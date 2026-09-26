@@ -4,13 +4,19 @@
   "title": "Runtime Cloud",
   "description": "Linux microVM sandboxes for AI agents: run commands, files, processes, pause and wake.",
   "websiteUrl": "https://withruntime.com/docs/mcp",
-  "version": "0.7.0",
+  "repository": {
+    "url": "https://github.com/withruntime/runtime",
+    "id": "1388451105",
+    "source": "github",
+    "subfolder": "packages/cloud-sdk"
+  },
+  "version": "0.7.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "withruntime",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "packageArguments": [{ "type": "positional", "value": "mcp" }]

@@ -5,6 +5,14 @@ What shipped in Runtime Cloud, newest first.
 Runtime ships every day. Each entry is something you can use or see; the
 guides hold the current terms, and [pricing](./pricing) holds the current rates.
 
+## 26 September 2026
+
+- **withruntime 0.7.1.** Code written for E2B no longer gets lost output back
+  looking whole: when part of a command's output was dropped before it was
+  read, the result says `truncated` and a warning names it. `runtime login`
+  now names the account it connected to. Update with
+  `npm i withruntime@latest` or `pip install -U withruntime`.
+
 ## 25 September 2026
 
 - **Sandboxes from a custom image start in half a second.** Once an image is
