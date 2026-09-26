@@ -61,7 +61,8 @@ Runtime's main repository before each release.
 ## Contributing
 
 Each release copies the SDKs here from Runtime's main repository, so each
-commit here is one copy, named after the npm and PyPI versions it matches. Issues are welcome. A pull request is
+commit here is one copy, named after the versions in its source; a copy made
+before those versions reach npm and PyPI says so. Issues are welcome. A pull request is
 reviewed here and carried into the next release with its author credited.
 
 ## License
