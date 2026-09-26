@@ -7,6 +7,11 @@ guides hold the current terms, and [pricing](./pricing) holds the current rates.
 
 ## 26 September 2026
 
+- **Fast commands keep all their output.** A command that writes faster than
+  it is read now waits for its reader from its first byte instead of losing
+  what came before: 4 MiB written at once came back whole in every run, where
+  before about half the runs lost up to three quarters of it. See
+  [running commands](./javascript#run-commands).
 - **withruntime 0.7.1.** Code written for E2B no longer gets lost output back
   looking whole: when part of a command's output was dropped before it was
   read, the result says `truncated` and a warning names it. `runtime login`
