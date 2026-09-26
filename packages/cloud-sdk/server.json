@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.withruntime/runtime",
+  "title": "Runtime Cloud",
+  "description": "Linux microVM sandboxes for AI agents: run commands, files, processes, pause and wake.",
+  "websiteUrl": "https://withruntime.com/docs/mcp",
+  "version": "0.7.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "withruntime",
+      "version": "0.7.0",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" },
+      "packageArguments": [{ "type": "positional", "value": "mcp" }]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.withruntime.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional: Bearer <key> from https://withruntime.com/account/keys. Without it the client signs in through the browser (OAuth).",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pydantic-ai-withruntime"
+version = "0.1.0"
+description = "Runtime sandboxes as a Pydantic AI toolset: shell, files and listings in a Firecracker microVM"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Runtime LLC" }]
+keywords = ["pydantic-ai", "sandbox", "code-execution", "firecracker", "microvm", "runtime"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    # AbstractToolset.for_run, which gives each agent run its own sandbox.
+    "pydantic-ai-slim>=1.71",
+    "withruntime>=0.6.1",
+]
+
+[project.urls]
+Homepage = "https://withruntime.com/docs/frameworks#pydantic-ai"
+Documentation = "https://withruntime.com/docs/frameworks#pydantic-ai"
+Source = "https://github.com/withruntime/runtime/tree/main/integrations/pydantic-ai"
+
+[dependency-groups]
+test = ["pytest>=8", "pytest-asyncio>=1.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pydantic_ai_withruntime"]
+
+[tool.hatch.build.targets.sdist]
+include = ["pydantic_ai_withruntime", "tests", "scripts", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120

@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "runtime": { "command": "npx", "args": ["-y", "withruntime", "mcp"] }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@runtime/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./base": "./base.js",
+    "./next": "./next.js"
+  },
+  "files": [
+    "base.js",
+    "next.js"
+  ],
+  "dependencies": {
+    "eslint-config-next": "16.3.3",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript-eslint": "^8.68.0",
+    "@eslint/js": "^9"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "typescript": "^5"
+  }
+}

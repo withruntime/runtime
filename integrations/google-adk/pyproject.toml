@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "google-adk-withruntime"
+version = "0.1.0"
+description = "Runtime sandboxes for Google ADK: a code executor and a sandbox toolset in a Firecracker microVM"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Runtime LLC" }]
+keywords = ["google-adk", "adk", "sandbox", "code-execution", "firecracker", "microvm", "runtime"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    # CodeExecutionResult.exit_code.
+    "google-adk>=2.9",
+    "withruntime>=0.6.1",
+]
+
+[project.urls]
+Homepage = "https://withruntime.com/docs/frameworks#google-adk"
+Documentation = "https://withruntime.com/docs/frameworks#google-adk"
+Source = "https://github.com/withruntime/runtime/tree/main/integrations/google-adk"
+
+[dependency-groups]
+test = ["pytest>=8", "pytest-asyncio>=1.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["google_adk_withruntime"]
+
+[tool.hatch.build.targets.sdist]
+include = ["google_adk_withruntime", "tests", "scripts", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120

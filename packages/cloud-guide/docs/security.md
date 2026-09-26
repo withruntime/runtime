@@ -1,0 +1,358 @@
+# Isolation and account boundaries
+
+Runtime uses Firecracker microVMs on Runtime-operated dedicated servers.
+
+- Each sandbox has its own Linux kernel, disk and guest environment.
+- CPU, memory, disk, network rules, leases and billing are enforced on the host,
+  outside the guest.
+- Host credentials, control sockets and provider credentials never reach
+  customers.
+- Tests on our own servers exercise guest separation, selected private-address
+  refusals, restart recovery and host-side lease expiry.
+
+## Keys and secrets
+
+**Keep keys in server-side secret storage, one per agent or application.**
+
+- A key covers every Cloud product, including products enabled later, and lasts
+  until revoked. It can never do more than the role of the member who made it
+  allows, read on every request (see [teams](./teams)).
+- Never put a key in a public prompt, URL, browser bundle, repository,
+  command-line argument or diagnostic log.
+- A framework adapter does not expand what the key is allowed to do.
+
+Give a command its secrets through `env`, never in the command line. Runtime
+never echoes `env` values back, and its journals and request records keep only a
+hash of them. A command line is recorded as you sent it.
+
+## Read-only keys and daily limits
+
+**Both are optional.** Without them a key reaches every product, bounded by
+your prepaid balance.
+
+- **Read-only key.** Choose **Read only** when you create a key at
+  [API keys](https://withruntime.com/account/keys), or pass `--read-only` to
+  `runtime keys create`. It sees the whole account: every sandbox and its state,
+  spec and cost, the images, volumes, snapshots, previews and network rules
+  beside them, account notices, the balance, and its own access and limit. That
+  covers products added later too. It cannot create, start, stop, pause, wake,
+  run a command, write a file, change anything or spend anything. It does not
+  see inside sandboxes (files, command output), job runs or secrets. Use it for
+  monitoring, dashboards and CI checks.
+- **Daily spending limit.** Set one on any key that can spend, when you create
+  it or later from its row. It is the most that key's agent may commit in any
+  24 hours: settled charges plus money still on hold. It counts everything the
+  agent's sandboxes cost, including renewals and parked storage. When a create,
+  wake, extension or renewal would pass it, that request fails with
+  `spending_limit_reached` (HTTP 402) and nothing is charged. A running sandbox
+  keeps its current lease; one that needs a renewal past the limit stops or
+  pauses when its lease ends. Room comes back as older spending leaves the
+  24-hour window.
+
+An owner, admin or developer of the account can create a key, of either kind:
+
+- They create one at [API keys](https://withruntime.com/account/keys), or
+  approve one in the browser that `runtime keys create` asked for from a
+  terminal (see below).
+- The member who made a key, or an owner or admin, sets, changes or removes its
+  limit, and only on the website.
+- A key can read its own access and limit with `GET /v1/limits`,
+  `runtime limits` or the `runtime_limits_get` tool.
+- No key can raise, remove or set a limit, and no key can create another key.
+- Every key made, revoked or limited, and every connection approved, is in the
+  account's [audit log](./teams#audit-log), with who did it and from where.
+
+A create can also carry `maxCostMicros`: it is refused if its first lease would
+cost more.
+
+Set a limit above what the agent's paused sandboxes cost in a day. If storage
+for a paused sandbox cannot be paid for, it is treated like storage on an empty
+balance: you are notified, and after seven days unpaid it is deleted.
+
+## Network access
+
+**Every outbound connection goes through a proxy on the host.** Programs that
+use `HTTP_PROXY` and programs that open raw sockets are held to the same rules;
+nothing in the guest, root included, can go around it.
+
+- A paid sandbox of an account that has made a purchase reaches any public host
+  on any port. A trial sandbox reaches ports 443 and 80.
+- A few ports are never reachable (telnet, Windows RPC, NetBIOS and SMB, IRC),
+  and mail ports open only when support enables mail for your account.
+- Private and internal addresses are refused.
+- Each sandbox's rules can narrow this further, and they bind root inside the
+  sandbox too. See [the sandbox environment](./sandbox-environment).
+- Each sandbox has limits on concurrent connections, bandwidth and bytes per
+  day, so one sandbox cannot crowd out others. A paid sandbox gets 500 Mbit/s,
+  200 Mbit/s sustained after its first 10 GiB, and 500 GiB a day
+  ([the sandbox environment](./sandbox-environment#the-network)).
+
+Inbound connections require a preview, a proved custom domain, an allocated
+TCP port or an authorized private tunnel. Each reaches only the sandbox port
+and account it was granted. A preview is private with an expiring token unless
+you make it public. Preview addresses are under `runtimehost.com`, never under
+`withruntime.com`, so sandbox content never shares an origin with your account.
+Rotating a preview token refuses every token issued before it.
+
+Public ingress rate tracking fails closed when its bounded tracking table is
+full. Established connections and the separate operator SSH allowance keep
+their own rules.
+
+When you switch a project over, check that its package registries and other
+destinations are reachable on these terms.
+
+## Secrets sandboxes never see
+
+**Store an API key once; your sandboxes use it without holding it.** Each
+secret has a name, a value and the hosts it may go to.
+
+```bash no-run
+printf %s "$OPENAI_API_KEY" | runtime secrets set OPENAI_API_KEY --host api.openai.com
+runtime secrets ls
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+await runtime.secrets.set("GITHUB_TOKEN", {
+  value: process.env.GITHUB_TOKEN ?? "",
+  hosts: ["api.github.com", "*.githubusercontent.com"],
+  header: "Authorization",
+  format: "token {value}",
+});
+```
+
+- Every sandbox of your account has an environment variable of the secret's
+  name, holding a placeholder such as `rtsec_3f9c…`. Code uses it as it would
+  use the key: `Authorization: Bearer $OPENAI_API_KEY`, or an SDK that reads
+  `OPENAI_API_KEY`.
+- The host's proxy replaces the placeholder with the value in the URL and
+  headers of HTTPS requests to the secret's hosts, and nowhere else. A request
+  to any other host carries the placeholder, which is worthless.
+- With `header`, the proxy sets that header on every HTTPS request to the hosts,
+  replacing one the sandbox sent, so code needs no placeholder at all.
+- With `rules`, on paid accounts, the value goes only into the requests a rule
+  allows, by method and path, decided for each request on a connection. A path
+  is exact (`/v1/chat/completions`) or a prefix ending in `/*`
+  (`/repos/acme/*`). Before matching, the proxy removes `.` and `..` segments
+  and decodes escaped letters and digits, so `/repos/acme/%2e%2e/admin` is
+  `/repos/admin`. A request whose path could be read two ways, with an encoded
+  slash, a semicolon or a backslash, gets no secret that has rules. Up to 16
+  rules of up to 16 paths each. In the CLI, from `withruntime` 0.7.0, give `--allow "GET,HEAD /repos/acme/*"` once per rule, or
+  `--allow /v1/chat/completions` for every method; in the SDKs,
+  `rules: [{ methods: ["GET"], paths: ["/repos/acme/*"] }]`. An account that
+  has not added credit gets `payment_required` (402).
+- The value is sealed to the servers' key when you store it. No API, tool or
+  command returns it, and a sandbox never holds it: not in its environment, its
+  memory or its disk, so a prompt injection or a stolen sandbox cannot leak it.
+- Plain HTTP never carries a secret, and request bodies are never rewritten.
+  Requests to a secret's hosts go over HTTP/1.1, WebSockets included; gRPC,
+  which needs HTTP/2, works to every other host.
+- To reach those hosts the proxy opens the HTTPS connection itself and checks
+  the real server's certificate. Sandboxes trust Runtime's certificate for
+  those hosts already; Python, Node, curl and git pick it up through
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`. A program
+  with its own pinned certificates needs the file
+  `/usr/local/share/ca-certificates/runtime-egress.crt` added to them.
+- Name only hosts you trust with the value. A host that echoes requests back
+  would show it to the sandbox.
+- A secret with header `Authorization` and format `AWS4-HMAC-SHA256 {value}`
+  holds a bucket's `ACCESS_KEY_ID:SECRET_ACCESS_KEY` and signs S3 requests
+  instead: the proxy signs each request to its hosts again with the real key,
+  and the secret key is never sent at all. See
+  [mounting your own bucket](./storage#mount-your-own-bucket).
+- Replacing a secret keeps its placeholder; running sandboxes use the new value
+  within seconds. Deleting one erases the value; it does not revoke the key at
+  its provider.
+- Up to 50 secrets per account, each at most 8 KiB of visible ASCII, with up to
+  16 hosts. The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
+  and `DELETE /v1/egress-secrets/{name}`; the MCP tools are
+  `runtime_secrets_set`, `runtime_secrets_list` and `runtime_secrets_delete`.
+
+## Your own proxy
+
+**Paid accounts can send their sandboxes' connections through their own HTTP
+or HTTPS proxy,** so the proxy's controls and logs apply and the traffic leaves
+from its address.
+
+```bash no-run
+printf %s "Basic $(printf %s user:pass | base64)" | runtime secrets set PROXY_AUTH --host proxy.example.com
+runtime network upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+await runtime.network.upstreamProxy.set({
+  url: "http://proxy.example.com:3128",
+  secret: "PROXY_AUTH",
+  hosts: ["*.internal.example.com"],
+});
+```
+
+- Runtime's own rules apply first: a connection they refuse never reaches your
+  proxy. Then the host reaches the destination with `CONNECT` through yours.
+- `secret` names one of your secrets whose value is sent as the whole
+  `Proxy-Authorization` header, such as `Basic dXNlcjpwYXNz`. Its hosts must
+  name the proxy's host; it cannot be deleted while the proxy uses it.
+- `hosts` limits which destinations go through the proxy, such as
+  `["*.internal.example.com"]`; the rest leave directly. Without it, every
+  connection goes through it.
+- Secrets are still put in by Runtime before the bytes enter your proxy's
+  tunnel, so your proxy sees encrypted traffic to the destination.
+- If your proxy refuses or cannot be reached, the connection fails with
+  `upstream-proxy-failed`. It never falls back to a direct connection. UDP to a
+  destination the proxy covers is refused.
+- The proxy's own address must be public, and its port one a sandbox may reach.
+  An `https://` proxy's certificate must verify against the public roots.
+- `runtime network upstream-proxy get` and `remove` read and remove it; in
+  Python it is `runtime.network.upstream_proxy`. The API is `PUT`, `GET` and
+  `DELETE /v1/network/upstream-proxy`; the MCP tools are
+  `runtime_network_upstream_proxy_set`, `runtime_network_upstream_proxy_get` and
+  `runtime_network_upstream_proxy_remove`. The CLI command and the SDK methods
+  arrived in `withruntime` 0.7.0.
+
+## Root inside the sandbox
+
+The sandbox user has passwordless `sudo`. Root inside the guest controls the
+guest and nothing else: CPU, memory, disk, network rules, leases and billing are
+enforced on the host.
+
+## Lifetimes and storage
+
+A host-side lease bounds execution even if management is unavailable. A stopped
+sandbox is not a separately promised backup. Export important results before you
+stop it.
+
+## Browser-approved agent connections
+
+**Connect an agent without copying a key.** Run the [CLI login](./cli), check
+the request code and agent name, then approve **Connect agent**.
+
+- The browser uses your existing session when possible.
+- An owner, admin or developer of the account can approve a new connection. A
+  person who belongs to several accounts chooses which one on the same page.
+- The request expires after 15 minutes. Do not approve unsolicited connection
+  links.
+- The page shows the name the requesting computer gives itself, and the city
+  and country Runtime saw the request come from. The computer's name is
+  whatever that computer says, so treat it as a hint and match the code.
+
+`runtime keys create` asks for an API key the same way, for a CI runner or
+anywhere else with no browser:
+
+- The page shows the key's name, its access, its daily limit and that it lasts
+  until revoked, and an owner, admin or developer approves **Create key**.
+- A billing member, an agent and an existing key cannot approve one.
+- Whoever started the request receives the key, so approve only a request you
+  started yourself.
+- The key is sealed to that terminal, printed there once and kept by Runtime
+  only as a hash.
+- A command stopped before the key arrives cancels the request, and a key
+  approved but not yet received is revoked before anyone holds it.
+
+Approval creates a distinct agent identity and credential. It does not give the
+agent your browser session. The credential is encrypted for the initiating CLI
+when delivered, and saved outside the project. On Unix, the credential
+directory is private to its user and the file has owner-only permissions. It is
+a file that software running as your user can read, so keep the machine and its
+backups secure.
+
+Each connection can operate across the account and spend its prepaid balance,
+so connect only agents you trust. Separate identities let you see which agent
+did what, and revoke one without the others. To cap what one agent may spend,
+set a daily limit on its row at
+[API keys](https://withruntime.com/account/keys) after it connects.
+
+The browser reports success after the CLI receives and verifies the credential.
+Signing out of the browser leaves agent connections active. Revoke an individual
+credential from **API keys**, or run `npx withruntime logout` on its machine
+(installed: `runtime logout`). Revocation does not itself stop running
+resources: inspect them and stop any work you no longer want. Billing follows
+confirmed resource state, not sign-in state.
+
+## The browser terminal
+
+**The terminal on a sandbox's page acts as the agent that started the sandbox,
+never as your browser session.** The website holds a key of that agent labelled
+"Runtime website terminals" for you, and throws its secret away as it makes it.
+To open a terminal, the page asks the website for a ticket, and the API trades
+the ticket for that key.
+
+- A ticket opens one terminal in one sandbox, for the person who asked for it.
+  It lasts 60 seconds, and its first use spends it, whatever the outcome.
+- The page sends it as a WebSocket subprotocol, so it never appears in an
+  address or an access log. Runtime keeps only its SHA-256 hash.
+- The API accepts a ticket only from a page on withruntime.com. A ticket offered
+  for another sandbox or from another site is spent and refused.
+- When the ticket is used, Runtime checks again that you may still act as that
+  agent. A changed role or a removed member is refused.
+- Every call the terminal makes meets the same checks as that agent's API key.
+  Revoke "Runtime website terminals" on
+  [API keys](https://withruntime.com/account/keys) to close every browser
+  terminal it holds; the next one makes a new key.
+- A person can open 30 terminals a minute. Each ticket is recorded with who
+  asked, when, from which site and what became of it, and kept 30 days.
+
+## Single sign-on
+
+**Sign in through your company's identity provider, and require it.** Owners
+connect Okta, Microsoft Entra ID, Google Workspace or any SAML or OIDC
+provider at [Single sign-on](https://withruntime.com/account/single-sign-on),
+free on every account. See [single sign-on](./single-sign-on).
+
+- Your provider can sign in only addresses on the email domain you proved with
+  a DNS record, and only one Runtime account can hold a proven domain.
+- SAML assertions must be signed, meant for Runtime, within their validity
+  window and in answer to a sign-in Runtime started, and each is accepted once.
+- **Require single sign-on** refuses every other kind of session to your
+  members. Owners stay exempt so a provider outage cannot lock you out. API
+  keys are separate: revoke or limit them on [API keys](https://withruntime.com/account/keys).
+- SCIM directory sync removes a person the moment your directory deactivates
+  them, and revokes every key they made in the same step.
+
+## Identity tokens instead of stored keys
+
+**Give code in a sandbox access to your cloud without putting a key in it.** A
+sandbox asks Runtime for a short-lived OIDC token that names the sandbox, its
+organization and its image, and trades it for credentials in your AWS or
+Google Cloud account, or presents it to your own API. See
+[identity tokens](./identity-tokens).
+
+- A sandbox can get a token only for itself, only while it runs, and for the
+  audience it names. Tokens last 10 minutes unless asked for up to an hour.
+- The signing keys stay on Runtime's own servers. Only their public halves are
+  published, at `https://withruntime.com/oidc/jwks`.
+- Scope your trust policy to your organization's id (`org:<org-id>:*`), or to
+  one image, so no other Runtime customer's sandbox can assume your role.
+
+## Before production traffic
+
+- Run your real workload on the [free trial](./trial), including its package
+  registries, cleanup and recovery.
+- Give each agent or application its own key, with a daily limit where it helps.
+- Keep outputs you need outside the sandbox.
+
+Anyone can sign up at https://withruntime.com/sign-in.
+
+## Domains, TCP ports, addresses and the tunnel
+
+- **A custom domain is proved by DNS.** Only a TXT record holding the token made
+  for your claim proves a hostname is yours; a CNAME left pointing at Runtime
+  proves nothing, so nobody can take over a name its owner forgot to clean up.
+  Certificates are requested only for proved names.
+- **A TCP port reaches one port of one sandbox,** and a private network reaches
+  only your own account's sandboxes: never another account's, never Runtime's
+  servers or internal addresses, never the internet. The WireGuard gateway runs
+  each account's network in its own user-space network stack, so nothing a peer
+  sends reaches the server's own network stack. Rotating or removing a peer's
+  key ends its connections.
+- **Runtime's own relays inside a sandbox** (ports 10800, 10802 and 10853) are
+  never reachable from outside, by a preview, a domain, a TCP port or the tunnel.
+- **A dedicated outbound address is yours alone** while you hold it, and rests
+  30 days after you release it before another account can have it.
+- **Every connection is logged** with the sandbox, the account and the client's
+  address, without contents, so a report can be traced and acted on. Runtime
+  can turn off a domain, a port, a tunnel or everything of an account at once.

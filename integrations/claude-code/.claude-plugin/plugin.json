@@ -1,0 +1,11 @@
+{
+  "name": "runtime",
+  "displayName": "Runtime Cloud",
+  "version": "1.0.0",
+  "description": "Linux sandboxes for Claude Code: run code, install packages, serve previews and move a project's sandbox work to Runtime Cloud. One browser approval, no key to copy.",
+  "author": { "name": "Runtime", "url": "https://withruntime.com" },
+  "homepage": "https://withruntime.com/docs/frameworks",
+  "repository": "https://github.com/marcraghina/runtime",
+  "license": "MIT",
+  "keywords": ["sandbox", "microvm", "mcp", "cloud", "code-execution"]
+}

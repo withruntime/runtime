@@ -1,0 +1,6 @@
+# Runtime Cloud for Codex. Add this to ~/.codex/config.toml, or run:
+#   codex mcp add runtime -- npx -y withruntime mcp
+# The first call shows a link and a code to approve in the browser; no key to copy.
+[mcp_servers.runtime]
+command = "npx"
+args = ["-y", "withruntime", "mcp"]

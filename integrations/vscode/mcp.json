@@ -1,0 +1,5 @@
+{
+  "servers": {
+    "runtime": { "type": "stdio", "command": "npx", "args": ["-y", "withruntime", "mcp"] }
+  }
+}

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Java SDK's Maven metadata. Maven Central reads it from the bundle that
+  scripts/publish.sh builds with the JDK's own tools, so publishing needs no
+  Maven plugins; `mvn package` also works for anyone who prefers Maven.
+  The version here, RuntimeClient.VERSION and the guide's coordinates move together.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.withruntime</groupId>
+  <artifactId>withruntime</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>Runtime Cloud</name>
+  <description>Runtime Cloud: one client for every Runtime product. Sandboxes first. No dependencies beyond the JDK.</description>
+  <url>https://withruntime.com/docs/java</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Runtime</name>
+      <organization>Runtime LLC</organization>
+      <organizationUrl>https://withruntime.com</organizationUrl>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://withruntime.com/docs/java</url>
+  </scm>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+</project>

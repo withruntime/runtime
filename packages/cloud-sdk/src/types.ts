@@ -1,0 +1,210 @@
+/** A sandbox as the API answers it. Times are ISO 8601 strings, money is
+ * integer microdollars (1,000,000 = $1). */
+export type SandboxInfo = {
+  id: string;
+  kind: "sandbox";
+  name: string | null;
+  labels: Record<string, string>;
+  status: "pending" | "active" | "paused" | "stopping" | "stopped";
+  state: "starting" | "running" | "pausing" | "paused" | "resuming" | "stopping" | "stopped";
+  region: string;
+  funding: "trial" | "paid";
+  vcpu: number;
+  memoryMiB: number;
+  diskMiB: number;
+  cpu: "shared" | "reserved";
+  cpuFloorMillis: number;
+  pausable: boolean;
+  timeoutSeconds: number;
+  /** Pauses after this many idle seconds; 0 is never. */
+  idlePauseSeconds?: number;
+  /** True for the default idle pause, which pauses only a sandbox nothing has used yet. */
+  idlePauseUnusedOnly?: boolean;
+  /** A request (exec, files, terminal, a visit to a shared port) wakes it when paused. */
+  autoWake?: boolean;
+  /** Its lease renews itself while credit lasts, and its disk is kept after a stop. */
+  persistent?: boolean;
+  /** The last exec, file, terminal, desktop or preview request, to within a minute. */
+  lastActiveAt?: string | null;
+  onLeaseEnd: "pause" | "stop";
+  createdAt: string;
+  readyAt: string | null;
+  expiresAt: string;
+  endedAt: string | null;
+  stopReason: string | null;
+  pausedAt: string | null;
+  pausedExpiresAt: string | null;
+  chargedMicros: number;
+  heldMicros: number;
+  simulated?: boolean;
+  replayed?: boolean;
+  /** On a create from an image with a start command: whether it started,
+   * became ready (readyMs), timed out, or exited first. */
+  start?: {
+    state: "started" | "ready" | "timeout" | "exited" | "not_running";
+    processId?: string;
+    exitCode?: number | null;
+    readyMs?: number;
+  };
+  /** Present and true when getOrCreate answered a sandbox that already held the name. */
+  reused?: boolean;
+  [key: string]: unknown;
+};
+
+export type CreateSandbox = {
+  name?: string;
+  labels?: Record<string, string>;
+  /** Omit to use the free trial while it lasts, then prepaid credit. */
+  funding?: "trial" | "paid";
+  region?: string;
+  vcpu?: number;
+  memoryMiB?: number;
+  diskMiB?: number;
+  cpu?: "shared" | "reserved";
+  cpuFloorMillis?: number;
+  /** How long it may run before its lease ends. Default 1800. */
+  timeoutSeconds?: number;
+  pausable?: boolean;
+  /** What happens when timeoutSeconds runs out: "pause" (default) or "stop". */
+  onLeaseEnd?: "pause" | "stop";
+  /** Pause after this many seconds with no exec, file, terminal, desktop or
+   * preview request (60 to 86400; 0 never). A request wakes it again. */
+  idlePauseSeconds?: number;
+  /** A request to a paused sandbox wakes it. Default true. */
+  autoWake?: boolean;
+  /** Keep it running while credit lasts (its lease renews itself) and keep its
+   * disk after a stop, for restart(). Paid only. */
+  persistent?: boolean;
+  /** The most it may cost over its whole life, in microdollars. */
+  maxTotalCostMicros?: number;
+  /** With name: return the sandbox that already has the name, woken if paused. */
+  getOrCreate?: boolean;
+  maxCostMicros?: number;
+  /** Network rules from the first start; the same shape as sandbox.network.set.
+   * Omit for the public web on ports 80 and 443. */
+  network?: { internet: boolean; allow?: string[]; deny?: string[]; connect?: string[] };
+  /** A ready image (runtime.images.build): its id, name (its latest tag),
+   * name:tag or name@version. When the image has a start command, create
+   * answers once its ready check passes and says how in `start`. */
+  image?: string;
+  /** A ready snapshot's id: the sandbox starts as a copy of it, with its shape. Not with image. */
+  snapshot?: string;
+  /** Up to four volumes: read-write ("rw", one sandbox at a time) or a
+   * read-only "snapshot" copy. */
+  volumes?: { volumeId: string; path: string; mode?: "rw" | "snapshot" }[];
+};
+
+export type CommandResult = {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  durationMs?: number | null;
+  processId?: string;
+  replayed?: boolean;
+};
+
+export type ExecOptions = {
+  cwd?: string;
+  /** Merged over the sandbox's environment. Put secrets here, never in the command. */
+  env?: Record<string, string>;
+  /** Given to standard input, then closed. */
+  stdin?: string | Uint8Array;
+  /** Default 60 000; up to 24 hours. A timeout is a result (timedOut), not an error. */
+  timeoutMs?: number;
+  onStdout?: (text: string) => void;
+  onStderr?: (text: string) => void;
+  /** Throw CommandError when the exit code is not 0. */
+  check?: boolean;
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+};
+
+export type ProcessInfo = {
+  id: string;
+  kind: "process";
+  state: "running" | "exited" | "killed" | "timed_out" | "unknown";
+  exitCode: number | null;
+  command: string;
+  cwd: string;
+  pty: boolean;
+  stdinOpen: boolean;
+  stdinOffset: number;
+  startedAt: string;
+  endedAt: string | null;
+  timeoutMs: number | null;
+  outputBytes: number;
+  firstOffset: number;
+};
+
+export type OutputEvent =
+  | { type: "start"; processId: string; replayed?: boolean }
+  | { type: "stdout" | "stderr"; data: string; offset: number }
+  | { type: "exit"; exitCode: number | null; state: string; timedOut: boolean; durationMs?: number }
+  | { type: "truncated"; droppedBytes: number; resumeAt: number }
+  | { type: "continue"; processId: string; cursor: number }
+  | { type: "error"; error: { code: string; message: string; requestId?: string } };
+
+export type FileEntry = {
+  name: string;
+  path: string;
+  type: "file" | "directory" | "symlink" | "other";
+  size: number;
+  mode: string;
+  modifiedAt: string;
+};
+
+/** GET /v1/usage. Money is integer microdollars in strings (1,000,000 = $1),
+ * exact past 2^53: available = credited - spent - expired - held. */
+export type Usage = {
+  orgId: string;
+  unit: "microdollars";
+  credited: string;
+  spent: string;
+  held: string;
+  /** Credit that expired, or grant credit taken back. */
+  expired: string;
+  /** What can still be spent. */
+  available: string;
+  /** The part of spent that refunds and disputes took. */
+  takenBack: string;
+  trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
+  resources: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type FeedbackKind =
+  | "bug"
+  | "missing_feature"
+  | "competitor_gap"
+  | "migration_blocker"
+  | "docs"
+  | "pricing"
+  | "praise"
+  | "other";
+
+/** What `sandbox.update()` changes; fields left out stay as they are. */
+export type SandboxSettings = {
+  name?: string;
+  labels?: Record<string, string>;
+  /** A request to a paused sandbox wakes it. */
+  autoWake?: boolean;
+  /** Pause after this many seconds with no activity, counted from now; 0 never. */
+  idlePauseSeconds?: number;
+  /** Keep it running while credit lasts and keep its disk after a stop. Paid only. */
+  persistent?: boolean;
+  /** Lifetime cap in microdollars; null removes it. */
+  maxTotalCostMicros?: number | null;
+};
+
+/** How `sandbox.keepAlive()` extends the lease. */
+export type KeepAliveOptions = {
+  /** How often it checks, in seconds. Default 60. */
+  everySeconds?: number;
+  /** How much lease it keeps ahead of now, in seconds (60 to 3600). Default 600. */
+  marginSeconds?: number;
+  /** Called with an error an extension met; the loop carries on. */
+  onError?: (error: unknown) => void;
+};

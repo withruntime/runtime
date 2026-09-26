@@ -1,0 +1,8 @@
+{
+  "name": "runtime-public",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "packageManager": "bun@1.4.0"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "runtime",
+  "version": "1.0.0",
+  "description": "Runtime Cloud: Linux sandboxes for Gemini CLI, over MCP.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "runtime": { "command": "npx", "args": ["-y", "withruntime", "mcp"] }
+  }
+}

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "withruntime"
+version = "0.7.0"
+description = "Runtime Cloud: one client (sync and async) for every Runtime product. Sandboxes first."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["sandbox", "ai-agents", "agents", "microvm", "firecracker", "code-execution", "code-interpreter", "mcp", "llm"]
+
+[project.urls]
+Homepage = "https://withruntime.com"
+Documentation = "https://withruntime.com/docs/python"
+Source = "https://github.com/withruntime/runtime/tree/main/sdks/python"
+Issues = "https://github.com/withruntime/runtime/issues"
+
+[project.optional-dependencies]
+# withruntime.openai_agents: a sandbox client for the OpenAI Agents SDK's SandboxAgent.
+openai-agents = ["openai-agents>=0.22.3"]
+# withruntime.deepagents: a LangChain Deep Agents sandbox backend.
+deepagents = ["deepagents>=0.7"]
+# withruntime.harbor: an environment for Harbor (Terminal-Bench): -e withruntime.harbor:RuntimeEnvironment.
+harbor = ["harbor>=0.23.0"]
+# withruntime.inspect_ai: sandbox="runtime" for Inspect AI, registered by the entry point below.
+inspect-ai = ["inspect-ai>=0.3.268"]
+
+[project.entry-points.inspect_ai]
+withruntime = "withruntime.inspect_ai"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["withruntime*"]

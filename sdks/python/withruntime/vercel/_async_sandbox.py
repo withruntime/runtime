@@ -1,0 +1,862 @@
+"""Vercel Sandbox's async Python API over Runtime's AsyncRuntime. The sync
+API is generated from this file by scripts/generate_dropin_sync.py; edit this
+one."""
+from __future__ import annotations
+
+import subprocess
+import sys
+import time
+from datetime import timedelta
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+
+from .._async_client import AsyncRuntime
+
+from . import _core as core
+from ._async_io import operation
+from ._core import (CompletedProcess, DirectoryEntry, NotSupportedError, ProcessStatus, SandboxApiError,
+                    SandboxPathNotFoundError, SandboxResources, SandboxRoute, SandboxStatus, SandboxStreamError,
+                    translate)
+
+_clients: Dict[str, Any] = {}
+
+
+def _client(token: Optional[str] = None, client: Optional[AsyncRuntime] = None) -> AsyncRuntime:
+    if client is not None:
+        return client
+    key = core.pick_key(token)
+    found = _clients.get(key or "")
+    if found is None:
+        found = AsyncRuntime(api_key=key) if key else AsyncRuntime()
+        _clients[key or ""] = found
+    return found
+
+
+async def _guard(subject: str, work: Callable[[], Any]) -> Any:
+    try:
+        return await work()
+    except Exception as error:  # noqa: BLE001 - every Runtime error becomes Vercel's
+        raise translate(error, subject) from error
+
+
+class AsyncTextReader:
+    """One stream of a process's output: ``read()``, ``readline()`` and
+    iteration by line. It moves forward and cannot rewind."""
+
+    def __init__(self, process: "AsyncProcess", stream: str) -> None:
+        self._process, self._stream = process, stream
+
+    async def read(self, size: int = -1) -> str:
+        while True:
+            text = self._process._pump.take(self._stream, size=size)
+            if text is not None:
+                return text
+            await self._process._pull()
+
+    async def readline(self) -> str:
+        while True:
+            text = self._process._pump.take(self._stream, line=True)
+            if text is not None:
+                return text
+            await self._process._pull()
+
+    def __aiter__(self) -> "AsyncTextReader":
+        return self
+
+    async def __anext__(self) -> str:
+        line = await self.readline()
+        if not line:
+            raise StopAsyncIteration
+        return line
+
+    async def aclose(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+class AsyncProcess:
+    """A process started with create_process: its output as text readers,
+    its end with wait(). Standard input is not supported, as in Vercel."""
+
+    def __init__(self, runtime_process: Any, args: List[str], cwd: str, session_id: str) -> None:
+        self._runtime_process = runtime_process
+        self.id = runtime_process.id
+        self.args = args
+        self.name = args[0] if args else ""
+        self.cwd = cwd
+        self.session_id = session_id
+        self.started_at = int(time.time())
+        self.stdin = None
+        self._iterator: Any = None
+        self._pump = core.LinePump(None)
+        self.stdout: Optional[AsyncTextReader] = AsyncTextReader(self, "stdout")
+        self.stderr: Optional[AsyncTextReader] = AsyncTextReader(self, "stderr")
+
+    async def _pull(self) -> None:
+        if self._pump.done:
+            return
+        if self._iterator is None:
+            self._iterator = self._runtime_process.output().__aiter__()
+        try:
+            event = await self._iterator.__anext__()
+        except StopAsyncIteration:
+            self._pump.done = True
+            return
+        except Exception as error:  # noqa: BLE001
+            raise SandboxStreamError(str(error)) from error
+        self._pump.feed(event)
+
+    @property
+    def returncode(self) -> Optional[int]:
+        exit_event = self._pump.exit
+        if exit_event is None:
+            return None
+        return core.exit_code(exit_event.get("exitCode"), bool(exit_event.get("timedOut")))
+
+    @property
+    def status(self) -> ProcessStatus:
+        return ProcessStatus.RUNNING if self._pump.exit is None else ProcessStatus.EXITED
+
+    async def wait(self) -> int:
+        while not self._pump.done:
+            await self._pull()
+        code = self.returncode
+        return -1 if code is None else code
+
+    async def communicate(self) -> Tuple[str, str]:
+        await self.wait()
+        return self._pump.take("stdout") or "", self._pump.take("stderr") or ""
+
+    async def refresh(self) -> "AsyncProcess":
+        await _guard("sandbox", lambda: self._runtime_process.refresh())
+        return self
+
+    async def send_signal(self, sig: Any) -> None:
+        name = core.signal_name(sig)
+        await _guard("sandbox", lambda: self._runtime_process.kill(name))
+
+    async def terminate(self) -> None:
+        await self.send_signal("SIGTERM")
+
+    async def kill(self) -> None:
+        await self.send_signal("SIGKILL")
+
+
+class AsyncFileHandle:
+    """A file opened with fs.open: read whole on first read, written whole
+    on close."""
+
+    def __init__(self, fs: "AsyncSandboxFilesystem", path: str, mode: str, permissions: Optional[int]) -> None:
+        self._fs, self.name, self.mode, self._permissions = fs, path, mode, permissions
+        self._binary = "b" in mode
+        self._reading = "r" in mode
+        self._data: Any = None
+        self._written: List[Any] = []
+        self.closed = False
+
+    def readable(self) -> bool:
+        return self._reading
+
+    def writable(self) -> bool:
+        return not self._reading
+
+    def seekable(self) -> bool:
+        return False
+
+    async def _load(self) -> None:
+        if self._data is None:
+            raw = await self._fs.read_bytes(self.name)
+            self._data = raw if self._binary else raw.decode()
+
+    async def read(self, size: int = -1) -> Any:
+        await self._load()
+        taken = self._data if size < 0 else self._data[:size]
+        self._data = self._data[len(taken):]
+        return taken
+
+    async def readline(self) -> Any:
+        await self._load()
+        newline = b"\n" if self._binary else "\n"
+        at = self._data.find(newline)
+        end = len(self._data) if at < 0 else at + 1
+        taken, self._data = self._data[:end], self._data[end:]
+        return taken
+
+    async def write(self, data: Any) -> int:
+        self._written.append(data)
+        return len(data)
+
+    async def writelines(self, lines: Sequence[Any]) -> None:
+        self._written.extend(lines)
+
+    async def flush(self) -> None:
+        return None
+
+    async def aclose(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if not self._reading:
+            joined = b"".join(self._written) if self._binary else "".join(self._written).encode()
+            await self._fs.write_bytes(self.name, joined, mode=self._permissions)
+
+    async def close(self) -> None:
+        await self.aclose()
+
+    async def __aenter__(self) -> Any:
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.aclose()
+
+
+class AsyncBatch:
+    """Writes staged with write_text and write_bytes, uploaded together when
+    the block ends without an error."""
+
+    def __init__(self, fs: "AsyncSandboxFilesystem", cwd: Any) -> None:
+        self._fs, self._cwd = fs, cwd
+        self._staged: List[Tuple[str, bytes, Optional[int]]] = []
+
+    def write_text(self, path: Any, text: str, encoding: str = "utf-8", mode: Optional[int] = None) -> None:
+        self._staged.append((core.to_runtime_path(path, self._cwd), text.encode(encoding), mode))
+
+    def write_bytes(self, path: Any, data: bytes, mode: Optional[int] = None) -> None:
+        self._staged.append((core.to_runtime_path(path, self._cwd), bytes(data), mode))
+
+    async def __aenter__(self) -> Any:
+        return self
+
+    async def __aexit__(self, error_type: Any, *_: Any) -> None:
+        if error_type is None:
+            for target, data, mode in self._staged:
+                await self._fs.write_bytes(target, data, mode=mode)
+
+
+class AsyncSandboxFilesystem:
+    """``box.fs``: files over Runtime's files API. Relative paths resolve
+    from /vercel/sandbox, which is /workspace on Runtime."""
+
+    def __init__(self, box: "AsyncSandbox") -> None:
+        self._box = box
+
+    async def _files(self) -> Any:
+        return (await self._box._live()).files
+
+    async def read_bytes(self, path: Any, *, cwd: Any = None) -> bytes:
+        target = core.to_runtime_path(path, cwd)
+        files = await self._files()
+        return bytes(await _guard("file", lambda: files.read(target)))
+
+    async def read_text(self, path: Any, encoding: str = "utf-8", errors: str = "strict", *, cwd: Any = None) -> str:
+        return (await self.read_bytes(path, cwd=cwd)).decode(encoding, errors)
+
+    async def write_bytes(self, path: Any, data: bytes, mode: Optional[int] = None, *, cwd: Any = None) -> None:
+        target = core.to_runtime_path(path, cwd)
+        runtime = await self._box._live()
+        await _guard("file", lambda: runtime.files.write(target, bytes(data)))
+        if mode is not None:
+            result = await _guard("sandbox", lambda: runtime.exec(["chmod", format(mode, "o"), "--", target]))
+            if result.exit_code != 0:
+                raise core.SandboxFilesystemError(result.stderr.strip())
+
+    async def write_text(self, path: Any, text: str, encoding: str = "utf-8", errors: str = "strict",
+                         mode: Optional[int] = None, *, cwd: Any = None) -> None:
+        await self.write_bytes(path, text.encode(encoding, errors), mode=mode, cwd=cwd)
+
+    async def mkdir(self, path: Any, recursive: bool = True, *, cwd: Any = None) -> None:
+        target = core.to_runtime_path(path, cwd)
+        files = await self._files()
+        await _guard("file", lambda: files.mkdir(target, parents=recursive))
+
+    async def _stat(self, path: Any, cwd: Any) -> Dict[str, Any]:
+        target = core.to_runtime_path(path, cwd)
+        files = await self._files()
+        return await _guard("file", lambda: files.stat(target))
+
+    async def exists(self, path: Any, *, cwd: Any = None) -> bool:
+        return bool((await self._stat(path, cwd)).get("exists"))
+
+    async def is_file(self, path: Any, *, cwd: Any = None) -> bool:
+        return (await self._stat(path, cwd)).get("type") == "file"
+
+    async def is_dir(self, path: Any, *, cwd: Any = None) -> bool:
+        return (await self._stat(path, cwd)).get("type") == "directory"
+
+    async def listdir(self, path: Any = ".", *, cwd: Any = None) -> List[DirectoryEntry]:
+        target = core.to_runtime_path(path, cwd)
+        files = await self._files()
+        entries = await _guard("file", lambda: files.list(target, depth=1, hidden=True))
+        return [DirectoryEntry(path=entry.get("name", ""), kind=entry.get("type", "other")) for entry in entries]
+
+    async def remove(self, path: Any, recursive: bool = False, missing_ok: bool = False, *, cwd: Any = None) -> None:
+        target = core.to_runtime_path(path, cwd)
+        files = await self._files()
+        removed = await _guard("file", lambda: files.remove(target, recursive=recursive))
+        if not removed and not missing_ok:
+            raise SandboxPathNotFoundError(f"{target} does not exist.")
+
+    async def rename(self, source: Any, destination: Any, *, cwd: Any = None) -> None:
+        origin, target = core.to_runtime_path(source, cwd), core.to_runtime_path(destination, cwd)
+        files = await self._files()
+        await _guard("file", lambda: files.rename(origin, target, overwrite=True))
+
+    def batch(self, *, cwd: Any = None) -> AsyncBatch:
+        return AsyncBatch(self, cwd)
+
+    def open(self, path: Any, mode: str = "r", *, permissions: Optional[int] = None, cwd: Any = None,
+             **_: Any) -> AsyncFileHandle:
+        if mode not in ("r", "rb", "w", "wb"):
+            raise ValueError(f"mode must be r, rb, w or wb, not {mode!r}")
+        return AsyncFileHandle(self, core.to_runtime_path(path, cwd), mode, permissions)
+
+
+class AsyncSnapshot:
+    """A saved sandbox, over a Runtime snapshot: files, memory and running
+    processes."""
+
+    def __init__(self, info: Dict[str, Any], client: AsyncRuntime) -> None:
+        self._info, self._client = info, client
+
+    @property
+    def id(self) -> str:
+        return self._info["id"]
+
+    @property
+    def source_session_id(self) -> str:
+        return self._info.get("sourceSandboxId", "")
+
+    @property
+    def region(self) -> str:
+        return "iad1"
+
+    @property
+    def status(self) -> str:
+        state = self._info.get("state", "ready")
+        return "failed" if state == "failed" else "deleted" if state in ("deleting", "deleted") else "created"
+
+    @property
+    def size_bytes(self) -> int:
+        return int(self._info.get("storedBytes") or 0)
+
+    @property
+    def created_at(self) -> int:
+        return int(core_date(self._info.get("createdAt")))
+
+    @property
+    def expires_at(self) -> Optional[int]:
+        value = self._info.get("expiresAt")
+        return int(core_date(value)) if value else None
+
+    async def delete(self) -> None:
+        try:
+            await _guard("other", lambda: self._client.snapshots.delete(self.id))
+        except SandboxApiError as error:
+            if error.status_code != 404:
+                raise
+
+
+def core_date(value: Any) -> float:
+    if not isinstance(value, str) or not value:
+        return 0.0
+    from datetime import datetime
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+class AsyncSandbox:
+    """A sandbox handle with Vercel's methods. ``box.withruntime`` is the
+    Runtime sandbox underneath, for anything Vercel has no name for."""
+
+    def __init__(self, runtime: Any, client: AsyncRuntime, env: Optional[Mapping[str, str]] = None,
+                 persistent: Optional[bool] = None) -> None:
+        self.withruntime = runtime
+        self._client = client
+        self._env = dict(env or {})
+        self._persistent = persistent if persistent is not None else runtime.info.get("onLeaseEnd") != "stop"
+        self._routes: Dict[int, str] = {}
+        self._linked = False
+        self._destroyed = False
+        self._exit_mode = "stop"
+        self.fs = AsyncSandboxFilesystem(self)
+
+    @property
+    def name(self) -> str:
+        return self.withruntime.info.get("name") or self.withruntime.id
+
+    @property
+    def current_session_id(self) -> str:
+        return self.withruntime.id
+
+    @property
+    def status(self) -> SandboxStatus:
+        return core.status_of(self.withruntime.state)
+
+    @property
+    def persistent(self) -> bool:
+        return self._persistent
+
+    @property
+    def image(self) -> Optional[str]:
+        return self.withruntime.info.get("image")
+
+    @property
+    def cwd(self) -> str:
+        return core.HOME
+
+    @property
+    def region(self) -> str:
+        return "iad1"
+
+    @property
+    def memory(self) -> int:
+        return int(self.withruntime.info.get("memoryMiB", 0))
+
+    @property
+    def vcpus(self) -> int:
+        return int(self.withruntime.info.get("vcpu", 0))
+
+    @property
+    def execution_time_limit(self) -> timedelta:
+        return timedelta(seconds=int(self.withruntime.info.get("timeoutSeconds") or 0))
+
+    @property
+    def tags(self) -> Dict[str, str]:
+        return dict(self.withruntime.info.get("labels") or {})
+
+    @property
+    def routes(self) -> Tuple[SandboxRoute, ...]:
+        return tuple(core.route(port, url) for port, url in self._routes.items())
+
+    @property
+    def raw(self) -> Dict[str, Any]:
+        return dict(self.withruntime.info)
+
+    async def _live(self) -> Any:
+        """Wakes a stopped persistent (paused) sandbox, as Vercel resumes one
+        on the next process or file call."""
+        if self._destroyed:
+            raise core.SandboxInvalidHandleError(f"Sandbox {self.name} was destroyed.")
+        if self.withruntime.state in ("paused", "pausing"):
+            await _guard("sandbox", lambda: self.withruntime.wake())
+        return self.withruntime
+
+    async def _resuming(self, work: Callable[[Any], Any]) -> Any:
+        """Runs ``work``; when the lease paused the sandbox meanwhile, wakes
+        it and runs ``work`` once more."""
+        runtime = await self._live()
+        try:
+            return await work(runtime)
+        except Exception as error:  # noqa: BLE001
+            if getattr(error, "code", None) != "sandbox_paused":
+                raise translate(error, "sandbox") from error
+            await _guard("sandbox", lambda: runtime.refresh())
+            await _guard("sandbox", lambda: runtime.wake())
+            return await _guard("sandbox", lambda: work(runtime))
+
+    async def _link_home(self, text: str) -> None:
+        if self._linked or core.HOME not in text:
+            return
+        self._linked = True
+        try:
+            await self.withruntime.exec(core.HOME_LINK)
+        except Exception:  # noqa: BLE001 - the command that named the path reports what is wrong
+            pass
+
+    async def _share(self, port: int) -> None:
+        preview = await _guard("sandbox", lambda: self.withruntime.previews.create(port, visibility="public"))
+        self._routes[port] = preview["url"].rstrip("/")
+
+    async def _setup(self, source: Any, ports: Optional[List[int]], expiration: Any) -> None:
+        for port in ports or []:
+            await self._share(port)
+        if expiration is not None and self._persistent:
+            await _guard("sandbox", lambda: self.withruntime.set_retention(core.retention_days(expiration)))
+        if isinstance(source, core.GitSource):
+            auth = source.username is not None
+            argv = ["git", *(["-c", core.GIT_HELPER] if auth else []), "clone",
+                    *(["--depth", str(source.depth)] if source.depth else []), "--", source.url, core.RUNTIME_HOME]
+            env = {"GIT_USER": source.username or "", "GIT_PASS": source.password or ""} if auth else None
+            await self._setup_step(argv, env)
+            if source.revision:
+                await self._setup_step(["git", "-C", core.RUNTIME_HOME, "checkout", source.revision], env)
+        elif isinstance(source, core.TarballSource):
+            await self._setup_step(["sh", "-c", 'curl -fsSL "$1" | tar -xz -C /workspace', "sh", source.url])
+
+    async def _setup_step(self, argv: List[str], env: Optional[Dict[str, str]] = None) -> None:
+        result = await _guard("sandbox", lambda: self.withruntime.exec(argv, env=env, timeout_ms=600_000))
+        if result.exit_code != 0:
+            raise SandboxApiError(f"Setting up the sandbox's source failed ({' '.join(argv[:3])}): "
+                                  f"{result.stderr.strip()}", status_code=400, code="source_failed")
+
+    # ---- processes ------------------------------------------------------------------
+
+    async def run_process(self, command: str, args: Optional[Sequence[str]] = None, *, cwd: Any = None,
+                          env: Optional[Mapping[str, str]] = None, sudo: bool = False, kill_after: Any = None,
+                          check: bool = False, stdout: Any = None, stderr: Any = None,
+                          capture_output: bool = False) -> CompletedProcess:
+        """Runs a process and waits for it. Output streams to this process's
+        stdout and stderr unless captured, sent elsewhere, or dropped."""
+        argv = core.argv_of(command, args, sudo)
+        merged = {**self._env, **(env or {})}
+        runtime = await self._live()
+        await self._link_home(f"{' '.join(argv)}\n{cwd or ''}\n" + "\n".join(merged.values()))
+        target_cwd = core.RUNTIME_HOME if cwd is None else core.to_runtime_path(cwd)
+        limit = core.seconds(kill_after)
+        captured = {"stdout": "", "stderr": ""}
+
+        def sink(stream: str, target: Any) -> Callable[[str], None]:
+            def write(text: str) -> None:
+                if stream == "stderr" and target == subprocess.STDOUT:
+                    captured["stdout"] += text
+                    return
+                if capture_output or target == subprocess.PIPE:
+                    captured[stream] += text
+                elif target == subprocess.DEVNULL:
+                    return
+                elif target is None:
+                    (sys.stdout if stream == "stdout" else sys.stderr).write(text)
+                else:
+                    target.write(text)
+            return write
+        result = await self._resuming(lambda box: box.exec(
+            argv, cwd=target_cwd, env=merged or None,
+            timeout_ms=int(limit * 1000) if limit else core.LONGEST_MS,
+            on_stdout=sink("stdout", stdout), on_stderr=sink("stderr", stderr)))
+        keep = capture_output or stdout == subprocess.PIPE or stderr == subprocess.PIPE
+        completed = CompletedProcess(
+            args=argv, returncode=core.exit_code(result.exit_code, result.timed_out),
+            stdout=captured["stdout"] if keep or stderr == subprocess.STDOUT else None,
+            stderr=captured["stderr"] if keep else None, id=getattr(result, "process_id", None) or "",
+            name=command, cwd=core.HOME if cwd is None else str(cwd), session_id=self.withruntime.id,
+            started_at=int(time.time()))
+        if check:
+            completed.check_returncode()
+        return completed
+
+    async def create_process(self, command: str, args: Optional[Sequence[str]] = None, *, cwd: Any = None,
+                             env: Optional[Mapping[str, str]] = None, sudo: bool = False, kill_after: Any = None,
+                             stdout: Any = subprocess.PIPE, stderr: Any = subprocess.PIPE) -> AsyncProcess:
+        """Starts a process and returns at once; read its output from
+        ``process.stdout`` and ``process.stderr``."""
+        argv = core.argv_of(command, args, sudo)
+        merged = {**self._env, **(env or {})}
+        await self._live()
+        await self._link_home(f"{' '.join(argv)}\n{cwd or ''}")
+        limit = core.seconds(kill_after)
+        started = await self._resuming(lambda box: box.spawn(
+            argv, cwd=core.RUNTIME_HOME if cwd is None else core.to_runtime_path(cwd), env=merged or None,
+            timeout_ms=int(limit * 1000) if limit else core.LONGEST_MS))
+        process = AsyncProcess(started, argv, core.HOME if cwd is None else str(cwd), self.withruntime.id)
+        if stdout == subprocess.DEVNULL:
+            process.stdout = None
+        if stderr in (subprocess.DEVNULL, subprocess.STDOUT):
+            process.stderr = None
+        return process
+
+    async def get_process(self, process_id: str, wait: bool = False) -> AsyncProcess:
+        runtime = await self._live()
+        found = await _guard("sandbox", lambda: runtime.process(process_id))
+        process = AsyncProcess(found, [str(found.info.get("command", ""))], str(found.info.get("cwd", "")),
+                               self.withruntime.id)
+        if wait:
+            await process.wait()
+        return process
+
+    async def query_processes(self) -> List[AsyncProcess]:
+        runtime = await self._live()
+        out = []
+        for info in await _guard("sandbox", lambda: runtime.processes()):
+            found = await _guard("sandbox", lambda: runtime.process(info["id"]))
+            out.append(AsyncProcess(found, [str(info.get("command", ""))], str(info.get("cwd", "")),
+                                    self.withruntime.id))
+        return out
+
+    # ---- lifecycle ----------------------------------------------------------------------
+
+    async def refresh(self) -> "AsyncSandbox":
+        await _guard("sandbox", lambda: self.withruntime.refresh())
+        return self
+
+    async def stop(self) -> "AsyncSandbox":
+        """Ends the session. A persistent sandbox is paused, keeping its files
+        and memory, and wakes on the next process or file call; any other ends."""
+        await _guard("sandbox", lambda: self.withruntime.refresh())
+        state = self.withruntime.state
+        if state not in ("stopped", "stopping", "paused"):
+            if self._persistent:
+                await _guard("sandbox", lambda: self.withruntime.pause())
+            else:
+                await _guard("sandbox", lambda: self.withruntime.stop())
+        return self
+
+    async def destroy(self) -> None:
+        """Ends the sandbox for good."""
+        await _guard("sandbox", lambda: self.withruntime.refresh())
+        if self.withruntime.state != "stopped":
+            await _guard("sandbox", lambda: self.withruntime.stop(wait=False))
+        self._destroyed = True
+
+    async def _finish(self, mode: str) -> None:
+        if self._destroyed:
+            return
+        if mode == "destroy":
+            await self.destroy()
+        else:
+            await self.stop()
+
+    async def __aenter__(self) -> Any:
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self._finish(self._exit_mode)
+
+    def session(self) -> Any:
+        """The sandbox itself, woken: a Runtime sandbox is its own session.
+        Leaving the block stops it."""
+        async def acquire() -> Any:
+            await self._live()
+            return self
+        return operation(acquire, "stop")
+
+    async def extend_execution_time_limit(self, duration: Any) -> "AsyncSandbox":
+        """Moves the end ``duration`` later (at most an hour ahead of now)."""
+        total = core.seconds(duration) or 0
+        if total < 1:
+            raise ValueError("duration must be at least one second.")
+        await self._resuming(lambda box: box.extend(int(total + 0.999)))
+        return self
+
+    async def update_network_policy(self, policy: Any) -> Any:
+        rules = core.network_rules(policy)
+        await self._resuming(lambda box: box.network.set(**rules))
+        return policy
+
+    async def update(self, *, ports: Optional[List[int]] = None, execution_time_limit: Any = None,
+                     network_policy: Any = None, snapshot_expiration: Any = None, **other: Any) -> "AsyncSandbox":
+        """Changes what Runtime can change on a sandbox: ports, the time limit
+        (later only), network policy and snapshot expiration."""
+        given = [name for name, value in other.items() if value is not None]
+        if given:
+            raise NotSupportedError(f"Changing {given[0]} on an existing sandbox",
+                                    "Create a new sandbox with it (Runtime cannot change a sandbox's machine, "
+                                    "persistence, tags or region after creation).")
+        if execution_time_limit is not None:
+            wanted = core.seconds(execution_time_limit) or 0
+            current = int(self.withruntime.info.get("timeoutSeconds") or 0)
+            if wanted < current:
+                raise NotSupportedError("Shortening a sandbox's time limit",
+                                        "Runtime leases only move later. Call stop() when the work is done.")
+            if wanted > current:
+                await self.extend_execution_time_limit(wanted - current)
+        if network_policy is not None:
+            await self.update_network_policy(network_policy)
+        if snapshot_expiration is not None:
+            await _guard("sandbox", lambda: self.withruntime.set_retention(core.retention_days(snapshot_expiration)))
+        if ports is not None:
+            for port in [one for one in self._routes if one not in ports]:
+                await _guard("sandbox", lambda: self.withruntime.previews.delete(port))
+                del self._routes[port]
+            for port in ports:
+                if port not in self._routes:
+                    await self._share(port)
+        return self
+
+    async def snapshot(self, *, expiration: Any = None) -> AsyncSnapshot:
+        """Keeps the whole machine as a Runtime snapshot (files, memory,
+        processes), then stops the sandbox, as Vercel does."""
+        days = None if expiration is None else core.retention_days(expiration)
+        taken = await self._resuming(lambda box: box.snapshot(retention_days=days))
+        await _guard("sandbox", lambda: self.withruntime.stop(wait=False))
+        return AsyncSnapshot(taken, self._client)
+
+    list_sessions = staticmethod(core.unsupported("Listing a sandbox's sessions",
+                                                  "A Runtime sandbox has one session: itself."))
+    list_snapshots = staticmethod(core.unsupported("Listing a sandbox's snapshots from the sandbox",
+                                                   "Use query_snapshots(name=...)."))
+
+
+async def _find(client: AsyncRuntime, name: str) -> Any:
+    if core.UUID.match(name):
+        return await _guard("sandbox", lambda: client.sandboxes.get(name))
+    listing = await _guard("other", lambda: client.sandboxes.list(name=name))
+    live = [one for one in await listing.to_list() if one.state != "stopped"]
+    if not live:
+        raise SandboxApiError(f"Sandbox {name} was not found.", status_code=404, code="not_found",
+                              data={"error": {"code": "not_found", "message": f"Sandbox {name} was not found."}})
+    return live[-1]
+
+
+async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[str], source: Any,
+                  ports: Optional[List[int]], execution_time_limit: Any, resources: Optional[SandboxResources],
+                  persistent: Optional[bool], network_policy: Any, env: Optional[Mapping[str, str]],
+                  tags: Optional[Mapping[str, str]], snapshot_expiration: Any,
+                  runtime_create: Optional[Dict[str, Any]]) -> AsyncSandbox:
+    keep = True if persistent is None else persistent
+    fields: Dict[str, Any] = {}
+    if isinstance(source, core.SnapshotSource):
+        fields["snapshot"] = source.snapshot_id
+    else:
+        vcpus = (resources.vcpus if resources and resources.vcpus else core.DEFAULT_VCPUS)
+        fields.update(vcpu=vcpus, memory_mib=(resources.memory if resources and resources.memory
+                                              else vcpus * core.MEMORY_MIB_PER_VCPU))
+        if image is not None and not core.STOCK_IMAGE.match(image):
+            if core.UUID.match(image):
+                fields["image"] = image
+            else:
+                listing = await _guard("other", lambda: client.images.list(name=image, state="ready", limit=1))
+                if not listing.data:
+                    raise NotSupportedError(
+                        f"The image {image}, which is not a Runtime image",
+                        f"Build it as a Runtime image with that name: `npx withruntime image build --dockerfile "
+                        f"Dockerfile --name {image}`.")
+                fields["image"] = listing.data[0]["id"]
+    fields.update(timeout_seconds=core.lease_seconds(execution_time_limit), on_lease_end="pause" if keep else "stop")
+    if name:
+        fields["name"] = name
+    if tags:
+        fields["labels"] = dict(tags)
+    if network_policy is not None:
+        fields["network"] = core.network_rules(network_policy)
+    fields.update(runtime_create or {})
+    runtime = await _guard("sandbox", lambda: client.sandboxes.create(**fields))
+    box = AsyncSandbox(runtime, client, env, keep)
+    try:
+        await box._setup(source, ports, snapshot_expiration)
+    except Exception:
+        await runtime.stop(wait=False)
+        raise
+    return box
+
+
+def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, source: Any = None,
+                   ports: Optional[List[int]] = None, execution_time_limit: Any = None,
+                   resources: Optional[SandboxResources] = None, persistent: Optional[bool] = None,
+                   network_policy: Any = None, network_id: Optional[str] = None,
+                   env: Optional[Mapping[str, str]] = None, tags: Optional[Mapping[str, str]] = None,
+                   mounts: Any = None, snapshot_expiration: Any = None, snapshot_retention: Any = None,
+                   region: Optional[str] = None, failover_regions: Any = None, destroy: bool = True,
+                   project_id: Optional[str] = None, token: Optional[str] = None,
+                   client: Optional[AsyncRuntime] = None, runtime_create: Optional[Dict[str, Any]] = None,
+                   **_private: Any) -> Any:
+    """Creates a sandbox with Vercel's defaults (2 vCPUs with 2048 MiB each,
+    5 minutes, persistent). Await it, or use it as a context manager that
+    stops (and by default destroys) it. Funding is left to Runtime: the free
+    trial while the account has trial time, then prepaid credit.
+    ``runtime_create`` passes Runtime fields (snake_case)."""
+    core.refuse_create(mounts, network_id, region, failover_regions)
+    runtime_client = _client(token, client)
+    return operation(lambda: _create(
+        runtime_client, name=name, image=image, source=source, ports=ports, execution_time_limit=execution_time_limit,
+        resources=resources, persistent=persistent, network_policy=network_policy, env=env, tags=tags,
+        snapshot_expiration=snapshot_expiration, runtime_create=runtime_create), "destroy" if destroy else "stop")
+
+
+async def get_sandbox(*, name: str, project_id: Optional[str] = None, include_system_routes: bool = False,
+                      token: Optional[str] = None, client: Optional[AsyncRuntime] = None) -> AsyncSandbox:
+    """A sandbox by name (or Runtime id), without waking it: the next process
+    or file call does."""
+    runtime_client = _client(token, client)
+    return AsyncSandbox(await _find(runtime_client, name), runtime_client)
+
+
+def resume_sandbox(*, name: str, project_id: Optional[str] = None, token: Optional[str] = None,
+                   client: Optional[AsyncRuntime] = None) -> Any:
+    """Wakes a stopped persistent sandbox now. As a context manager, stops it on exit."""
+    async def acquire() -> Any:
+        box = await get_sandbox(name=name, token=token, client=client)
+        await box._live()
+        return box
+    return operation(acquire, "stop")
+
+
+async def get_or_create_sandbox(*, name: str, resume: bool = True, token: Optional[str] = None,
+                                client: Optional[AsyncRuntime] = None,
+                                **create: Any) -> Tuple[AsyncSandbox, bool]:
+    """The named sandbox (woken unless resume=False) and False, or a new one and True."""
+    try:
+        box = await get_sandbox(name=name, token=token, client=client)
+    except SandboxApiError as error:
+        if error.status_code != 404:
+            raise
+        create.pop("destroy", None)
+        return await create_sandbox(name=name, token=token, client=client, **create), True
+    if resume:
+        await box._live()
+    return box, False
+
+
+def fork_sandbox(*, source_sandbox: str, name: Optional[str] = None, destroy: bool = True,
+                 token: Optional[str] = None, client: Optional[AsyncRuntime] = None, **overrides: Any) -> Any:
+    """A copy of a named sandbox, memory and all (a Runtime fork)."""
+    given = [key for key, value in overrides.items() if value is not None]
+    if given:
+        raise NotSupportedError(f"Overriding {given[0]} on a fork",
+                                "Fork without it; the copy keeps the source's machine, lease and rules.")
+
+    async def make() -> Any:
+        source = await get_sandbox(name=source_sandbox, token=token, client=client)
+        await source._live()
+        copy = await _guard("sandbox", lambda: source.withruntime.fork(name=name))
+        return AsyncSandbox(copy, source._client, source._env, source._persistent)
+    return operation(make, "destroy" if destroy else "stop")
+
+
+async def query_sandboxes(query: Any = None, *, page_size: Optional[int] = None, cursor: Optional[str] = None,
+                          project_id: Optional[str] = None, token: Optional[str] = None,
+                          client: Optional[AsyncRuntime] = None) -> Any:
+    """Live and stopped (paused) sandboxes. A name prefix and newest-first
+    order are applied here, over the whole list."""
+    if cursor is not None:
+        raise NotSupportedError("Starting a query from a saved cursor", "Iterate the whole query.")
+    runtime_client = _client(token, client)
+    tag = getattr(query, "tag", None)
+    listing = await _guard("other", lambda: runtime_client.sandboxes.list(
+        labels={tag.key: tag.value} if tag else None, limit=min(page_size, 100) if page_size else None))
+    found = await listing.to_list()
+    prefix = getattr(query, "name_prefix", None)
+    if prefix:
+        found = [one for one in found if str(one.info.get("name") or "").startswith(prefix)]
+    if getattr(query, "sort_order", "asc") == "desc":
+        found.reverse()
+    for runtime in found:
+        yield AsyncSandbox(runtime, runtime_client)
+
+
+async def get_snapshot(*, snapshot_id: str, token: Optional[str] = None,
+                       client: Optional[AsyncRuntime] = None) -> AsyncSnapshot:
+    runtime_client = _client(token, client)
+    return AsyncSnapshot(await _guard("other", lambda: runtime_client.snapshots.get(snapshot_id)), runtime_client)
+
+
+async def query_snapshots(*, name: Optional[str] = None, page_size: Optional[int] = None,
+                          cursor: Optional[str] = None, sort_order: Optional[str] = None,
+                          project_id: Optional[str] = None, token: Optional[str] = None,
+                          client: Optional[AsyncRuntime] = None) -> Any:
+    """Snapshots, optionally only those of the named sandbox."""
+    runtime_client = _client(token, client)
+    sandbox_id = None
+    if name is not None:
+        listing = await _guard("other", lambda: runtime_client.sandboxes.list(name=name, include_stopped=True))
+        if not listing.data:
+            return
+        sandbox_id = listing.data[0].id
+    listing = await _guard("other", lambda: runtime_client.snapshots.list(sandbox_id=sandbox_id, limit=page_size))
+    found = await listing.to_list()
+    if sort_order == "desc":
+        found.reverse()
+    for info in found:
+        yield AsyncSnapshot(info, runtime_client)
+
+
+_DRIVES = ("Vercel Drives", "Use a Runtime volume (runtime.volumes) and mount it with "
+           "runtime_create={'volumes': [{'volume_id': ..., 'path': ...}]}.")
+get_or_create_drive = core.unsupported(*_DRIVES)
+delete_drive = core.unsupported(*_DRIVES)
+query_drives = core.unsupported(*_DRIVES)
+query_sessions = core.unsupported("Querying sessions", "A Runtime sandbox is its own session: query_sandboxes.")
+
+__all__ = ["AsyncSandbox", "AsyncProcess", "AsyncTextReader", "AsyncSandboxFilesystem", "AsyncSnapshot",
+           "AsyncFileHandle", "AsyncBatch", "create_sandbox", "get_sandbox", "resume_sandbox", "get_or_create_sandbox",
+           "fork_sandbox", "query_sandboxes", "get_snapshot", "query_snapshots", "get_or_create_drive", "delete_drive",
+           "query_drives", "query_sessions"]
