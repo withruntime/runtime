@@ -110,6 +110,81 @@ use instead. The sync modules are generated from the async ones by
 `scripts/generate_dropin_sync.py`. `DAYTONA.md` and `VERCEL.md` in the
 JavaScript package list every mapping and gap.
 
+## Code written for Blaxel
+
+`withruntime.blaxel` runs code written for Blaxel's Python SDK (`blaxel`
+0.4.11) on Runtime. Change the import and set `RUNTIME_API_KEY`, or run
+`npx withruntime login` once:
+
+```python no-run
+from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance
+from withruntime.blaxel import SyncSandboxInstance  # was: from blaxel.core import SyncSandboxInstance
+```
+
+`withruntime.blaxel.core` holds the same names, so replacing `blaxel.` with
+`withruntime.blaxel.` works too. A Runtime key in `BL_API_KEY` is used; a
+Blaxel key is never sent anywhere.
+
+How it maps:
+
+- **Sandboxes.** `create`, `create_if_not_exists` (one sandbox when two calls
+  race), `get`, `get_by_external_id`, `list`, `delete`, `fork`, `snapshots` and
+  the `update_*` calls work. `memory` is kept, with one vCPU for every 2048 MB.
+  Blaxel's general templates (`blaxel/base-image`, `py-app`, `ts-app`, `node`,
+  `jupyter-server`, `docker-in-sandbox`) run on Runtime's image. Any other
+  image must be a ready Runtime image of that name. Volumes mount Runtime
+  volumes of the same name.
+- **Standby.** A sandbox pauses after a minute with no call (Blaxel: about 15
+  seconds). It keeps its memory and processes, and wakes on the next command,
+  file call or preview visit. `archive` pauses it and keeps its memory too.
+  A lease in use is renewed, so a long command is not paused at the hour.
+  `keep_alive` raises the idle pause to the process's time limit, or turns it
+  off for a process with none. The first call from any client that finds no
+  `keep_alive` process running gives the old idle pause back.
+- **How long it is kept.** A paused sandbox with no `ttl` or `lifecycle` is
+  kept 365 days. Blaxel keeps it until you delete it. A limit is rounded up to
+  whole days of pause. A limit of an hour or less that counts from creation
+  also ends the sandbox at that time. On the free trial a paused sandbox is kept
+  seven days, the most Blaxel's first tier keeps one.
+- **Envs** reach every process, from any client: they are kept on the
+  sandbox, and a process's own `env` wins.
+- **Paths.** `/blaxel`, Blaxel's working directory and `HOME`, is
+  `/workspace`. Relative paths and `~` start there.
+- **Processes.** You can find a process by name from any client, as long as
+  Runtime still has its record. Runtime keeps the running processes and the
+  last 16 that ended.
+- **Previews** are Runtime previews of each port. A private preview's
+  `tokens.create(expires_at)` gives a token. Send it as the
+  `x-runtime-preview-token` header, or as `runtime_preview_token` in the
+  address. `fetch(port)` uses a private preview for you.
+- **Code interpreter.** `CodeInterpreter.run_code` and `create_code_context`
+  run on Runtime's interpreter and return Blaxel's result classes.
+- **Errors.** Errors keep Blaxel's classes: `SandboxAPIError`,
+  `ResponseError` and `SnapshotAPIError`. Each also carries Runtime's `code`,
+  `hint` and `request_id`.
+- **Runtime fields.** `runtime_create={...}` passes Runtime's own create
+  fields, for example `{"funding": "trial"}`. `sandbox.withruntime` is the
+  Runtime sandbox underneath.
+
+Differences you can hit:
+
+- Commands run as root, as on Blaxel, with the sandbox's `PATH` and `HOME`
+  (`/workspace`). File calls act as the sandbox user and fall back to `sudo`
+  where only root may: they reach files a root process made, including private
+  ones, and a file they write is the sandbox user's.
+- Blaxel's `X-Blaxel-Preview-Token` header and `bl_preview_token` address
+  parameter are not read.
+- Public previews need a paid sandbox.
+- A process's `pid` is Runtime's process id, not an operating-system number.
+
+These raise `NotSupportedError` before anything happens, naming what to use:
+regions outside the US, read-only and ephemeral volumes, drives, `extra_args`
+other than `iptables`, egress and subnet settings, preview headers, custom
+domains and preview expiry, restoring a snapshot in place (fork from it
+instead), sessions, codegen, `system`, schedules, and Blaxel's agents, models,
+tools, jobs and applications. The sync module is generated from the async one
+by `scripts/generate_dropin_sync.py`.
+
 ## Agent frameworks
 
 `withruntime.openai_agents` is a sandbox client for the OpenAI Agents SDK's

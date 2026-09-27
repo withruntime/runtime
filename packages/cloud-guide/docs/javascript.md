@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.7.2. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.8.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -856,22 +856,23 @@ account's single sign-on. See [identity tokens](./identity-tokens) and
 `runtime.support.message(...)` asks for help; see
 [feedback and support](./feedback-and-support).
 
-## Coming from E2B, Daytona or Vercel Sandbox
+## Coming from E2B, Daytona, Vercel Sandbox or Blaxel
 
 Code written for their SDKs runs on Runtime after changing one import, in
 `withruntime` 0.4.0 and later for E2B and 0.5.0 and later for Daytona and
-Vercel Sandbox:
+Vercel Sandbox, and 0.8.0 and later for Blaxel:
 
 ```ts no-run
 import { Sandbox } from "withruntime/e2b"; // was: from "e2b"
 import { Daytona } from "withruntime/daytona"; // was: from "@daytona/sdk"
 import { Sandbox as VercelSandbox } from "withruntime/vercel"; // was: from "@vercel/sandbox"
+import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
 ```
 
 Sandboxes get the old provider's defaults, and a call Runtime cannot honour
 the same way throws `NotSupportedError` before anything happens, naming what
-to use instead. `E2B.md`, `DAYTONA.md` and `VERCEL.md` in the package list
-every mapping and gap. To move to Runtime's own calls, see
+to use instead. `E2B.md`, `DAYTONA.md`, `VERCEL.md` and `BLAXEL.md` in the
+package list every mapping and gap. To move to Runtime's own calls, see
 [migration](./migrate).
 
 ## Configuration

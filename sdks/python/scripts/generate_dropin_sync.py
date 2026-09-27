@@ -1,8 +1,8 @@
-"""Writes the sync modules of withruntime.daytona and withruntime.vercel from
-their async sources, as generate_e2b_sync.py does for withruntime.e2b: each
-sync adapter is its async one with the awaits taken out, so the two cannot
-drift. tests/test_daytona.py fails when a committed file differs from what
-this produces. Run: python3 scripts/generate_dropin_sync.py"""
+"""Writes the sync modules of withruntime.daytona, withruntime.vercel and
+withruntime.blaxel from their async sources, as generate_e2b_sync.py does for
+withruntime.e2b: each sync adapter is its async one with the awaits taken out,
+so the two cannot drift. tests/test_daytona.py fails when a committed file
+differs from what this produces. Run: python3 scripts/generate_dropin_sync.py"""
 import re
 import sys
 from pathlib import Path
@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent / "withruntime"
 PAIRS = {
     ROOT / "daytona" / "_async_daytona.py": ROOT / "daytona" / "_sync_daytona.py",
     ROOT / "vercel" / "_async_sandbox.py": ROOT / "vercel" / "_sync_sandbox.py",
+    ROOT / "blaxel" / "_async_sandbox.py": ROOT / "blaxel" / "_sync_sandbox.py",
 }
 REPLACEMENTS = [
     ("from ._async_io import", "from ._sync_io import"),

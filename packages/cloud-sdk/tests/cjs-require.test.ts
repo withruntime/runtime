@@ -32,6 +32,7 @@ const expected: Record<string, string> = {
   "withruntime/e2b/code-interpreter": "Sandbox",
   "withruntime/daytona": "Daytona",
   "withruntime/vercel": "Sandbox",
+  "withruntime/blaxel": "SandboxInstance",
 };
 
 test("engines asks for the Node that require(esm) needs", () => {

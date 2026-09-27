@@ -8,10 +8,19 @@ import type { RequestOptions, Transport } from "../transport.js";
  * prices every rival its rates table carries and names them when it refuses
  * one, so any string is sent as it is. */
 export type CompareProvider =
-  "e2b" | "daytona" | "vercel" | "modal" | "cloudflare" | "fly" | "fly-machines" | (string & {});
+  | "e2b"
+  | "daytona"
+  | "vercel"
+  | "modal"
+  | "cloudflare"
+  | "fly"
+  | "fly-machines"
+  | "blaxel"
+  | (string & {});
 
 /** The rivals a switch can be recorded from. */
-export type SwitchProvider = "e2b" | "daytona" | "vercel" | "modal" | "cloudflare" | "fly";
+export type SwitchProvider =
+  "e2b" | "daytona" | "vercel" | "modal" | "cloudflare" | "fly" | "blaxel";
 
 export type SwitchingSummary = {
   /** False while the programme is paused. */

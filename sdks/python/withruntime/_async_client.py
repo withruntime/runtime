@@ -512,7 +512,13 @@ class AsyncProcess:
                     if event["type"] == "continue":
                         read.cursor, resumed = max(read.cursor, event["cursor"]), True
                         break
-                    for passed in read.pass_event(event):
+                    passing = read.pass_event(event)
+                    if event["type"] == "exit":
+                        # Closed before the last event is handed over: a reader
+                        # that stops at exit leaves no stream open for the
+                        # loop's shutdown to close twice at once.
+                        await _close_events(events)
+                    for passed in passing:
                         yield passed
                     if event["type"] == "exit":
                         return
@@ -883,7 +889,10 @@ class AsyncSandbox:
                 if event["type"] == "continue":
                     process_id, read.cursor = event["processId"], event["cursor"]
                     break
-                for passed in read.pass_event(event):
+                passing = read.pass_event(event)
+                if event["type"] == "exit":
+                    await _close_events(events)  # as in AsyncProcess.output
+                for passed in passing:
                     yield passed
                 if event["type"] == "exit":
                     return

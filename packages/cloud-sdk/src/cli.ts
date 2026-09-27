@@ -57,10 +57,11 @@ Account
                                                A new API key for CI, approved by an owner in the browser
   referrals                                    Your referral link: you both get up to $500
   compare --from <provider> [--days 30]        What your usage would cost at e2b, daytona, vercel,
-                                               modal, cloudflare, fly, lambda-microvms, freestyle,
-                                               prime and others, and what you save
-  switch [--from <provider>]                   Moving from a rival: record it before your first top-up,
-                                               and that top-up is matched, up to $100
+                                               modal, cloudflare, fly, blaxel, lambda-microvms,
+                                               freestyle, prime and others, and what you save
+  switch [--from <provider>]                   Moving from e2b, daytona, vercel, modal, cloudflare, fly
+                                               or blaxel: record it before your first top-up, and
+                                               that top-up is matched, up to $100
   ls                                           Everything you run, every product
   feedback "<text>" [--kind bug|missing_feature|competitor_gap|migration_blocker|docs|pricing|praise|other]
                    [--detail <text>] [--competitor <name>] [--request-id <req_...>]
@@ -1218,6 +1219,7 @@ const SWITCH_FROM: Record<string, SwitchProvider> = {
   cloudflare: "cloudflare",
   fly: "fly",
   "fly-machines": "fly",
+  blaxel: "blaxel",
 };
 const RIVAL_NAMES: Record<SwitchProvider, string> = {
   e2b: "E2B",
@@ -1226,6 +1228,7 @@ const RIVAL_NAMES: Record<SwitchProvider, string> = {
   modal: "Modal",
   cloudflare: "Cloudflare Sandbox",
   fly: "Fly",
+  blaxel: "Blaxel",
 };
 
 /** A date as the CLI writes one: 23 September 2026. */
@@ -1337,7 +1340,7 @@ async function switching(
 
   if (!from)
     throw usage(
-      `Name the rival: ${me} compare --from e2b (or daytona, vercel, modal, cloudflare, fly, fly-machines, lambda-microvms, freestyle, prime...).`,
+      `Name the rival: ${me} compare --from e2b (or daytona, vercel, modal, cloudflare, fly, fly-machines, blaxel, lambda-microvms, freestyle, prime...).`,
     );
   /* The server holds the list of rivals it has rates for, and names them all
      when it refuses one, so a rival added there needs no new CLI. */

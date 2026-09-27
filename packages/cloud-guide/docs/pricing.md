@@ -260,7 +260,7 @@ Sources: [E2B pricing](https://e2b.dev/pricing),
 
 ## Switching credit
 
-Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare or Fly? Say so
+Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare, Fly or Blaxel? Say so
 before your first top-up, and that top-up is matched with credit, up to $100:
 
 ```bash check

@@ -107,6 +107,24 @@ Runtime does not do the same way throws `NotSupportedError` before anything
 happens, naming what to use instead. `DAYTONA.md` and `VERCEL.md` in this
 package list every mapping and gap.
 
+## Code written for Blaxel
+
+`withruntime/blaxel` runs code written for Blaxel's sandbox SDK. Change the
+import:
+
+```ts no-run
+import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
+```
+
+Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB.
+Standby becomes Runtime's pause: after 60 seconds without a call a sandbox
+pauses with its memory and processes, and the next call wakes it. Envs,
+processes by name, files, previews, snapshots, forks and the code interpreter
+work as they do on Blaxel. A Blaxel key is never sent anywhere. Sessions,
+drives, codegen, schedules and Blaxel's agent, model and MCP hosting throw
+`NotSupportedError` before anything happens, naming what to use instead.
+`BLAXEL.md` in this package lists every mapping and gap.
+
 ## Agent frameworks
 
 `withruntime/openai-agents` is a sandbox client for the OpenAI Agents SDK's

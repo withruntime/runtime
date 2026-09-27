@@ -4,7 +4,8 @@ Runtime bills the CPU your agent uses and costs **77% less than Blaxel** while r
 
 **The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
 Runtime and $2.76 on Blaxel**. At 100,000 runs a month that is $63.89 against
-$276.00, **$212 a month saved**.
+$276.00, **$212 a month saved**. Your Blaxel sandbox code keeps working: change
+one import.
 
 ## Where Runtime is better
 
@@ -20,6 +21,10 @@ $276.00, **$212 a month saved**.
 - **Cheaper to keep paused work.** A paused Runtime sandbox keeps its files,
   memory and processes for $0.08 per GB a month, for 1 to 365 days. Blaxel's
   standby snapshots cost $0.20 per GB a month.
+- **A one-line switch.** `withruntime/blaxel` runs code written for Blaxel's
+  sandbox SDK, in JavaScript and Python: processes, files, previews, snapshots,
+  forks and the code interpreter, with no Blaxel key. A switch from Blaxel gets
+  your first top-up matched, up to $100.
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -31,7 +36,7 @@ $276.00, **$212 a month saved**.
 ## At a glance
 
 Blaxel's figures come from its public pricing and documentation, checked
-23 September 2026.
+27 September 2026.
 
 |                | Runtime                                                  | Blaxel                                           |
 | -------------- | -------------------------------------------------------- | ------------------------------------------------ |
@@ -41,6 +46,7 @@ Blaxel's figures come from its public pricing and documentation, checked
 | Paused storage | $0.08 per GB-month; files, memory and processes          | $0.20 per GB-month snapshot; files and processes |
 | Plan fee       | None; prepaid credit from $10                            | None; tiers grow with credit added               |
 | Free start     | 100 sandbox hours, no card                               | Up to $200 of credit                             |
+| Internet out   | First 100 GiB a month free, then $0.02 per GB            | Included                                         |
 
 ## Cost for the same job
 
@@ -74,6 +80,46 @@ replaces the Blaxel calls on a branch, tests them on the free trial, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
+### Change one import
+
+Runtime's SDK runs code written for Blaxel's sandbox SDK. Change the import and
+set `RUNTIME_API_KEY`, or run `npx withruntime login` once:
+
+```ts no-run
+import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
+```
+
+```python no-run
+from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance
+```
+
+Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB. A
+sandbox pauses after 60 seconds without a call, keeping its memory, files and
+processes, and wakes by itself on the next command, file call or preview visit.
+Envs, processes by name, files, previews, snapshots, forks, volumes and the code
+interpreter carry over. Sandboxes use the free trial while the account has
+trial time, then prepaid credit; pass `withruntime: { create: { funding: "trial" } }`
+(Python `runtime_create={"funding": "trial"}`) while you test.
+
+A call Runtime handles differently, such as sessions, drives, schedules or
+Blaxel's agent and MCP hosting, throws `NotSupportedError` before anything
+happens and names what to use instead. `BLAXEL.md` in the package lists every
+mapping.
+
+### Or port the calls
+
+Blaxel:
+
+```js
+import { SandboxInstance } from "@blaxel/core";
+const sandbox = await SandboxInstance.create({ name: "my-sandbox", memory: 4096 });
+const result = await sandbox.process.exec({
+  command: "python3 -c 'print(6 * 7)'",
+  waitForCompletion: true,
+});
+await sandbox.delete();
+```
+
 Runtime:
 
 ```ts
@@ -86,17 +132,26 @@ try {
 }
 ```
 
+Moving from Blaxel? Run `npx withruntime switch --from blaxel` before your first
+top-up, and that top-up is matched with credit, up to $100
+([switching credit](./pricing#switching-credit)).
+
 ## When Blaxel may fit better
 
 - **Idle for free, back in milliseconds.** A Blaxel sandbox goes to standby by
   itself when connections close, costs nothing for compute there, and resumes
   in about 25 ms.
 - **Very large fleets.** Blaxel's top tier runs over 100,000 sandboxes at once.
+  A tier is the credit topped up over the last 30 days, which is then spent on
+  usage: $20 unlocks 50 sandboxes and $50 unlocks 200.
+- **Heavy outbound traffic.** Blaxel includes internet egress in its rates.
+  Runtime's first 100 GiB out a month are free, then $0.02 per GB.
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 27 September 2026.
 
 - [Blaxel pricing](https://blaxel.ai/pricing)
 - [Blaxel sandboxes](https://docs.blaxel.ai/Sandboxes/Overview)
+- [Blaxel usage and quotas](https://docs.blaxel.ai/Security/Quotas)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

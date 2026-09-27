@@ -8,7 +8,7 @@ import { Runtime } from "../src/client";
 const SUMMARY = {
   enabled: true,
   maxMicros: "100000000",
-  providers: ["e2b", "daytona", "vercel", "modal", "cloudflare", "fly"],
+  providers: ["e2b", "daytona", "vercel", "modal", "cloudflare", "fly", "blaxel"],
   eligible: true,
   switch: null as null | Record<string, unknown>,
 };
@@ -204,6 +204,30 @@ test("`runtime switch --from e2b` records it; `runtime switch` shows where it st
       await expect(run(["compare", "--from", "e2b", "--vcpu", "2"], env, out)).rejects.toThrow(
         "Unknown option --vcpu",
       );
+    },
+  );
+});
+
+test("`runtime switch --from blaxel` records a switch from Blaxel by name", async () => {
+  await withStub(
+    () => ({
+      ...SUMMARY,
+      eligible: false,
+      switch: {
+        provider: "blaxel",
+        status: "pending",
+        refusedReason: null,
+        recordedAt: "2026-09-27T12:00:00.000Z",
+        creditMicros: "0",
+      },
+    }),
+    async (seen) => {
+      const { lines, out } = capture();
+      expect(await run(["switch", "--from", "Blaxel"], env, out)).toBe(0);
+      expect(lines.join("\n")).toBe(
+        "Recorded: switching from Blaxel. This organization's switch from Blaxel was recorded on 27 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+      );
+      expect(seen).toEqual(['POST /v1/switching {"provider":"blaxel"}']);
     },
   );
 });

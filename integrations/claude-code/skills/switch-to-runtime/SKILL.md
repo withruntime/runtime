@@ -1,6 +1,6 @@
 ---
 name: switch-to-runtime
-description: Move a project's sandbox code from another provider (E2B, Daytona, Modal, Vercel Sandbox, Cloudflare Sandbox, Fly, Docker) to Runtime Cloud, test it on the free trial and report the monthly saving. Use when the user asks to switch, migrate or compare sandbox providers, or to set up Runtime for a project.
+description: Move a project's sandbox code from another provider (E2B, Daytona, Modal, Vercel Sandbox, Blaxel, Cloudflare Sandbox, Fly, Docker) to Runtime Cloud, test it on the free trial and report the monthly saving. Use when the user asks to switch, migrate or compare sandbox providers, or to set up Runtime for a project.
 ---
 
 # Switch a project to Runtime Cloud
@@ -15,10 +15,11 @@ In short, the guide has you:
 1. Find the old provider's calls: dependencies, imports, creation, commands,
    files, background processes and cleanup, and the names (never the values)
    of its environment variables.
-2. Map each call to Runtime. Code written for E2B, Daytona or Vercel Sandbox
-   often needs only its import changed to `withruntime/e2b`, `withruntime/daytona`
-   or `withruntime/vercel` (Python `withruntime.e2b`, `withruntime.daytona`,
-   `withruntime.vercel`).
+2. Map each call to Runtime. Code written for E2B, Daytona, Vercel Sandbox or
+   Blaxel often needs only its import changed to `withruntime/e2b`,
+   `withruntime/daytona`, `withruntime/vercel` or `withruntime/blaxel` (Python
+   `withruntime.e2b`, `withruntime.daytona`, `withruntime.vercel`,
+   `withruntime.blaxel`).
    Agent frameworks have ready integrations: see topic `frameworks`.
 3. Connect with one approval (`runtime_connect`, or `npx -y withruntime login`)
    and run the project's own tests on the free trial with `funding: "trial"`.

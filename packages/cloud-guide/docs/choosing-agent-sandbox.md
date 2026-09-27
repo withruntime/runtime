@@ -122,4 +122,8 @@ time, Northflank's allocated rate is lower than Runtime's.
 Give your coding agent the one instruction in [migration](./migrate). It
 replaces the old provider's calls on a branch, tests them on the free trial, and
 tells you what you save each month. Your old code stays on the main branch until
-you merge. For a new project, start with [getting started](./start).
+you merge. Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after
+changing one import. Moving from E2B, Daytona, Vercel Sandbox, Modal,
+Cloudflare, Fly or Blaxel, your first top-up is matched, up to $100
+([switching credit](./pricing#switching-credit)). For a new project, start with
+[getting started](./start).

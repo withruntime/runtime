@@ -316,12 +316,16 @@ class AsyncHTTP:
         self._writers: set[asyncio.StreamWriter] = set()
 
     async def discard(self, writer: asyncio.StreamWriter) -> None:
+        import ssl
         writer.close()
         try:
             await writer.wait_closed()
-        except (ConnectionResetError, BrokenPipeError):
-            # The peer has already closed; these are closure outcomes, not
-            # a reason to replace an original read error or cancellation.
+        except (ConnectionResetError, BrokenPipeError, ssl.SSLError):
+            # The peer has already closed, or kept sending after our TLS
+            # close_notify (a stream closed before its last chunk arrived):
+            # closure outcomes on a connection being thrown away, which asyncio
+            # has already closed, not a reason to fail a call that has its
+            # answer or to replace an original read error or cancellation.
             pass
         finally:
             with self._lock:

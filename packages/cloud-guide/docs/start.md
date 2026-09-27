@@ -28,6 +28,10 @@ each month. You approve one link in your browser; there is nothing to copy.
 
 ## Run your first sandbox
 
+**In the browser:** [sign in](https://withruntime.com/sign-in) and press
+**Start a sandbox** on Home. It opens with a shell running in the page, on your
+free hours, and pauses itself after five minutes with nothing running in it.
+
 **One line, with Node 22.12 or later:**
 
 ```bash
@@ -137,10 +141,11 @@ use, and choose `funding: "paid"` when you intend to use credit.
 ## Switch from another provider
 
 **Most sandbox code moves over call for call.** The [switch guide](./migrate)
-maps E2B, Daytona, Vercel, Modal, Cloudflare and Fly calls to Runtime's, and
-shows how to work out your monthly saving from measured usage. Code written for
-E2B, Daytona or Vercel Sandbox runs after changing one import to
-`withruntime/e2b`, `withruntime/daytona` or `withruntime/vercel`.
+maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
+Runtime's, and shows how to work out your monthly saving from measured usage.
+Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after changing one
+import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
+`withruntime/blaxel`.
 `npx withruntime compare --from <provider>` prints what you save, and
 `npx withruntime switch --from <provider>` before your first top-up gets it
 matched, up to $100.
@@ -168,7 +173,7 @@ See [troubleshooting](./troubleshooting) for safe retries and cleanup.
 | Call the API from any language                                     | [API reference](./api)                           |
 | Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment) |
 | Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                       |
-| Switch from E2B, Daytona, Vercel, Modal, Cloudflare or Fly.io      | [Switch guide](./migrate)                        |
+| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                        |
 | Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)   |
 
 Keep important results outside the sandbox: a sandbox is not a backup.

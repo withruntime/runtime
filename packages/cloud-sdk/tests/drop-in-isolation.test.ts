@@ -20,15 +20,30 @@ function reach(entry: string): string[] {
 const inside = (files: string[], dir: string) =>
   files.filter((file) => file.startsWith(join(src, dir)));
 
-test("importing withruntime alone loads neither the Daytona nor the Vercel layer", () => {
+test("importing withruntime alone loads none of the Daytona, Vercel or Blaxel layers", () => {
   const files = reach("index.ts");
   expect(inside(files, "daytona")).toEqual([]);
   expect(inside(files, "vercel")).toEqual([]);
+  expect(inside(files, "blaxel")).toEqual([]);
 });
 
-test("the Daytona and Vercel layers load no other drop-in", () => {
+test("the Daytona, Vercel and Blaxel layers load no other drop-in", () => {
   const daytona = reach("daytona/index.ts");
   const vercel = reach("vercel/index.ts");
-  expect([...inside(daytona, "vercel"), ...inside(daytona, "e2b")]).toEqual([]);
-  expect([...inside(vercel, "daytona"), ...inside(vercel, "e2b")]).toEqual([]);
+  const blaxel = reach("blaxel/index.ts");
+  expect([
+    ...inside(daytona, "vercel"),
+    ...inside(daytona, "e2b"),
+    ...inside(daytona, "blaxel"),
+  ]).toEqual([]);
+  expect([
+    ...inside(vercel, "daytona"),
+    ...inside(vercel, "e2b"),
+    ...inside(vercel, "blaxel"),
+  ]).toEqual([]);
+  expect([
+    ...inside(blaxel, "daytona"),
+    ...inside(blaxel, "e2b"),
+    ...inside(blaxel, "vercel"),
+  ]).toEqual([]);
 });

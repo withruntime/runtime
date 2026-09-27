@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeRoute, routeFor } from "../src/proxy";
 import { RuntimeError } from "../src/errors";
-import { Runtime } from "../src/index";
 
 /* The SDK and the CLI behind an egress proxy, on Node and on Bun. A real
    HTTPS API (a throwaway certificate, trusted through NODE_EXTRA_CA_CERTS) and
@@ -337,18 +336,28 @@ describe("which proxy an address uses", () => {
     expect((error as RuntimeError).message).toBe(
       "HTTPS_PROXY (socks5://proxy:1080) is not an HTTP proxy; Runtime connects through http:// and https:// proxies.",
     );
-    // Through a client it fails at once: retrying cannot change a variable.
-    const saved = process.env.HTTPS_PROXY;
-    process.env.HTTPS_PROXY = "socks5://proxy:1080";
-    try {
-      const started = performance.now();
-      await expect(
-        new Runtime({ apiKey: "rk", baseUrl: `https://${HOST}`, maxRetries: 4 }).me(),
-      ).rejects.toMatchObject({ code: "invalid_proxy" });
-      expect(performance.now() - started).toBeLessThan(200);
-    } finally {
-      if (saved === undefined) delete process.env.HTTPS_PROXY;
-      else process.env.HTTPS_PROXY = saved;
-    }
+    /* Through a client it fails at once: retrying cannot change a variable.
+       In a process of its own, because Bun 1.4 carries a deleted HTTPS_PROXY
+       into the next file a --parallel worker runs, and four other files
+       then failed on this proxy (26 September 2026). */
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `const { Runtime } = await import(${JSON.stringify(join(import.meta.dir, "../src/index.ts"))});
+         const started = performance.now();
+         const code = await new Runtime({ apiKey: "rk", baseUrl: "https://${HOST}", maxRetries: 4 })
+           .me()
+           .then(() => "none", (error) => error.code);
+         console.log(JSON.stringify({ code, ms: performance.now() - started }));`,
+      ],
+      { env: { ...process.env, HTTPS_PROXY: "socks5://proxy:1080" }, stdout: "pipe" },
+    );
+    const { code, ms } = JSON.parse(await new Response(child.stdout).text()) as {
+      code: string;
+      ms: number;
+    };
+    expect(code).toBe("invalid_proxy");
+    expect(ms).toBeLessThan(200);
   });
 });
