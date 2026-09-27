@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-this-alias -- the fake's modules close over their world. */
 /* eslint-disable @typescript-eslint/unbound-method -- getters are taken off the prototype and called with their sandbox. */
-import { ConflictError, RuntimeError, type Runtime } from "../../src/index";
+import { type Runtime } from "../../src/index";
+import { ConflictError, InvalidRequestError, RuntimeError } from "../../src/errors";
 import { DropInWorld, page } from "../drop-in-fake";
 import { FakeProcess, FakeSandbox, notFound } from "../e2b/fake";
 
@@ -385,6 +386,24 @@ export class BlaxelWorld extends DropInWorld {
       made.info.autoWake = input.autoWake;
       made.info.reused = false;
       return made;
+    };
+    // Runtime resolves name:tag; a name it could not hold is a 400.
+    (base.images as Record<string, unknown>).resolve = async (ref: string) => {
+      world.record("images.resolve", ref);
+      const at = ref.lastIndexOf(":");
+      const [name, tag] = at > 0 ? [ref.slice(0, at), ref.slice(at + 1)] : [ref, "latest"];
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name))
+        throw new InvalidRequestError({
+          message: "invalid image name",
+          code: "invalid_request",
+          status: 400,
+        });
+      const found = world.images.find(
+        (one) =>
+          one.name === name && ((one as { tags?: string[] }).tags ?? ["latest"]).includes(tag),
+      );
+      if (!found) throw notFound("image_not_found", `No image ${ref}.`);
+      return found;
     };
     const snapshots = base.snapshots!;
     snapshots.list = async (filter: { sandboxId?: string; name?: string; limit?: number } = {}) => {

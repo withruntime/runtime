@@ -369,7 +369,9 @@ class SandboxProcess:
         runtime = self._sandbox._live()
         records = _guard("process", lambda: runtime.processes())
         out = []
-        for record in records:
+        # Only Blaxel's processes: not the adapter's own helper commands.
+        for record in [one for one in records
+                       if one["id"] in self._requests or core.parse_record(str(one.get("command", "")))]:
             output = _Output()
             output.info = record
             out.append(self._shape(record["id"], output))
@@ -1520,17 +1522,20 @@ def _volumes(client: Runtime, volumes: List[Any]) -> List[Dict[str, str]]:
 
 def _image(client: Runtime, image: str) -> str:
     """The Runtime image for a Blaxel image that is not a stock one: a ready
-    Runtime image of that name (or id)."""
+    Runtime image named as ``core.image_ref`` maps it (``ns/name:tag`` is
+    ``ns-name:tag``), or that id."""
     if core.UUID.match(image):
         return image
-    name = core.image_name(image)
-    listing = _guard("sandbox", lambda: client.images.list(name=name, state="ready", limit=1))
-    if not listing.data:
-        raise NotSupportedError(
-            f"The image {image}, which is not a Runtime image",
-            f"Build it as a Runtime image with that name: `npx withruntime image build --dockerfile Dockerfile "
-            f"--name {name}`, then create with image=\"{name}\".")
-    return listing.data[0]["id"]
+    name, tag = core.image_ref(image)
+    try:
+        found = client.images.resolve(f"{name}:{tag}")
+    except Exception as error:  # noqa: BLE001
+        if getattr(error, "status", None) not in (400, 404):
+            raise translate(error, "sandbox") from error
+        found = None
+    if not found or found.get("state") not in (None, "ready"):
+        raise NotSupportedError(f"The image {image}, which is not a Runtime image", core.image_alternative(image))
+    return found["id"]
 
 
 def _delete_by_name(sandbox_name: str) -> Sandbox:

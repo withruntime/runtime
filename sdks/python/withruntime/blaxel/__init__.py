@@ -25,7 +25,7 @@ from ._core import (ApplicationAPIError, AsyncStreamHandle, AsyncWatchHandle, Co
                     SandboxUpdateMetadata, SandboxUpdateNetwork, SessionCreateOptions, SessionWithToken,
                     SnapshotAPIError, Status, StreamHandle, Subdirectory, SuccessResponse, VolumeAttachment,
                     VolumeBinding, WatchEvent, WatchHandle)
-from ._core import unsupported as _unsupported
+from ._core import unsupported_export as _unsupported_export
 
 SandboxInstance = AsyncSandboxInstance
 CodeInterpreter = AsyncCodeInterpreter
@@ -65,23 +65,8 @@ def autoload() -> None:
     """Blaxel sets up its auth and telemetry here; Runtime needs neither."""
 
 
-class _Unsupported:
-    """A Blaxel export Runtime has no counterpart for: importing it works;
-    using it raises NotSupportedError naming the alternative."""
-
-    def __init__(self, name: str, alternative: str) -> None:
-        self._refuse = _unsupported(f"Blaxel's {name}", alternative)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self._refuse()
-
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("__"):
-            raise AttributeError(name)
-        return self._refuse()
-
-    def __getitem__(self, key: Any) -> Any:
-        return self._refuse()
+def _Unsupported(name: str, alternative: str) -> Any:  # noqa: N802 - reads as the class it makes
+    return _unsupported_export(name, alternative)
 
 
 _MODELS = "Call your model provider's SDK directly; run the agent's tools in a Runtime sandbox."

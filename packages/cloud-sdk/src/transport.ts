@@ -1,7 +1,7 @@
 import { ConnectionError, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.8.0";
+export const VERSION = "0.8.1";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 
 export type RequestOptions = {

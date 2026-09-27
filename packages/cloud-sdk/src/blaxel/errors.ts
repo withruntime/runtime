@@ -99,6 +99,35 @@ export function responseError(status: number, message: string): ResponseError {
   );
 }
 
+const LS = "List the directory with sandbox.fs.ls(path).";
+/** Runtime's hints that name Runtime's calls, in the Blaxel calls a Blaxel
+ * program makes (the Python adapter uses the same words). */
+const AGAIN = "Try again in a moment.";
+const BLAXEL_HINTS: Record<string, string> = {
+  name_taken: "SandboxInstance.createIfNotExists({ name }) answers the sandbox that has the name.",
+  file_not_found: LS,
+  path_not_found: LS,
+  is_a_directory:
+    "That path is a directory: list it with sandbox.fs.ls(path), or name a file in it.",
+  cwd_not_found:
+    "Make the directory with sandbox.fs.mkdir(path), or pass an existing workingDir to sandbox.process.exec.",
+  sandbox_paused: "Call sandbox.unarchive(), then try again.",
+  not_running:
+    "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with SandboxInstance.create if it was deleted.",
+  trial_busy:
+    "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
+  public_preview_not_allowed:
+    "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt). A public preview needs a paid sandbox, which is the account owner's decision.",
+  busy: AGAIN,
+  guest_busy: AGAIN,
+  rate_limited: AGAIN,
+  unauthorized:
+    "Set RUNTIME_API_KEY to a Runtime key (https://withruntime.com/account/keys), or run `npx withruntime login` once. A Blaxel key (BL_API_KEY) is never sent.",
+};
+/** A trial create over the trial's size, in Blaxel's field. */
+const TRIAL_CAP =
+  "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.";
+
 /** A Runtime SDK error as Blaxel's: ResponseError (SandboxGatewayError for a
  * 502, 503 or 504), NotSupportedError for a product Runtime has switched off,
  * CredentialsError when there is no Runtime key. Anything else passes through
@@ -121,9 +150,11 @@ export function translate(error: unknown): unknown {
       error.message,
     );
   if (error.status < 200 || error.status > 599) return error;
+  const trialCap = error.code === "invalid_trial";
+  const hint = trialCap ? undefined : (BLAXEL_HINTS[error.code] ?? error.hint);
   const message = [
-    error.message,
-    error.hint ? `Hint: ${error.hint}` : "",
+    trialCap ? TRIAL_CAP : error.message,
+    hint ? `Hint: ${hint}` : "",
     error.requestId ? `Request: ${error.requestId}` : "",
   ]
     .filter(Boolean)
@@ -131,7 +162,7 @@ export function translate(error: unknown): unknown {
   const data = {
     error: message,
     code: error.code,
-    ...(error.hint ? { hint: error.hint } : {}),
+    ...(hint ? { hint } : {}),
     ...(error.requestId ? { requestId: error.requestId } : {}),
   };
   const Kind = GATEWAY.has(error.status) ? SandboxGatewayError : ResponseError;
@@ -144,7 +175,7 @@ export function translate(error: unknown): unknown {
     data,
   );
   out.runtimeCode = error.code;
-  if (error.hint) out.hint = error.hint;
+  if (hint) out.hint = hint;
   if (error.requestId) out.requestId = error.requestId;
   out.cause = error;
   return out;

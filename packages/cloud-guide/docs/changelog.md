@@ -8,14 +8,14 @@ guides hold the current terms, and [pricing](./pricing) holds the current rates.
 ## 27 September 2026
 
 - **Switch from Blaxel in one import.** Code written for Blaxel's sandbox SDK
-  runs on Runtime (`withruntime` 0.8.0) after changing `@blaxel/core` to
-  `withruntime/blaxel` (Python `blaxel.core` to `withruntime.blaxel`).
-  Processes, files, previews, snapshots, forks and the code interpreter carry
-  over, and standby becomes a pause that keeps memory and processes until the
-  next call wakes it. A switch
-  from Blaxel now earns the [switching credit](./pricing#switching-credit):
-  run `runtime switch --from blaxel` before your first top-up, and that top-up
-  is matched, up to $100. See [Runtime vs Blaxel](./blaxel-alternative).
+  runs on Runtime after changing `@blaxel/core` to `withruntime/blaxel`
+  (`withruntime` 0.8.0), or in Python `blaxel.core` to `withruntime.blaxel`
+  (0.8.1). Processes, files, previews, snapshots, forks and the code interpreter
+  carry over, and standby becomes a pause that keeps memory and processes until
+  the next call wakes it. A switch from Blaxel now earns the [switching
+  credit](./pricing#switching-credit): run `runtime switch --from blaxel` before
+  your first top-up, and that top-up is matched, up to $100. See [Runtime vs
+  Blaxel](./blaxel-alternative).
 - **Start a sandbox from the browser.** A new account's Home offers
   **Start a sandbox** beside the agent prompt. It opens the sandbox with a
   shell running in the page, runs on the free hours, and pauses after five

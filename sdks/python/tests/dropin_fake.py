@@ -359,6 +359,10 @@ class BlaxelSandbox(DropInSandbox):
 class BlaxelSandboxes(DropInSandboxes):
     def create(self, **fields: Any) -> BlaxelSandbox:
         self._w.record("sandboxes.create", fields)
+        if self._w.trial and fields.get("memory_mib", 0) > 4096:
+            raise withruntime.InvalidRequestError(
+                "A trial sandbox is at most 2 vCPU and 4 GiB: vcpu must be at most 2; memoryMiB must be at most 4096.",
+                code="invalid_trial", status=400, hint="Omit vcpu, memoryMiB, diskMiB and cpu for the default.")
         if fields.get("get_or_create"):
             for one in self._w.sandboxes.values():
                 if one.info.get("name") == fields.get("name") and one.state != "stopped":
@@ -397,12 +401,28 @@ class BlaxelSnapshots(DropInSnapshots):
         self._w.snapshot_infos.pop(snapshot_id, None)
 
 
+class BlaxelImages(DropInImages):
+    def resolve(self, ref: str) -> Dict[str, Any]:
+        """By name:tag, as Runtime's /v1/images/resolve; a name with a "/" is
+        refused, as Runtime's name rule does."""
+        self._w.record("images.resolve", ref)
+        name, _, tag = ref.partition(":")
+        if "/" in name:
+            raise withruntime.InvalidRequestError("query.name must match ^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,299}$",
+                                                  code="invalid_request", status=400)
+        for image in self._w.images:
+            if image["name"] == name and image.get("tag", "latest") == tag:
+                return image
+        raise not_found("not_found", f"No image {ref}.")
+
+
 class BlaxelClient(DropInClient):
     def __init__(self, world: "BlaxelWorld") -> None:
         super().__init__(world)
         self._w = world
         self.sandboxes = BlaxelSandboxes(world)
         self.snapshots = BlaxelSnapshots(world)
+        self.images = BlaxelImages(world)
 
     def request(self, method: str, path: str, query: Optional[Dict[str, Any]] = None,
                 body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -429,6 +449,7 @@ class BlaxelWorld(DropInWorld):
     def __init__(self) -> None:
         super().__init__()
         self.snapshot_infos: Dict[str, Dict[str, Any]] = {}
+        self.trial = False
         self.watch_events: List[Dict[str, Any]] = []
         self.pause_next_spawn = False
         self.finish_on_wait: Any = None
@@ -445,5 +466,5 @@ class BlaxelWorld(DropInWorld):
         return e2b_fake.Asyncified(BlaxelClient(self))
 
 
-e2b_fake._WRAPPED = e2b_fake._WRAPPED + (BlaxelClient, BlaxelSandboxes, BlaxelSandbox, BlaxelSnapshots,  # type: ignore
+e2b_fake._WRAPPED = e2b_fake._WRAPPED + (BlaxelClient, BlaxelImages, BlaxelSandboxes, BlaxelSandbox, BlaxelSnapshots,  # type: ignore
                                          BlaxelPreviews, BlaxelFiles, BlaxelProcess, BlaxelWatch)

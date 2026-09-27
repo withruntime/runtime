@@ -2439,8 +2439,8 @@ async function snapshot(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promi
 
 const IMAGE_HELP = `runtime image <command>
 
-  build [<folder>] [-f <Dockerfile>] | --from <image> | --pip <pkg>... --apt <pkg>... --npm <pkg>...
-        [-t name[:tag]]... [--target <stage>] [--build-arg K=V]... [--no-cache]
+  build [<folder>] [--dockerfile|-f <Dockerfile>] | --from <image> | --pip <pkg>... --apt <pkg>... --npm <pkg>...
+        [--name <name>] [--tag|-t name[:tag]]... [--target <stage>] [--build-arg K=V]... [--no-cache]
         [--start <command>] [--ready-port <port> | --ready-command <command>]
         [--max-image-mib 8192] [--disk-mib <1024-32768>] [--timeout <seconds>]
                         Build and stream the log; prints the image id when ready.

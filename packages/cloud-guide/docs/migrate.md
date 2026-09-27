@@ -121,6 +121,16 @@ sandbox. Pass `withruntime: { create: { funding: "trial" } }` (Python
 differently, such as sessions, drives or schedules, throws `NotSupportedError`
 naming what to use instead.
 
+- A sandbox is visible only to the key that created it, so a web service and a
+  worker that share sandboxes must use the same key
+  ([keys in a team](./teams#keys-in-a-team)).
+- The trial caps a sandbox at 2 vCPU and 4096 MB; `memory: 8192` needs paid
+  credit.
+- An image other than Blaxel's own templates must be a ready Runtime image of
+  the same name: `npx withruntime image build --dockerfile Dockerfile --name <name>`.
+- Blaxel's preview token header (`X-Blaxel-Preview-Token`) and parameter
+  (`?bl_preview_token=`) are accepted.
+
 **From E2B:** change `from "e2b"` to `from "withruntime/e2b"` (Python
 `from withruntime.e2b import ...`, SDK 0.4.0 and later), and pass
 `runtime: { create: { funding: "trial" } }` (Python

@@ -101,6 +101,22 @@ interpreter carry over. Sandboxes use the free trial while the account has
 trial time, then prepaid credit; pass `withruntime: { create: { funding: "trial" } }`
 (Python `runtime_create={"funding": "trial"}`) while you test.
 
+Four things to know before the first run:
+
+- **One key sees its own sandboxes.** A sandbox is visible only to the key
+  that created it; another key gets a 404, while names stay unique across the
+  account ([keys in a team](./teams#keys-in-a-team)). A web service and a worker
+  that share sandboxes must use the same key.
+- **The trial caps a sandbox at 2 vCPU and 4096 MB.** Blaxel's default fits.
+  `memory: 8192` or more needs paid credit.
+- **Custom images are Runtime images.** Blaxel's own templates, such as
+  `blaxel/base-image`, start Runtime's stock image. Any other image must be a
+  ready Runtime image of the same name: build it once with
+  `npx withruntime image build --dockerfile Dockerfile --name <name>`.
+- **Private preview tokens work as they did.** Blaxel's
+  `X-Blaxel-Preview-Token` header and `?bl_preview_token=` parameter are
+  accepted, as are Runtime's own, and the token never reaches your server.
+
 A call Runtime handles differently, such as sessions, drives, schedules or
 Blaxel's agent and MCP hosting, throws `NotSupportedError` before anything
 happens and names what to use instead. `BLAXEL.md` in the package lists every

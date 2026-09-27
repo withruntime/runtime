@@ -132,8 +132,13 @@ How it maps:
   the `update_*` calls work. `memory` is kept, with one vCPU for every 2048 MB.
   Blaxel's general templates (`blaxel/base-image`, `py-app`, `ts-app`, `node`,
   `jupyter-server`, `docker-in-sandbox`) run on Runtime's image. Any other
-  image must be a ready Runtime image of that name. Volumes mount Runtime
-  volumes of the same name.
+  image `ns/name:tag` starts from the ready Runtime image `ns-name:tag`
+  (every `/` becomes `-`; the tag is `latest` when none is given), so the
+  code keeps Blaxel's image string. A missing one raises `NotSupportedError`
+  with the build command, for example `npx withruntime image build
+  --dockerfile Dockerfile --name my-company-agent-image -t
+  my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
+  name. On the free trial a sandbox has at most 4096 MB of memory (2 vCPUs).
 - **Standby.** A sandbox pauses after a minute with no call (Blaxel: about 15
   seconds). It keeps its memory and processes, and wakes on the next command,
   file call or preview visit. `archive` pauses it and keeps its memory too.
@@ -154,9 +159,9 @@ How it maps:
   Runtime still has its record. Runtime keeps the running processes and the
   last 16 that ended.
 - **Previews** are Runtime previews of each port. A private preview's
-  `tokens.create(expires_at)` gives a token. Send it as the
-  `x-runtime-preview-token` header, or as `runtime_preview_token` in the
-  address. `fetch(port)` uses a private preview for you.
+  `tokens.create(expires_at)` gives a token, which works as Blaxel's
+  `X-Blaxel-Preview-Token` header or `bl_preview_token` address parameter.
+  `fetch(port)` uses a private preview for you.
 - **Code interpreter.** `CodeInterpreter.run_code` and `create_code_context`
   run on Runtime's interpreter and return Blaxel's result classes.
 - **Errors.** Errors keep Blaxel's classes: `SandboxAPIError`,
@@ -172,8 +177,9 @@ Differences you can hit:
   (`/workspace`). File calls act as the sandbox user and fall back to `sudo`
   where only root may: they reach files a root process made, including private
   ones, and a file they write is the sandbox user's.
-- Blaxel's `X-Blaxel-Preview-Token` header and `bl_preview_token` address
-  parameter are not read.
+- A sandbox is visible only to the key that created it: another key of the
+  same account gets 404 for it
+  ([teams](https://withruntime.com/docs/teams#keys-in-a-team)).
 - Public previews need a paid sandbox.
 - A process's `pid` is Runtime's process id, not an operating-system number.
 

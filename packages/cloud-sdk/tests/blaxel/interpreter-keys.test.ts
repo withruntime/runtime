@@ -32,7 +32,7 @@ describe("CodeInterpreter", () => {
     });
     expect(interpreter).toBeInstanceOf(CodeInterpreter);
     expect(interpreter).toBeInstanceOf(SandboxInstance);
-    expect(world.called("images.list")).toEqual([]);
+    expect(world.called("images.resolve")).toEqual([]);
     expect(world.called("sandbox.retention").at(-1)![1]).toBe(1);
     expect(interpreter.spec.runtime?.ports).toEqual([{ target: 8888, protocol: "HTTP" }]);
     expect(interpreter.spec.runtime?.image).toBe("blaxel/jupyter-server");
@@ -232,6 +232,125 @@ describe("errors", () => {
     expect(off).toBeInstanceOf(NotSupportedError);
     const plain = new Error("x");
     expect(translate(plain)).toBe(plain);
+  });
+});
+
+describe("Runtime's words in Blaxel's", () => {
+  test("a trial create over the trial's size speaks of Blaxel's memory, keeping code and request id", () => {
+    const error = translate(
+      new RuntimeError({
+        message:
+          "A trial sandbox is at most 2 vCPU and 4 GiB: vcpu must be at most 2; memoryMiB must be at most 4096.",
+        code: "invalid_trial",
+        status: 400,
+        hint: "Omit vcpu, memoryMiB, diskMiB and cpu for the default.",
+        requestId: "req_t",
+      }),
+    ) as ResponseError;
+    expect(error.message).toBe(
+      "Sandbox request failed with status 400: A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.\nRequest: req_t",
+    );
+    expect([error.status, error.runtimeCode, error.hint, error.requestId]).toEqual([
+      400,
+      "invalid_trial",
+      undefined,
+      "req_t",
+    ]);
+  });
+
+  test("hints that name Runtime's calls name Blaxel's", () => {
+    const taken = translate(
+      new RuntimeError({
+        message: "Sandbox x is already named 'a'.",
+        code: "name_taken",
+        status: 409,
+        hint: "Pass getOrCreate: true (Sandbox.getOrCreate in the SDKs) to get that sandbox, woken if it is paused, or choose another name.",
+      }),
+    ) as ResponseError;
+    expect(taken.hint).toBe(
+      "SandboxInstance.createIfNotExists({ name }) answers the sandbox that has the name.",
+    );
+    expect(taken.message).not.toContain("getOrCreate");
+    for (const code of ["file_not_found", "path_not_found"]) {
+      const missing = translate(
+        new RuntimeError({
+          message: "No such file.",
+          code,
+          status: 404,
+          hint: "Check the path; list the directory with GET /v1/sandboxes/{id}/files/list?path=... or runtime sandbox files <id> <dir>.",
+        }),
+      ) as ResponseError;
+      expect(missing.hint).toBe("List the directory with sandbox.fs.ls(path).");
+      expect(missing.message).not.toContain("/v1/");
+    }
+    const table: Array<[string, number, string]> = [
+      [
+        "is_a_directory",
+        400,
+        "That path is a directory: list it with sandbox.fs.ls(path), or name a file in it.",
+      ],
+      [
+        "cwd_not_found",
+        400,
+        "Make the directory with sandbox.fs.mkdir(path), or pass an existing workingDir to sandbox.process.exec.",
+      ],
+      ["sandbox_paused", 409, "Call sandbox.unarchive(), then try again."],
+      [
+        "not_running",
+        409,
+        "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with SandboxInstance.create if it was deleted.",
+      ],
+      [
+        "trial_busy",
+        429,
+        "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
+      ],
+      [
+        "public_preview_not_allowed",
+        403,
+        "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt). A public preview needs a paid sandbox, which is the account owner's decision.",
+      ],
+      ["busy", 409, "Try again in a moment."],
+      ["guest_busy", 429, "Try again in a moment."],
+      ["rate_limited", 429, "Try again in a moment."],
+      [
+        "unauthorized",
+        401,
+        "Set RUNTIME_API_KEY to a Runtime key (https://withruntime.com/account/keys), or run `npx withruntime login` once. A Blaxel key (BL_API_KEY) is never sent.",
+      ],
+    ];
+    for (const [code, status, hint] of table) {
+      const out = translate(
+        new RuntimeError({
+          message: "Refused.",
+          code,
+          status,
+          hint: "Runtime's own hint: POST /v1/sandboxes/{id}:wake, the x-runtime-preview-token header, Idempotency-Key.",
+          requestId: "req_h",
+        }),
+      ) as ResponseError;
+      expect([out.status, out.runtimeCode, out.requestId, out.hint]).toEqual([
+        status,
+        code,
+        "req_h",
+        hint,
+      ]);
+      expect(out.message).toBe(
+        `Sandbox request failed with status ${status}: Refused.\nHint: ${hint}\nRequest: req_h`,
+      );
+      expect(out.message).not.toMatch(
+        /\/v1\/|x-runtime|Idempotency-Key|visibility|urlWithToken|:wake/,
+      );
+    }
+    const other = translate(
+      new RuntimeError({
+        message: "No.",
+        code: "quota_exceeded",
+        status: 429,
+        hint: "Stop something.",
+      }),
+    ) as ResponseError;
+    expect(other.hint).toBe("Stop something.");
   });
 });
 

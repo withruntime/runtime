@@ -129,6 +129,7 @@ if (wanted("blaxel")) {
       "blaxel-previews.mjs",
       [
         "second server running",
+        "preview with Blaxel's token parameter: 200",
         '"path":"/"',
         "path: '/api/health'",
         '8080 {"path":"/eight","port":"8080"',

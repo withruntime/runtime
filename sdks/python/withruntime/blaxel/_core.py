@@ -68,10 +68,7 @@ class ResponseError(_Carries, Exception):
 
     def __init__(self, message: str, status_code: int = 0, code: Optional[str] = None) -> None:
         self.data: Dict[str, Any] = {"error": message, **({"code": code} if code else {})}
-        shown = dict(self.data)
-        if status_code:
-            shown["status"] = status_code
-        super().__init__(str(shown))
+        super().__init__(f"Sandbox request failed with status {status_code or 'unknown'}: {message}")
         self.response = _Reply(status_code, self.data)
         self.status_code = status_code
         self.code = code
@@ -90,6 +87,34 @@ class NotSupportedError(SandboxAPIError):
 
 
 _KINDS = {"sandbox": SandboxAPIError, "snapshot": SnapshotAPIError}
+_LS = "List the directory with sandbox.fs.ls(path)."
+_AGAIN = "Try again in a moment."
+BLAXEL_HINTS = {
+    "name_taken": "SandboxInstance.create_if_not_exists({\"name\": ...}) answers the sandbox that has the name.",
+    "file_not_found": _LS,
+    "path_not_found": _LS,
+    "is_a_directory": "That path is a directory: list it with sandbox.fs.ls(path), or name a file in it.",
+    "cwd_not_found": "Make the directory with sandbox.fs.mkdir(path), or pass an existing working_dir to "
+                     "sandbox.process.exec.",
+    "sandbox_paused": "Call sandbox.unarchive(), then try again.",
+    "not_running": "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with "
+                   "SandboxInstance.create if it was deleted.",
+    "trial_busy": "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive "
+                  "it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
+    "public_preview_not_allowed": "On the trial, share the port privately: sandbox.previews.create({\"metadata\": "
+                                  "{\"name\": ...}, \"spec\": {\"port\": ..., \"public\": False}}) and a token "
+                                  "from preview.tokens.create(expires_at). A public preview needs a paid sandbox, "
+                                  "which is the account owner's decision.",
+    "busy": _AGAIN,
+    "guest_busy": _AGAIN,
+    "rate_limited": _AGAIN,
+    "unauthorized": "Set RUNTIME_API_KEY to a Runtime key (https://withruntime.com/account/keys), or run "
+                    "`npx withruntime login` once. A Blaxel key (BL_API_KEY) is never sent.",
+}
+"""Runtime's hints that name Runtime's calls, in the Blaxel calls a Blaxel
+program makes: the TypeScript adapter's (errors.ts ``BLAXEL_HINTS``), word for
+word, with Python's spelling of each call."""
+TRIAL_CAP = "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit."
 
 
 def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
@@ -98,9 +123,14 @@ def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
     workspace snapshot, ResponseError for a process or a file."""
     if not isinstance(error, _SDKError):
         return error
-    parts = [error.message]
-    if error.hint:
-        parts.append(f"Hint: {error.hint}")
+    hint = BLAXEL_HINTS.get(error.code or "", error.hint)
+    if error.code == "invalid_trial":
+        parts = [TRIAL_CAP]
+        hint = None
+    else:
+        parts = [error.message]
+    if hint:
+        parts.append(f"Hint: {hint}")
     if error.code == "missing_api_key" and (os.environ.get("BL_API_KEY") or "").strip():
         parts.append("BL_API_KEY holds a Blaxel key, which is never sent to Runtime.")
     if error.request_id:
@@ -114,9 +144,63 @@ def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
         out = _KINDS[subject](message, error.status or None, code)
     else:
         out = ResponseError(message, error.status, code)
-    out.hint, out.request_id = error.hint, error.request_id  # type: ignore[attr-defined]
+    out.hint, out.request_id = hint, error.request_id  # type: ignore[attr-defined]
     out.__cause__ = error
     return out
+
+
+class Unset:
+    """Blaxel's marker for a field left out. The drop-in's models leave a field
+    out as None, so no value is ever Unset."""
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET = Unset()
+
+
+class Unsupported:
+    """A Blaxel export Runtime has no counterpart for: importing it works;
+    using it raises NotSupportedError naming the alternative."""
+
+    def __init__(self, feature: str, alternative: str) -> None:
+        self._refuse = unsupported(feature, alternative)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._refuse()
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._refuse()
+
+    def __getitem__(self, key: Any) -> Any:
+        return self._refuse()
+
+
+def unsupported_export(name: str, alternative: str) -> Unsupported:
+    return Unsupported(f"Blaxel's {name}", alternative)
+
+
+_CORE_ALTERNATIVES = {
+    "applications": "Run the app in a sandbox and share its port with sandbox.previews.create(...).",
+    "jobs": "Run the job as a process in a Runtime sandbox.",
+    "functions": "Run the function's server in a sandbox and share its port with sandbox.previews.create(...).",
+    "workspaces": "A Runtime account is one workspace; teams share it (withruntime.com/docs/teams).",
+}
+
+
+def core_alternative(kind: str) -> str:
+    return _CORE_ALTERNATIVES[kind]
+
+
+def api_call(name: str) -> Unsupported:
+    """One of Blaxel's generated API calls (``module.asyncio`` and the rest)."""
+    return Unsupported(f"Blaxel's generated API call {name}",
+                       "Use SandboxInstance's methods; to change a sandbox's envs, fork it with envs=[...] or create "
+                       "it with them." if name in ("get_sandbox", "update_sandbox") else
+                       "Use the drop-in's classes, or the withruntime SDK for what Blaxel's API does here.")
 
 
 def unsupported(feature: str, alternative: str) -> Callable[..., Any]:
@@ -1403,9 +1487,20 @@ def check_fork(target_type: str, port: Any, traffic: Any, custom_domain: Any, pr
                                     "Fork without it; share a port of the copy with its previews.create(...).")
 
 
-def image_name(image: str) -> str:
-    """A Blaxel image reference as a Runtime image name: without ":latest"."""
-    return image[: -len(":latest")] if image.endswith(":latest") else image
+def image_ref(image: str) -> Tuple[str, str]:
+    """A Blaxel image ``ns/name:tag`` as the Runtime image name and tag it
+    maps to: every "/" becomes "-" (``ns-name``), the tag ``latest`` when
+    none is given."""
+    slash = image.rfind("/")
+    colon = image.rfind(":")
+    name, tag = (image[:colon], image[colon + 1:]) if colon > slash else (image, "latest")
+    return name.replace("/", "-"), tag or "latest"
+
+
+def image_alternative(image: str) -> str:
+    name, tag = image_ref(image)
+    return (f"Build it as a Runtime image named {name}: `npx withruntime image build --dockerfile Dockerfile "
+            f"--name {name} -t {name}:{tag}`. The code can keep \"{image}\": the adapter starts from {name}:{tag}.")
 
 
 class SandboxConfiguration:

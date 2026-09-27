@@ -215,13 +215,80 @@ class Create(Base):
         for image in ("blaxel/base-image:latest", "blaxel/py-app", "blaxel/jupyter-server:latest"):
             self.create({"image": image})
             self.assertNotIn("image", self.last_create())
-        self.world.images.append({"id": "img-1", "name": "my-template", "state": "ready"})
-        self.create({"image": "my-template:latest"})
-        self.assertEqual(self.last_create()["image"], "img-1")
-        for image in ("blaxel/nextjs:latest", "someone/else"):
+        self.world.images += [{"id": "img-1", "name": "my-template", "state": "ready"},
+                              {"id": "img-2", "name": "my-company-agent-image", "tag": "v2", "state": "ready"},
+                              {"id": "img-3", "name": "blaxel-vite", "state": "ready"}]
+        for image, found in (("my-template:latest", "img-1"), ("my-template", "img-1"),
+                             ("my-company/agent-image:v2", "img-2"), ("blaxel/vite:latest", "img-3")):
+            self.create({"image": image})
+            self.assertEqual(self.last_create()["image"], found, image)
+        self.assertEqual(self.world.called("images.resolve")[-1], ("blaxel-vite:latest",))
+        # A slash reaches Runtime's name rule no more: a missing image is NotSupportedError, with a command that works.
+        for image, name, tag in (("blaxel/nextjs:latest", "blaxel-nextjs", "latest"),
+                                 ("my-company/agent-image", "my-company-agent-image", "latest"),
+                                 ("registry.example.com:5000/team/app:1.2", "registry.example.com:5000-team-app", "1.2")):
             with self.assertRaises(NotSupportedError) as caught:
                 self.create({"image": image})
-            self.assertIn("npx withruntime image build", caught.exception.alternative)
+            self.assertEqual(core.image_ref(image), (name, tag))
+            self.assertIn(f"`npx withruntime image build --dockerfile Dockerfile --name {name} -t {name}:{tag}`",
+                          caught.exception.alternative)
+            self.assertIn(f'The code can keep "{image}"', caught.exception.alternative)
+
+    def test_the_trial_size_cap_in_blaxels_terms(self):
+        self.world.trial = True
+        with self.assertRaises(SandboxAPIError) as caught:
+            self.create({"memory": 8192})
+        self.assertEqual(str(caught.exception).splitlines()[0],
+                         "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.")
+        self.assertNotIn("memoryMiB", str(caught.exception))
+        self.assertEqual((caught.exception.status_code, caught.exception.code), (400, "invalid_trial"))
+
+    def test_every_runtime_hint_is_said_in_blaxels_calls(self):
+        expected = {
+            "is_a_directory": "That path is a directory: list it with sandbox.fs.ls(path), or name a file in it.",
+            "cwd_not_found": "Make the directory with sandbox.fs.mkdir(path), or pass an existing working_dir to "
+                             "sandbox.process.exec.",
+            "sandbox_paused": "Call sandbox.unarchive(), then try again.",
+            "not_running": "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one "
+                           "with SandboxInstance.create if it was deleted.",
+            "trial_busy": "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or "
+                          "archive it (sandbox.archive()), then try again. Moving to paid credit is the account "
+                          "owner's decision.",
+            "public_preview_not_allowed": 'On the trial, share the port privately: sandbox.previews.create({"metadata": '
+                                          '{"name": ...}, "spec": {"port": ..., "public": False}}) and a token from '
+                                          "preview.tokens.create(expires_at). A public preview needs a paid sandbox, "
+                                          "which is the account owner's decision.",
+            "busy": "Try again in a moment.", "guest_busy": "Try again in a moment.",
+            "rate_limited": "Try again in a moment.",
+            "unauthorized": "Set RUNTIME_API_KEY to a Runtime key (https://withruntime.com/account/keys), or run "
+                            "`npx withruntime login` once. A Blaxel key (BL_API_KEY) is never sent.",
+        }
+        runtime_only = ("/v1/", "x-runtime", "Idempotency-Key", "visibility", "urlWithToken", ":wake")
+        for code, hint in expected.items():
+            for subject in ("sandbox", "process"):
+                error = core.translate(withruntime.ConflictError(
+                    "Refused.", code=code, status=409, request_id="req_7",
+                    hint="Send :wake to /v1/sandboxes/{id} with visibility, urlWithToken, x-runtime-preview-token and "
+                         "an Idempotency-Key."), subject)
+                self.assertEqual(error.hint, hint, code)
+                self.assertEqual((error.status_code, error.code, error.request_id), (409, code, "req_7"))
+                self.assertIn("Request: req_7", str(error))
+                for name in runtime_only:
+                    self.assertNotIn(name, str(error), (code, name))
+        other = core.translate(withruntime.ConflictError("Refused.", code="something_else", status=409,
+                                                         hint="Runtime's own words."))
+        self.assertEqual(other.hint, "Runtime's own words.")
+
+    def test_runtime_hints_speak_blaxel(self):
+        taken = core.translate(withruntime.ConflictError("The name is taken.", code="name_taken", status=409,
+                                                         hint="Pass getOrCreate: true to reuse it."))
+        self.assertNotIn("getOrCreate", str(taken))
+        self.assertIn("create_if_not_exists", taken.hint)
+        missing = core.translate(withruntime.NotFoundError("No such file.", code="file_not_found", status=404,
+                                                           hint="list the directory with GET /v1/.../files/list"),
+                                 "file")
+        self.assertEqual(missing.hint, "List the directory with sandbox.fs.ls(path).")
+        self.assertNotIn("/v1/", str(missing))
 
     def test_refusals_before_anything_happens(self):
         cases = [({"volumes": [{"name": "v", "mount_path": "/data"}]}, "not a Runtime volume"),
@@ -450,6 +517,7 @@ class Processes(Base):
             box.process.exec({"command": "sleep 99", "name": "slow", "wait_for_completion": True, "timeout": 1})
         self.assertLess(time.monotonic() - started, 5)
         self.assertEqual(caught.exception.status_code, 422)
+        self.assertEqual(str(caught.exception), "Sandbox request failed with status 422: process timed out after 1 seconds")
         self.assertEqual(self.world.called("request")[-1][0], "GET")
         self.assertEqual(box.process.get("slow").status, ProcessResponseStatus.RUNNING)
 
@@ -564,6 +632,10 @@ class Processes(Base):
             other.process.get("nope")
         self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(len(other.process.list()), 2)
+        box.fs.grep("x", "/blaxel")  # a helper command of the adapter's own
+        self.runtime(box).process_list.append(type("Helper", (), {"id": "a" * 32, "info": {
+            "id": "a" * 32, "state": "exited", "exitCode": 0, "command": "grep -rnIEs -i -- x ."}})())
+        self.assertEqual([one.name for one in other.process.list()], ["job", "job"])
 
     def test_stop_kill_logs_and_stdin(self):
         self.keep_running()
@@ -1006,7 +1078,7 @@ class Unsupported(Base):
             box.process.exec({"command": "ls"})
         self.assertEqual((caught.exception.status_code, caught.exception.code, caught.exception.hint,
                           caught.exception.request_id, caught.exception.response.status_code),
-                         (429, "rate_limited", "Wait.", "req_9", 429))
+                         (429, "rate_limited", "Try again in a moment.", "req_9", 429))
         error = core.translate(withruntime.ServiceUnavailableError("Off.", code="fork_unavailable", status=503,
                                                                    hint="Later."))
         self.assertIsInstance(error, NotSupportedError)
@@ -1055,6 +1127,47 @@ class Async(unittest.TestCase):
                 await SandboxInstance.get("a")
         asyncio.run(scenario())
         self.assertEqual(len(self.world.called("sandbox.stop")), 1)
+
+
+class ImportPaths(unittest.TestCase):
+    # Every path Blaxel's README and docs import from (blaxel-ai/docs at
+    # 17fb3bbe, sdk-python README at 8015ae82), with "blaxel." made
+    # "withruntime.blaxel.", and a name each imports.
+    PATHS = {
+        "": "settings", "core": "SandboxInstance", "core.agents": "bl_agent", "core.client": "client",
+        "core.client.api.applications.list_application_revisions": "asyncio",
+        "core.client.api.compute.get_sandbox": "asyncio", "core.client.api.compute.update_sandbox": "asyncio",
+        "core.client.api.functions.create_function": "asyncio", "core.client.api.images": "list_images",
+        "core.client.api.workspaces": "create_workspace", "core.client.client": "client",
+        "core.client.models": "Env", "core.client.models.create_job_execution_request": "CreateJobExecutionRequest",
+        "core.client.models.create_job_execution_request_env": "CreateJobExecutionRequestEnv",
+        "core.client.models.env": "Env", "core.client.models.function": "Function",
+        "core.client.models.function_runtime": "FunctionRuntime", "core.client.models.function_spec": "FunctionSpec",
+        "core.client.models.metadata": "Metadata", "core.client.models.workspace": "Workspace",
+        "core.client.types": "Unset", "core.common": "autoload", "core.drive": "DriveInstance", "core.jobs": "bl_job",
+        "core.sandbox": "SandboxInstance", "core.sandbox.types": "SandboxUpdateNetwork", "crewai": "bl_tools",
+        "googleadk": "bl_tools", "langgraph": "bl_model", "livekit": "bl_tools", "llamaindex": "bl_tools",
+        "openai": "bl_tools", "pydantic": "bl_model", "telemetry": None,
+    }
+
+    def test_every_path_blaxels_docs_import_from(self):
+        import importlib
+        for path, name in self.PATHS.items():
+            module = importlib.import_module("withruntime.blaxel" + (f".{path}" if path else ""))
+            if name is not None:
+                self.assertTrue(hasattr(module, name), f"{path}.{name}")
+
+    def test_the_real_classes_come_through_and_the_rest_names_an_alternative(self):
+        from withruntime.blaxel.core.client.models.env import Env
+        from withruntime.blaxel.core.sandbox import SandboxInstance as FromSandbox
+        self.assertIs(Env, bl.Env)
+        self.assertIs(FromSandbox, SandboxInstance)
+        from withruntime.blaxel.core.client.api.compute.update_sandbox import asyncio as update_sandbox
+        from withruntime.blaxel.langgraph import bl_model
+        for refused in (lambda: update_sandbox("s"), lambda: bl_model("m")):
+            with self.assertRaises(NotSupportedError) as caught:
+                refused()
+            self.assertTrue(caught.exception.alternative)
 
 
 class Generated(unittest.TestCase):

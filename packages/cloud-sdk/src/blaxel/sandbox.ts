@@ -1,4 +1,5 @@
 import type { Runtime } from "../client.js";
+import { RuntimeError } from "../errors.js";
 import {
   clientFor,
   defaultRegion,
@@ -278,26 +279,40 @@ function checkRegion(region: string | undefined) {
     );
 }
 
-/** Where an image sends the create: Runtime's stock image, or a ready Runtime
- * image by name or id. */
+/** A Blaxel image `ns/name:tag` as the Runtime image name and tag it maps to
+ * (Runtime names allow no "/"): every "/" becomes "-" (`ns-name`), and the
+ * tag is `latest` when none is given. The Python adapter maps the same way. */
+export function imageRef(image: string): { name: string; tag: string } {
+  const slash = image.lastIndexOf("/");
+  const colon = image.lastIndexOf(":");
+  const [name, tag] = colon > slash ? [image.slice(0, colon), image.slice(colon + 1)] : [image, ""];
+  return { name: name.replaceAll("/", "-"), tag: tag || "latest" };
+}
+
+/** Where an image sends the create: Runtime's stock image, or the ready
+ * Runtime image `imageRef` maps it to. */
 async function resolveImage(
   client: Runtime,
   image: string | undefined,
 ): Promise<Partial<RuntimeCreate>> {
   if (image === undefined || STOCK_IMAGE.test(image)) return {};
   if (UUID.test(image)) return { image };
-  const name = image.replace(/:latest$/, "");
-  let found: { id: string } | undefined;
+  const { name, tag } = imageRef(image);
+  let found: { id: string; state: string } | undefined;
   try {
-    found = (await client.images.list({ name, state: "ready", limit: 1 })).data[0];
+    found = await client.images.resolve(`${name}:${tag}`);
   } catch (error) {
-    // A name Runtime could not hold is simply not one of its images.
-    if (codeOf(error) !== "invalid_request") throw translate(error);
+    // Not an image, or a name Runtime could not hold: the same answer.
+    const status = error instanceof RuntimeError ? error.status : undefined;
+    if (status !== 400 && status !== 404) throw translate(error);
   }
-  if (found) return { image: found.id };
+  if (found && found.state === "ready") return { image: found.id };
+  const feature = `The image ${image}, which is not a Runtime image`;
+  const alternative = `Build it as a Runtime image named ${name}: \`npx withruntime image build --dockerfile Dockerfile --name ${name} -t ${name}:${tag}\`. The code can keep "${image}": the adapter starts from ${name}:${tag}.`;
   throw new NotSupportedError(
-    `The image ${image}, which is not a Runtime image`,
-    `Build it as a Runtime image with that name and this call starts from it: \`npx withruntime image build --dockerfile Dockerfile --name ${name}\`, or runtime.images.build({ name: "${name}", image: "<registry reference>" }).`,
+    feature,
+    alternative,
+    `${feature}, is not supported on Runtime. ${alternative}`,
   );
 }
 

@@ -24,15 +24,26 @@ anywhere: in `BL_API_KEY` it is ignored, and passed to `initialize` while
 nothing on Runtime. With no Runtime key at all, the first call throws
 `CredentialsError` saying what to set.
 
+**A key sees only the sandboxes it created.** A sandbox made with another of
+the account's keys answers 404, though its name stays taken
+([teams](https://withruntime.com/docs/teams)). Services that share sandboxes by
+name, or through `getByExternalId`, use the same Runtime key.
+
 ## What a sandbox gets
 
 - **Machine:** Blaxel's default of 4096 MB. vCPUs follow Blaxel's rule of one
-  per 2048 MB (at least one, at most 16): 2 for the default, 4 for 8192 MB.
+  per 2048 MB (at least one, at most 16): 2 for the default, 4 for 8192 MB. A
+  trial sandbox has at most 4096 MB (2 vCPUs); `memory: 8192` or more needs
+  prepaid credit, and on the trial is refused with a 400 (`invalid_trial`)
+  saying so.
 - **Image:** Blaxel's `base-image`, `py-app`, `ts-app`, `node`,
   `docker-in-sandbox` and `jupyter-server` are Runtime's stock image (Ubuntu
   24.04 with Node.js 24, Python 3.12, Bun, git and a compiler; Docker after
-  `sudo enable-docker`). Any other name must be a ready Runtime image with that
-  name.
+  `sudo enable-docker`). Any other image `ns/name:tag` is the ready Runtime
+  image named `ns-name` (every `/` becomes `-`, as Runtime names hold none) at
+  tag `tag` (`latest` when none is given). Build it once with
+  `npx withruntime image build --dockerfile Dockerfile --name ns-name -t ns-name:tag`,
+  and the code keeps `image: "ns/name:tag"` as it is.
 - **Standby and lifetime:** a Blaxel sandbox goes to standby when unused and
   resumes on the next call. On Runtime it pauses after 60 seconds without a
   call (Runtime's shortest idle pause; Blaxel's is about 15 seconds), keeping
@@ -107,21 +118,21 @@ nothing on Runtime. With no Runtime key at all, the first call throws
 Each of these throws `NotSupportedError` before anything happens. Its `feature`
 names the gap and its `alternative` says what to use.
 
-| Blaxel                                                                                                                   | Use instead                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| An `image` with no Runtime image of that name (Blaxel's other templates too)                                             | Build it: `npx withruntime image build --dockerfile Dockerfile --name <image>`.                                         |
-| A region outside the US                                                                                                  | Runtime runs in one US region.                                                                                          |
-| `extraArgs` other than `iptables`; network `egress`, `firewall`, `subnet`, and a `proxy` with more than its domain lists | Remove them; `allowedDomains` and `forbiddenDomains` (on the network or its proxy); Runtime secrets.                    |
-| Read-only and ephemeral volumes; a volume with no Runtime volume of that name                                            | Mount read-write; write scratch files under `/workspace`; `runtime.volumes.create`.                                     |
-| `snapshots.restore`, `restore`                                                                                           | Fork from the snapshot into a new sandbox.                                                                              |
-| Forking into an application                                                                                              | Fork into a sandbox and share its port.                                                                                 |
-| A preview's `prefixUrl`, `customDomain`, `requestHeaders`, `responseHeaders`, `ttl`                                      | Runtime's fixed preview address; set headers (CORS) in your server; delete the preview.                                 |
-| `preview.tokens.list()`; a token for over a week                                                                         | Keep the tokens you create; create a new one when it runs out.                                                          |
-| `runCode` with `envs` for one run; a language Runtime's interpreter lacks                                                | Sandbox envs at create, or set them in the code; `process.exec`.                                                        |
-| Listing by `cursor`, `q`, `anchor`, a status other than `DEPLOYED`, or newest first                                      | List and filter the result yourself; `nextPage()` walks the pages.                                                      |
-| `sandbox.sessions`, `schedules`, `codegen`, `system`, `drives`; `fromSession`                                            | Previews and tokens; your own scheduler; `fs.write`; nothing to upgrade; Runtime volumes.                               |
-| Agents, models, tools, MCP transports, jobs, applications, images, volumes, drives                                       | Your own agent with Runtime sandboxes, `withruntime/tools`, `npx withruntime mcp`, `runtime.images`, `runtime.volumes`. |
-| Blaxel's generated API functions (`createSandbox`, `postProcess`, ...)                                                   | `SandboxInstance` here, or `import { Runtime } from "withruntime"`.                                                     |
+| Blaxel                                                                                                                   | Use instead                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| An `image` with no ready Runtime image of the name it maps to (Blaxel's other templates too)                             | Build it: `npx withruntime image build --dockerfile Dockerfile --name ns-name -t ns-name:tag`; the error gives the exact command. |
+| A region outside the US                                                                                                  | Runtime runs in one US region.                                                                                                    |
+| `extraArgs` other than `iptables`; network `egress`, `firewall`, `subnet`, and a `proxy` with more than its domain lists | Remove them; `allowedDomains` and `forbiddenDomains` (on the network or its proxy); Runtime secrets.                              |
+| Read-only and ephemeral volumes; a volume with no Runtime volume of that name                                            | Mount read-write; write scratch files under `/workspace`; `runtime.volumes.create`.                                               |
+| `snapshots.restore`, `restore`                                                                                           | Fork from the snapshot into a new sandbox.                                                                                        |
+| Forking into an application                                                                                              | Fork into a sandbox and share its port.                                                                                           |
+| A preview's `prefixUrl`, `customDomain`, `requestHeaders`, `responseHeaders`, `ttl`                                      | Runtime's fixed preview address; set headers (CORS) in your server; delete the preview.                                           |
+| `preview.tokens.list()`; a token for over a week                                                                         | Keep the tokens you create; create a new one when it runs out.                                                                    |
+| `runCode` with `envs` for one run; a language Runtime's interpreter lacks                                                | Sandbox envs at create, or set them in the code; `process.exec`.                                                                  |
+| Listing by `cursor`, `q`, `anchor`, a status other than `DEPLOYED`, or newest first                                      | List and filter the result yourself; `nextPage()` walks the pages.                                                                |
+| `sandbox.sessions`, `schedules`, `codegen`, `system`, `drives`; `fromSession`                                            | Previews and tokens; your own scheduler; `fs.write`; nothing to upgrade; Runtime volumes.                                         |
+| Agents, models, tools, MCP transports, jobs, applications, images, volumes, drives                                       | Your own agent with Runtime sandboxes, `withruntime/tools`, `npx withruntime mcp`, `runtime.images`, `runtime.volumes`.           |
+| Blaxel's generated API functions (`createSandbox`, `postProcess`, ...)                                                   | `SandboxInstance` here, or `import { Runtime } from "withruntime"`.                                                               |
 
 Some differences are not refusals:
 

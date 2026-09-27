@@ -4,6 +4,7 @@ import {
   NotSupportedError,
   ResponseError,
   SandboxInstance,
+  imageRef,
   lifetimeOf,
   type SandboxCreateConfiguration,
 } from "../../src/blaxel/index";
@@ -127,11 +128,40 @@ describe("SandboxInstance.create", () => {
     expect((error as Error).message).toContain("routes");
   });
 
-  test("an image named with :latest is the Runtime image of that name", async () => {
-    world.images.push({ id: "img-9", name: "my-agent", state: "ready" });
-    await create({ image: "my-agent:latest" });
-    expect(world.called("images.list").at(-1)![0]).toMatchObject({ name: "my-agent" });
-    expect(lastCreate()).toMatchObject({ image: "img-9" });
+  test("an image ns/name:tag is the ready Runtime image ns-name at that tag", async () => {
+    expect(imageRef("blaxel/nextjs:latest")).toEqual({ name: "blaxel-nextjs", tag: "latest" });
+    expect(imageRef("acme/tools/agent")).toEqual({ name: "acme-tools-agent", tag: "latest" });
+    expect(imageRef("my-agent:v2")).toEqual({ name: "my-agent", tag: "v2" });
+    expect(imageRef("localhost:5000/app")).toEqual({ name: "localhost:5000-app", tag: "latest" });
+    world.images.push({ id: "img-9", name: "acme-agent", state: "ready", tags: ["v2"] } as never);
+    await create({ image: "acme/agent:v2" });
+    expect(world.called("images.resolve").at(-1)).toEqual(["acme-agent:v2"]);
+    expect(lastCreate()).toMatchObject({
+      image: "img-9",
+      labels: { "blaxel/image": "acme/agent:v2" },
+    });
+    world.images.push({ id: "img-b", name: "acme-slow", state: "building" });
+    const building = await create({ image: "acme/slow" }).catch((e: unknown) => e);
+    expect(building).toBeInstanceOf(NotSupportedError);
+  });
+
+  test("a missing image says how to build it, under a name Runtime can hold", async () => {
+    const missing = (await create({ image: "blaxel/nextjs:latest" }).catch(
+      (e: unknown) => e,
+    )) as NotSupportedError;
+    expect(missing).toBeInstanceOf(NotSupportedError);
+    expect(missing.feature).toBe("The image blaxel/nextjs:latest, which is not a Runtime image");
+    expect(missing.alternative).toBe(
+      'Build it as a Runtime image named blaxel-nextjs: `npx withruntime image build --dockerfile Dockerfile --name blaxel-nextjs -t blaxel-nextjs:latest`. The code can keep "blaxel/nextjs:latest": the adapter starts from blaxel-nextjs:latest.',
+    );
+    expect(missing.message).toStartWith(
+      "The image blaxel/nextjs:latest, which is not a Runtime image, is not supported on Runtime. Build",
+    );
+    // A name Runtime could not hold is the same answer, never its name-rule error.
+    expect(await create({ image: "localhost:5000/app" }).catch((e: unknown) => e)).toBeInstanceOf(
+      NotSupportedError,
+    );
+    expect(world.called("sandboxes.create")).toEqual([]);
   });
 
   test("a Sandbox model (metadata and spec) creates the same sandbox", async () => {
@@ -229,13 +259,10 @@ describe("SandboxInstance.create", () => {
       "blaxel/jupyter-server",
     ])
       await create({ image });
-    expect(world.called("images.list")).toEqual([]);
+    expect(world.called("images.resolve")).toEqual([]);
     world.images.push({ id: "img-1", name: "my-agent-image", state: "ready" });
     await create({ image: "my-agent-image" });
     expect(lastCreate()).toMatchObject({ image: "img-1" });
-    const missing = await create({ image: "blaxel/nextjs:latest" }).catch((e: unknown) => e);
-    expect(missing).toBeInstanceOf(NotSupportedError);
-    expect((missing as Error).message).toContain("--name blaxel/nextjs");
   });
 
   test("refuses what it cannot honour, before creating anything", async () => {

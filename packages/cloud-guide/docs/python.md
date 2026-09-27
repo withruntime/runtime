@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.8.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.8.1. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -688,7 +688,7 @@ and group roles. See [single sign-on](./single-sign-on).
 
 Code written for their Python SDKs runs on Runtime after changing one import,
 in `withruntime` 0.4.0 and later for E2B and 0.5.0 and later for Daytona and
-Vercel Sandbox, and 0.8.0 and later for Blaxel:
+Vercel Sandbox, and 0.8.1 and later for Blaxel:
 
 ```python no-run
 from withruntime.e2b import Sandbox  # was: from e2b import Sandbox

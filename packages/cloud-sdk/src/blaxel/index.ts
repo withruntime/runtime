@@ -18,6 +18,7 @@ export {
   DEFAULT_MEMORY,
   MEMORY_PER_VCPU,
   durationMs,
+  imageRef,
   lifetimeOf,
   networkRules,
   type SandboxListQuery,
