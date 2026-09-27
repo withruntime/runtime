@@ -79,8 +79,9 @@ Cloudflare  CPU    1,000 × 20 s × $0.000020           = $0.40
 The Cloudflare figure assumes each sandbox is destroyed when its run ends; one
 left alone keeps billing memory and disk until it has been idle for 10 minutes.
 Workers requests, Durable Object time, the $5 plan minimum, network, taxes and
-free allowances are left out of both. See [pricing](./pricing) for Runtime's
-terms.
+free allowances are left out of both. On Runtime, inbound traffic is free, and
+each account's first 100 GiB out a month is free, then $0.02 per GB. See
+[pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

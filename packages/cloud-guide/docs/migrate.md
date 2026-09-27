@@ -115,8 +115,11 @@ sandbox; `delete()` ends it. See [JavaScript](./javascript) and
 **From E2B:** change `from "e2b"` to `from "withruntime/e2b"` (Python
 `from withruntime.e2b import ...`, SDK 0.4.0 and later), and pass
 `runtime: { create: { funding: "trial" } }` (Python
-`runtime_create={"funding": "trial"}`) while you test. A call Runtime handles
-differently throws `NotSupportedError` naming what to use instead.
+`runtime_create={"funding": "trial"}`) while you test. Errors stay E2B's:
+`commands.run` throws `CommandExitError` (Python `CommandExitException`) on a
+non-zero exit and `TimeoutError` (Python `TimeoutException`) past its timeout,
+so keep your `try`/`catch`. A call Runtime handles differently throws
+`NotSupportedError` naming what to use instead.
 
 ### Map the calls
 
@@ -128,7 +131,7 @@ docs.
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | E2B `Sandbox.create()`, Daytona `daytona.create()`, Vercel `Sandbox.create()`, Modal `Sandbox.create(app=...)`, Cloudflare `getSandbox(env.Sandbox, id)`, Sprites `client.createSprite(name)`          | `Sandbox.create({ funding: "trial" })` while you test                                                                              |
 | E2B `sbx.commands.run(cmd)`, Daytona `sandbox.process.exec(cmd)`, Vercel `sandbox.runCommand(cmd, args)`, Modal `sb.exec(*args)`, Cloudflare `sandbox.exec(cmd)`, Sprites `sprite.execFile(cmd, args)` | `sbx.exec(cmd)` or `sbx.exec([cmd, ...args])`                                                                                      |
-| E2B `CommandExitError` on a non-zero exit                                                                                                                                                              | `exec` returns `exitCode` (and `timedOut: true` on a timeout) without throwing; `exec(cmd, { check: true })` throws `CommandError` |
+| E2B `CommandExitError` on a non-zero exit, once you port to `withruntime` (the `withruntime/e2b` import keeps throwing it)                                                                             | `exec` returns `exitCode` (and `timedOut: true` on a timeout) without throwing; `exec(cmd, { check: true })` throws `CommandError` |
 | Streaming callbacks (`onStdout`, `on_stdout`)                                                                                                                                                          | `exec(cmd, { onStdout, onStderr })` or `execStream(cmd)`                                                                           |
 | Background commands (`background: true`, `detached: true`)                                                                                                                                             | `sbx.spawn(cmd)`, then `process.output()` and `wait()`                                                                             |
 | `files.write` / `fs.upload_file` / `writeFiles`                                                                                                                                                        | `sbx.files.write(path, data)`; `files.upload(dir, path)` for trees                                                                 |

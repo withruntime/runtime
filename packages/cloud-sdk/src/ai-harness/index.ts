@@ -605,6 +605,10 @@ export function networkRules(policy: HarnessV1NetworkPolicy): NetworkRules {
   if (policy.mode === "allow-all") return { internet: true };
   if (policy.mode === "deny-all") return { internet: false };
   const allow = [...(policy.allowedHosts ?? []), ...(policy.allowedCIDRs ?? [])];
+  // `custom` is an allow list; one that allows nothing is `deny-all` in the
+  // harness's own terms. Runtime reads an empty allow as no allow list at all,
+  // which would open the whole internet.
+  if (!allow.length) return { internet: false };
   const deny = [...(policy.deniedCIDRs ?? [])];
   return { internet: true, allow, ...(deny.length ? { deny } : {}) };
 }

@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.7.1. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.7.2. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -92,8 +92,9 @@ if (run.exitCode !== 0) console.error(run.stderr);
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds; the maximum is 24 hours. A timeout is a
-  result (`timedOut: true`, with the output so far), not an exception.
+- The default timeout is 60 seconds, and 24 hours when the output streams
+  (`onStdout`, `onStderr` or `execStream`); the maximum is 24 hours. A timeout
+  is a result (`timedOut: true`, with the output so far), not an exception.
 - `check: true` throws `CommandError` on a non-zero exit, with the result on it.
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
   `stderr`. The rest is dropped, and `stdoutTruncated` or `stderrTruncated` is
@@ -211,7 +212,9 @@ await sbx.files.remove("/workspace/data", { recursive: true });
 
 `write` makes parent directories and replaces the file atomically. Large files go
 in parallel 1 MiB chunks, each checked by SHA-256, and resume after a dropped
-connection. There is no size limit beyond the disk.
+connection. Under `/workspace` there is no size limit beyond the disk. Elsewhere
+a file is written with the sandbox user's own rights and can be at most 1 MiB;
+write a larger one to `/workspace` and move it with a command.
 
 Copy whole directories in one call. They travel as one compressed archive:
 
@@ -232,6 +235,10 @@ await sbx.files.download("/workspace/project", join(project, "..", "project-out"
 
 An uploaded file keeps its permissions, so a script stays runnable;
 `write(path, data, { mode: 0o755 })` sets them (0o644 when left out).
+
+A directory download keeps the links inside the directory and throws
+`unsafe_archive` for any entry or link that would reach outside it, so
+nothing in a sandbox can write elsewhere on your machine.
 
 From `withruntime` 0.7.0, reads are checked. The API sends
 every file's length before its bytes, and a small file's SHA-256; `read` reads
@@ -690,7 +697,8 @@ const page = await fetch(preview.url, {
 console.log(page.status);
 ```
 
-Pass `{ visibility: "public" }` for an address anyone can open, `previews.rotate(port)`
+Pass `{ visibility: "public" }` for an address anyone can open (paid sandboxes;
+a trial sandbox's previews stay private), `previews.rotate(port)`
 to refuse every token issued so far, and `previews.delete(port)` to stop sharing.
 
 - **Token lifetime:** a day by default; `ttlSeconds` sets 60 seconds to 7 days.

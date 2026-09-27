@@ -112,7 +112,7 @@ closes an account.
 Closing cannot be undone. At once:
 
 - every sandbox stops, and every snapshot, image, volume, volume backup,
-  secret and egress secret is deleted;
+  secret, egress secret and saved registry password is deleted;
 - custom domains, dedicated addresses and the private network are released,
   and webhooks, telemetry exports and the upstream proxy removed;
 - every key and CLI connection stops working, open invitations are withdrawn,

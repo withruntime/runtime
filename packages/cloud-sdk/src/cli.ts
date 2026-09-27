@@ -152,7 +152,7 @@ const SANDBOX_HELP = `runtime sandbox <command>
                              [--option SERVER.NAME=value]... [--port 8765] [--replace]
                                               Start them; prints each URL and the header to send
   mcp <id> [status] | mcp <id> stop           Their state and fresh URLs; stop them
-  preview <id> <port> [--public] [--ttl <s>]  Share a port at an HTTPS address
+  preview <id> <port> [--public] [--ttl <s>]  Share a port at an HTTPS address (--public: paid only)
   preview rotate <id> <port>                  Refuse every token given out for a private port so
                                               far; prints the new token
   previews <id>                               Every shared port
@@ -535,9 +535,11 @@ export async function run(
   env: NodeJS.ProcessEnv = process.env,
   out: Out = defaultOut(argv),
 ): Promise<number> {
+  // Only what comes before -- is the CLI's: a --json after it is the
+  // command's, whether or not the CLI was given its own.
+  const dash = argv.indexOf("--");
   const [first, ...remaining] = argv.filter(
-    (arg) =>
-      arg !== "--json" || (argv.indexOf("--") !== -1 && argv.indexOf(arg) > argv.indexOf("--")),
+    (arg, index) => arg !== "--json" || (dash !== -1 && index > dash),
   );
   // Sandbox is one product of several, so its commands live under it
   // (AGENTS.md, 23 September 2026): `runtime sandbox run`, `sandbox ssh` and
@@ -1111,6 +1113,15 @@ function usageSummary(u: Usage): string {
       "free trial",
       `${hours(u.trial.availableMs)} of ${hours(u.trial.totalMs)} hours left${u.trial.reservedMs > 0 ? `, ${hours(u.trial.reservedMs)} held by running sandboxes` : ""}`,
     ]);
+  if (u.outbound) {
+    const gib = (bytes: number) =>
+      `${(bytes / 1_073_741_824).toLocaleString("en-US", { maximumFractionDigits: 1 })} GiB`;
+    const left = Math.max(0, u.outbound.allowanceBytes - u.outbound.freeBytes);
+    rows.push([
+      "outbound traffic this month",
+      `${gib(u.outbound.sentBytes)} sent, ${gib(left)} of ${gib(u.outbound.allowanceBytes)} free left, ${dollars(micros(u.outbound.chargedMicros))} charged`,
+    ]);
+  }
   const kinds = new Map<string, { count: number; charged: bigint; held: bigint }>();
   for (const resource of u.resources ?? []) {
     const kind = typeof resource.kind === "string" ? resource.kind : "other";
@@ -1184,13 +1195,14 @@ async function outputSoFar(runtime: Runtime, sandboxId: string, processId: strin
   };
 }
 
-/** Dollars from integer microdollars: cents from a dollar up, and four
- * places below one, so a few minutes of use does not round to $0.01. */
+/** Dollars from integer microdollars: cents from a dollar up, four places
+ * below one, and every place below a hundredth of a cent, so a short trial
+ * test never reads as $0.0000. */
 function dollars(micros: string | bigint): string {
   const value = BigInt(micros);
   const sign = value < 0n ? "-" : "";
   const size = value < 0n ? -value : value;
-  const places = size < 1_000_000n ? 4 : 2;
+  const places = size >= 1_000_000n ? 2 : size >= 100n || size === 0n ? 4 : 6;
   const unit = 10n ** BigInt(6 - places);
   const rounded = (size + unit / 2n) / unit;
   const whole = rounded / 10n ** BigInt(places);
@@ -1257,10 +1269,30 @@ function switchingLine(summary: SwitchingSummary, provider?: SwitchProvider): st
   }
 }
 
+/** Running time in the largest unit that keeps it above zero: a short
+ * trial test is seconds, not "0 hours". */
+function runningTime(seconds: number): string {
+  const [amount, unit] =
+    seconds < 60
+      ? [seconds, "second"]
+      : seconds < 3600
+        ? [seconds / 60, "minute"]
+        : [seconds / 3600, "hour"];
+  const shown = amount.toLocaleString("en-US", {
+    maximumFractionDigits: unit === "second" ? 1 : 2,
+  });
+  return `${shown} ${unit}${shown === "1" ? "" : "s"}`;
+}
+
 /** The sandboxes the free trial paid for, said beside what was priced. */
-function trialNote(trial: number, all: number): string {
+function trialNote(trial: number, all: number, trialSeconds: number): string {
   if (!trial) return "";
-  const which = trial === all ? (all === 1 ? "It" : "All of them") : `${trial} of them`;
+  const which =
+    trial === all
+      ? all === 1
+        ? "It"
+        : "All of them"
+      : `${trial} of them, ${runningTime(trialSeconds)} of that time,`;
   return ` ${which} ran on the free trial, which charged nothing; Runtime's side prices ${trial === 1 ? "it" : "them"} at the standard rates, what the same work costs on paid credit.`;
 }
 
@@ -1341,14 +1373,14 @@ async function switching(
     c.basis === "usage"
       ? [
           `Your last ${c.window.days} days: ${figures}${pace}`,
-          `Priced: ${c.usage.sandboxes.toLocaleString("en-US")} sandbox${c.usage.sandboxes === 1 ? "" : "es"}, ${(c.usage.runSeconds / 3600).toLocaleString("en-US", { maximumFractionDigits: 2 })} hours running.${trialNote(c.usage.trialSandboxes, c.usage.sandboxes)}${c.usage.unpricedSandboxes ? ` ${c.usage.unpricedSandboxes} left out: ${c.rival.name} publishes no price for their size.` : ""}`,
+          `Priced: ${c.usage.sandboxes.toLocaleString("en-US")} sandbox${c.usage.sandboxes === 1 ? "" : "es"}, ${runningTime(c.usage.runSeconds)} running.${trialNote(c.usage.trialSandboxes, c.usage.sandboxes, c.usage.trialRunSeconds)}${c.usage.unpricedSandboxes ? ` ${c.usage.unpricedSandboxes} left out: ${c.rival.name} publishes no price for their size.` : ""}`,
         ]
       : [
           `No settled sandboxes in your last ${c.window.days} days yet, so this prices an example: ${c.usage.sandboxes.toLocaleString("en-US")} runs of ${(c.usage.runSeconds / c.usage.sandboxes).toLocaleString("en-US")} seconds using ${(c.usage.activeCpuSeconds / c.usage.sandboxes).toLocaleString("en-US")} CPU-seconds each.`,
           `The example: ${figures}.`,
         ];
   lines.push(
-    `${c.rival.name}'s published rates, checked ${longDate(`${c.rival.checked}T12:00:00Z`)}: ${c.rival.rates.join("; ")}. Compute only: storage, network, plan fees and free allowances are left out.`,
+    `${c.rival.name}'s published rates, checked ${longDate(`${c.rival.checked}T12:00:00Z`)}: ${c.rival.rates.join("; ")}. Compute only, with the disk where a rival bills it while running: storage at rest, network, plan fees and free allowances are left out.`,
   );
   const line = switchingLine(
     c.switching,
@@ -2965,9 +2997,11 @@ async function execute(
     process.off("SIGINT", onInterrupt);
   }
   if (out.json) out.write(JSON.stringify(result));
+  // Here the output streamed, whose timeout is 24 hours unless one was given
+  // (Sandbox.exec); `--json` answers the result and prints no such line.
   else if (result.timedOut)
     out.error(
-      `runtime: timed out after ${timeout ?? 60} s; the command's process group was killed.`,
+      `runtime: timed out after ${timeout ? `${timeout} s` : "24 h"}; the command's process group was killed.`,
     );
   // Never drop output silently: say so, and do not exit 0.
   const lost = extras.lostOutput(result, sbx.id);

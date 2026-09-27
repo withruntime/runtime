@@ -1,5 +1,15 @@
-import { mkdir, readdir, readFile, lstat, writeFile, symlink, chmod } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 /* A small ustar writer and reader for directory uploads and downloads, so the
@@ -76,45 +86,100 @@ export async function packDirectory(root: string): Promise<Uint8Array> {
   return gzipSync(Buffer.concat(parts));
 }
 
+/* The archive comes from a sandbox, whose contents the customer's untrusted code
+   controls, so nothing in it may write outside `target`. A lexical check on each
+   name is not enough: a link `x -> ../outside` followed by `x/file` passes it and
+   writes through the link. So no write ever passes through a link, links are made
+   only after every file and directory is in place, and each link is then walked
+   through the finished tree and removed, failing the unpack, if it leads out. */
+
+async function linkAt(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Throws unless `destination` is inside `root` and no part of the way to it,
+    itself included, is a link. */
+async function assertPlain(root: string, destination: string, name: string): Promise<void> {
+  if (destination !== root && !destination.startsWith(root + sep))
+    throw new Error(`Refusing an archive entry outside the target: ${name}`);
+  let path = root;
+  for (const part of relative(root, destination).split(sep).filter(Boolean)) {
+    path = join(path, part);
+    if (await linkAt(path))
+      throw new Error(`Refusing an archive entry that passes through a link: ${name}`);
+  }
+}
+
+/** Where following `link` from `directory` leads, or undefined when the way
+    leaves `root` or turns at a link before its last step. The last step may
+    be a link; that link is checked on its own. */
+async function linkStaysInside(root: string, directory: string, link: string) {
+  if (isAbsolute(link)) return false;
+  const parts = link.split("/").filter((part) => part && part !== ".");
+  let path = directory;
+  for (const [index, part] of parts.entries()) {
+    path = part === ".." ? dirname(path) : join(path, part);
+    if (path !== root && !path.startsWith(root + sep)) return false;
+    if (index < parts.length - 1 && part !== ".." && (await linkAt(path))) return false;
+  }
+  return true;
+}
+
 /** Unpacks into `target`, refusing any entry that would land outside it. */
 export async function unpackArchive(archive: Uint8Array, target: string): Promise<void> {
   const data = gunzipSync(archive);
-  const root = resolve(target);
-  await mkdir(root, { recursive: true });
+  await mkdir(resolve(target), { recursive: true });
+  const root = await realpath(resolve(target));
   const text = (start: number, length: number) => {
     const slice = data.subarray(start, start + length);
     const end = slice.indexOf(0);
     return new TextDecoder().decode(end < 0 ? slice : slice.subarray(0, end));
   };
+  const links: { destination: string; link: string; name: string }[] = [];
   let longName: string | undefined;
+  let longLink: string | undefined;
   for (let offset = 0; offset + 512 <= data.length;) {
     if (data.subarray(offset, offset + 512).every((byte) => byte === 0)) break;
     const size = parseInt(text(offset + 124, 12).trim() || "0", 8);
     const type = String.fromCharCode(data[offset + 156] ?? 48);
     const prefix = text(offset + 345, 155);
     let name = longName ?? (prefix ? `${prefix}/${text(offset, 100)}` : text(offset, 100));
+    const link = longLink ?? text(offset + 157, 100);
     longName = undefined;
+    longLink = undefined;
     const mode = parseInt(text(offset + 100, 8).trim() || "644", 8);
-    const link = text(offset + 157, 100);
     const body = data.subarray(offset + 512, offset + 512 + size);
     offset += 512 + Math.ceil(size / 512) * 512;
-    if (type === "L") {
-      longName = new TextDecoder().decode(body).replace(/\0.*$/s, "");
+    if (type === "L" || type === "K") {
+      const value = new TextDecoder().decode(body).replace(/\0.*$/s, "");
+      if (type === "L") longName = value;
+      else longLink = value;
       continue;
     }
     name = name.replace(/^\.\//, "");
     if (!name || name === "." || name === "./") continue;
     const destination = resolve(root, name);
-    if (destination !== root && !destination.startsWith(root + sep))
-      throw new Error(`Refusing an archive entry outside the target: ${name}`);
+    await assertPlain(root, destination, name);
     if (type === "5") await mkdir(destination, { recursive: true });
-    else if (type === "2") {
-      await mkdir(resolve(destination, ".."), { recursive: true });
-      await symlink(link, destination).catch(() => undefined);
-    } else if (type === "0" || type === "\0" || type === "7") {
-      await mkdir(resolve(destination, ".."), { recursive: true });
+    else if (type === "2") links.push({ destination, link, name });
+    else if (type === "0" || type === "\0" || type === "7") {
+      await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, body);
       await chmod(destination, mode & 0o777);
     }
+  }
+  for (const { destination, link, name } of links) {
+    await assertPlain(root, destination, name);
+    await mkdir(dirname(destination), { recursive: true });
+    await symlink(link, destination).catch(() => undefined);
+  }
+  for (const { destination, link, name } of links) {
+    if (await linkStaysInside(root, dirname(destination), link)) continue;
+    await unlink(destination).catch(() => undefined);
+    throw new Error(`Refusing an archive link that leads outside the target: ${name} -> ${link}`);
   }
 }

@@ -138,9 +138,12 @@ test("headless login hands back the link at once, the next run finishes it, and 
     orgId,
   });
   expect(server.starts).toBe(1);
-  expect(
-    await authenticationCommand(["auth", "status"], env, { fetch: server.fetcher }),
-  ).toMatchObject({ connected: true });
+  expect(await connectionStore(env).read()).toMatchObject({ orgId });
+  // Reviewer's finding #42, 26 September 2026: `auth status` was a branch the
+  // CLI never sends (it has `whoami`), so it is not a command here either.
+  await expect(
+    authenticationCommand(["auth", "status"], env, { fetch: server.fetcher }),
+  ).rejects.toThrow("runtime whoami");
   expect(await authenticationCommand(["logout"], env, { fetch: server.fetcher })).toEqual({
     disconnected: true,
   });

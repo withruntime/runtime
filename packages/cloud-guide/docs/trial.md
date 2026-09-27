@@ -9,6 +9,13 @@ Every new account gets **100 hours of sandbox time** after a verified sign-in, w
   (`cpuFloorMillis`) is at most 250 thousandths of a vCPU; the default is 50.
   A create that asks for more is refused with `invalid_trial`, naming each
   field, and a fork of such a sandbox can go only onto `"paid"`.
+- Trial sandboxes reach the web at 20 Mbit/s each, and move 5 GiB a day in all,
+  in and out together.
+- A trial sandbox that keeps trying to reach internal or cloud metadata
+  addresses has its network cut and the account suspended. One that holds its
+  CPUs flat out for 30 minutes is slowed to half a core for the rest of its run.
+- Previews of a trial sandbox are private: a link carries its token. Public
+  previews need a paid sandbox.
 - The 100 hours are shared by all your trial sandboxes, so eight at once use them
   eight times as fast. Running time counts, idle or busy; paused or stopped time
   does not.
@@ -17,7 +24,8 @@ Every new account gets **100 hours of sandbox time** after a verified sign-in, w
   within the time you have left.
 - Your first three images and first 10 GiB of volumes are stored free, for as
   long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)).
-  Building an image uses no trial hours.
+  A build counts toward the 100 hours: at most 2 vCPU and 4 GiB, 20 minutes
+  and 10 builds a day, with only the time it builds used up.
 - A trial request never falls back to paid credit, even when the account has
   some.
 - Model calls are not included. Opening ports beyond the web (`connect`) needs
@@ -90,6 +98,9 @@ shows the hours used, set aside for running sandboxes, and left.
   for a slot, as it does for `trial_busy`.
 - **`trial_exhausted`:** the time is used up, and new trial sandboxes are
   refused.
+
+Sign in with Google or with an email address you keep. Temporary inbox
+services such as Guerrilla Mail and Mailinator cannot open an account.
 
 Free time cannot be cashed out, refunded or replenished by signing in again.
 

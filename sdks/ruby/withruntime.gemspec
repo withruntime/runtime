@@ -18,6 +18,8 @@ Gem::Specification.new do |spec|
   spec.metadata = {
     "homepage_uri" => "https://withruntime.com",
     "documentation_uri" => "https://withruntime.com/docs/ruby",
+    "source_code_uri" => "https://github.com/withruntime/runtime/tree/main/sdks/ruby",
+    "bug_tracker_uri" => "https://github.com/withruntime/runtime/issues",
     "rubygems_mfa_required" => "true"
   }
 end

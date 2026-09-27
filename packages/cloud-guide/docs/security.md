@@ -23,7 +23,8 @@ Runtime uses Firecracker microVMs on Runtime-operated dedicated servers.
 
 Give a command its secrets through `env`, never in the command line. Runtime
 never echoes `env` values back, and its journals and request records keep only a
-hash of them. A command line is recorded as you sent it.
+hash of them. A command line is not protected that way: anything running in the
+sandbox can read it.
 
 ## Read-only keys and daily limits
 
@@ -37,8 +38,9 @@ your prepaid balance.
   beside them, account notices, the balance, and its own access and limit. That
   covers products added later too. It cannot create, start, stop, pause, wake,
   run a command, write a file, change anything or spend anything. It does not
-  see inside sandboxes (files, command output), job runs or secrets. Use it for
-  monitoring, dashboards and CI checks.
+  see inside sandboxes (files, command output), job runs or secrets, and a
+  private preview reaches it without its token. Use it for monitoring,
+  dashboards and CI checks.
 - **Daily spending limit.** Set one on any key that can spend, when you create
   it or later from its row. It is the most that key's agent may commit in any
   24 hours: settled charges plus money still on hold. It counts everything the
@@ -57,7 +59,7 @@ An owner, admin or developer of the account can create a key, of either kind:
 - The member who made a key, or an owner or admin, sets, changes or removes its
   limit, and only on the website.
 - A key can read its own access and limit with `GET /v1/limits`,
-  `runtime limits` or the `runtime_limits_get` tool.
+  `runtime limits` or the `runtime_account` tool's `limits` action.
 - No key can raise, remove or set a limit, and no key can create another key.
 - Every key made, revoked or limited, and every connection approved, is in the
   account's [audit log](./teams#audit-log), with who did it and from where.
@@ -79,18 +81,25 @@ nothing in the guest, root included, can go around it.
   on any port. A trial sandbox reaches ports 443 and 80.
 - A few ports are never reachable (telnet, Windows RPC, NetBIOS and SMB, IRC),
   and mail ports open only when support enables mail for your account.
-- Private and internal addresses are refused.
+- Private and internal addresses are refused. A trial sandbox that tries them
+  five times in ten minutes loses its network, and its account is suspended.
+- Services that exist only to catch a security test's call-back, such as
+  `oast.live`, `interact.sh` and Burp Collaborator, are refused to every
+  sandbox and image build. To test Runtime itself, see
+  [report a vulnerability](#report-a-vulnerability).
 - Each sandbox's rules can narrow this further, and they bind root inside the
   sandbox too. See [the sandbox environment](./sandbox-environment).
 - Each sandbox has limits on concurrent connections, bandwidth and bytes per
   day, so one sandbox cannot crowd out others. A paid sandbox gets 500 Mbit/s,
-  200 Mbit/s sustained after its first 10 GiB, and 500 GiB a day
+  200 Mbit/s sustained after its first 10 GiB, and 500 GiB a day; a trial
+  sandbox 20 Mbit/s, with 5 GiB a day for the whole trial account
   ([the sandbox environment](./sandbox-environment#the-network)).
 
 Inbound connections require a preview, a proved custom domain, an allocated
 TCP port or an authorized private tunnel. Each reaches only the sandbox port
 and account it was granted. A preview is private with an expiring token unless
-you make it public. Preview addresses are under `runtimehost.com`, never under
+you make it public, which a paid sandbox can do; a trial sandbox's previews
+are always private. Preview addresses are under `runtimehost.com`, never under
 `withruntime.com`, so sandbox content never shares an origin with your account.
 Rotating a preview token refuses every token issued before it.
 
@@ -167,8 +176,8 @@ await runtime.secrets.set("GITHUB_TOKEN", {
   its provider.
 - Up to 50 secrets per account, each at most 8 KiB of visible ASCII, with up to
   16 hosts. The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
-  and `DELETE /v1/egress-secrets/{name}`; the MCP tools are
-  `runtime_secrets_set`, `runtime_secrets_list` and `runtime_secrets_delete`.
+  and `DELETE /v1/egress-secrets/{name}`; the MCP tool is
+  `runtime_secrets`, with `set`, `list` and `delete`.
 
 ## Your own proxy
 
@@ -209,9 +218,8 @@ await runtime.network.upstreamProxy.set({
   An `https://` proxy's certificate must verify against the public roots.
 - `runtime network upstream-proxy get` and `remove` read and remove it; in
   Python it is `runtime.network.upstream_proxy`. The API is `PUT`, `GET` and
-  `DELETE /v1/network/upstream-proxy`; the MCP tools are
-  `runtime_network_upstream_proxy_set`, `runtime_network_upstream_proxy_get` and
-  `runtime_network_upstream_proxy_remove`. The CLI command and the SDK methods
+  `DELETE /v1/network/upstream-proxy`; the MCP tool is
+  `runtime_network_upstream_proxy`, with `set`, `get` and `remove`. The CLI command and the SDK methods
   arrived in `withruntime` 0.7.0.
 
 ## Root inside the sandbox
@@ -356,3 +364,15 @@ Anyone can sign up at https://withruntime.com/sign-in.
 - **Every connection is logged** with the sandbox, the account and the client's
   address, without contents, so a report can be traced and acted on. Runtime
   can turn off a domain, a port, a tunnel or everything of an account at once.
+
+## Report a vulnerability
+
+**Write to marc@heyruntime.com before you test anything, and again with what
+you find.** Testing Runtime's own servers, network or other accounts without
+agreeing it with us first breaks the
+[acceptable use policy](/legal/acceptable-use), and we may suspend the account.
+
+A report helps most with the steps to reproduce it, the sandbox or request ids
+involved, and the time with its time zone. Please give us a reasonable time
+to fix a problem before you describe it in public. The same address is in
+[`/.well-known/security.txt`](https://withruntime.com/.well-known/security.txt).

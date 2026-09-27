@@ -71,8 +71,10 @@ Vercel   CPU    1,000 × 20 s / 3,600 × $0.128      = $0.71
   Runtime against $5.68 on Vercel, a 77% saving.
 
 A GiB is about 7% larger than a GB, so Runtime's memory figure covers slightly
-more. Creations, network, storage, plan fees, taxes and free allowances are
-left out of both. See [pricing](./pricing) for Runtime's terms.
+more. Creations, network, storage, plan fees, taxes and free allowances are left
+out of both. On Runtime, inbound traffic is free, and each account's first 100
+GiB out a month is free, then $0.02 per GB. See [pricing](./pricing) for
+Runtime's terms.
 
 ## How to switch
 

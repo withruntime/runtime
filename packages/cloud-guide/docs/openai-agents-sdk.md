@@ -67,20 +67,20 @@ export async function analyse() {
 
 Every option is optional.
 
-| Python                    | TypeScript              | What it does                                                                                                |
-| ------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `funding`, `image`, ...   | `create`                | How to create the sandbox: `funding`, `region`, `image`, a snapshot, `vcpu`, memory, disk, `name`, `labels` |
-| `snapshot_id`             | `create.snapshot`       | Start from a ready Runtime snapshot, with its files, memory and processes                                   |
-| `timeout_seconds`         | `create.timeoutSeconds` | How long the sandbox may run before its lease ends                                                          |
-| `max_cost_micros`         | `create.maxCostMicros`  | Refuse the create if its first lease could cost more, in millionths of a dollar                             |
-| `extra`                   | `create`                | Any other create field, such as `network` or `volumes`                                                      |
-| `env`                     | `env`                   | Set for every command, under the manifest's own environment                                                 |
-| `exposed_ports`           | `exposedPorts`          | Ports `resolve_exposed_port` may share as Runtime previews                                                  |
-| `preview_visibility`      | `previewVisibility`     | `private` (default): the endpoint carries its token in its query; `public`: anyone with the address         |
-| `pause_on_exit`           | `pauseOnExit`           | Pause instead of stopping at the end, so resuming wakes the same machine                                    |
-| `workspace_persistence`   | —                       | `tar` (default) or `snapshot`, below                                                                        |
-| `snapshot_retention_days` | —                       | Days a `snapshot` persistence snapshot is kept                                                              |
-| `exec_timeout_s`          | `execTimeoutMs`         | The longest a command may run: one hour by default, 24 hours at most                                        |
+| Python                    | TypeScript              | What it does                                                                                                   |
+| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `funding`, `image`, ...   | `create`                | How to create the sandbox: `funding`, `region`, `image`, a snapshot, `vcpu`, memory, disk, `name`, `labels`    |
+| `snapshot_id`             | `create.snapshot`       | Start from a ready Runtime snapshot, with its files, memory and processes                                      |
+| `timeout_seconds`         | `create.timeoutSeconds` | How long the sandbox may run before its lease ends                                                             |
+| `max_cost_micros`         | `create.maxCostMicros`  | Refuse the create if its first lease could cost more, in millionths of a dollar                                |
+| `extra`                   | `create`                | Any other create field, such as `network` or `volumes`                                                         |
+| `env`                     | `env`                   | Set for every command, under the manifest's own environment                                                    |
+| `exposed_ports`           | `exposedPorts`          | Ports `resolve_exposed_port` may share as Runtime previews                                                     |
+| `preview_visibility`      | `previewVisibility`     | `private` (default): the endpoint carries its token in its query; `public`: anyone with the address, paid only |
+| `pause_on_exit`           | `pauseOnExit`           | Pause instead of stopping at the end, so resuming wakes the same machine                                       |
+| `workspace_persistence`   | —                       | `tar` (default) or `snapshot`, below                                                                           |
+| `snapshot_retention_days` | —                       | Days a `snapshot` persistence snapshot is kept                                                                 |
+| `exec_timeout_s`          | `execTimeoutMs`         | The longest a command may run: one hour by default, 24 hours at most                                           |
 
 ## What runs in the sandbox
 

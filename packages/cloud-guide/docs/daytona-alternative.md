@@ -71,8 +71,12 @@ Daytona  CPU    1,000 × 60 s / 3,600 × 2 × $0.0504 = $1.68
   Runtime against $2.76 on Daytona. At this size, Runtime is cheaper however busy the
   sandbox is.
 
-Disk, network, taxes and free credits are left out of both. See
-[pricing](./pricing) for Runtime's terms.
+Disk, network, taxes and free credits are left out of both.
+`runtime compare --from daytona` prices your own usage the same way, with
+sandboxes the free trial paid for at the standard rates, so trial time never
+counts as a saving. On Runtime, inbound traffic is free, and each account's
+first 100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing)
+for Runtime's terms.
 
 ## How to switch
 

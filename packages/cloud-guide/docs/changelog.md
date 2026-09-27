@@ -5,8 +5,59 @@ What shipped in Runtime Cloud, newest first.
 Runtime ships every day. Each entry is something you can use or see; the
 guides hold the current terms, and [pricing](./pricing) holds the current rates.
 
+## 27 September 2026
+
+- **withruntime 0.7.2.** A directory download (`files.download`,
+  `runtime sandbox cp`) can no longer write outside the folder you gave it: a
+  link in the sandbox that leads outside, or a file written through one, is
+  refused with `unsafe_archive`, and links that stay inside arrive intact. A
+  `custom` network policy in the Vercel AI SDK harness that allows nothing now
+  turns the internet off, as `deny-all` does. `runtime sandbox exec … --json --
+tool --json` passes the second `--json` to the tool, and a streamed command
+  that times out says 24 hours, its real limit. The Harbor and Inspect adapters
+  build images with the current image builder. Update with
+  `npm i withruntime@latest` or `pip install -U withruntime`.
+
 ## 26 September 2026
 
+- **Security fixes across the account.** A read-only key still lists a
+  sandbox's previews but no longer receives a private preview's token.
+  Webhooks and telemetry exports are made, changed and deleted by an owner's or
+  admin's key, and every key still lists them. A deleted or replaced private
+  registry password is erased, as is every one when an account closes. Support
+  asked through a read-only key sees only what that key can. See
+  [security](./security) and [observability](./observability#webhooks).
+- **Single sign-on through OIDC.** Okta, Entra ID and Google Workspace
+  connections by OIDC can be saved and used, as SAML ones could. See
+  [single sign-on](./single-sign-on).
+- **Bucket mounts work again,** and a custom domain under a suffix such as
+  `co.uk` is told to set A and AAAA records at its apex, not a CNAME.
+- **Paid means paid and kept.** Paid-only features follow a top-up that was not
+  refunded or charged back in full, and a refund of a top-up that earned
+  matching credit is smaller by any of that credit already spent. See
+  [pricing](./pricing).
+
+- **Faster starts, pauses and wakes.** Runtime now keeps machines of the most
+  common sandbox shapes started ahead of time, and the servers keep memory
+  ready for sandboxes that start or grow at once. Measured through the public
+  API: a new sandbox runs its first Python command 374 ms after the create
+  request at the median (495 ms p95, down from 981 ms), a pause takes 207 ms,
+  a paused sandbox runs its next command 980 ms after the call that wakes it,
+  and a preview visit to one answers in 0.77 s, down from 3.99 s. See
+  [speed](./speed) for every figure and the samples.
+- **Outbound traffic has a price.** Inbound traffic stays free, and each
+  account's first 100 GiB out a month is free. Past it, what sandboxes send to
+  the internet costs $0.02 per GB, fixed in each new sandbox's quote. Replies
+  served through previews, custom domains and TCP ports, traffic to your own
+  network, and trial sandboxes are not charged, and sandboxes made before today
+  keep free traffic for their whole life. `GET /v1/usage` shows the month so
+  far under `outbound`. See [pricing](./pricing#network-products).
+- **A calmer console.** Home is your whole account on three sheets: your
+  sandboxes' CPU hour by hour for the last day, this month's cost by product,
+  and **Worth a look**, which names sandboxes costing money while doing little
+  and offers **Pause** for an idle one. Sandboxes, a sandbox's page, Images,
+  Volumes and Settings are redrawn to match, and the sidebar holds everything,
+  with your account and your menu in one place at its top.
 - **Fast commands keep all their output.** A command that writes faster than
   it is read now waits for its reader from its first byte instead of losing
   what came before: 4 MiB written at once came back whole in every run, where
@@ -17,6 +68,17 @@ guides hold the current terms, and [pricing](./pricing) holds the current rates.
   read, the result says `truncated` and a warning names it. `runtime login`
   now names the account it connected to. Update with
   `npm i withruntime@latest` or `pip install -U withruntime`.
+- **Your account opens straight away.** A new account now lands in the full
+  console. Home shows the setup prompt for your coding agent until the agent
+  connects, and keys, billing and settings are in the menu from the first
+  visit. Hide the prompt if you would rather start on your own.
+- **A smaller MCP tool list.** An agent connected to Runtime's MCP server now
+  reads 45 tools instead of 80, in 61,754 characters instead of 80,808, before
+  its first call. A product's rarer verbs share one tool that takes an
+  `action`: `runtime_volume_get` is now `runtime_volume` with
+  `"action": "get"`. The first-session tools keep their names. The old names
+  answer until the next release and say what replaces them; see
+  [renamed tools](./mcp#renamed-tools).
 
 ## 25 September 2026
 

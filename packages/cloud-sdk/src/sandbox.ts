@@ -816,8 +816,9 @@ export class Files {
   async readText(path: string, options: RequestOptions = {}): Promise<string> {
     return new TextDecoder().decode(await this.read(path, options));
   }
-  /** Writes a file of any size, atomically, making parent directories. Large
-   * ones go in parallel 1 MiB chunks checked against their SHA-256. `mode`
+  /** Writes a file, atomically, making parent directories. Under /workspace
+   * any size, large ones in parallel 1 MiB chunks checked against their
+   * SHA-256; elsewhere, with the sandbox user's rights, up to 1 MiB. `mode`
    * sets its permissions (0o755 for a program); 0o644 when left out. */
   async write(
     path: string,

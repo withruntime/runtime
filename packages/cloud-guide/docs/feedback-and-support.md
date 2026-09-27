@@ -40,7 +40,7 @@ How to write one:
 - Include the resource ID and the request ID when an error prompted the report:
   every error carries a request ID for this.
 
-From MCP, call `runtime_feedback_submit`. From the CLI:
+From MCP, call `runtime_feedback` with `"action": "submit"`. From the CLI:
 
 ```bash no-run
 npx withruntime feedback --kind migration_blocker --competitor E2B \
@@ -74,7 +74,7 @@ console.log((await runtime.feedback.list()).data);
    The link at the bottom stops these emails for that address without signing
    in; the status stays in the account.
 
-`npx withruntime feedback --list`, `runtime_feedback_list` and
+`npx withruntime feedback --list`, `runtime_feedback` with `list` and
 `GET /v1/feedback` show what your organization reported, whether it has been
 sorted, and whether it shipped. So does the **Support** page in the account,
 and the support agent can look them up for you.
@@ -86,11 +86,13 @@ Never put API keys, passwords or private file contents in a report.
 **Runtime's support agent answers in the same call, with your account in view.**
 It reads your organization's resources, operations and errors, usage, billing,
 notices and job logs, together with these docs. It can reproduce a problem in
-its own sandbox. A person reviews anything it escalates.
+its own sandbox. A person reviews anything it escalates. Asked through a
+read-only key, it sees only what that key can: no job logs, keys, members or
+sandbox contents, and it proposes no actions.
 
-From MCP, call `runtime_support_message` with your question, then keep the
+From MCP, call `runtime_support` with `"action": "message"` and your question, then keep the
 returned `conversationId` for follow-ups. If the answer is still being worked
-on, the status is `working`; call `runtime_support_read` with the conversation
+on, the status is `working`; call it with `read` and the conversation
 ID until it changes. From the CLI:
 
 ```bash no-run
@@ -109,7 +111,7 @@ retention or a lifetime policy, or looking inside a sandbox, it proposes the
 action and returns an action ID and an input hash. Nothing runs until you
 approve that exact action:
 
-- MCP: `runtime_support_message` with `conversationId`, `approveActionId` and
+- MCP: `runtime_support`, action `message`, with `conversationId`, `approveActionId` and
   `approveInputHash`, or `denyActionId`.
 - CLI: `npx withruntime support approve <actionId> <inputHash> --conversation <id>` or
   `npx withruntime support deny <actionId> --conversation <id>`.

@@ -137,6 +137,15 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
     available: "24998618",
     takenBack: "10000000",
     trial: { totalMs: 360_000_000, usedMs: 3_663_049, reservedMs: 0, availableMs: 356_336_951 },
+    outbound: {
+      month: "2026-09",
+      sentBytes: 112_374_182_400,
+      freeBytes: 107_374_182_400,
+      billableBytes: 5_000_000_000,
+      allowanceBytes: 107_374_182_400,
+      chargedMicros: "100000",
+      writtenOffMicros: "0",
+    },
     resources: [
       ...Array.from({ length: 3 }, (_, i) => ({
         resourceId: `s${i}`,
@@ -158,8 +167,11 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
       expect(text).toMatch(/^returned by refunds and disputes\s+\$10\.00$/m);
       expect(text).toMatch(/^held for running sandboxes and this hour's storage\s+\$0\.0011$/m);
       expect(text).toMatch(/^free trial\s+99 of 100 hours left$/m);
+      expect(text).toMatch(
+        /^outbound traffic this month\s+104\.7 GiB sent, 0 GiB of 100 GiB free left, \$0\.1000 charged$/m,
+      );
       expect(text).toMatch(/sandboxes\s+3\s+\$0\.0360\s+\$0\.0000/);
-      expect(text).toMatch(/image\s+1\s+\$0\.0001\s+\$0\.0002/);
+      expect(text).toMatch(/image\s+1\s+\$0\.000054\s+\$0\.0002/);
       expect(text).toContain("usage --json");
       expect(text).not.toContain("24998618");
       expect(text.split("\n").length).toBeLessThan(20);
@@ -350,4 +362,53 @@ test("`whoami` names the organization, the role and what it can spend", async ()
       expect(text).toMatch(/^funding\s+free trial, 95\.5 hours left; \$24\.99 of credit$/m);
     },
   );
+});
+
+// Reviewer's finding #44, 26 September 2026: exec streams, and a streamed
+// command's timeout is 24 hours unless --timeout says otherwise, but the line
+// a timeout printed said 60 s.
+test("a streamed exec that times out says the timeout it ran under", async () => {
+  const stream = () =>
+    new Response(
+      [
+        { type: "start", processId: "p1" },
+        { type: "stdout", data: "partial\n", offset: 0 },
+        { type: "exit", exitCode: null, state: "timed_out", timedOut: true },
+      ]
+        .map((event) => `${JSON.stringify(event)}\n`)
+        .join(""),
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  const bodies: unknown[] = [];
+  await withStub(
+    (_method, url, body) => {
+      if (url.pathname === `/v1/sandboxes/${SANDBOX}`) return INFO;
+      if (url.pathname === `/v1/sandboxes/${SANDBOX}:exec`) {
+        bodies.push(body);
+        return stream();
+      }
+    },
+    async (lines) => {
+      const write = spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        expect(await run(["sandbox", "exec", SANDBOX, "--", "sleep", "1d"], env, out(lines))).toBe(
+          124,
+        );
+        expect(lines.at(-1)).toBe(
+          "ERR runtime: timed out after 24 h; the command's process group was killed.",
+        );
+        expect(
+          await run(
+            ["sandbox", "exec", SANDBOX, "--timeout", "5", "--", "sleep", "9"],
+            env,
+            out(lines),
+          ),
+        ).toBe(124);
+        expect(lines.at(-1)).toContain("timed out after 5 s;");
+      } finally {
+        write.mockRestore();
+      }
+    },
+  );
+  expect(bodies[0]).toMatchObject({ timeoutMs: 86_400_000, stream: true });
 });

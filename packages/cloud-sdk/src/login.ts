@@ -131,26 +131,6 @@ export async function authenticationCommand(
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const [command, ...rest] = args;
-  if (command === "auth" && rest.length === 1 && rest[0] === "status") {
-    if (env.RUNTIME_API_KEY) {
-      await new Runtime({
-        apiKey: env.RUNTIME_API_KEY,
-        baseUrl: origins.api,
-        fetch: fetcher,
-      }).usage();
-      return { connected: true, source: "environment" };
-    }
-    const saved = await store.read();
-    if (!saved) return { connected: false };
-    try {
-      await request("confirm", undefined, saved.key);
-    } catch (error) {
-      if (error instanceof ConnectionError && error.status === 401)
-        return { connected: false, reason: "revoked" };
-      throw error;
-    }
-    return { connected: true, agentName: saved.agentName, orgId: saved.orgId };
-  }
   if (command === "logout" && rest.length === 0) {
     if (env.RUNTIME_API_KEY)
       throw new Error(

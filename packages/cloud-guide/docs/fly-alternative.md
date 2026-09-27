@@ -82,8 +82,9 @@ every vCPU for you too.
 A `shared-cpu-2x` Machine with 4 GB costs about $0.50 for the same runs, but its
 shared vCPUs are guaranteed 6.25% of a core each and start with a small burst
 allowance, so a new one would not fit 20 CPU-seconds into the minute. Storage,
-network, plan fees, taxes and free credits are left out of all three. See
-[pricing](./pricing) for Runtime's terms.
+network, plan fees, taxes and free credits are left out of all three. On
+Runtime, inbound traffic is free, and each account's first 100 GiB out a month
+is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

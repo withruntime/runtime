@@ -270,7 +270,7 @@ disconnected. Text frames from the server are JSON: `{"type":"ready"}` first,
 | `POST`, `GET /v1/sandboxes/{id}/files/watches`                  | Watch a directory: `{"path", "recursive", "events", "include", "exclude", "batchMs", "timeoutMs"}`; list the watches                                                 |
 | `GET /v1/sandboxes/{id}/files/watches/{watchId}/events?cursor=` | Its events after a cursor (`waitMs` up to 8000), or `follow=true` for a stream                                                                                       |
 | `DELETE /v1/sandboxes/{id}/files/watches/{watchId}`             | Stop a watch                                                                                                                                                         |
-| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload: `{"path", "size", "sha256", "mode"}`                                                                                                           |
+| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload under `/workspace`: `{"path", "size", "sha256", "mode"}`                                                                                        |
 | `PUT /v1/sandboxes/{id}/uploads/{uploadId}?offset=`             | One chunk of raw bytes; chunks may go in parallel                                                                                                                    |
 | `POST /v1/sandboxes/{id}/uploads/{uploadId}:commit`             | Check the digest and move the file into place atomically                                                                                                             |
 | `POST /v1/sandboxes/{id}/uploads/{uploadId}:abort`              | Give up                                                                                                                                                              |
@@ -360,13 +360,21 @@ microdollars in strings (1,000,000 is one dollar), exact however large:
 | `available` | What can still be spent: `credited - spent - expired - held`      |
 | `takenBack` | The part of `spent` that refunds and disputes took                |
 | `trial`     | `{totalMs, usedMs, reservedMs, availableMs}`, or null             |
+| `outbound`  | This month's outbound traffic, below                              |
 | `resources` | The newest hundred resources, with what each used and was charged |
 
 Each resource carries `resourceId`, `name`, `kind`, `state`, `createdAt`,
 `vcpu` and `memoryMiB` (null for a kind with no size), `runningSeconds` (the
 billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates`, and
-`chargedMicros` and `heldMicros`. Divide `chargedMicros` by `runningSeconds`
-for what a run cost a second.
+`chargedMicros` and `heldMicros`. `chargedMicros` covers every meter, outbound
+traffic included. Divide it by `runningSeconds` for what a run cost a second.
+
+`outbound` is the account's outbound traffic this calendar month, UTC:
+`month` (`2026-09`), `sentBytes`, `freeBytes` (what the allowance covered),
+`billableBytes`, `allowanceBytes` (100 GiB), and `chargedMicros` and
+`writtenOffMicros` as strings. `writtenOffMicros` is traffic your balance or a
+spending limit could not cover; it is never charged later
+([pricing](./pricing#network-products)).
 
 `GET /v1/limits` says what this key may do and what its agent may still spend:
 

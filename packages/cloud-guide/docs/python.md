@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.7.1. `pip show withruntime` shows the
+This guide describes `withruntime` 0.7.2. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -104,8 +104,10 @@ with Sandbox.create() as sbx:
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds; the maximum is 24 hours. A timeout is a
-  result (`timed_out=True`, with the output so far), not an exception.
+- The default timeout is 60 seconds, and 24 hours when the output streams
+  (`on_stdout`, `on_stderr` or `exec_stream`); the maximum is 24 hours. A
+  timeout is a result (`timed_out=True`, with the output so far), not an
+  exception.
 - `check=True` raises `CommandError` on a non-zero exit.
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
   `stderr`. The rest is dropped, and `stdout_truncated` or `stderr_truncated` is
@@ -197,7 +199,10 @@ with Sandbox.create() as sbx:
 ```
 
 `write` makes parent directories and replaces the file atomically; large files go
-in parallel chunks checked by SHA-256. Whole directories travel as one archive:
+in parallel chunks checked by SHA-256. Under `/workspace` there is no size limit
+beyond the disk. Elsewhere a file is written with the sandbox user's own rights
+and can be at most 1 MiB; write a larger one to `/workspace` and move it with a
+command. Whole directories travel as one archive:
 
 ```python
 import pathlib
@@ -215,6 +220,10 @@ with Sandbox.create() as sbx:
 
 An uploaded file keeps its permissions; `write(path, data, mode=0o755)` sets
 them (0o644 when left out).
+
+A directory download keeps the links inside the directory and raises
+`unsafe_archive` for any entry or link that would reach outside it, so
+nothing in a sandbox can write elsewhere on your machine.
 
 From `withruntime` 0.7.0, reads are checked. The API sends
 every file's length before its bytes, and a small file's SHA-256; `read` reads

@@ -66,7 +66,9 @@ Runloop  CPU    1,000 × 60 s / 3,600 × 2 × $0.108       = $3.60
   against $5.33 on Runloop.
 
 Plan fees, storage while suspended, network, taxes and free credit are left out
-of both. See [pricing](./pricing) for Runtime's terms.
+of both. On Runtime, inbound traffic is free, and each account's first 100 GiB
+out a month is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's
+terms.
 
 ## How to switch
 

@@ -70,8 +70,9 @@ Prime    CPU    1,000 × 60 s / 3,600 × 2 × $0.02       = $0.67
   against $1.52 on Prime. At this size Runtime is cheaper however busy the
   sandbox is.
 
-Network, taxes and free allowances are left out of both. See
-[pricing](./pricing) for Runtime's terms.
+Network, taxes and free allowances are left out of both. On Runtime, inbound
+traffic is free, and each account's first 100 GiB out a month is free, then
+$0.02 per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

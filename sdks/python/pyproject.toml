@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "withruntime"
-version = "0.7.1"
+version = "0.7.2"
 description = "Runtime Cloud: one client (sync and async) for every Runtime product. Sandboxes first."
 readme = "README.md"
 license = { text = "Apache-2.0" }

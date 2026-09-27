@@ -140,8 +140,11 @@ npx withruntime events --sandbox <id>
 ## Webhooks
 
 A webhook sends every event of the types you choose to an HTTPS URL, as a POST
-of the event's JSON. It belongs to the account, so every key and every owner
-sees the same webhooks. An account can have 16.
+of the event's JSON, for every sandbox in the account. It belongs to the
+account, so every key sees the same webhooks. Making, changing or deleting one,
+or reading its deliveries, needs a key made by an owner or admin, as do
+[OpenTelemetry exports](#opentelemetry-export); another key gets 403 `forbidden`. An
+account can have 16.
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -161,7 +164,7 @@ npx withruntime webhooks test <id>
 npx withruntime webhooks deliveries <id>
 ```
 
-Owners can do the same on the [Webhooks page](https://withruntime.com/account/webhooks),
+Owners and admins can do the same on the [Webhooks page](https://withruntime.com/account/webhooks),
 which picks event types grouped by product and shows each webhook's delivery
 log, with **Resend** on each finished delivery.
 

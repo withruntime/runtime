@@ -55,6 +55,7 @@ except ImportError:  # pragma: no cover - older Harbor
 from ._async_client import AsyncRuntime, AsyncSandbox
 from ._errors import NotFoundError
 from ._errors import RuntimeError as RuntimeCloudError
+from ._unpack import unpack_archive
 from ._eval_sandbox import (_TRANSFER_TIMEOUT_S, MissingSudoError, _file_error, _missing_sudo, _Shell, _sizes,
                             dockerfile_workdir, ensure_image, image_name, image_tag)
 
@@ -302,8 +303,7 @@ class RuntimeEnvironment(BaseEnvironment):
             await shell.remove(staging)
         target = Path(target_dir)
         target.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-            archive.extractall(target, filter="data")
+        unpack_archive(data, str(target))
 
 
 __all__ = ["ENVIRONMENT_TYPE", "MissingSudoError", "RuntimeEnvironment"]

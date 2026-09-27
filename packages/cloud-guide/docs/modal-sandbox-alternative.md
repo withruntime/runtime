@@ -68,7 +68,9 @@ Modal    CPU    1,000 × 60 s × 1 core × $0.00003942 = $2.37
 
 A smaller request lowers Modal's figure, but it also caps what the sandbox can
 use when it needs more. Plan fees, storage, network, taxes and free credits are
-left out of both. See [pricing](./pricing) for Runtime's terms.
+left out of both. On Runtime, inbound traffic is free, and each account's first
+100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing) for
+Runtime's terms.
 
 ## How to switch
 

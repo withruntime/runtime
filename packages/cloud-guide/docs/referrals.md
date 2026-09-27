@@ -41,7 +41,8 @@ The details:
 - If the qualifying top-up is partly refunded, the reward is matched again to
   what stands, and both sides give back the difference. If less than $10
   stands, or it is disputed, both rewards are taken back. Either way, only what
-  is still unspent is taken.
+  is still unspent is taken, so a refund of that top-up is smaller by any
+  reward credit already spent on either side.
 - Referral credit is spent like any other credit. It can't be exchanged for
   cash or refunded.
 
@@ -66,8 +67,8 @@ print(r["link"], r["capRemainingMicros"])
 npx withruntime referrals
 ```
 
-Over HTTP it is `GET /v1/referrals`, and over MCP the `runtime_referrals_get`
-tool. Both answer the same fields:
+Over HTTP it is `GET /v1/referrals`, and over MCP the `runtime_account`
+tool's `referrals` action. Both answer the same fields:
 
 | Field                             | Meaning                                                             |
 | --------------------------------- | ------------------------------------------------------------------- |

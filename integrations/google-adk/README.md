@@ -38,7 +38,9 @@ extended while it is open.
 
 ## Tests
 
-`tests/` runs both against fake clients. `scripts/e2e.py` runs both through
+`tests/` runs both against fake clients;
+`uv run --resolution lowest-direct --group test pytest` runs them at the lowest
+versions `pyproject.toml` allows. `scripts/e2e.py` runs both through
 ADK's own `Runner`, driven by a scripted model, against the real API with
 `RUNTIME_API_KEY` set. It passed on 25 September 2026 with google-adk 2.10.0:
 ADK ran the model's block in a sandbox, `runtime_exec` ran through function

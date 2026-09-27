@@ -51,7 +51,7 @@ Every option is optional.
 | `apiKey`            | The API key; defaults to `RUNTIME_API_KEY`, then the key `npx withruntime login` saved                       |
 | `baseUrl`           | The API origin; defaults to `RUNTIME_API_URL`, then `https://api.withruntime.com`                            |
 | `create`            | Defaults for every create: `funding`, `region`, `image`, `vcpu`, memory, disk, `network` and any other field |
-| `previewVisibility` | `private` (default): the URL from `getUrl` carries its token; `public`: anyone with the address              |
+| `previewVisibility` | `private` (default): the URL from `getUrl` carries its token; `public`: anyone with the address, paid only   |
 | `previewTtlSeconds` | How long a private preview's token lasts, 60 seconds to 7 days; one day by default                           |
 
 `compute.sandbox.create()` takes ComputeSDK's own options and maps them:

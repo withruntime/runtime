@@ -51,28 +51,36 @@ and `runtime_<product>_<verb>` in MCP.
 
 ## The console
 
-The sidebar lists every product: **Home**, then **Sandboxes**, **Images** and
-**Volumes**. At its foot are your credit, how long it lasts at this month's pace
-and any free-trial hours left, then **Usage & billing**, **Settings** and
-**Docs**. New accounts begin with a focused connection flow until their first
-sandbox has started.
+The sidebar holds everything. At its top is your account: its menu switches
+account and holds Refer & earn, Support, the documentation, Runtime's status and
+Sign out. Under it are **Search or create**, **Home**, then **Sandboxes**,
+**Images** and **Volumes**, and at its foot **Usage & billing**, with your credit
+(or the free trial left) beside it, and **Settings**. New accounts begin with a
+focused connection flow until their first sandbox has started.
 
-- **Home** is about what runs: each running or paused sandbox with a trace of
-  its recent CPU, its memory and how long it has been up, with **Connect**
-  (copies its SSH command) or **Wake**; what just happened across every
-  product; and **Start something**.
-- **New**, or ⌘K (Ctrl+K), opens one search box that goes to any page or
-  resource and starts anything. Each start shows the CLI command and SDK call
+- **Home** is an overview of the whole account. **Needs you** comes first when
+  something does: a sandbox that failed to start or wake, or credit or
+  free-trial hours about to run out. Then how many sandboxes run, with their CPU
+  together an hour at a time for the last day; this month's cost by product,
+  where it is heading and how long your credit lasts; and **Worth a look**,
+  which names sandboxes costing money while doing little (idle for an hour or
+  more, with **Pause**; reserved CPU or memory mostly unused; paused for over a
+  week). To connect to or wake one sandbox, open it from **Sandboxes**.
+- **Search or create**, or ⌘K (Ctrl+K), opens one search box that goes to any
+  page or resource and starts anything. Each start shows the CLI command and SDK call
   that does it, ready to copy.
-- **Sandboxes** filters by state, with counts, and searches by name. Each row
-  shows live CPU and memory and what the sandbox has cost this month.
-- A **sandbox's page** has **Snapshot**, **Pause** or **Wake**, **Stop**, and
-  **Fork** and its ID and SSH command under ⋯. Its tabs are Overview, Terminal,
+- **Sandboxes** groups every sandbox as running, paused and stopped in the last
+  30 days, filters by state and searches by name or ID. Each row shows live CPU
+  and memory and what the sandbox has cost this month.
+- A **sandbox's page** leads with **Open a shell** while it runs, or **Wake**
+  while it is paused, beside **Pause** and **Stop**; **Snapshot**, **Fork**, its
+  ID and its SSH command are under ⋯. Its tabs are Overview, Terminal,
   Files, Processes, Previews, Network, Metrics, Events and Settings. **Terminal**
   is a shell in the browser ([how it signs in](./security#the-browser-terminal)).
-- **Images** and **Volumes** list each one with its details. An image's page
-  shows every version with its tags and the build log, live while it builds; a
-  volume's page shows its backups. Both give the commands that change them.
+- **Images** and **Volumes** list each one with what it cost this month. An
+  image's page shows every version with its tags and the build log, live while
+  it builds; a volume's page shows how full it is, where it is attached and its
+  backups. Both give the commands that change them.
 - **Usage & billing** shows your credit and how long it lasts, adds credit, and
   charts daily spend by product with an estimate for the rest of the month and
   where it went. Its ledger lists purchases, referral and switching credit,

@@ -64,8 +64,9 @@ CodeSandbox  Size   1,000 × 60 s / 3,600 × $0.1486     = $2.48
 
 Each run here is a whole minute, so CodeSandbox's rounding adds nothing; a
 40-second run would still be billed as a minute there. Plan fees, storage,
-network and taxes are left out of both. See [pricing](./pricing) for Runtime's
-terms.
+network and taxes are left out of both. On Runtime, inbound traffic is free, and
+each account's first 100 GiB out a month is free, then $0.02 per GB. See
+[pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

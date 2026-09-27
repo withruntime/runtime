@@ -27,7 +27,8 @@ logger = logging.getLogger("withruntime")
 # by an older builder is not reused. runtime-builder/3 gives uid 1000 sudo in
 # images built from a public image (ARCHITECTURE.md section 10, "Root in images
 # built from a public image"); images tagged before it may have none.
-IMAGE_RECIPE = "runtime-builder/3"
+# runtime-builder/4 (26 September 2026) fixed that sudo's -s, -i and VAR=value.
+IMAGE_RECIPE = "runtime-builder/4"
 
 
 def image_tag(key: str) -> str:

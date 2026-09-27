@@ -6,7 +6,7 @@ Firecracker microVM with its own Linux kernel. The sandbox is created when the
 run starts and stopped when it ends.
 
 ```bash
-pip install pydantic-ai-withruntime
+pip install pydantic-ai pydantic-ai-withruntime   # pydantic-ai brings the model providers
 npx withruntime login   # or set RUNTIME_API_KEY
 ```
 
@@ -45,6 +45,8 @@ from the front, keeping the end, where errors are.
 ## Tests
 
 `tests/` runs the toolset under Pydantic AI's own agent loop, with a scripted
-`FunctionModel` and a fake client. `scripts/e2e.py` does the same against the
-real API with `RUNTIME_API_KEY` set. It passed on 25 September 2026 with
+`FunctionModel` and a fake client;
+`uv run --resolution lowest-direct --group test pytest` runs them at the lowest
+versions `pyproject.toml` allows. `scripts/e2e.py` runs the agent loop against
+the real API with `RUNTIME_API_KEY` set. It passed on 25 September 2026 with
 Pydantic AI 2.50.0: two runs, each in its own sandbox, both stopped.

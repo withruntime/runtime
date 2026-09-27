@@ -190,8 +190,8 @@ console.log(
 );
 ```
 
-Python: `runtime.sso.get()`, the same fields. MCP: the `runtime_account_sso_get`
-tool.
+Python: `runtime.sso.get()`, the same fields. MCP: the `runtime_account`
+tool's `sso` action.
 
 ## Troubleshooting
 

@@ -11,7 +11,8 @@ model ([the comparison](#published-rate-comparison)).
   CPU floor of 50 millicores (a twentieth of a vCPU).
 - **At scale:** 1,000 running hours cost $31.25 waiting and $80 fully busy.
 
-Memory is billed while compute is running. A GiB is 1,073,741,824 bytes, not a
+Memory is billed while compute is running. CPU is billed from the moment the
+sandbox is ready: what it spends booting or restoring is ours. A GiB is 1,073,741,824 bytes, not a
 decimal GB. A higher `cpuFloorMillis`, or `cpu: "reserved"`, raises the waiting
 charge. Reserved CPU keeps every vCPU for the sandbox and bills it as if it
 were always busy: the floor becomes all of them, so 2 reserved vCPUs and 4 GiB
@@ -47,6 +48,11 @@ neither. A disputed payment, a suspension or an abuse report puts an account
 back to 50. A paused sandbox holds no CPU or memory. At a busy moment a create
 can still answer `no_capacity`; the SDKs wait for room, up to two minutes by
 default.
+
+An account counts as paid while it holds a top-up that was not refunded or
+charged back in full, and no payment of it is in dispute. Once every top-up has
+gone back, the paid-only features close again: outbound ports beyond 80 and
+443, the network products, and four image builds at once.
 
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
@@ -95,8 +101,8 @@ The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole
 size on its server from the moment you create it.
 
-Building an image is free, and so is the snapshot a fork takes for itself and
-deletes. A snapshot is kept 7 days unless you choose 1 to 365. A snapshot's copy
+Building an image is free (on the free trial it counts toward the 100 hours),
+and so is the snapshot a fork takes for itself and deletes. A snapshot is kept 7 days unless you choose 1 to 365. A snapshot's copy
 off its server is part of the snapshot and costs nothing more. Volume backups cost **$0.012 per decimal GB per 30-day month**, charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
 Daily backups are on by default when backups are enabled in the region.
@@ -115,6 +121,26 @@ the item can be charged for that hour; the charge is what it used, and the rest
 is released.
 
 ## Network products
+
+Inbound traffic is free. Each account's first **100 GiB of outbound traffic a
+month** is free, and after that it costs **$0.02 per decimal GB**. Outbound
+traffic is what your sandboxes send over the connections they open to the
+internet, TCP and UDP. Everything a sandbox receives, replies it serves through
+previews, custom domains and TCP ports, and traffic to your own network over a
+WireGuard tunnel are not counted. A trial sandbox's traffic is free and uses
+none of the allowance.
+
+The allowance is shared by all of an account's sandboxes and starts again on
+the first of each month, UTC. Traffic is charged from your balance each time a
+sandbox's compute settles: at each lease renewal and when it stops or pauses.
+It is never held in advance and never takes the balance below zero. The rate is
+fixed in each sandbox's quote, as `egress.outbound` in `rates`, and
+`GET /v1/usage` answers the month so far under `outbound`: what was sent, what
+the allowance covered, and what the rest cost. At $0.02, 1 TB past the
+allowance costs $20.
+
+A paid sandbox moves up to 500 GiB a day, in and out together, and a trial
+account 5 GiB a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
 
 A dedicated IPv4 address costs **$5 per 30-day month**. A WireGuard tunnel
 costs **$5 per 30-day month**, including up to 16 peers. These are prorated to
@@ -248,7 +274,8 @@ runtime switch --from e2b
 - It does not stack with a [referral](./referrals). If you signed up through a
   referral link, the referral's match applies instead, and it is never smaller.
 - If the top-up is refunded or charged back, the matching credit goes back too,
-  up to what is unspent.
+  up to what is unspent, and a refund of that top-up is smaller by any matching
+  credit already spent.
 
 `runtime switch` on its own shows whether you can still claim it and what it
 paid.

@@ -21,6 +21,7 @@ from ._errors import WAITS_FOR_ROOM, CommandError, ConnectionError, RuntimeError
 from ._http import SyncHTTP as HTTP
 from ._http import Origin
 from ._proxy import describe as describe_route
+from ._unpack import unpack_archive
 from ._ws import SyncWebSocket as WebSocket
 from ._tunnel import PortForward
 from ._tunnel import sync_open_forward as open_forward
@@ -636,8 +637,9 @@ class Files:
         return (self.read(path)).decode(encoding)
 
     def write(self, path: str, data: Union[str, bytes], mode: Optional[int] = None) -> dict[str, Any]:
-        """Writes a file of any size, atomically, making parent directories.
-        Large files go in parallel 1 MiB chunks checked against their SHA-256.
+        """Writes a file, atomically, making parent directories. Under
+        /workspace any size, large ones in parallel 1 MiB chunks checked against
+        their SHA-256; elsewhere, with the sandbox user's rights, up to 1 MiB.
         ``mode`` sets its permissions (0o755 for a program); 0o644 when left out."""
         payload = data.encode() if isinstance(data, str) else bytes(data)
         octal = None if mode is None else format(mode & 0o777, "03o")
@@ -751,22 +753,12 @@ class Files:
             os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
             self._stream_to(remote_path, local_path)
             return
-        import io
-        import tarfile
         staging = f"/tmp/.runtime-download-{uuid.uuid4().hex}.tar.gz"
         packed = Sandbox(self._t, {"id": self._id}).exec(["tar", "-czf", staging, "-C", remote_path, "."])
         if packed.exit_code != 0:
             raise CommandError(packed.to_dict())
         try:
-            data = self.read(staging)
-            os.makedirs(local_path, exist_ok=True)
-            root = os.path.realpath(local_path)
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-                for member in archive.getmembers():
-                    destination = os.path.realpath(os.path.join(root, member.name))
-                    if destination != root and not destination.startswith(root + os.sep):
-                        raise RuntimeError(f"Refusing an archive entry outside the target: {member.name}", code="unsafe_archive")
-                archive.extractall(root)  # noqa: S202 - every member checked above
+            unpack_archive(self.read(staging), local_path)
         finally:
             try:
                 self.remove(staging)
@@ -814,7 +806,8 @@ class Sandbox:
                    on_stderr: Optional[Callable[[str], Any]] = None, check: bool = False,
                    idempotency_key: Optional[str] = None) -> CommandResult:
         """Runs a command: a string under ``bash -c``, a list without a shell.
-        With on_stdout/on_stderr the output streams. A timeout is a result
+        With on_stdout/on_stderr the output streams. The timeout is 60 s by
+        default, 24 h when the output streams. A timeout is a result
         (timed_out=True, the output so far), never an error; ``check=True``
         raises CommandError on a non-zero exit."""
         streaming = on_stdout is not None or on_stderr is not None or (timeout_ms or 0) > 60_000
@@ -1282,7 +1275,9 @@ class Runtime:
         microdollars in strings (1,000,000 = $1): ``credited``, ``spent``,
         ``held``, ``expired``, ``available`` (credited - spent - expired - held)
         and ``takenBack`` (the part of spent that refunds and disputes took);
-        ``trial`` is in milliseconds, or None."""
+        ``trial`` is in milliseconds, or None; ``outbound`` is this month's
+        outbound traffic in bytes, with ``chargedMicros`` for what went past
+        the free 100 GiB."""
         return self._t.json("GET", "/v1/usage")
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:

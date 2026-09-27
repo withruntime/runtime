@@ -67,8 +67,12 @@ E2B      CPU    1,000 × 60 s / 3,600 × 2 × $0.0504 = $1.68
   Runtime against $2.76 on E2B. At this size, Runtime is cheaper however busy the
   sandbox is.
 
-Plan fees, storage, network, taxes and free credits are left out of both. See
-[pricing](./pricing) for Runtime's terms.
+Plan fees, storage, network, taxes and free credits are left out of both.
+`runtime compare --from e2b` prices your own usage the same way, with
+sandboxes the free trial paid for at the standard rates, so trial time never
+counts as a saving. On Runtime, inbound traffic is free, and each account's
+first 100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing)
+for Runtime's terms.
 
 ## How to switch
 
@@ -93,11 +97,16 @@ from withruntime.e2b import Sandbox  # was: from e2b import Sandbox
 `withruntime/e2b/code-interpreter` and `withruntime.e2b.code_interpreter`
 replace E2B's code interpreter packages. Sandboxes get E2B's defaults: 2 vCPU,
 512 MiB and a 300-second timeout, after which they stop. They use the free
-trial while the account has trial time, then prepaid credit.
+trial while the account has trial time, then prepaid credit; pass
+`runtime: { create: { funding: "trial" } }` (Python
+`runtime_create={"funding": "trial"}`) while you test, so a test never spends
+credit.
 
-`commands.run` returns the command's whole output and throws
-`CommandExitError` on a non-zero exit, as E2B's does. If any output was lost
-before it was read, the result's `truncated` is set and a warning says so.
+`commands.run` returns the command's whole output and, as E2B's does, throws
+`CommandExitError` (Python `CommandExitException`) on a non-zero exit and
+`TimeoutError` (Python `TimeoutException`) past its timeout, so your existing
+error handling keeps working. If any output was lost before it was read, the
+result's `truncated` is set and a warning says so.
 
 A call Runtime handles differently, such as E2B templates, workload identity or
 a single lease over an hour, throws `NotSupportedError` before anything happens

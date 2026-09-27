@@ -240,4 +240,6 @@ follows a build while it runs.
 
 A stored image is charged on its whole file
 ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
-and does not use trial hours. A free trial keeps its first three images free.
+with credit. On the free trial a build counts toward the 100 hours, only for
+the time it builds, and is at most 2 vCPU and 4 GiB, 20 minutes and 10 builds
+a day. A free trial keeps its first three images free.

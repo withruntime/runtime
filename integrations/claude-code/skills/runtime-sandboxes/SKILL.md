@@ -28,7 +28,7 @@ then appears. Never ask the user for a key.
    `timedOut` and the truncation flags, not only that the call succeeded.
 4. For a server or a long job, `runtime_sandbox_exec` with `"background": true`, then
    `runtime_sandbox_process` with `"action": "read"` to follow it.
-5. To show a web app, `runtime_sandbox_previews_create` for its port. Private previews
+5. To show a web app, `runtime_sandbox_previews` with `"action": "create"` for its port. Private previews
    need the returned token; give the user `urlWithToken`.
 6. Copy results out (`runtime_sandbox_files_read`, or
    `npx -y withruntime sandbox cp <id>:/workspace/out ./out`), then
@@ -42,9 +42,9 @@ use and the memory they reserve, so stop or pause what you are not using.
 ## Good habits
 
 - One sandbox per task. Name it (`name`) so it is easy to find again.
-- Keep secrets out of commands and files: `runtime_secrets_set` gives a sandbox
+- Keep secrets out of commands and files: `runtime_secrets` with `"action": "set"` gives a sandbox
   a secret it can use without seeing.
 - For a question about limits, prices or a product, call `runtime_docs_read`
   rather than guessing.
-- When something fails that should work, `runtime_feedback_submit` with a short
+- When something fails that should work, `runtime_feedback` with `"action": "submit"` and a short
   summary and the request id, never code or credentials.

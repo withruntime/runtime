@@ -74,7 +74,9 @@ Lambda   CPU    1,000 × 60 s × 2 × $0.0000276944              = $3.32
   sandbox is.
 
 Snapshot storage and its reads and writes, data transfer, taxes and credits are
-left out of both. See [pricing](./pricing) for Runtime's terms.
+left out of both. On Runtime, inbound traffic is free, and each account's first
+100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing) for
+Runtime's terms.
 
 ## How to switch
 

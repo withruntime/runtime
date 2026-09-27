@@ -2,7 +2,9 @@
 <!--
   The Java SDK's Maven metadata. Maven Central reads it from the bundle that
   scripts/publish.sh builds with the JDK's own tools, so publishing needs no
-  Maven plugins; `mvn package` also works for anyone who prefers Maven.
+  Maven plugins; `mvn verify` also builds it for anyone who prefers Maven. The
+  tests have their own runner and need the API fixture, so `mvn verify` only
+  compiles them; `bun scripts/check.ts` runs them.
   The version here, RuntimeClient.VERSION and the guide's coordinates move together.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -35,11 +37,36 @@
   </developers>
 
   <scm>
-    <url>https://withruntime.com/docs/java</url>
+    <url>https://github.com/withruntime/runtime/tree/main/sdks/java</url>
+    <connection>scm:git:https://github.com/withruntime/runtime.git</connection>
   </scm>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Maven compiles the tests inside the com.withruntime module, which reads
+             neither the JDK's HTTP server (the fake API) nor its compiler (the guide's
+             samples); scripts/check.ts compiles them on the class path instead. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <executions>
+          <execution>
+            <id>default-testCompile</id>
+            <configuration>
+              <compilerArgs>
+                <arg>--add-modules=jdk.httpserver,java.compiler</arg>
+                <arg>--add-reads=com.withruntime=jdk.httpserver,java.compiler</arg>
+              </compilerArgs>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

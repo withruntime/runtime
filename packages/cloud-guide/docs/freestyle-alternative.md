@@ -74,8 +74,10 @@ Freestyle  CPU    1,000 × 60 s / 3,600 × 2 × $0.04032        = $1.34
   against $2.25 on Freestyle. At this size Runtime is cheaper however busy the
   sandbox is.
 
-Plan fees, free allowances, data transfer, paused storage and taxes are left
-out of both. See [pricing](./pricing) for Runtime's terms.
+Plan fees, free allowances, data transfer, paused storage and taxes are left out
+of both. On Runtime, inbound traffic is free, and each account's first 100 GiB
+out a month is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's
+terms.
 
 ## How to switch
 
@@ -105,8 +107,8 @@ await box.stop();
 - **Forking without a pause.** Freestyle clones a running VM without pausing
   it. A Runtime fork pauses the source for about a second.
 - **The fastest start.** Freestyle states VMs provision with a p99 under
-  400 ms. A Runtime sandbox ran its first command 391 ms after the request at
-  the median and 981 ms at the 95th percentile on 25 September 2026
+  400 ms. A Runtime sandbox ran its first command 374 ms after the request at
+  the median and 495 ms at the 95th percentile on 26 September 2026
   ([speed](./speed)).
 
 ## Sources

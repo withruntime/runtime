@@ -137,8 +137,11 @@ module WithRuntime
       value = names.map { |name| env[name] }.find { |found| found && !found.strip.empty? }
       return nil unless value
 
-      exempt = env["NO_PROXY"] || env["no_proxy"]
-      return nil if exempt && !exempt.strip.empty? && !URI::Generic.use_proxy?(uri.host, uri.host, uri.port, exempt)
+      # URI's matcher knows neither curl's "*" (no proxy at all) nor "*.example.com".
+      exempt = (env["NO_PROXY"] || env["no_proxy"]).to_s.split(",").map(&:strip).reject(&:empty?)
+      return nil if exempt.include?("*")
+      exempt = exempt.map { |entry| entry.delete_prefix("*") }.join(",")
+      return nil if !exempt.empty? && !URI::Generic.use_proxy?(uri.host, uri.host, uri.port, exempt)
 
       value = "http://#{value}" unless value.include?("://")
       URI(value.strip)

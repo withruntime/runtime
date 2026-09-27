@@ -33,8 +33,9 @@ The answer lists two DNS records to set at your DNS provider:
 | TXT    | `_runtime-challenge.app.example.com` | `runtime-verify=<token>`  | Proves the name is yours  |
 | CNAME  | `app.example.com`                    | `domains.runtimehost.com` | Sends visitors to Runtime |
 
-A name with no subdomain (`example.com`) cannot have a CNAME; set an A record
-to the address the answer gives instead. Then check:
+A name with no subdomain (`example.com`, `example.co.uk`) cannot have a CNAME;
+the answer gives an A record (and an AAAA for an IPv6 address) with the
+addresses to set instead. Then check:
 
 ```bash no-run
 runtime domain verify app.example.com

@@ -63,8 +63,9 @@ Blaxel   Memory 1,000 × 60 s × 4 × $0.0000115      = $2.76
 
 The Blaxel figure assumes each sandbox goes to standby the moment its run ends;
 Blaxel's docs say standby starts about 15 seconds after the last connection
-closes. Storage, network, taxes and free credit are left out of both. See
-[pricing](./pricing) for Runtime's terms.
+closes. Storage, network, taxes and free credit are left out of both. On
+Runtime, inbound traffic is free, and each account's first 100 GiB out a month
+is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

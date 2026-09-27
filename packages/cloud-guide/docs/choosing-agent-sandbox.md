@@ -42,7 +42,7 @@ to keep, expected duration and acceptable failure rate.
 | Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default                                                            |
 | Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept 1–365 days; a failed wake says so                                                 |
 | Custom environments     | Dependencies installed once, reused on every start            | Custom images from a recipe, any public or private image, or a Dockerfile; volumes                                 |
-| Predictable cost        | CPU, memory, idle time, storage, retries and fees             | Measured CPU with a floor, reserved memory, separately quoted paused storage                                       |
+| Predictable cost        | CPU, memory, idle time, storage, retries and fees             | Measured CPU with a floor, reserved memory, separately quoted paused storage, 100 GiB out a month free             |
 | Spending control        | Limits an agent cannot raise itself                           | Read-only keys and a daily spending limit per key, set only by a person                                            |
 | Team access             | Roles for people, and a record of who changed what            | Owner, admin, developer and billing roles; an audit log kept at least 400 days                                     |
 
@@ -84,8 +84,9 @@ on Linux. Its measured CPU saves the most on workloads that wait on model or
 network responses.
 
 A running sandbox still pays its CPU floor and reserved memory, and paused
-storage is billed separately. Sandboxes run Linux on CPUs, in one US region
-today; see [products](./products) for everything available.
+storage is billed separately. Inbound traffic is free, and each account's first
+100 GiB out a month is free, then $0.02 per GB. Sandboxes run Linux on CPUs, in
+one US region today; see [products](./products) for everything available.
 
 ## Compared with a specific provider
 

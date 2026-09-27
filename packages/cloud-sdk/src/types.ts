@@ -112,7 +112,8 @@ export type ExecOptions = {
   env?: Record<string, string>;
   /** Given to standard input, then closed. */
   stdin?: string | Uint8Array;
-  /** Default 60 000; up to 24 hours. A timeout is a result (timedOut), not an error. */
+  /** Default 60 000, or 24 hours when the output streams (onStdout, onStderr or
+   * execStream); up to 24 hours. A timeout is a result (timedOut), not an error. */
   timeoutMs?: number;
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
@@ -171,6 +172,18 @@ export type Usage = {
   /** The part of spent that refunds and disputes took. */
   takenBack: string;
   trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
+  /** Outbound traffic this calendar month, UTC: the first `allowanceBytes`
+   * (100 GiB) an account sends are free, the rest $0.02 per decimal GB. */
+  outbound?: {
+    month: string;
+    sentBytes: number;
+    freeBytes: number;
+    billableBytes: number;
+    allowanceBytes: number;
+    chargedMicros: string;
+    /** What the balance or a spending limit could not cover; never charged. */
+    writtenOffMicros: string;
+  } | null;
   resources: Array<Record<string, unknown>>;
   [key: string]: unknown;
 };

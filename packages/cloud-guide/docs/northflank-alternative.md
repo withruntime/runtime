@@ -65,8 +65,9 @@ Northflank  CPU    1,000 × 60 s / 3,600 × 2 × $0.01667  = $0.556
   against $1.11 on Northflank.
 
 The more of its time an agent spends waiting, the more Runtime saves. Storage,
-network, taxes and free allowances are left out of both. See
-[pricing](./pricing) for Runtime's terms.
+network, taxes and free allowances are left out of both. On Runtime, inbound
+traffic is free, and each account's first 100 GiB out a month is free, then
+$0.02 per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

@@ -261,7 +261,53 @@ test("`runtime compare` says which sandboxes the free trial paid for, and that t
     async () => {
       const { lines, out } = capture();
       await run(["compare", "--from", "e2b"], env, out);
-      expect(lines.join("\n")).toContain("3 of them ran on the free trial");
+      expect(lines.join("\n")).toContain(
+        "3 of them, 16.67 hours of that time, ran on the free trial",
+      );
+    },
+  );
+});
+
+test("`runtime compare` never shows a short trial test as $0 or 0 hours", async () => {
+  // One trial sandbox of 2 vCPU and 512 MiB for 10 seconds, 2 CPU-seconds used:
+  // 25 microdollars on Runtime's side, 302 at Daytona's rates.
+  const short = {
+    ...COMPARISON,
+    provider: "daytona",
+    rival: { ...COMPARISON.rival, name: "Daytona" },
+    usage: {
+      ...COMPARISON.usage,
+      sandboxes: 1,
+      runSeconds: 10,
+      activeCpuSeconds: 2,
+      trialSandboxes: 1,
+      trialRunSeconds: 10,
+    },
+    runtimeMicros: "25",
+    rivalMicros: "302",
+    savingMicros: "277",
+    savingPercent: 91.7,
+    perMonth: { fromDays: 1, runtimeMicros: "750", rivalMicros: "9060", savingMicros: "8310" },
+  };
+  await withStub(
+    () => short,
+    async () => {
+      const { lines, out } = capture();
+      await run(["compare", "--from", "daytona"], env, out);
+      const text = lines.join("\n");
+      expect(text).toContain(
+        "Your last 30 days: $0.000025 on Runtime; the same sandboxes on Daytona: $0.0003; you save $0.0003 (91.7%).",
+      );
+      expect(text).toContain("Priced: 1 sandbox, 10 seconds running. It ran on the free trial");
+      expect(text).not.toMatch(/\$0\.0+(?!\d)/);
+    },
+  );
+  await withStub(
+    () => ({ ...short, usage: { ...short.usage, runSeconds: 90, trialRunSeconds: 90 } }),
+    async () => {
+      const { lines, out } = capture();
+      await run(["compare", "--from", "daytona"], env, out);
+      expect(lines.join("\n")).toContain("1 sandbox, 1.5 minutes running.");
     },
   );
 });

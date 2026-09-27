@@ -222,3 +222,12 @@ test("`sandbox network` with the internet off allows nothing, and says so", asyn
   }
   expect(lines.join("\n")).toMatch(/^allow\s+\(nothing\)$/m);
 });
+
+// Reviewer's finding #45, 26 September 2026: a --json meant for the remote
+// command was dropped when --json also came before --, so the command ran
+// without it. Only what comes before -- is the CLI's.
+test("--json after -- belongs to the command, even when the CLI has its own before it", async () => {
+  const { sent } = await cli(["sandbox", "exec", SANDBOX, "--json", "--", "tool", "--json"]);
+  const exec = sent.find((request) => request.path.endsWith(":exec"));
+  expect(exec?.body?.argv).toEqual(["tool", "--json"]);
+});

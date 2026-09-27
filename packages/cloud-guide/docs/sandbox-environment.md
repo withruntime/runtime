@@ -112,10 +112,13 @@ paid sandbox also sends UDP to any public address and port
 to 500 Mbit/s in each direction. After its first 10 GiB at that speed it runs
 at 200 Mbit/s, and earns the burst back at that rate while it moves less. It
 can move 500 GiB a day, in and out together, in a 24-hour window that starts
-with its first byte. A trial sandbox gets 100 Mbit/s, 20 Mbit/s after 2 GiB, and
-50 GiB a day. Past the daily amount,
-open connections close and new requests get `429 Too Many Requests` with
-`X-Runtime-Egress: quota-exhausted` and the reset time, until the window ends.
+with its first byte. A trial sandbox gets 20 Mbit/s, and a trial account 5 GiB a
+day shared by all its sandboxes. Past the daily amount, open connections close
+and new requests get `429 Too Many Requests` with `X-Runtime-Egress:
+quota-exhausted` (`quota-exhausted:account` for a trial account's shared
+amount), until the window ends.
+Inbound traffic is free; each account's first 100 GiB out a month is free, then
+$0.02 per GB ([pricing](./pricing#network-products)).
 
 Each sandbox has its own rules, set at create (`network`) or at any time after,
 applied at once, to open connections too:

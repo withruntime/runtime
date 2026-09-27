@@ -122,7 +122,8 @@ gets "Did you mean --memory?". `--help` after any command prints its product's
 help and runs nothing.
 
 `exec` streams all of the output as it happens and exits with the command's own
-exit code (124 when it timed out), so `set -e` scripts behave. Everything it
+exit code (124 when it timed out), so `set -e` scripts behave. Without
+`--timeout` a command may run for 24 hours; with `--json`, for 60 seconds. Everything it
 starts, `nohup … &` included, ends when the command returns; start a server with
 `spawn` (below) instead. Pass secrets with
 `--env` from a variable, never written into the command. Piped input reaches
