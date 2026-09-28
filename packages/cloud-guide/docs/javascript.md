@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.8.3. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.8.4. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 

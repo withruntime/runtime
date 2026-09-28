@@ -111,7 +111,7 @@ test("create fills in a 2 vCPU, 4 GiB run for 30 minutes and sends one idempoten
         name: "nightly",
         schedule: { kind: "cron", expression: "0 3 * * *", timezone: "Europe/Berlin" },
         compute: {
-          region: "us-east-vin",
+          region: "us-east",
           vcpu: 2,
           cpuMode: "shared",
           cpuFloorMillis: 50,

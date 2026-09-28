@@ -53,6 +53,13 @@ each month. You approve one link in your browser; there is nothing to copy.
 **Start a sandbox** on Home. It opens with a shell running in the page, on your
 free hours, and pauses itself after {{idle-pause}} with nothing happening in it.
 
+**From your code:** Home offers the prompt for your coding agent, which does
+the whole setup, and by hand makes your first key in one click, shown once,
+with the install and a first sandbox in Python or JavaScript. If you signed up
+from a page comparing Runtime with E2B, Daytona, Vercel Sandbox or Blaxel, Home
+opens on that switch instead, and by hand it is the key, the install and the
+one import that changes.
+
 **One line, with Node 22.12 or later:**
 
 ```bash

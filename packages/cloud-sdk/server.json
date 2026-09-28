@@ -10,13 +10,13 @@
     "source": "github",
     "subfolder": "packages/cloud-sdk"
   },
-  "version": "0.8.3",
+  "version": "0.8.4",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "withruntime",
-      "version": "0.8.3",
+      "version": "0.8.4",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "packageArguments": [{ "type": "positional", "value": "mcp" }]

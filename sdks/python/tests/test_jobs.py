@@ -96,7 +96,7 @@ class JobsTest(unittest.TestCase):
         first = Stub.seen[0]
         self.assertEqual(first[:2], ("POST", "/v1/jobs"))
         self.assertTrue(first[3])
-        self.assertEqual(first[2]["compute"], {"region": "us-east-vin", "vcpu": 2, "cpuMode": "shared",
+        self.assertEqual(first[2]["compute"], {"region": "us-east", "vcpu": 2, "cpuMode": "shared",
                                                "cpuFloorMillis": 50, "memoryMiB": 4096, "diskMiB": 4096,
                                                "durationSeconds": 1860})
         self.assertEqual(first[2]["schedule"], {"kind": "cron", "expression": "0 3 * * *",

@@ -116,7 +116,7 @@ Each event carries the resource as it was:
       "vcpu": 2,
       "memoryMiB": 4096,
       "diskMiB": 10240,
-      "region": "us-east-vin",
+      "region": "us-east",
       "funding": "paid",
       "pausable": true
     }

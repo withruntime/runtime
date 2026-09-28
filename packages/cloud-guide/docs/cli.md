@@ -396,7 +396,7 @@ runtime sandbox stop "${id}" --json
   "name": null,
   "labels": {},
   "state": "running",
-  "region": "us-east-vin",
+  "region": "us-east",
   "funding": "trial",
   "vcpu": 2,
   "memoryMiB": 4096,

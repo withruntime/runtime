@@ -112,9 +112,9 @@ export type CreateJob = {
 };
 
 /** The size a run gets when `compute` leaves a field out: the sandbox
- * defaults, in the region `us-east-vin`. */
+ * defaults, in the region `us-east`. */
 export const JOB_DEFAULTS = {
-  region: "us-east-vin",
+  region: "us-east",
   vcpu: 2,
   cpuMode: "shared" as const,
   cpuFloorMillis: 50,

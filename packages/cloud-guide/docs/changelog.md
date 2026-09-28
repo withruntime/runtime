@@ -10,6 +10,22 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 28 September 2026
 
+- **The region is now `us-east`.** It was `us-east-vin`, the name of one
+  building; a region is named for its place, so more data centres nearby can
+  join it. Every sandbox, snapshot, volume, image and job moved with it and
+  keeps running. Asking for `us-east-vin` now answers `invalid_region` and
+  names `us-east`, and an identity token's `region` claim reads `us-east`, so
+  update a trust policy that names the old one. `withruntime` 0.8.4 sends
+  `us-east` as a job's default region; update with `npm i withruntime@latest`
+  or `pip install -U withruntime`. A job that names a region Runtime does not
+  have is now refused when you create it, rather than waiting at every run.
+- **Your first key and code on Home.** A new account's Home puts your code in
+  one place beside the browser shell: the prompt that has your coding agent do
+  the setup, and by hand **Create my key**, which makes a key and shows it
+  once, with the install and a first sandbox in Python or JavaScript. Signing
+  up from a page comparing Runtime with another provider opens Home on that
+  switch, with the one import that changes for E2B, Daytona, Vercel Sandbox and
+  Blaxel. See [Get started](./start#run-your-first-sandbox).
 - **A sandbox from a browser.** A sandbox session is a short-lived token your
   own web page uses to run commands, read and write files and reach previews in
   one sandbox, with no API key and no proxy of your own. It cannot stop, extend
