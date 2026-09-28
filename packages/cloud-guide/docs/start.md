@@ -4,13 +4,23 @@ Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use, and
 
 Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
 One API, one CLI, one MCP server and SDKs for JavaScript and Python cover
-every Runtime product. New accounts get [100 free hours](./trial), no card.
+every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), no card.
 
-- **100 free hours, no card:** enough to run your real workload before you pay.
-- **Pay for the CPU you use:** $0.025 per active vCPU-hour, measured, and
-  $0.0075 per reserved GiB-hour of memory ([pricing](./pricing)).
+- **{{trial-hours}} free hours, no card:** enough to run your real workload before you pay.
+- **Pay for the CPU you use:** {{cpu-rate}} per active vCPU-hour, measured, and
+  {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
+- **Idle time costs almost nothing:** a sandbox pauses itself after
+  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
+  and runs its next command {{wake}} after the request that wakes it.
+- **Fast:** a new sandbox runs its first command {{first-command}} after the
+  create request ([speed](./speed)).
 - **Pause keeps memory**, and a fork copies a running sandbox with its memory
   and processes.
+- **An uptime promise:** paid accounts are promised {{uptime-promise}} API
+  uptime a month, and {{uptime-credit}} of a short month's charges comes back
+  automatically ([Uptime Promise](/legal/sla)).
+- **Secrets the sandbox never sees,** and single sign-on, SCIM and roles free
+  for every team.
 - **Built in:** a desktop, a code interpreter, custom images, volumes, and
   preview URLs that are private by default.
 
@@ -30,7 +40,7 @@ each month. You approve one link in your browser; there is nothing to copy.
 
 **In the browser:** [sign in](https://withruntime.com/sign-in) and press
 **Start a sandbox** on Home. It opens with a shell running in the page, on your
-free hours, and pauses itself after five minutes with nothing running in it.
+free hours, and pauses itself after {{idle-pause}} with nothing happening in it.
 
 **One line, with Node 22.12 or later:**
 
@@ -148,7 +158,7 @@ import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
 `withruntime/blaxel`.
 `npx withruntime compare --from <provider>` prints what you save, and
 `npx withruntime switch --from <provider>` before your first top-up gets it
-matched, up to $100.
+matched, up to {{switching-max}}.
 
 ## If the first run fails
 

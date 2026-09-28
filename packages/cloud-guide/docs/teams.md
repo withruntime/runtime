@@ -16,6 +16,7 @@ invite someone.
 | Start, run and delete sandboxes and other resources, using credit |  yes  |  yes  |    yes    |    —    |
 | Create API keys and approve CLI connections                       |  yes  |  yes  |    yes    |    —    |
 | Revoke or limit a key somebody else made                          |  yes  |  yes  |     —     |    —    |
+| Make a key account-wide, or limit it to its own again             |  yes  |  yes  |     —     |    —    |
 | Add credit and see payments                                       |  yes  |  yes  |     —     |   yes   |
 | Invite, remove and change the role of members                     |  yes  |  yes  |     —     |    —    |
 | Read the audit log                                                |  yes  |  yes  |     —     |    —    |
@@ -73,9 +74,26 @@ account sees every key, with who made it, at
 
 - Each key is its own agent, so the audit log and the bill say which key did
   what.
-- A key sees and uses only the sandboxes its own agent made. A sandbox made
-  with another key answers 404 to it, while a sandbox's name is still unique
-  across the whole account.
+- A key sees and uses the sandboxes and other resources its own agent made. A
+  sandbox made with another key answers 404 to it, while a sandbox's name is
+  still unique across the whole account.
+- An owner or admin can make a key **account-wide**: it sees and uses every
+  sandbox, snapshot, image, volume, service and job in the account, whichever
+  key made it, and `getOrCreate` with a name another key holds returns that
+  sandbox. Choose "Everything in the account" when you make the key, use
+  **Make account-wide** on a key's row, or run
+  `runtime keys create --account-wide` (CLI 0.8.2 and later), which only an owner or admin can
+  approve. This is how services that share sandboxes work, as a Blaxel
+  workspace key does.
+- An account-wide key still acts as its own agent. The audit log names it, and
+  a wake, extension or restart it asks for is billed to it and counts against
+  its own daily limit, even on a sandbox another key made. Job secrets stay
+  with the person who made the key; the secrets sandboxes use are the
+  account's, for every key.
+- An account-wide key reaches the account only while the person who made it is
+  an owner or admin. Changed to developer, it sees only what it made again, on
+  the next request. Developers and billing members cannot make or switch one.
+  A read-only key already sees the whole account and is never account-wide.
 - The person who made a key sets or changes its daily spending limit. Owners and
   admins can limit or revoke any key.
 - When someone leaves or is removed, the keys they made are revoked in the same

@@ -17,8 +17,8 @@ It never spends paid credit, and it never touches your old provider's account.
 
 **Why teams switch:**
 
-- **You pay for the CPU you use.** $0.025 per active vCPU-hour, measured, and
-  $0.0075 per reserved GiB-hour of memory. No plan fee, and no one-minute
+- **You pay for the CPU you use.** {{cpu-rate}} per active vCPU-hour, measured, and
+  {{memory-rate}} per reserved GiB-hour of memory. No plan fee, and no one-minute
   minimum.
 - **The calls map one to one.** Create, exec, files and stop have direct
   equivalents (table below). Code written for E2B, Daytona, Vercel Sandbox or
@@ -29,7 +29,7 @@ It never spends paid credit, and it never touches your old provider's account.
 - **More is built in.** A desktop, a code interpreter, custom images, volumes,
   and preview URLs that are private by default.
 - **No API key to copy.** One browser approval connects the CLI, SDKs and MCP.
-- **Test it free.** 100 sandbox hours, no card, up to eight running at once.
+- **Test it free.** {{trial-hours}} sandbox hours, no card, up to eight running at once.
 
 The [comparison pages](./e2b-alternative) work through the cost of the same job
 on each provider.
@@ -115,14 +115,16 @@ sandbox; `delete()` ends it. See [JavaScript](./javascript) and
 **From Blaxel:** change `from "@blaxel/core"` to `from "withruntime/blaxel"`
 (Python `from blaxel.core import SandboxInstance` to
 `from withruntime.blaxel import SandboxInstance`). Standby becomes a pause that
-keeps memory and processes after 60 idle seconds, and the next call wakes the
+keeps memory and processes after {{idle-pause}} idle, and the next call wakes the
 sandbox. Pass `withruntime: { create: { funding: "trial" } }` (Python
 `runtime_create={"funding": "trial"}`) while you test. A call Runtime handles
 differently, such as sessions, drives or schedules, throws `NotSupportedError`
 naming what to use instead.
 
-- A sandbox is visible only to the key that created it, so a web service and a
-  worker that share sandboxes must use the same key
+- A Blaxel workspace key sees every sandbox; a Runtime key sees the ones it
+  made unless an owner or admin makes it account-wide
+  (the API keys page, or `runtime keys create --account-wide` from CLI 0.8.2). Give services
+  that share sandboxes account-wide keys
   ([keys in a team](./teams#keys-in-a-team)).
 - The trial caps a sandbox at 2 vCPU and 4096 MB; `memory: 8192` needs paid
   credit.
@@ -203,7 +205,7 @@ sandboxes you actually ran at that provider's published rates and prints the
 monthly saving, with the date the rates were checked (`runtime_usage_compare`
 over MCP). It prices trial sandboxes at the standard rates and says how many
 ran on the trial, so the saving is the one paid credit gives. Before the owner's first top-up, `npx withruntime switch --from
-<provider>` records the move, and that top-up is matched, up to $100
+<provider>` records the move, and that top-up is matched, up to {{switching-max}}
 ([switching credit](./pricing#switching-credit)). To work it out by hand:
 
 1. **Runtime's cost.** After the test runs, `npx withruntime usage --json` lists
@@ -212,7 +214,7 @@ ran on the trial, so the saving is the one paid credit gives. Before the owner's
    the standard rates in [pricing](./pricing):
 
    ```text
-   cost = billedCpuSeconds × $0.025 / 3,600 + memoryGiBSeconds × $0.0075 / 3,600
+   cost = billedCpuSeconds × {{cpu-rate}} / 3,600 + memoryGiBSeconds × {{memory-rate}} / 3,600
    ```
 
 2. **The old provider's cost.** Use its own billing or usage records where you
@@ -234,8 +236,8 @@ A report in this shape, with made-up volumes:
 
 > Switched from E2B to Runtime on branch `runtime`. 40 test jobs passed with the
 > same outputs. Runtime, measured: $0.00064 a job. E2B at its published rates
-> (checked 23 September 2026): $0.00276 a job. At your 30,000 jobs a month,
-> that is $19 on Runtime against $83 on E2B: you save about $64 a month (77%).
+> (checked {{checked:e2b}}): {{=$5 cost:e2b:2x4x60x0x1}} a job. At your 30,000 jobs a month,
+> that is $19 on Runtime against $83 on E2B: you save about {{=$0 cost:runtime:100000}} a month (77%).
 > Add credit at https://withruntime.com/account/billing before production
 > traffic runs.
 
@@ -243,7 +245,7 @@ A report in this shape, with made-up volumes:
 
 - The owner adds prepaid credit at
   [Usage & billing](https://withruntime.com/account/billing), any amount from
-  $10. There is no subscription.
+  {{topup-min}}. There is no subscription.
 - Change `funding: "trial"` to `"paid"`, or remove it, once the owner says so.
   Never spend paid credit on your own.
 - The old provider's account, keys and data are the owner's to close. Leave

@@ -1,14 +1,14 @@
 # Referrals
 
-Share your link. When a company signs up with it and adds $10 or more of credit
+Share your link. When a company signs up with it and adds {{referral-min-purchase}} or more of credit
 for the first time, **you both get credit equal to what they added: at least
-$25 and at most $500 each**. Theirs is added on top of what they bought.
+{{referral-min}} and at most {{referral-max}} each**. Theirs is added on top of what they bought.
 
-| Their first top-up | You get | They get, on top |
-| ------------------ | ------: | ---------------: |
-| $10                |     $25 |              $25 |
-| $137.42            | $137.42 |          $137.42 |
-| $2,000             |    $500 |             $500 |
+| Their first top-up        |          You get | They get, on top |
+| ------------------------- | ---------------: | ---------------: |
+| {{referral-min-purchase}} | {{referral-min}} | {{referral-min}} |
+| $137.42                   |          $137.42 |          $137.42 |
+| $2,000                    | {{referral-max}} | {{referral-max}} |
 
 The details:
 
@@ -24,13 +24,13 @@ The details:
 - The link has to be followed before the company is created. It is remembered
   for 30 days in a cookie that holds only the code, and it carries through
   Google and email sign-in.
-- The reward is paid once per referred company, on its first top-up of $10 or
+- The reward is paid once per referred company, on its first top-up of {{topup-min}} or
   more, and matches that top-up. Later top-ups pay nothing more. Free trial
   time never counts.
 - A referral and the [switching credit](./pricing#switching-credit) never
   both pay: when a company that signed up with your link also records a switch,
   the referral's match applies, and it is never smaller.
-- You can earn up to **$10,000 of referral credit per calendar year** (UTC).
+- You can earn up to **{{referral-cap}} of referral credit per calendar year** (UTC).
   Past that, the company you referred still gets its credit; yours is recorded
   as over the cap.
 - Referring yourself does not count: not your own organization, not another
@@ -39,7 +39,7 @@ The details:
   with a card your organization has paid with. A code that does not count never
   stops anyone signing up.
 - If the qualifying top-up is partly refunded, the reward is matched again to
-  what stands, and both sides give back the difference. If less than $10
+  what stands, and both sides give back the difference. If less than {{referral-min-purchase}}
   stands, or it is disputed, both rewards are taken back. Either way, only what
   is still unspent is taken, so a refund of that top-up is smaller by any
   reward credit already spent on either side.

@@ -1,23 +1,33 @@
 # Runtime vs Morph
 
-Runtime runs each agent sandbox in its own microVM and costs **62% less than Morph** for an agent that mostly waits on a model.
+Runtime runs each agent sandbox in its own microVM and costs **{{saving:morph}} less than Morph** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $1.67 on Morph**. At 100,000 runs a month that is $63.89 against
-$166.67, **$103 a month saved**.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:morph}} on Morph**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:morph:100000}}, **{{=$0 less:morph:100000}} a month saved**.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Morph bills a machine's full size in MCUs for
   as long as it runs. Runtime measures the CPU your code actually uses, so time
-  spent waiting on a model costs only a small floor, a twentieth of a vCPU.
+  spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after
+  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
+  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  pays {{paused-storage-rate}} per GB of saved state a month.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
 - **Cheaper even when busy.** With both CPUs working the whole time, the example
-  job costs $1.33 on Runtime and $1.67 on Morph.
+  job costs {{cost:runtime:busy}} on Runtime and {{cost:morph}} on Morph.
 - **CPU and memory priced apart.** One MCU covers 1 vCPU, 4 GB of memory or
   16 GB of disk, and a machine pays for whichever it needs most of. On Runtime
   you choose vCPUs and memory separately and pay for each.
-- **No plan fee.** Morph's plans with included credit cost $40 or $250 a month.
-  Runtime is prepaid credit from $10, with 100 free sandbox hours to start.
+- **No plan fee.** Morph's plans with included credit cost {{term:morph:developer}} or {{term:morph:team}} a month.
+  Runtime is prepaid credit from {{topup-min}}, with {{trial-hours}} free sandbox hours to start.
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -29,16 +39,16 @@ $166.67, **$103 a month saved**.
 ## At a glance
 
 Morph's figures come from its public pricing and product pages, checked
-23 September 2026.
+{{checked:morph}}.
 
-|                  | Runtime                                                  | Morph                                                    |
-| ---------------- | -------------------------------------------------------- | -------------------------------------------------------- |
-| Isolation        | Firecracker microVM, own kernel                          | Full virtual machines                                    |
-| CPU billing      | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.05 per MCU-hour for the machine's size                |
-| Memory billing   | $0.0075 per reserved GiB-hour                            | Inside the MCU: 4 GB per MCU                             |
-| Plan fee         | None; prepaid credit from $10                            | Free with no credit; Developer $40 and Team $250 a month |
-| Free start       | 100 sandbox hours, no card                               | 1,000 MCUs with the $40 Developer plan                   |
-| Snapshots, forks | Files, memory and running processes                      | Memory and disk; branches to many replicas               |
+|                  | Runtime                                                        | Morph                                                                                        |
+| ---------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Isolation        | Firecracker microVM, own kernel                                | Full virtual machines                                                                        |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:morph:unit}} per MCU-hour for the machine's size                                      |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the MCU: 4 GB per MCU                                                                 |
+| Plan fee         | None; prepaid credit from {{topup-min}}                        | Free with no credit; Developer {{term:morph:developer}} and Team {{term:morph:team}} a month |
+| Free start       | {{trial-hours}} sandbox hours, no card                         | 1,000 MCUs with the {{term:morph:developer}} Developer plan                                  |
+| Snapshots, forks | Files, memory and running processes                            | Memory and disk; branches to many replicas                                                   |
 
 ## Cost for the same job
 
@@ -47,21 +57,21 @@ keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
 waiting for a model. On Morph, 2 vCPUs and 4 GB is 2 MCUs an hour.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-         Total                                        $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+         Total                                        {{cost:runtime}}
 
-Morph    Size   1,000 × 60 s / 3,600 × 2 MCU × $0.05 = $1.67
+Morph    Size   1,000 × 60 s / 3,600 × 2 MCU × {{rate:morph:unit}} = {{part:morph:size}}
 ```
 
-- **Saving:** 62%, or $1.03 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $166.67 on Morph.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $1.67 on Morph.
+- **Saving:** {{saving:morph}}, or {{less:morph}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:morph:100000}} on Morph.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:morph}} on Morph.
 
 Plan fees, included credit, storage, network and taxes are left out of both. On
-Runtime, inbound traffic is free, and each account's first 100 GiB out a month
-is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's terms.
+Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month
+is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

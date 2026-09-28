@@ -16,10 +16,16 @@ import { describeRoute, envFetch } from "./proxy.js";
    the command prints it once and keeps nothing. */
 
 export type KeyAccess = "full" | "read";
+/** What a key acts on: what its own agent makes, or everything in the
+ * account, which only an owner or admin can approve. */
+export type KeyReach = "agent" | "account";
 export type KeyRequest = {
   /** The key's name, and its agent's. */
   name: string;
   access: KeyAccess;
+  /** `account` for a key that sees and uses every sandbox and other resource
+   * in the account, whichever key made it. Absent is `agent`. */
+  reach?: KeyReach;
   /** The most its agent may spend in any 24 hours, or null for none. */
   dailyLimitMicros: number | null;
 };
@@ -109,6 +115,11 @@ export async function createKey(
     throw failure("usage", "Give the key a name of up to 80 characters.");
   if (request.access === "read" && request.dailyLimitMicros !== null)
     throw failure("usage", "A read-only key cannot spend, so it takes no --daily-limit.");
+  if (request.access === "read" && request.reach === "account")
+    throw failure(
+      "usage",
+      "A read-only key already sees the whole account, so it takes no --account-wide.",
+    );
   const origins = connectionOrigins(env);
   const fetcher = options.fetch ?? envFetch;
   const notify = options.notify ?? ((message: string) => process.stderr.write(`${message}\n`));
@@ -166,6 +177,7 @@ export async function createKey(
     purpose: "key",
     agentName: name,
     access: request.access,
+    ...(request.reach === "account" ? { reach: "account" } : {}),
     dailyLimitMicros: request.dailyLimitMicros,
     machine: options.machine ?? hostname(),
     publicKey: pair.publicKey,
@@ -258,6 +270,7 @@ export async function createKey(
       return {
         name,
         access: request.access,
+        reach: request.reach ?? "agent",
         dailyLimitMicros: request.dailyLimitMicros,
         key,
         keyId: match[1]!,

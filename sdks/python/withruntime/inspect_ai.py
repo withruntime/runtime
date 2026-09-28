@@ -274,7 +274,8 @@ class RuntimeSandboxEnvironment(SandboxEnvironment):
 
     @classmethod
     def default_concurrency(cls) -> Optional[int]:
-        # The free trial runs eight sandboxes at once; raise it with --max-sandboxes on a paid account.
+        # The free trial's concurrency, which packages/cloud-guide/src/facts.test.ts holds to
+        # the API's limit; raise it with --max-sandboxes on a paid account.
         return 8
 
     @classmethod

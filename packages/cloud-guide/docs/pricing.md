@@ -1,48 +1,58 @@
 # Understand your sandbox bill
 
-You pay for the CPU your code uses, not the CPUs it holds: **$0.025 per active vCPU-hour** and **$0.0075 per reserved GiB-hour of memory**.
+You pay for the CPU your code uses, not the CPUs it holds: **{{cpu-rate}} per active vCPU-hour** and **{{memory-rate}} per reserved GiB-hour of memory**.
 
-There is no plan fee. That makes Runtime **42% to 88% cheaper** than fourteen
+There is no plan fee. That makes Runtime **{{saving-range}} cheaper** than {{rival-count}}
 other sandbox providers for an agent that spends most of its time waiting on a
 model ([the comparison](#published-rate-comparison)).
 
-- **Busy:** 2 vCPUs and 4 GiB with both CPUs working cost $0.08 an hour.
-- **Waiting:** the same sandbox costs $0.03125 an hour, memory plus the default
-  CPU floor of 50 millicores (a twentieth of a vCPU).
-- **At scale:** 1,000 running hours cost $31.25 waiting and $80 fully busy.
+- **Busy:** 2 vCPUs and 4 GiB with both CPUs working cost {{busy-hour}} an hour.
+- **Waiting while it runs:** the same sandbox costs {{idle-hour}} an hour, memory
+  plus the default CPU floor of {{cpu-floor}} ({{cpu-floor-share}}). After
+  {{idle-pause}} with nothing happening it pauses and pays paused storage instead.
+- **Memory:** {{memory-rate}} per GiB-hour is the lowest memory rate of the
+  providers in [the comparison](#published-rate-comparison) that price memory on
+  its own.
+- **At scale:** 1,000 running hours cost {{= idle-hour * 1000}} waiting and {{=$0 busy-hour * 1000}} fully busy.
 
 Memory is billed while compute is running. CPU is billed from the moment the
 sandbox is ready: what it spends booting or restoring is ours. A GiB is 1,073,741,824 bytes, not a
 decimal GB. A higher `cpuFloorMillis`, or `cpu: "reserved"`, raises the waiting
 charge. Reserved CPU keeps every vCPU for the sandbox and bills it as if it
 were always busy: the floor becomes all of them, so 2 reserved vCPUs and 4 GiB
-cost $0.08 an hour whether the code works or waits. Each resource's
-usage-pricing quote is fixed when it is made. Keep a
-bounded lifetime: `onLeaseEnd` pauses or stops a sandbox for you.
+cost {{busy-hour}} an hour whether the code works or waits. Each resource's
+usage-pricing quote is fixed when it is made.
 
-**Start free.** Every new account gets the [100-hour free trial](./trial), no
-card. At these rates, 100 fully busy hours of a 2 vCPU, 4 GiB sandbox would cost
-$8.00.
+**Idle time is paused time.** A sandbox pauses itself after {{idle-pause}} with
+nothing happening in it: no request, no command still running, no open
+connection, no network traffic and no CPU use. From then it pays
+[paused storage](#paused-storage) only, and the next request wakes it. Set
+`idlePauseSeconds` from {{idle-pause-min}} to {{idle-pause-max}}, or 0 to keep it running; `onLeaseEnd`
+pauses or stops it when its lease ends.
+
+**Start free.** Every new account gets the [{{trial-hours}}-hour free trial](./trial), no
+card. At these rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox would cost
+{{=$2 trial-hours * busy-hour}}.
 
 **Then prepay.** Add credit by card at
-[Usage & billing](https://withruntime.com/account/billing), any amount from $10
-to $10,000. There is no subscription. The page shows how long your credit lasts
+[Usage & billing](https://withruntime.com/account/billing), any amount from {{topup-min}}
+to {{topup-max}}. There is no subscription. The page shows how long your credit lasts
 at this month's pace and what each product cost each day, and its ledger links
 each card purchase to its Stripe receipt. Refer a company and you both get credit
-equal to its first top-up, up to $500 each ([referrals](./referrals)). Moving
-from another provider? Your first top-up is matched, up to $100
+equal to its first top-up, up to {{referral-max}} each ([referrals](./referrals)). Moving
+from another provider? Your first top-up is matched, up to {{switching-max}}
 ([switching credit](#switching-credit)).
 
 ## How many at once
 
-One paid sandbox can have up to **16 vCPUs and 64 GiB of memory**, at the same
+One paid sandbox can have up to **{{max-vcpu}} vCPUs and {{max-memory}} of memory**, at the same
 per-unit rates; a trial sandbox up to 2 vCPU and 4 GiB. Fully busy, the largest
-costs $0.88 an hour.
+costs {{=$2 cost:runtime:16x64x3600x57600x1}} an hour.
 
-A paid account runs **100 sandboxes at once**, running or paused, with up to
-**200 vCPUs and 400 GiB of memory** across the running ones and 400 GiB of
-disk. A new account earns the hundred: it runs **50 sandboxes at once** until
-7 days after its first top-up clears, or until $50 of paid use has settled,
+A paid account runs **{{paid-sandboxes}} sandboxes at once**, running or paused, with up to
+**{{account-vcpus}} vCPUs and {{account-memory}} of memory** across the running ones and 400 GiB of
+disk. A new account earns the hundred: it runs **{{new-account-sandboxes}} sandboxes at once** until
+{{new-account-days}} days after its first top-up clears, or until {{new-account-spend}} of paid use has settled,
 whichever comes first. Granted credit, such as referral credit, counts toward
 neither. A disputed payment, a suspension or an abuse report puts an account
 back to 50. A paused sandbox holds no CPU or memory. At a busy moment a create
@@ -58,11 +68,11 @@ These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
 Past a limit, a create returns `quota_exceeded`, saying which limit and, for
 a new account, when it lifts, and costs nothing. The [free trial](./trial)
-runs eight at once.
+runs {{trial-sandboxes}} at once.
 
 ## Paused storage
 
-A paused sandbox keeps its files and memory for **$0.08 per decimal GB per
+A paused sandbox keeps its files and memory for **{{paused-storage-rate}} per decimal GB per
 30-day month**. Its immutable resource quote holds the actual rate.
 
 - **What counts:** disk and memory-snapshot blocks the sandbox alone owns. Shared
@@ -81,31 +91,32 @@ Paid retention defaults to 30 days from each successful pause and can be set to
 their free seven-day retention and never fall back to paid storage. The
 resource's `pausedExpiresAt` and paused-storage receipt give its actual terms.
 
-A pause posts an account notice with the date its saved state is kept until.
-The notice is posted within about five minutes, so a sandbox woken sooner may
-get none. Its storage is still charged from the moment it
-paused, as above.
+A pause you ask for, or one at the end of a lease, posts an account notice with
+the date its saved state is kept until. The notice is posted within about five
+minutes, so a sandbox woken sooner may get none. An idle pause posts none. Every
+paused sandbox gets a warning a day before its saved state is deleted. Its
+storage is still charged from the moment it paused, as above.
 
 ## Snapshots, images and volumes
 
 Storage has been charged since 23 September 2026. An item made before then is
 charged only from that date.
 
-| What you keep                                | Rate                                                                     | Charged on                                                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| [Snapshot](./javascript#snapshots-and-forks) | **$0.08 per decimal GB per 30-day month**, 119 microdollars per GiB-hour | The bytes the snapshot alone stores; a block two of your snapshots share counts once |
-| [Image](./javascript#custom-images)          | **$0.08 per decimal GB per 30-day month**, 119 microdollars per GiB-hour | The whole image file, shared base image included                                     |
-| [Volume](./javascript#volumes)               | **153 microdollars per GiB-hour**, about $0.11 per GiB per 30-day month  | The full size you create it with, written or not                                     |
+| What you keep                                | Rate                                                                                                            | Charged on                                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [Snapshot](./javascript#snapshots-and-forks) | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | The bytes the snapshot alone stores; a block two of your snapshots share counts once |
+| [Image](./javascript#custom-images)          | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | The whole image file, shared base image included                                     |
+| [Volume](./javascript#volumes)               | **{{volume-rate-micros}} microdollars per GiB-hour**, about {{volume-month}} per GiB per 30-day month           | The full size you create it with, written or not                                     |
 
 The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole
 size on its server from the moment you create it.
 
-Building an image is free (on the free trial it counts toward the 100 hours),
+Building an image is free (on the free trial it counts toward the {{trial-hours}} hours),
 and so is the snapshot a fork takes for itself and deletes. A snapshot is kept 7 days unless you choose 1 to 365. A snapshot's copy
-off its server is part of the snapshot and costs nothing more. Volume backups cost **$0.012 per decimal GB per 30-day month**, charged on
+off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**, charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
-Daily backups are on by default when backups are enabled in the region.
+Every volume is backed up off its server daily unless you turn that off.
 
 The [free trial](./trial) stores your first three images and your first 10 GiB of
 volumes free, for as long as you keep them. They are never charged, even after
@@ -122,8 +133,8 @@ is released.
 
 ## Network products
 
-Inbound traffic is free. Each account's first **100 GiB of outbound traffic a
-month** is free, and after that it costs **$0.02 per decimal GB**. Outbound
+Inbound traffic is free. Each account's first **{{outbound-allowance}} of outbound traffic a
+month** is free, and after that it costs **{{outbound-rate}} per decimal GB**. Outbound
 traffic is what your sandboxes send over the connections they open to the
 internet, TCP and UDP. Everything a sandbox receives, replies it serves through
 previews, custom domains and TCP ports, and traffic to your own network over a
@@ -136,14 +147,14 @@ sandbox's compute settles: at each lease renewal and when it stops or pauses.
 It is never held in advance and never takes the balance below zero. The rate is
 fixed in each sandbox's quote, as `egress.outbound` in `rates`, and
 `GET /v1/usage` answers the month so far under `outbound`: what was sent, what
-the allowance covered, and what the rest cost. At $0.02, 1 TB past the
-allowance costs $20.
+the allowance covered, and what the rest cost. At {{outbound-rate}}, 1 TB past the
+allowance costs {{=$0 1000 * outbound-rate}}.
 
 A paid sandbox moves up to 500 GiB a day, in and out together, and a trial
 account 5 GiB a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
 
-A dedicated IPv4 address costs **$5 per 30-day month**. A WireGuard tunnel
-costs **$5 per 30-day month**, including up to 16 peers. These are prorated to
+A dedicated IPv4 address costs **{{address-month}} per 30-day month**. A WireGuard tunnel
+costs **{{tunnel-month}} per 30-day month**, including up to 16 peers. These are prorated to
 funded time, with the rate fixed in each resource's quote. Dedicated IPv6,
 custom domains (up to 50) and TCP ports are included.
 
@@ -174,39 +185,39 @@ CPU-seconds of work per run, 1,000 completed runs. A CPU-second is one core busy
 for one second; two cores busy for ten seconds use 20 CPU-seconds.
 
 ```
-CPU:    1,000 × 20 / 3,600 × $0.025 = $0.138889
-Memory: 1,000 × 60 / 3,600 × 4 × $0.0075 = $0.500000
-Total:  $0.638889, approximately $0.64 per 1,000 runs
+CPU:    1,000 × 20 / 3,600 × {{cpu-rate}} = {{=$6 1000 * 20 / 3600 * cpu-rate}}
+Memory: 1,000 × 60 / 3,600 × 4 × {{memory-rate}} = {{=$6 1000 * 60 / 3600 * 4 * memory-rate}}
+Total:  {{=$6 1000 * 20 / 3600 * cpu-rate + 1000 * 60 / 3600 * 4 * memory-rate}}, approximately {{cost:runtime}} per 1,000 runs
 ```
 
-At 100,000 runs a month, that is $63.89. The figure assumes the CPU floor does
+At 100,000 runs a month, that is {{cost:runtime:100000}}. The figure assumes the CPU floor does
 not exceed measured CPU. It leaves out taxes, paid disk retention, network
 charges if any, free credits and retries. Count startup and dependency setup in
 running time when they are inside the billable interval.
 
 ## Published rate comparison
 
-The same example at each provider's published rates, checked 23 September 2026
-(25 September 2026 for AWS Lambda MicroVMs, Freestyle and Prime Sandboxes).
+The same example at each provider's published rates, checked {{rivals-checked}};
+each provider's comparison page gives its own date.
 
-| Provider                                                        | CPU and memory for 1,000 runs | Runtime saves |
-| --------------------------------------------------------------- | ----------------------------: | ------------: |
-| **Runtime**                                                     |                     **$0.64** |             — |
-| Northflank, published CPU and memory rates (4 GB)               |                         $1.11 |           42% |
-| Cloudflare Sandbox, published rates (2 vCPU, 6 GiB, 12 GB disk) |                         $1.35 |           53% |
-| Fly Machines, `performance-2x` with 4 GB, `iad`                 |                         $1.44 |           55% |
-| Prime Sandboxes, published rates (5 GiB disk)                   |                         $1.52 |           58% |
-| Morph, 2 MCUs an hour                                           |                         $1.67 |           62% |
-| Vercel Sandbox, published `iad1` rates (4 GB)                   |                         $2.12 |           70% |
-| Freestyle, published rates (32 GiB disk)                        |                         $2.25 |           72% |
-| CodeSandbox SDK, a Nano VM (2 cores, 4 GB)                      |                         $2.48 |           74% |
-| E2B, published per-second rates                                 |                         $2.76 |           77% |
-| Daytona, published CPU and memory rates                         |                         $2.76 |           77% |
-| Blaxel, 4 GB of memory while active                             |                         $2.76 |           77% |
-| Fly Sprites, published rates (4 GB of memory in use)            |                         $3.31 |           81% |
-| Modal Sandboxes, published rates (1 physical core)              |                         $3.97 |           84% |
-| AWS Lambda MicroVMs, Arm, US East (a 4 GB baseline)             |                         $4.20 |           85% |
-| Runloop, a `MEDIUM` devbox (2 CPUs, 4 GB, 8 GB disk)            |                         $5.33 |           88% |
+| Provider                                                        | CPU and memory for 1,000 runs |              Runtime saves |
+| --------------------------------------------------------------- | ----------------------------: | -------------------------: |
+| **Runtime**                                                     |          **{{cost:runtime}}** |                          — |
+| Northflank, published CPU and memory rates (4 GB)               |           {{cost:northflank}} |      {{saving:northflank}} |
+| Cloudflare Sandbox, published rates (2 vCPU, 6 GiB, 12 GB disk) |           {{cost:cloudflare}} |      {{saving:cloudflare}} |
+| Fly Machines, `performance-2x` with 4 GB, `iad`                 |         {{cost:fly-machines}} |    {{saving:fly-machines}} |
+| Prime Sandboxes, published rates (5 GiB disk)                   |                {{cost:prime}} |           {{saving:prime}} |
+| Morph, 2 MCUs an hour                                           |                {{cost:morph}} |           {{saving:morph}} |
+| Vercel Sandbox, published `iad1` rates (4 GB)                   |               {{cost:vercel}} |          {{saving:vercel}} |
+| Freestyle, published rates (32 GiB disk)                        |            {{cost:freestyle}} |       {{saving:freestyle}} |
+| CodeSandbox SDK, a Nano VM (2 cores, 4 GB)                      |          {{cost:codesandbox}} |     {{saving:codesandbox}} |
+| E2B, published per-second rates                                 |                  {{cost:e2b}} |             {{saving:e2b}} |
+| Daytona, published CPU and memory rates                         |              {{cost:daytona}} |         {{saving:daytona}} |
+| Blaxel, 4 GB of memory while active                             |               {{cost:blaxel}} |          {{saving:blaxel}} |
+| Fly Sprites, published rates (4 GB of memory in use)            |          {{cost:fly-sprites}} |     {{saving:fly-sprites}} |
+| Modal Sandboxes, published rates (1 physical core)              |                {{cost:modal}} |           {{saving:modal}} |
+| AWS Lambda MicroVMs, Arm, US East (a 4 GB baseline)             |      {{cost:lambda-microvms}} | {{saving:lambda-microvms}} |
+| Runloop, a `MEDIUM` devbox (2 CPUs, 4 GB, 8 GB disk)            |              {{cost:runloop}} |         {{saving:runloop}} |
 
 Each row's working is on its comparison page:
 [E2B](./e2b-alternative), [Daytona](./daytona-alternative),
@@ -217,27 +228,26 @@ Each row's working is on its comparison page:
 [Blaxel](./blaxel-alternative), [AWS Lambda MicroVMs](./aws-lambda-microvms-alternative),
 [Freestyle](./freestyle-alternative) and [Prime Sandboxes](./prime-sandboxes-alternative).
 
-- E2B and Daytona charge $0.0504 per vCPU-hour and $0.0162 per GiB-hour for
-  every allocated vCPU.
-- Vercel charges $0.128 per active CPU-hour and $0.0212 per provisioned
+- E2B and Daytona {{~ alike : rate:daytona:cpu / rate:e2b:cpu ; rate:daytona:memory / rate:e2b:memory}} charge {{rate:e2b:cpu}} per vCPU-hour and {{rate:e2b:memory}} per GiB-hour for every allocated vCPU.
+- Vercel charges {{rate:vercel:cpu}} per active CPU-hour and {{rate:vercel:memory}} per provisioned
   GB-hour in `iad1`; other regions differ.
-- Modal charges $0.1419 per physical core-hour and $0.0240 per GiB-hour, on
+- Modal charges {{=$4 rate:modal:cpu * 2}} per physical core-hour and {{=$4 rate:modal:memory}} per GiB-hour, on
   whichever is higher of request and use.
 - Cloudflare needs at least 3 GiB per vCPU, so its row is priced at 6 GiB.
-- Northflank charges $0.01667 per allocated vCPU-hour and $0.00833 per GB-hour.
+- Northflank charges {{rate:northflank:cpu}} per allocated vCPU-hour and {{rate:northflank:memory}} per GB-hour.
   It is the one row where a job that keeps every CPU busy costs less than on
   Runtime.
-- Morph charges $0.05 per MCU-hour; 2 vCPUs and 4 GB is 2 MCUs.
-- CodeSandbox charges 10 credits an hour at $0.01486 for a Nano VM.
-- Blaxel charges $0.0000115 per GB-second of active time, with CPU included.
-- Runloop charges $0.108 per CPU-hour, $0.0252 per GB-hour and $0.00034236 per
+- Morph charges {{rate:morph:unit}} per MCU-hour; 2 vCPUs and 4 GB is 2 MCUs.
+- CodeSandbox charges 10 credits an hour at {{term:codesandbox:credit-price}} for a Nano VM.
+- Blaxel charges {{=$7 rate:blaxel:memory / 3600}} per GB-second of active time, with CPU included.
+- Runloop charges {{rate:runloop:cpu}} per CPU-hour, {{rate:runloop:memory}} per GB-hour and {{rate:runloop:disk}} per
   GB-hour of disk.
-- AWS Lambda MicroVMs charge $0.0000276944 per vCPU-second and $0.0000036667
+- AWS Lambda MicroVMs charge {{=$10 rate:lambda-microvms:cpu / 3600}} per vCPU-second and {{=$10 rate:lambda-microvms:memory / 3600}}
   per GB-second of the baseline size while a MicroVM runs, on Arm in US East.
-- Freestyle charges $0.04032 per vCPU-hour, $0.0129 per GiB-hour of memory and
-  $0.000086 per GiB-hour of storage, all on the allocation.
-- Prime Sandboxes charge $0.02 per vCPU-hour, $0.0125 per GiB-hour of memory
-  and $0.0002 per GiB-hour of disk while running, rates published through
+- Freestyle charges {{rate:freestyle:cpu}} per vCPU-hour, {{rate:freestyle:memory}} per GiB-hour of memory and
+  {{rate:freestyle:disk}} per GiB-hour of storage, all on the allocation.
+- Prime Sandboxes charge {{part:prime:disk}} per vCPU-hour, {{rate:prime:memory}} per GiB-hour of memory
+  and {{rate:prime:disk}} per GiB-hour of disk while running, rates published through
   22 December 2026.
 
 Plan fees, storage, network, free credits and negotiated prices are left out of
@@ -258,10 +268,20 @@ Sources: [E2B pricing](https://e2b.dev/pricing),
 [Freestyle pricing](https://www.freestyle.sh/pricing),
 [Prime Sandboxes overview](https://docs.primeintellect.ai/sandboxes/overview).
 
+## Uptime promise
+
+Paid accounts are promised {{uptime-promise}} API uptime every calendar month,
+measured by the check from outside our servers that the
+[status page](/status) publishes. If a month falls short, every paid account
+receives {{uptime-credit}} of that month's charges back as service credit in the
+first week of the next month. Nobody has to ask: it is added automatically, the
+account's owners are emailed, and the billing page lists it. The full terms are
+the [Uptime Promise](/legal/sla).
+
 ## Switching credit
 
 Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare, Fly or Blaxel? Say so
-before your first top-up, and that top-up is matched with credit, up to $100:
+before your first top-up, and that top-up is matched with credit, up to {{switching-max}}:
 
 ```bash check
 runtime switch --from e2b
@@ -270,7 +290,7 @@ runtime switch --from e2b
 - Once per organization, and only before its first top-up. Your agent can do
   it for you: `POST /v1/switching`, or the `runtime_switching_record` MCP tool.
 - The credit lands when the payment settles. Pay $40 and you get $40 more; pay
-  $250 and you get $100 more.
+  $250 and you get {{switching-max}} more.
 - It does not stack with a [referral](./referrals). If you signed up through a
   referral link, the referral's match applies instead, and it is never smaller.
 - If the top-up is refunded or charged back, the matching credit goes back too,

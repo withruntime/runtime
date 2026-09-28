@@ -58,6 +58,10 @@ An owner, admin or developer of the account can create a key, of either kind:
   terminal (see below).
 - The member who made a key, or an owner or admin, sets, changes or removes its
   limit, and only on the website.
+- A key acts on what its own agent made. Only an owner or admin can make a key
+  **account-wide**, so it sees and uses everything in the account, and only
+  for a key of an owner or admin; it lapses if that person becomes a developer
+  ([keys in a team](./teams#keys-in-a-team)).
 - A key can read its own access and limit with `GET /v1/limits`,
   `runtime limits` or the `runtime_account` tool's `limits` action.
 - No key can raise, remove or set a limit, and no key can create another key.
@@ -365,9 +369,26 @@ Anyone can sign up at https://withruntime.com/sign-in.
   address, without contents, so a report can be traced and acted on. Runtime
   can turn off a domain, a port, a tunnel or everything of an account at once.
 
+## Two-step sign-in
+
+Turn it on under **Settings → Two-step sign-in**: scan the QR code with an
+authenticator app (1Password, Google Authenticator, Authy or any app that shows
+six-digit codes), enter the code it shows, and keep the ten backup codes it
+gives you. From then on, every sign-in, whether with Google, an email link or
+single sign-on, asks for the app's current code before the account opens. A
+backup code works once, for when the phone is lost, and new ones replace the
+old whenever you ask.
+
+An owner can require it of everyone in the account. Members who have not set
+it up do so at their next sign-in, and an owner turns on their own before
+requiring it. Turning it on or off, and the requirement, are recorded in the
+[audit log](./teams). API keys and connected agents are not affected: they do
+not sign in through a browser. Five wrong codes in a row pause the step for
+fifteen minutes.
+
 ## Report a vulnerability
 
-**Write to marc@heyruntime.com before you test anything, and again with what
+**Write to security@withruntime.com before you test anything, and again with what
 you find.** Testing Runtime's own servers, network or other accounts without
 agreeing it with us first breaks the
 [acceptable use policy](/legal/acceptable-use), and we may suspend the account.

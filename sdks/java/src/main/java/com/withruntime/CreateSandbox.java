@@ -67,7 +67,7 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("onLeaseEnd", what);
   }
 
-  /** Pause after this many seconds with no request (60 to 86400; 0 never). */
+  /** Pause after this many idle seconds (10 to 86400; 0 never). Left unset, 60. */
   public CreateSandbox idlePauseSeconds(int seconds) {
     return set("idlePauseSeconds", seconds);
   }

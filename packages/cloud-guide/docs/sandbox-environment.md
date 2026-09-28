@@ -117,8 +117,8 @@ day shared by all its sandboxes. Past the daily amount, open connections close
 and new requests get `429 Too Many Requests` with `X-Runtime-Egress:
 quota-exhausted` (`quota-exhausted:account` for a trial account's shared
 amount), until the window ends.
-Inbound traffic is free; each account's first 100 GiB out a month is free, then
-$0.02 per GB ([pricing](./pricing#network-products)).
+Inbound traffic is free; each account's first {{outbound-allowance}} out a month is free, then
+{{outbound-rate}} per GB ([pricing](./pricing#network-products)).
 
 Each sandbox has its own rules, set at create (`network`) or at any time after,
 applied at once, to open connections too:

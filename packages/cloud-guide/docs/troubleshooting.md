@@ -98,15 +98,15 @@ Node from nodejs.org reads no such file, so it starts either way.
 
 ## Creation is refused
 
-| Code                  | What it means                                                         | What to do                                              |
-| --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------- |
-| `trial_busy`          | Eight trial sandboxes are already running; `details` names them       | Stop or pause one, or retry once one ends               |
-| `trial_domain_limit`  | Your email domain's eight shared trial slots are all running          | Stop or pause one, or use paid credit                   |
-| `trial_exhausted`     | The 100 hours are used, or `timeoutSeconds` is more than what is left | Shorten `timeoutSeconds`, or use paid credit            |
-| `invalid_trial`       | A trial sandbox is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk | Omit the size fields for the default                    |
-| `invalid_request`     | `details.issues` names every wrong field                              | Fix the named fields; unknown fields are refused        |
-| `invalid_region`      | `details.available` lists your regions                                | Use a region listed for your account, or omit it        |
-| `no_capacity`, `busy` | No host has room right now                                            | Retry with the same idempotency key and a growing delay |
+| Code                  | What it means                                                                     | What to do                                              |
+| --------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `trial_busy`          | Eight trial sandboxes are already running; `details` names them                   | Stop or pause one, or retry once one ends               |
+| `trial_domain_limit`  | Your email domain's eight shared trial slots are all running                      | Stop or pause one, or use paid credit                   |
+| `trial_exhausted`     | The {{trial-hours}} hours are used, or `timeoutSeconds` is more than what is left | Shorten `timeoutSeconds`, or use paid credit            |
+| `invalid_trial`       | A trial sandbox is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk             | Omit the size fields for the default                    |
+| `invalid_request`     | `details.issues` names every wrong field                                          | Fix the named fields; unknown fields are refused        |
+| `invalid_region`      | `details.available` lists your regions                                            | Use a region listed for your account, or omit it        |
+| `no_capacity`, `busy` | No host has room right now                                                        | Retry with the same idempotency key and a growing delay |
 
 **`trial_busy` is temporary:** a slot frees when any trial sandbox stops or
 pauses.

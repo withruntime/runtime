@@ -23,7 +23,12 @@ import type { Snapshot, SnapshotOptions } from "./snapshots.js";
 import { Tunnel, type PortForward } from "./tunnel.js";
 
 const CHUNK = 1_048_576;
-const PARALLEL = 4;
+/** Chunks of a large write in flight at once. Each chunk's reply waits on the
+ * API and the guest, and the link idles while every chunk in flight waits:
+ * from a home link (12.6 MB/s up, 27 September 2026) 100 MB took 17-18 s at
+ * four and 11 s at eight, and sixteen was no faster. The guest takes 128
+ * connections at once. */
+const PARALLEL = 8;
 const enc = (id: string) => encodeURIComponent(id);
 const toBase64 = (data: string | Uint8Array) =>
   (typeof data === "string" ? Buffer.from(data) : Buffer.from(data)).toString("base64");

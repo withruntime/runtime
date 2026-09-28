@@ -4,9 +4,55 @@ What shipped in Runtime Cloud, newest first.
 
 Runtime ships every day. Each entry is something you can use or see; the
 guides hold the current terms, and [pricing](./pricing) holds the current rates.
+Each day also has a page of its own at
+[withruntime.com/changelog](https://withruntime.com/changelog), and every entry
+arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 27 September 2026
 
+- **Security and compliance page.** One page for a security review: where
+  data lives and the certifications of the companies that hold it, isolation,
+  encryption, sign-in, recovery, and how Runtime is run, with the date each
+  recurring check was last done. See [security and compliance](./trust), or
+  withruntime.com/trust.
+- **A nightly off-site copy of the database.** Encrypted to a key held
+  offline and kept 30 days in Backblaze, locked against early deletion.
+- **Two-step sign-in.** Turn on a code from an authenticator app after every
+  sign-in, whichever way you sign in, under Settings → Two-step sign-in. Owners
+  can require it of everyone in the account. See
+  [two-step sign-in](./security#two-step-sign-in).
+- **Faster wakes, snapshots and stops.** A paused sandbox runs its next
+  command 588 ms after the call that wakes it at the median, down from 980 ms;
+  a snapshot of a running sandbox is ready in 3.49 s, down from 6.54 s; a
+  preview visit to a paused sandbox answers in 0.47 s, down from 0.77 s; and a
+  stop answers the moment the sandbox is frozen. See [speed](./speed).
+- **An uptime promise, paid automatically.** Paid accounts are promised
+  {{uptime-promise}} API uptime every calendar month, measured by the outside
+  check on the [status page](https://withruntime.com/status). A month below it
+  gives every paid account {{uptime-credit}} of that month's charges back as
+  service credit in the first week of the next month, with no claim to file.
+  The terms now give 30 days' emailed notice before we end an account without
+  cause, and the liability floor is $1,000 instead of $100. See the
+  [Uptime Promise](https://withruntime.com/legal/sla).
+- **Idle sandboxes pause themselves.** A new sandbox pauses after 60 seconds
+  with nothing happening in it, used or not (a `persistent` one only if you set
+  an idle time), and pays only paused storage until
+  the next request wakes it. A command or terminal still running, an open
+  preview, port, SSH or tunnel connection, network traffic or CPU use keeps it
+  awake. `idlePauseSeconds` now goes as low as 10 seconds, and 0 still turns it
+  off. Sandboxes made before today keep their settings. See
+  [pause when idle](./javascript#pause-when-idle).
+- **Account-wide keys.** An owner or admin can make a key that sees and uses
+  every sandbox, snapshot, image and volume in the account, whichever key made
+  it, as a Blaxel workspace key does: choose **Everything in the account** at
+  [API keys](https://withruntime.com/account/keys), switch an existing key from
+  its row, or, from CLI 0.8.2, approve `runtime keys create --account-wide`. `getOrCreate` with
+  a name another key holds then returns that sandbox. Keys made without it are
+  unchanged. See [keys in a team](./teams#keys-in-a-team).
+- **Coming in withruntime 0.8.2.** `runtime keys create --account-wide` makes an
+  account-wide key from the command line. Large file writes send eight chunks
+  at once in both SDKs, so a big upload finishes sooner: 100 MB took 11 s
+  instead of 17 from a 12.6 MB/s connection.
 - **Switch from Blaxel in one import.** Code written for Blaxel's sandbox SDK
   runs on Runtime after changing `@blaxel/core` to `withruntime/blaxel`
   (`withruntime` 0.8.0), or in Python `blaxel.core` to `withruntime.blaxel`
@@ -18,8 +64,8 @@ guides hold the current terms, and [pricing](./pricing) holds the current rates.
   Blaxel](./blaxel-alternative).
 - **Start a sandbox from the browser.** A new account's Home offers
   **Start a sandbox** beside the agent prompt. It opens the sandbox with a
-  shell running in the page, runs on the free hours, and pauses after five
-  idle minutes. It acts as an agent named Console, one for each member, shown
+  shell running in the page, runs on the free hours, and pauses after an idle
+  minute. It acts as an agent named Console, one for each member, shown
   on the API keys page like any other. See [Get started](./start#run-your-first-sandbox).
 - **withruntime 0.7.2.** A directory download (`files.download`,
   `runtime sandbox cp`) can no longer write outside the folder you gave it: a
@@ -31,6 +77,14 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   that times out says 24 hours, its real limit. The Harbor and Inspect adapters
   build images with the current image builder. Update with
   `npm i withruntime@latest` or `pip install -U withruntime`.
+- **A changelog page for every day, and a feed.** Each day's changes have a
+  page of their own at [withruntime.com/changelog](https://withruntime.com/changelog),
+  every entry has a link, and the [RSS feed](https://withruntime.com/changelog/feed.xml)
+  carries each one. The glossary adds fifteen cloud terms, from
+  [vCPU](https://withruntime.com/glossary/vcpu) to
+  [egress fees](https://withruntime.com/glossary/egress-fees), and every price,
+  limit and speed on the guides and question pages is now filled in from one
+  source, so a change reaches every page at once.
 
 ## 26 September 2026
 
@@ -425,15 +479,16 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
   create, `sandbox.update()`, `runtime sandbox update --persistent on` or the
   API keeps a paid sandbox running while credit lasts, and `keepAlive` extends
   a lease from your own process.
-- **50 free hours and 100 sandboxes at once.** The free trial is now 50 hours,
-  up from 20, still with no card and eight sandboxes running at once. A paid
+- **50 free hours and 100 sandboxes at once.** The free trial is now 50 hours
+  (now {{trial-hours}}), up from 20, still with no card and eight sandboxes running at once. A paid
   account starts with room for 100 sandboxes, 200 vCPUs and 400 GiB of memory
   at once, and more on request. Accounts that signed up before get the 50 hours
   too.
 - **Paid accounts run 20 sandboxes at once.** A paid account starts with room
-  for 20 sandboxes, 64 vCPUs and 128 GiB of memory at once, and more on request.
+  for 20 sandboxes, 64 vCPUs and 128 GiB of memory at once (now
+  {{paid-sandboxes}}, {{account-vcpus}} and {{account-memory}}), and more on request.
 - **The free trial runs eight sandboxes at once.** Up from three, with the same
-  20 free hours and still no card.
+  20 free hours (now {{trial-hours}}) and still no card.
 - **Forks and snapshots for everyone.** Copy a running sandbox with its memory
   and processes, and choose whether the copies use the trial or paid credit.
 - **Code written for E2B runs on Runtime.** Change `from "e2b"` to
@@ -479,8 +534,8 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
   subscription.
 - **Referrals.** Refer a company and you both get credit equal to its first
   top-up, up to $500 each.
-- **A 20-hour free trial.** Every new account gets 20 sandbox hours with no
-  card.
+- **A 20-hour free trial.** Every new account gets 20 sandbox hours (now
+  {{trial-hours}}) with no card.
 - **One line connects your agent.** `claude mcp add --scope user runtime -- npx -y withruntime mcp`
   (or the same for Codex and Cursor) is the whole setup; the agent asks for one
   browser approval.
@@ -495,7 +550,8 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
 - **A hundred commands at once.** One key can have 128 requests in flight, so an
   agent can fan out without refusals.
 - **Idle sandboxes pause themselves.** A sandbox left on the default lease and
-  never used pauses after five minutes, so it stops paying the running rate.
+  never used pauses after five minutes (now any sandbox after a
+  minute with nothing happening in it), so it stops paying the running rate.
 - **Retries you never see.** A brief outage answers 503 with `Retry-After`, and
   both SDKs retry it with the same idempotency key.
 - **Ask support anywhere.** Ask from the dashboard, with `runtime support`, or

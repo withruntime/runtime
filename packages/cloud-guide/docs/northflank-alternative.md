@@ -1,18 +1,24 @@
 # Runtime vs Northflank
 
-Runtime is built for agent sandboxes and costs **42% less than Northflank** for an agent that mostly waits on a model.
+Runtime is built for agent sandboxes and costs **{{saving:northflank}} less than Northflank** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $1.11 on Northflank**. At 100,000 runs a month that is $63.89
-against $111.10, **$47 a month saved**.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:northflank}} on Northflank**. At 100,000 runs a month that is {{cost:runtime:100000}}
+against {{cost:northflank:100000}}, **{{=$0 less:northflank:100000}} a month saved**.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Northflank bills the vCPUs and memory a
   sandbox holds for as long as it runs. Runtime measures the CPU your code
-  actually uses, so time spent waiting on a model costs only a small floor, a
-  twentieth of a vCPU.
-- **Cheaper memory.** $0.0075 per GiB-hour on Runtime against $0.00833 per
+  actually uses, so time spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
+  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
+  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  processes still running and its next command done {{wake}} later.
+- **An uptime promise that pays itself.** Paid accounts are promised
+  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
+  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
+- **Cheaper memory.** {{memory-rate}} per GiB-hour on Runtime against {{rate:northflank:memory}} per
   GB-hour on Northflank, and a GiB is about 7% larger than a GB.
 - **A sandbox is one call.** `Sandbox.create()` returns a running sandbox, with
   no service, project or deployment plan to set up. Northflank creates each
@@ -20,6 +26,12 @@ against $111.10, **$47 a month saved**.
 - **Pause and fork keep memory.** A paused Runtime sandbox wakes with its
   processes still running, kept for 1 to 365 days, and a fork copies a running
   sandbox with its memory.
+- **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
+  Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
+  every account ([single sign-on](./single-sign-on)).
+- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
+  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -31,16 +43,16 @@ against $111.10, **$47 a month saved**.
 ## At a glance
 
 Northflank's figures come from its public pricing and documentation, checked
-23 September 2026.
+{{checked:northflank}}.
 
-|                | Runtime                                                  | Northflank                                        |
-| -------------- | -------------------------------------------------------- | ------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                          | A microVM per workload, Kata Containers or gVisor |
-| CPU billing    | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.01667 per allocated vCPU-hour                  |
-| Memory billing | $0.0075 per reserved GiB-hour                            | $0.00833 per GB-hour                              |
-| Plan fee       | None; prepaid credit from $10                            | None published for compute                        |
-| Free start     | 100 sandbox hours, no card                               | 2 free services and 1 free database               |
-| Sandbox model  | A sandbox, created in one call                           | A service with a deployment plan                  |
+|                | Runtime                                                        | Northflank                                        |
+| -------------- | -------------------------------------------------------------- | ------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                | A microVM per workload, Kata Containers or gVisor |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:northflank:cpu}} per allocated vCPU-hour   |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{rate:northflank:memory}} per GB-hour            |
+| Plan fee       | None; prepaid credit from {{topup-min}}                        | None published for compute                        |
+| Free start     | {{trial-hours}} sandbox hours, no card                         | 2 free services and 1 free database               |
+| Sandbox model  | A sandbox, created in one call                                 | A service with a deployment plan                  |
 
 ## Cost for the same job
 
@@ -49,25 +61,25 @@ Take 1,000 runs of a 2 vCPU, 4 GiB sandbox (4 GB on Northflank). Each run lasts
 of its time waiting for a model.
 
 ```
-Runtime     CPU    1,000 × 20 s / 3,600 × $0.025        = $0.14
-            Memory 1,000 × 60 s / 3,600 × 4 × $0.0075   = $0.50
-            Total                                          $0.64
+Runtime     CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}        = {{part:runtime:cpu}}
+            Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}}   = {{part:runtime:memory}}
+            Total                                          {{cost:runtime}}
 
-Northflank  CPU    1,000 × 60 s / 3,600 × 2 × $0.01667  = $0.556
-            Memory 1,000 × 60 s / 3,600 × 4 × $0.00833  = $0.555
-            Total                                          $1.11
+Northflank  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:northflank:cpu}}  = $0.556
+            Memory 1,000 × 60 s / 3,600 × 4 × {{rate:northflank:memory}}  = $0.555
+            Total                                          {{cost:northflank}}
 ```
 
-- **Saving:** 42%, or $0.47 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $111.10 on
+- **Saving:** {{saving:northflank}}, or {{less:northflank}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:northflank:100000}} on
   Northflank.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $1.11 on Northflank.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:northflank}} on Northflank.
 
 The more of its time an agent spends waiting, the more Runtime saves. Storage,
 network, taxes and free allowances are left out of both. On Runtime, inbound
-traffic is free, and each account's first 100 GiB out a month is free, then
-$0.02 per GB. See [pricing](./pricing) for Runtime's terms.
+traffic is free, and each account's first {{outbound-allowance}} out a month is free, then
+{{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 
@@ -92,7 +104,7 @@ try {
 
 - **Work that keeps every CPU busy.** Northflank's allocated vCPU rate is lower
   than Runtime's measured rate, so a job that uses all its CPUs all the time
-  costs less there: $1.11 against $1.33 in the example.
+  costs less there: {{cost:northflank:busy}} against {{cost:runtime:busy}} in the example.
 - **GPUs.** Northflank rents GPUs by the hour, including L4, A100 and H100.
 - **Your own cloud and many regions.** Northflank runs in your AWS, GCP or Azure
   account as well as its own regions. Runtime runs in one US region.

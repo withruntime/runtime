@@ -1,10 +1,10 @@
 # Runtime vs Freestyle
 
-Runtime runs agent code in its own microVMs, like Freestyle's VMs, and costs **72% less** for an agent that mostly waits on a model, with no plan to buy for more at once.
+Runtime runs agent code in its own microVMs, like Freestyle's VMs, and costs **{{saving:freestyle}} less** for an agent that mostly waits on a model, with no plan to buy for more at once.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $2.25 on Freestyle**. At 100,000 runs a month that is $63.89
-against $224.99, **$161 a month saved**.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:freestyle}} on Freestyle**. At 100,000 runs a month that is {{cost:runtime:100000}}
+against {{cost:freestyle:100000}}, **{{=$0 less:freestyle:100000}} a month saved**.
 
 ## Where Runtime is better
 
@@ -12,18 +12,30 @@ against $224.99, **$161 a month saved**.
   allocated to a VM for as long as it is allocated; its pricing page says a
   reserved core is yours whether or not the guest is busy. Runtime measures the
   CPU your code actually uses, so time spent waiting on a model costs only a
-  small floor, a twentieth of a vCPU.
-- **Lower rates on both meters.** $0.025 per vCPU-hour against $0.04032, and
-  $0.0075 per GiB-hour of memory against $0.0129. With both CPUs busy the whole
-  time, the example job costs $1.33 on Runtime and $2.25 on Freestyle.
+  small floor, {{cpu-floor-share}}.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
+  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
+  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  processes still running and its next command done {{wake}} later.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
+- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against {{rate:freestyle:cpu}}, and {{memory-rate}} per GiB-hour of memory against {{rate:freestyle:memory}}. With both CPUs busy the whole
+  time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:freestyle}} on Freestyle.
 - **Scale without a plan.** Freestyle runs 10 VMs at once on its free plan, 40
-  on the $50-a-month Hobby plan and 400 on the $500-a-month Pro plan. A paid
-  Runtime account runs 100 sandboxes at once, 50 in its first week or first $50
-  of use, with no plan fee: prepaid credit from $10, and support raises the
+  on the {{term:freestyle:hobby}}-a-month Hobby plan and 400 on the {{term:freestyle:pro}}-a-month Pro plan. A paid
+  Runtime account runs {{paid-sandboxes}} sandboxes at once, {{new-account-sandboxes}} in its first week or first {{new-account-spend}}
+  of use, with no plan fee: prepaid credit from {{topup-min}}, and support raises the
   limit when you ask.
-- **Bigger sandboxes without Pro.** A paid Runtime sandbox takes up to 16 vCPUs
-  and 64 GiB. On Freestyle, 64 GiB needs the Pro plan; Hobby stops at 8 vCPUs
+- **Bigger sandboxes without Pro.** A paid Runtime sandbox takes up to {{max-vcpu}} vCPUs
+  and {{max-memory}}. On Freestyle, 64 GiB needs the Pro plan; Hobby stops at 8 vCPUs
   and 16 GiB.
+- **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
+  Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
+  every account ([single sign-on](./single-sign-on)).
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -36,19 +48,19 @@ against $224.99, **$161 a month saved**.
 ## At a glance
 
 Freestyle's figures come from its public pricing page and VM documentation,
-checked 25 September 2026.
+checked {{checked:freestyle}}.
 
-|                    | Runtime                                                  | Freestyle                                                 |
-| ------------------ | -------------------------------------------------------- | --------------------------------------------------------- |
-| Isolation          | Firecracker microVM, own kernel                          | Full Linux virtual machines                               |
-| CPU billing        | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.04032 per allocated vCPU-hour                          |
-| Memory billing     | $0.0075 per reserved GiB-hour                            | $0.0129 per allocated GiB-hour                            |
-| Disk while it runs | Included                                                 | $0.000086 per allocated GiB-hour                          |
-| Sizes              | Up to 16 vCPUs and 64 GiB paid, chosen apart             | 4 vCPUs and 8 GiB free; 8 and 16 Hobby; 32 and 64 Pro     |
-| At once            | 100 paid (50 in the first week), no plan                 | 10 free, 40 Hobby, 400 Pro                                |
-| Plan fee           | None; prepaid credit from $10                            | Free $0; Hobby $50 and Pro $500 a month, counted to usage |
-| Free start         | 100 sandbox hours, no card                               | 200 vCPU-hours and 400 GiB-hours of memory a month        |
-| Pause              | Files, memory and processes, kept 1 to 365 days          | Hibernate with memory, billed as storage while paused     |
+|                    | Runtime                                                                        | Freestyle                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Isolation          | Firecracker microVM, own kernel                                                | Full Linux virtual machines                                                                      |
+| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                 | {{rate:freestyle:cpu}} per allocated vCPU-hour                                                   |
+| Memory billing     | {{memory-rate}} per reserved GiB-hour                                          | {{rate:freestyle:memory}} per allocated GiB-hour                                                 |
+| Disk while it runs | Included                                                                       | {{rate:freestyle:disk}} per allocated GiB-hour                                                   |
+| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                 | 4 vCPUs and 8 GiB free; 8 and 16 Hobby; 32 and 64 Pro                                            |
+| At once            | {{paid-sandboxes}} paid ({{new-account-sandboxes}} in the first week), no plan | 10 free, 40 Hobby, 400 Pro                                                                       |
+| Plan fee           | None; prepaid credit from {{topup-min}}                                        | Free $0; Hobby {{term:freestyle:hobby}} and Pro {{term:freestyle:pro}} a month, counted to usage |
+| Free start         | {{trial-hours}} sandbox hours, no card                                         | 200 vCPU-hours and 400 GiB-hours of memory a month                                               |
+| Pause              | Files, memory and processes, kept 1 to 365 days                                | Hibernate with memory, billed as storage while paused                                            |
 
 ## Cost for the same job
 
@@ -57,26 +69,26 @@ keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
 waiting for a model. Freestyle's VM keeps its default 32 GiB disk.
 
 ```
-Runtime    CPU    1,000 × 20 s / 3,600 × $0.025              = $0.14
-           Memory 1,000 × 60 s / 3,600 × 4 × $0.0075         = $0.50
-           Total                                                $0.64
+Runtime    CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}              = {{part:runtime:cpu}}
+           Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}}         = {{part:runtime:memory}}
+           Total                                                {{cost:runtime}}
 
-Freestyle  CPU    1,000 × 60 s / 3,600 × 2 × $0.04032        = $1.34
-           Memory 1,000 × 60 s / 3,600 × 4 × $0.0129         = $0.86
-           Disk   1,000 × 60 s / 3,600 × 32 × $0.000086      = $0.05
-           Total                                                $2.25
+Freestyle  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:freestyle:cpu}}        = {{part:freestyle:cpu}}
+           Memory 1,000 × 60 s / 3,600 × 4 × {{rate:freestyle:memory}}         = {{part:freestyle:memory}}
+           Disk   1,000 × 60 s / 3,600 × 32 × {{rate:freestyle:disk}}      = {{part:freestyle:disk}}
+           Total                                                {{cost:freestyle}}
 ```
 
-- **Saving:** 72%, or $1.61 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $224.99 on
+- **Saving:** {{saving:freestyle}}, or {{less:freestyle}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:freestyle:100000}} on
   Freestyle, before any plan fee.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $2.25 on Freestyle. At this size Runtime is cheaper however busy the
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:freestyle}} on Freestyle. At this size Runtime is cheaper however busy the
   sandbox is.
 
 Plan fees, free allowances, data transfer, paused storage and taxes are left out
-of both. On Runtime, inbound traffic is free, and each account's first 100 GiB
-out a month is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's
+of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}}
+out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's
 terms.
 
 ## How to switch
@@ -105,10 +117,11 @@ await box.stop();
 
 - **More than 16 vCPUs in one VM.** Freestyle's Pro plan goes to 32 vCPUs.
 - **Forking without a pause.** Freestyle clones a running VM without pausing
-  it. A Runtime fork pauses the source for about a second.
+  it. A Runtime fork pauses the source for the capture and has it running
+  again when the call returns, {{fork}} for one copy.
 - **The fastest start.** Freestyle states VMs provision with a p99 under
-  400 ms. A Runtime sandbox ran its first command 374 ms after the request at
-  the median and 495 ms at the 95th percentile on 26 September 2026
+  400 ms. A Runtime sandbox ran its first command {{first-command}} after the request at
+  the median and {{first-command-p95}} at the 95th percentile on {{speed-date}}
   ([speed](./speed)).
 
 ## Sources

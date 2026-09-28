@@ -1,24 +1,37 @@
 # Runtime vs E2B
 
-Runtime runs agent code in Firecracker microVMs, like E2B, **for 77% less** on an agent that spends most of its time waiting on a model.
+Runtime runs agent code in Firecracker microVMs, like E2B, **for {{saving:e2b}} less** on an agent that spends most of its time waiting on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $2.76 on E2B**. At 100,000 runs a month that is $63.89 against
-$276.00, **$212 a month saved**. Your E2B code keeps working: change one import.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:e2b:100000}}, **{{=$0 less:e2b:100000}} a month saved**. Your E2B code keeps working: change one import.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** E2B bills every vCPU for as long as the
   sandbox runs. Runtime measures the CPU your code actually uses, so time spent
-  waiting on a model costs only a small floor, a twentieth of a vCPU.
-- **Lower rates on both meters.** $0.025 per vCPU-hour against E2B's $0.0504,
-  and $0.0075 per GiB-hour of memory against $0.0162. Even with every CPU busy
-  the whole time, the example job costs $1.33 on Runtime and $2.76 on E2B.
+  waiting on a model costs only a small floor, {{cpu-floor-share}}.
+- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  month until a request wakes it; the next command runs {{wake}} after that.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
+- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against E2B's {{rate:e2b:cpu}},
+  and {{memory-rate}} per GiB-hour of memory against {{rate:e2b:memory}}. Even with every CPU busy
+  the whole time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:e2b}} on E2B.
 - **No plan fee for long sessions.** E2B caps a session at 1 hour on Hobby and
-  needs the $150-a-month Pro plan for 24. A Runtime sandbox runs as long as you
-  keep extending its lease, with no plan at all: prepaid credit from $10.
+  needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox runs as long as you
+  keep extending its lease, with no plan at all: prepaid credit from {{topup-min}}.
 - **A one-line switch.** `withruntime/e2b` runs code written for E2B's SDK, in
-  JavaScript and Python, including the code interpreter.
+  JavaScript and Python, including the code interpreter. Run `runtime switch --from e2b` before your
+  first top-up and it is matched, up to {{switching-max}}.
+- **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
+  Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
+  every account ([single sign-on](./single-sign-on)).
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -31,19 +44,19 @@ $276.00, **$212 a month saved**. Your E2B code keeps working: change one import.
 ## At a glance
 
 E2B's figures come from its public pricing and documentation, checked
-23 September 2026.
+{{checked:e2b}}.
 
-|                  | Runtime                                                  | E2B                                              |
-| ---------------- | -------------------------------------------------------- | ------------------------------------------------ |
-| Isolation        | Firecracker microVM, own kernel                          | Firecracker microVM, own kernel                  |
-| CPU billing      | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.0504 per allocated vCPU-hour                  |
-| Memory billing   | $0.0075 per reserved GiB-hour                            | $0.0162 per GiB-hour                             |
-| Plan fee         | None; prepaid credit from $10                            | Hobby $0; Pro $150 a month                       |
-| Free start       | 100 sandbox hours, no card                               | $100 of usage credit on Hobby                    |
-| Session length   | Leases of up to an hour, extended as often as needed     | 1 hour on Hobby, 24 hours on Pro                 |
-| Pause and resume | Files, memory and running processes                      | Files, memory and running processes              |
-| Interfaces       | API, CLI, MCP server, JavaScript and Python SDKs         | API, CLI, MCP server, JavaScript and Python SDKs |
-| Agent sign-in    | Browser approval; no key in the agent's config           | API key                                          |
+|                  | Runtime                                                                                                                         | E2B                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Isolation        | Firecracker microVM, own kernel                                                                                                 | Firecracker microVM, own kernel                        |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                                                                  | {{rate:e2b:cpu}} per allocated vCPU-hour               |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                                                                           | {{rate:e2b:memory}} per GiB-hour                       |
+| Plan fee         | None; prepaid credit from {{topup-min}}                                                                                         | Hobby {{term:e2b:hobby}}; Pro {{term:e2b:pro}} a month |
+| Free start       | {{trial-hours}} sandbox hours, no card                                                                                          | {{term:e2b:credit}} of usage credit on Hobby           |
+| Session length   | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
+| Pause and resume | Files, memory and running processes                                                                                             | Files, memory and running processes                    |
+| Interfaces       | API, CLI, MCP server, JavaScript and Python SDKs                                                                                | API, CLI, MCP server, JavaScript and Python SDKs       |
+| Agent sign-in    | Browser approval; no key in the agent's config                                                                                  | API key                                                |
 
 ## Cost for the same job
 
@@ -52,26 +65,26 @@ keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
 waiting for a model.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-         Total                                        $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+         Total                                        {{cost:runtime}}
 
-E2B      CPU    1,000 × 60 s / 3,600 × 2 × $0.0504 = $1.68
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0162 = $1.08
-         Total                                        $2.76
+E2B      CPU    1,000 × 60 s / 3,600 × 2 × {{rate:e2b:cpu}} = {{part:e2b:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{rate:e2b:memory}} = {{part:e2b:memory}}
+         Total                                        {{cost:e2b}}
 ```
 
-- **Saving:** 77%, or $2.12 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $276.00 on E2B.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on
-  Runtime against $2.76 on E2B. At this size, Runtime is cheaper however busy the
+- **Saving:** {{saving:e2b}}, or {{less:e2b}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:e2b:100000}} on E2B.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on
+  Runtime against {{cost:e2b:busy}} on E2B. At this size, Runtime is cheaper however busy the
   sandbox is.
 
 Plan fees, storage, network, taxes and free credits are left out of both.
 `runtime compare --from e2b` prices your own usage the same way, with
 sandboxes the free trial paid for at the standard rates, so trial time never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
-first 100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing)
+first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing)
 for Runtime's terms.
 
 ## How to switch

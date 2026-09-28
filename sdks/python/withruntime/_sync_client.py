@@ -30,6 +30,11 @@ from ._sync_products.watch import Watches, WatchHandle
 
 DEFAULT_BASE_URL = "https://api.withruntime.com"
 CHUNK = 1_048_576
+# Chunks of a large write in flight at once. Each chunk's reply waits on the
+# API and the guest, and the link idles while every chunk in flight waits: from
+# a home link (12.6 MB/s up, 27 September 2026) 100 MB took 17-18 s at four and
+# 11 s at eight, and sixteen was no faster. The TypeScript SDK sends eight too.
+PARALLEL_CHUNKS = 8
 _KEY_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_.:-"
 
 
@@ -671,7 +676,7 @@ class Files:
                                           raw=payload[offset:offset + step])
             response.read()
         try:
-            parallel(chunk, range(0, len(payload), step), 4)
+            parallel(chunk, range(0, len(payload), step), PARALLEL_CHUNKS)
             self._t.json("POST", self._path(f"/uploads/{_enc(upload)}:commit"), body={})
             if octal and begin.get("mode") != octal:  # Older images need chmod after commit.
                 self._t.json("POST", self._path("/files:chmod"), body={"path": path, "mode": octal})
@@ -989,7 +994,8 @@ class Sandbox:
         """Changes its settings; what you leave out stays as it is: ``name``,
         ``labels``, ``auto_wake`` (a request wakes it when paused),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
-        from now; 0 never), ``persistent`` (keep it running while credit lasts
+        from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
+        ``persistent`` (keep it running while credit lasts
         and keep its disk after a stop; paid only) and
         ``max_total_cost_micros`` (None removes the cap)."""
         return self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
@@ -1286,7 +1292,7 @@ class Runtime:
         and ``takenBack`` (the part of spent that refunds and disputes took);
         ``trial`` is in milliseconds, or None; ``outbound`` is this month's
         outbound traffic in bytes, with ``chargedMicros`` for what went past
-        the free 100 GiB."""
+        the month's free ``allowanceBytes``."""
         return self._t.json("GET", "/v1/usage")
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:

@@ -1,3 +1,5 @@
+<!-- The source of README.md. Figures are {{facts}} from packages/cloud-guide/src/facts.ts; run `bun run generate` in packages/cloud-guide after editing, which writes README.md. -->
+
 # Runtime Cloud SDK and CLI
 
 One client for every Runtime Cloud product, and the `runtime` CLI. Node.js
@@ -27,7 +29,7 @@ console.log(result.exitCode, result.stdout);
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
 `await using` stops it when the block ends (Node 24, Bun or TypeScript; on
 Node 22 call `await sbx.stop()`). With no arguments you get the free
-trial while it lasts (100 free hours, up to eight sandboxes running at once), 2 vCPU, 4 GiB of
+trial while it lasts ({{trial-hours}} free hours, up to {{trial-sandboxes}} sandboxes running at once), 2 vCPU, 4 GiB of
 memory and a 4 GiB disk. The current default image includes NumPy, pandas and
 matplotlib; see the [sandbox environment](https://withruntime.com/docs/sandbox-environment).
 
@@ -45,9 +47,9 @@ The sandbox object does the rest:
   and persistence, and `keepAlive` to extend its lease while your process runs;
 - `interpreter`, `network`, `previews` and `desktop` for the other products.
 
-A sandbox pauses itself after 60 seconds with nothing happening in it, keeping
+A sandbox pauses itself after {{idle-pause}} with nothing happening in it, keeping
 its memory and processes, and the next call wakes it, so an idle sandbox costs
-no compute; `idlePauseSeconds` sets 10 to 86,400, or 0 for never.
+no compute; `idlePauseSeconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or 0 for never.
 
 `Sandbox.getOrCreate(name)` returns the sandbox with that name, woken if it is
 paused, or creates it.

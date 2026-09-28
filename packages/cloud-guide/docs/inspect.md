@@ -114,7 +114,7 @@ async backend.
 
 ## Limits to plan for
 
-- The trial runs eight sandboxes at once, so the sandbox asks Inspect for
+- The trial runs {{trial-sandboxes}} sandboxes at once, so the sandbox asks Inspect for
   eight at a time. On a paid account raise it with `--max-sandboxes`; see
   [pricing](./pricing#how-many-at-once).
 - Builds run one at a time until your account has bought credit, then four. A

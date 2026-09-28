@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.8.1. `pip show withruntime` shows the
+This guide describes `withruntime` 0.8.2. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -37,7 +37,7 @@ running. Leaving the `with` block stops it, even after an exception.
 
 With no arguments you get the free trial while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
-can have up to 16 vCPUs and 64 GiB; a trial one, 2 vCPU and 4 GiB. Every field
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and 4 GiB. Every field
 is optional and takes snake_case names:
 
 ```python
@@ -286,15 +286,19 @@ snapshot asked for meanwhile waits for that write.
 
 A paused sandbox also wakes by itself when a request needs it: an `exec`, a
 file, process, terminal, desktop or code-interpreter call, or a visit to one of
-its shared ports. The call waits while it wakes, usually under a second.
+its shared ports. The call waits while it wakes, about {{wake}}.
 The wake is billed like any wake, from the moment it runs again, with a fresh
-lease of its own `timeout_seconds`. Turn it off with `auto_wake=False` at create
+lease of its own `timeout_seconds`, or the lease it paused with when that ends
+later. Turn it off with `auto_wake=False` at create
 or `sbx.update(auto_wake=False)`; a call to a paused sandbox then fails with
 `sandbox_paused` until you call `wake()`.
 
-`idle_pause_seconds` pauses a sandbox after that many seconds with no request
-(60 to 86,400; 0 is never), and the next request wakes it. A sandbox created
-with no `timeout_seconds` pauses after 300 seconds if nothing has used it yet.
+A sandbox pauses itself after **{{idle-pause}}** in which nothing happens in it: no
+request, no command or terminal still running, no open preview, port, SSH or
+tunnel connection, no network traffic, and its processes using under a fortieth
+of a vCPU. The next request wakes it. `idle_pause_seconds` sets the idle time:
+{{idle-pause-min}} to {{idle-pause-max}} seconds, or 0 for never. A `persistent` sandbox has none unless you
+set it.
 
 ```python check
 from withruntime import Sandbox

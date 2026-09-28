@@ -1,19 +1,26 @@
 # Runtime vs Daytona
 
-Runtime gives every agent sandbox its own microVM kernel and costs **77% less than Daytona** for an agent that mostly waits on a model.
+Runtime gives every agent sandbox its own microVM kernel and costs **{{saving:daytona}} less than Daytona** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $2.76 on Daytona**. At 100,000 runs a month that is $63.89 against
-$276.00, **$212 a month saved**. Your Daytona code keeps working: change one import.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:daytona:100000}}, **{{=$0 less:daytona:100000}} a month saved**. Your Daytona code keeps working: change one import.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Daytona bills every vCPU for as long as the
   sandbox runs. Runtime measures the CPU your code actually uses, so time spent
-  waiting on a model costs only a small floor, a twentieth of a vCPU.
-- **Lower rates on both meters.** $0.025 per vCPU-hour against Daytona's
-  $0.0504, and $0.0075 per GiB-hour of memory against $0.0162. Even with every
-  CPU busy the whole time, the example job costs $1.33 on Runtime and $2.76 on
+  waiting on a model costs only a small floor, {{cpu-floor-share}}.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
+  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
+  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  processes still running and its next command done {{wake}} later.
+- **An uptime promise that pays itself.** Paid accounts are promised
+  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
+  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
+- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against Daytona's
+  {{rate:daytona:cpu}}, and {{memory-rate}} per GiB-hour of memory against {{rate:daytona:memory}}. Even with every
+  CPU busy the whole time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:daytona}} on
   Daytona.
 - **A microVM every time.** Every Runtime sandbox is a Firecracker microVM with
   its own kernel, and every one can pause with its memory. Daytona's default
@@ -22,7 +29,14 @@ $276.00, **$212 a month saved**. Your Daytona code keeps working: change one imp
   the sandbox runs or not. Runtime's disk is part of a running sandbox.
 - **A one-line switch.** `withruntime/daytona` runs code written for Daytona's
   SDK, in JavaScript and Python: sessions, files, git, snapshots built from
-  Daytona's `Image`, and the code interpreter.
+  Daytona's `Image`, and the code interpreter. Run `runtime switch --from daytona` before your
+  first top-up and it is matched, up to {{switching-max}}.
+- **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
+  Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
+  every account ([single sign-on](./single-sign-on)).
+- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
+  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -35,19 +49,19 @@ $276.00, **$212 a month saved**. Your Daytona code keeps working: change one imp
 ## At a glance
 
 Daytona's figures come from its public pricing and documentation, checked
-23 September 2026.
+{{checked:daytona}}.
 
-|                  | Runtime                                                   | Daytona                                                       |
-| ---------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
-| Isolation        | Firecracker microVM for every sandbox                     | Containers by default; VM sandboxes as a separate class       |
-| CPU billing      | $0.025 per vCPU-hour of measured CPU, with a small floor  | $0.0504 per allocated vCPU-hour                               |
-| Memory billing   | $0.0075 per reserved GiB-hour                             | $0.0162 per GiB-hour                                          |
-| Disk             | Included while running; paused storage $0.08 per GB-month | First 5 GiB free, then $0.000108 per GiB-hour, stopped or not |
-| Plan fee         | None; prepaid credit from $10                             | None published                                                |
-| Free start       | 100 sandbox hours, no card                                | $200 of compute                                               |
-| Pause and resume | Files and memory, every sandbox                           | Files and memory on VM sandboxes                              |
-| Snapshots, forks | Copies of a running sandbox, with memory and processes    | Memory snapshots on VM sandboxes                              |
-| Agent sign-in    | Browser approval; no key in the agent's config            | API key                                                       |
+|                  | Runtime                                                                     | Daytona                                                                   |
+| ---------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Isolation        | Firecracker microVM for every sandbox                                       | Containers by default; VM sandboxes as a separate class                   |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:daytona:cpu}} per allocated vCPU-hour                              |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:daytona:memory}} per GiB-hour                                      |
+| Disk             | Included while running; paused storage {{paused-storage-rate}} per GB-month | First 5 GiB free, then {{term:daytona:disk}} per GiB-hour, stopped or not |
+| Plan fee         | None; prepaid credit from {{topup-min}}                                     | None published                                                            |
+| Free start       | {{trial-hours}} sandbox hours, no card                                      | {{term:daytona:credit}} of compute                                        |
+| Pause and resume | Files and memory, every sandbox                                             | Files and memory on VM sandboxes                                          |
+| Snapshots, forks | Copies of a running sandbox, with memory and processes                      | Memory snapshots on VM sandboxes                                          |
+| Agent sign-in    | Browser approval; no key in the agent's config                              | API key                                                                   |
 
 ## Cost for the same job
 
@@ -56,26 +70,26 @@ keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
 waiting for a model.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-         Total                                        $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+         Total                                        {{cost:runtime}}
 
-Daytona  CPU    1,000 × 60 s / 3,600 × 2 × $0.0504 = $1.68
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0162 = $1.08
-         Total                                        $2.76
+Daytona  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:daytona:cpu}} = {{part:daytona:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{rate:daytona:memory}} = {{part:daytona:memory}}
+         Total                                        {{cost:daytona}}
 ```
 
-- **Saving:** 77%, or $2.12 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $276.00 on Daytona.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on
-  Runtime against $2.76 on Daytona. At this size, Runtime is cheaper however busy the
+- **Saving:** {{saving:daytona}}, or {{less:daytona}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:daytona:100000}} on Daytona.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on
+  Runtime against {{cost:daytona:busy}} on Daytona. At this size, Runtime is cheaper however busy the
   sandbox is.
 
 Disk, network, taxes and free credits are left out of both.
 `runtime compare --from daytona` prices your own usage the same way, with
 sandboxes the free trial paid for at the standard rates, so trial time never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
-first 100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing)
+first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing)
 for Runtime's terms.
 
 ## How to switch

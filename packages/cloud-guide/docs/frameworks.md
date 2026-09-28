@@ -338,7 +338,7 @@ VS Code takes it in `.vscode/mcp.json`:
 - `claude mcp list`, `codex mcp list` and `cursor-agent mcp list-tools` each
   reached the MCP server from the configuration above.
 
-Official references checked 23 September 2026:
+Official references checked {{checked:vercel}}:
 [OpenAI Agents SDK sandbox clients](https://openai.github.io/openai-agents-python/sandbox/clients/),
 [Vercel tools](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling),
 [Claude Agent SDK custom tools](https://platform.claude.com/docs/en/agent-sdk/custom-tools),

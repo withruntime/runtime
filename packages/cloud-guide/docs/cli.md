@@ -68,6 +68,7 @@ A CI runner has no browser, so it runs on a key. Make one from your own terminal
 runtime keys create --name ci                    # full access, until revoked
 runtime keys create --name ci --daily-limit 25   # at most $25 in any 24 hours
 runtime keys create --name monitor --read-only   # sees everything, changes nothing
+runtime keys create --name web --account-wide    # every sandbox in the account (0.8.2+)
 runtime keys create --name ci | gh secret set RUNTIME_API_KEY   # straight into GitHub
 ```
 
@@ -110,8 +111,9 @@ sandbox is running (`--no-wait` returns at once). Its options:
 - `--trial` or `--paid`, `--name`, `--label k=v` (repeatable)
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
   `--connect <host:port>`
-- `--idle-pause <seconds>` pauses it after that long with no request, and
-  `--no-auto-wake` keeps a paused one paused until `wake`
+- `--idle-pause <seconds>` pauses it after that long with nothing happening in
+  it (default {{idle-pause-seconds}}; {{idle-pause-min}} to {{idle-pause-max}}, or 0 for never), and `--no-auto-wake` keeps a
+  paused one paused until `wake`
 - `--persistent` keeps a paid sandbox running while credit lasts
 - `--get-or-create` with `--name` prints the id of the sandbox that already has
   the name, woken if paused, instead of failing with `name_taken`
@@ -431,7 +433,7 @@ runtime ls
   [rate comparison](./pricing#published-rate-comparison). With no sandboxes
   yet, it prices an example and says so.
 - `runtime switch --from <provider>` records the provider you are leaving. Do it
-  before your first top-up: that top-up is then matched, up to $100 of credit
+  before your first top-up: that top-up is then matched, up to {{switching-max}} of credit
   ([switching credit](./pricing#switching-credit)). `runtime switch` on its own
   shows where it stands.
 - `runtime account` lists the accounts this machine is connected to and marks

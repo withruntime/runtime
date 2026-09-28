@@ -28,6 +28,13 @@ macOS default, reads `$ID:e` as a modifier and sends `/xec`.
 Never use `curl -v` or `--trace` with the key: they print the `Authorization`
 header.
 
+A key sees and uses what its own agent made: another key's sandbox answers 404
+`not_found`. An account-wide key, which an owner or admin makes at
+[API keys](https://withruntime.com/account/keys) or approves for
+`runtime keys create --account-wide` (CLI 0.8.2 and later), sees and uses everything in the account,
+and `getOrCreate` returns a sandbox another key named. The API cannot make or
+change keys ([keys in a team](./teams#keys-in-a-team)).
+
 ```bash no-run
 curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}:exec" \
   -H "Authorization: Bearer ${RUNTIME_API_KEY}" \
@@ -134,28 +141,28 @@ Over a limit you get 429 with `Retry-After`.
 
 The create body:
 
-| Field                | Default                                      | Notes                                                                                                                                                                                                                                               |
-| -------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`, `labels`     | none                                         | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                      |
-| `funding`            | trial while it lasts, then paid              | `"trial"` never falls back to paid credit                                                                                                                                                                                                           |
-| `region`             | the default region                           | Use a region listed for your account                                                                                                                                                                                                                |
-| `vcpu`               | 2                                            | At most 16 on a paid sandbox, 2 on the trial                                                                                                                                                                                                        |
-| `memoryMiB`          | 4096                                         | At most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a larger size is refused with `invalid_request` naming the field                                                                                                                     |
-| `diskMiB`            | 4096                                         |                                                                                                                                                                                                                                                     |
-| `cpu`                | `"shared"`                                   | `"reserved"` guarantees every vCPU                                                                                                                                                                                                                  |
-| `cpuFloorMillis`     | 50                                           | Guaranteed CPU while shared, in thousandths of a vCPU                                                                                                                                                                                               |
-| `timeoutSeconds`     | 1800                                         | How long it may run before its lease ends, at most 3600                                                                                                                                                                                             |
-| `onLeaseEnd`         | `"pause"`                                    | Or `"stop"`                                                                                                                                                                                                                                         |
-| `pausable`           | true                                         |                                                                                                                                                                                                                                                     |
-| `idlePauseSeconds`   | 300 when `timeoutSeconds` is left out        | Pause after this many seconds with no exec, file, process, terminal, desktop or preview request; 0 is never, otherwise 60 to 86,400. The default counts only until the first request, and is not set with an explicit lease, an image or a snapshot |
-| `autoWake`           | true                                         | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                  |
-| `persistent`         | false                                        | Paid only: the lease renews itself while credit lasts, and a stopped sandbox keeps its disk for `:restart`                                                                                                                                          |
-| `maxTotalCostMicros` | none                                         | The most the sandbox may cost over its whole life                                                                                                                                                                                                   |
-| `getOrCreate`        | false                                        | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                     |
-| `network`            | every public port (paid), 80 and 443 (trial) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                      |
-| `maxCostMicros`      | none                                         | Refuse the create if its first lease would cost more                                                                                                                                                                                                |
-| `image`, `volumes`   | none                                         | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`. An image with a start command answers once its ready check passes, in `start`                                                                 |
-| `snapshot`           | none                                         | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                        |
+| Field                | Default                                      | Notes                                                                                                                                                                                                                                                                      |
+| -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`, `labels`     | none                                         | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                                             |
+| `funding`            | trial while it lasts, then paid              | `"trial"` never falls back to paid credit                                                                                                                                                                                                                                  |
+| `region`             | the default region                           | Use a region listed for your account                                                                                                                                                                                                                                       |
+| `vcpu`               | 2                                            | At most 16 on a paid sandbox, 2 on the trial                                                                                                                                                                                                                               |
+| `memoryMiB`          | 4096                                         | At most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a larger size is refused with `invalid_request` naming the field                                                                                                                                            |
+| `diskMiB`            | 4096                                         |                                                                                                                                                                                                                                                                            |
+| `cpu`                | `"shared"`                                   | `"reserved"` guarantees every vCPU                                                                                                                                                                                                                                         |
+| `cpuFloorMillis`     | 50                                           | Guaranteed CPU while shared, in thousandths of a vCPU                                                                                                                                                                                                                      |
+| `timeoutSeconds`     | 1800                                         | How long it may run before its lease ends, at most 3600                                                                                                                                                                                                                    |
+| `onLeaseEnd`         | `"pause"`                                    | Or `"stop"`                                                                                                                                                                                                                                                                |
+| `pausable`           | true                                         |                                                                                                                                                                                                                                                                            |
+| `idlePauseSeconds`   | {{idle-pause-seconds}}                       | Pause after this many seconds with nothing happening: no request, no command or terminal running, no open connection, no traffic and no CPU use. 0 is never, otherwise {{idle-pause-min}} to {{idle-pause-max}}. Not set on a sandbox that cannot pause or is `persistent` |
+| `autoWake`           | true                                         | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                                         |
+| `persistent`         | false                                        | Paid only: the lease renews itself while credit lasts, and a stopped sandbox keeps its disk for `:restart`                                                                                                                                                                 |
+| `maxTotalCostMicros` | none                                         | The most the sandbox may cost over its whole life                                                                                                                                                                                                                          |
+| `getOrCreate`        | false                                        | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                                            |
+| `network`            | every public port (paid), 80 and 443 (trial) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                             |
+| `maxCostMicros`      | none                                         | Refuse the create if its first lease would cost more                                                                                                                                                                                                                       |
+| `image`, `volumes`   | none                                         | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`. An image with a start command answers once its ready check passes, in `start`                                                                                        |
+| `snapshot`           | none                                         | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                               |
 
 Sizes are limits you ask for. The server checks their combinations against
 account limits and the host's measured capacity.
@@ -165,8 +172,8 @@ command, file, process, terminal, desktop or interpreter call reaches it, and
 the call runs once it is running, usually within a second. A visit
 to one of its shared ports wakes it too: an API client's request waits up to
 30 seconds, and a browser is shown a page that reloads itself. The wake is an
-ordinary wake: a fresh lease of the sandbox's own `timeoutSeconds`, billed from
-the moment it runs. With `autoWake: false` the call fails with `sandbox_paused`
+ordinary wake: a fresh lease of the sandbox's own `timeoutSeconds`, or the lease
+it paused with when that ends later, billed from the moment it runs. With `autoWake: false` the call fails with `sandbox_paused`
 until `:wake`. A wake that cannot be paid for fails with the refusal, such as
 `insufficient_funds`, and leaves the sandbox paused.
 
@@ -198,7 +205,7 @@ SDKs' `keepAlive` calls it for you.
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000; at most 24 hours)
+fields are `cwd`, `env`, `stdin`, `timeoutMs` (default {{idle-pause-seconds}},000; at most 24 hours)
 and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
 values are never echoed and are stored only as hashes.
 

@@ -1,19 +1,24 @@
 # Runtime vs Prime Sandboxes
 
-Runtime and Prime Sandboxes both give every sandbox a microVM with its own kernel; Runtime costs **58% less** for an agent that mostly waits on a model, and can pause and fork today.
+Runtime and Prime Sandboxes both give every sandbox a microVM with its own kernel; Runtime costs **{{saving:prime}} less** for an agent that mostly waits on a model, and can pause and fork today.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $1.52 on Prime Sandboxes**. At 100,000 runs a month that is $63.89
-against $151.67, **$88 a month saved**.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:prime}} on Prime Sandboxes**. At 100,000 runs a month that is {{cost:runtime:100000}}
+against {{cost:prime:100000}}, **{{=$0 less:prime:100000}} a month saved**.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Prime bills the vCPUs, memory and disk a
   sandbox is given for as long as it runs. Runtime measures the CPU your code
-  actually uses, so time spent waiting on a model costs only a small floor, a
-  twentieth of a vCPU. Even with both CPUs busy the whole minute, the example
-  job costs $1.33 on Runtime and $1.52 on Prime.
-- **Cheaper memory.** $0.0075 per GiB-hour against Prime's $0.0125, and memory
+  actually uses, so time spent waiting on a model costs only a small floor, {{cpu-floor-share}}. Even with both CPUs busy the whole minute, the example
+  job costs {{cost:runtime:busy}} on Runtime and {{cost:prime}} on Prime.
+- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  month until a request wakes it; the next command runs {{wake}} after that.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
+- **Cheaper memory.** {{memory-rate}} per GiB-hour against Prime's {{rate:prime:memory}}, and memory
   is most of what an agent sandbox costs while it waits.
 - **Pause and fork now.** A paused Runtime sandbox keeps its memory and
   running processes for 1 to 365 days, and a fork copies a running sandbox into
@@ -21,7 +26,10 @@ against $151.67, **$88 a month saved**.
   sandbox mid-run, as coming soon.
 - **Prices that do not lapse.** Prime's published rates hold through
   22 December 2026. Runtime's rates are fixed in each resource's quote, and
-  there is no plan fee: prepaid credit from $10.
+  there is no plan fee: prepaid credit from {{topup-min}}.
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -33,19 +41,19 @@ against $151.67, **$88 a month saved**.
 ## At a glance
 
 Prime's figures come from its sandbox documentation and launch post, checked
-25 September 2026.
+{{checked:prime}}.
 
-|                    | Runtime                                                  | Prime Sandboxes                                |
-| ------------------ | -------------------------------------------------------- | ---------------------------------------------- |
-| Isolation          | Firecracker microVM, own kernel                          | Hardware-virtualized microVM, own guest kernel |
-| CPU billing        | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.02 per vCPU-hour while running              |
-| Memory billing     | $0.0075 per reserved GiB-hour                            | $0.0125 per GiB-hour while running             |
-| Disk while it runs | Included                                                 | $0.0002 per GiB-hour; 5 GiB by default         |
-| Sizes              | Up to 16 vCPUs and 64 GiB paid, chosen apart             | Up to 16 vCPUs, 64 GiB and 128 GiB of disk     |
-| Pause and fork     | Files, memory and processes; forks of a running sandbox  | Snapshots and forks listed as coming soon      |
-| At once            | 100 on a paid account; 50 in its first week              | 1,024 per account to start                     |
-| Plan fee           | None; prepaid credit from $10                            | None; rates published through 22 December 2026 |
-| Free start         | 100 sandbox hours, no card                               | None published                                 |
+|                    | Runtime                                                                           | Prime Sandboxes                                    |
+| ------------------ | --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Isolation          | Firecracker microVM, own kernel                                                   | Hardware-virtualized microVM, own guest kernel     |
+| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                    | {{rate:prime:cpu}} per vCPU-hour while running     |
+| Memory billing     | {{memory-rate}} per reserved GiB-hour                                             | {{rate:prime:memory}} per GiB-hour while running   |
+| Disk while it runs | Included                                                                          | {{rate:prime:disk}} per GiB-hour; 5 GiB by default |
+| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                    | Up to 16 vCPUs, 64 GiB and 128 GiB of disk         |
+| Pause and fork     | Files, memory and processes; forks of a running sandbox                           | Snapshots and forks listed as coming soon          |
+| At once            | {{paid-sandboxes}} on a paid account; {{new-account-sandboxes}} in its first week | 1,024 per account to start                         |
+| Plan fee           | None; prepaid credit from {{topup-min}}                                           | None; rates published through 22 December 2026     |
+| Free start         | {{trial-hours}} sandbox hours, no card                                            | None published                                     |
 
 ## Cost for the same job
 
@@ -54,25 +62,25 @@ keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
 waiting for a model. Prime's sandbox keeps its default 5 GiB disk.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025          = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075     = $0.50
-         Total                                            $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}          = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}}     = {{part:runtime:memory}}
+         Total                                            {{cost:runtime}}
 
-Prime    CPU    1,000 × 60 s / 3,600 × 2 × $0.02       = $0.67
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0125     = $0.83
-         Disk   1,000 × 60 s / 3,600 × 5 × $0.0002     = $0.02
-         Total                                            $1.52
+Prime    CPU    1,000 × 60 s / 3,600 × 2 × {{rate:prime:cpu}}       = {{part:prime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{rate:prime:memory}}     = {{part:prime:memory}}
+         Disk   1,000 × 60 s / 3,600 × 5 × {{rate:prime:disk}}     = {{part:prime:disk}}
+         Total                                            {{cost:prime}}
 ```
 
-- **Saving:** 58%, or $0.88 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $151.67 on Prime.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $1.52 on Prime. At this size Runtime is cheaper however busy the
+- **Saving:** {{saving:prime}}, or {{less:prime}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:prime:100000}} on Prime.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:prime}} on Prime. At this size Runtime is cheaper however busy the
   sandbox is.
 
 Network, taxes and free allowances are left out of both. On Runtime, inbound
-traffic is free, and each account's first 100 GiB out a month is free, then
-$0.02 per GB. See [pricing](./pricing) for Runtime's terms.
+traffic is free, and each account's first {{outbound-allowance}} out a month is free, then
+{{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 
@@ -98,7 +106,7 @@ await Promise.all(episodes.map((episode) => episode.stop()));
 
 - **Thousands at once from day one.** An account starts at 1,024 active
   sandboxes and 4,096 vCPUs. A paid Runtime account runs 100, after a first week
-  at 50, and raises it on request.
+  at {{new-account-sandboxes}}, and raises it on request.
 - **Training on Prime Intellect.** Prime Sandboxes are built for agentic RL
   training on Prime's own platform, and Prime Tunnels reach inference running
   on its cluster nodes.

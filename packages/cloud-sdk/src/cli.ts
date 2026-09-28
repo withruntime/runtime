@@ -53,7 +53,7 @@ Account
                                                --allow (paid): only these methods and paths get it
   secrets ls                                   Names, hosts and placeholders, never values
   secrets rm <NAME>                            Delete a secret
-  keys create [--name <name>] [--read-only] [--daily-limit <usd>]
+  keys create [--name <name>] [--read-only] [--daily-limit <usd>] [--account-wide]
                                                A new API key for CI, approved by an owner in the browser
   referrals                                    Your referral link: you both get up to $500
   compare --from <provider> [--days 30]        What your usage would cost at e2b, daytona, vercel,
@@ -2194,11 +2194,14 @@ async function desktop(sbx: Sandbox, argv: string[], out: Out): Promise<number> 
 
 const KEYS_HELP = `runtime keys <command>
 
-  create [--name <name>] [--read-only] [--daily-limit <usd>]
+  create [--name <name>] [--read-only] [--daily-limit <usd>] [--account-wide]
       A new API key, for a CI runner or any place with no browser. Prints a link
       and a code; an account owner approves the key in the browser, seeing its
       name, access and limit. The key is printed once, alone on stdout, and
       lasts until revoked. --json prints it as JSON, still alone on stdout.
+      --account-wide makes a key that sees and uses every sandbox and other
+      resource in the account, whichever key made it; only an owner or admin
+      can approve one. Without it, a key sees only what it makes.
 
   runtime keys create --name ci --daily-limit 25 | gh secret set RUNTIME_API_KEY
 
@@ -2335,8 +2338,8 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
       "List and revoke keys at https://withruntime.com/account/keys. No key can list or revoke keys.",
     );
   if (verb !== "create") throw unknown("keys command", verb, ["create"]);
-  const args = parse(rest, ["read-only"], ["name", "daily-limit"]);
-  const known = new Set(["name", "read-only", "daily-limit"]);
+  const args = parse(rest, ["read-only", "account-wide"], ["name", "daily-limit"]);
+  const known = new Set(["name", "read-only", "daily-limit", "account-wide"]);
   for (const name of args.flags.keys())
     if (!known.has(name)) throw usage(`Unknown option --${name}.`);
   if (args.positional.length || args.rest) throw usage(`Unexpected ${args.positional[0] ?? "--"}.`);
@@ -2344,11 +2347,14 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
   const limit = flag(args, "daily-limit");
   if (readOnly && limit !== undefined)
     throw usage("A read-only key cannot spend, so it takes no --daily-limit.");
+  if (readOnly && has(args, "account-wide"))
+    throw usage("A read-only key already sees the whole account, so it takes no --account-wide.");
   const { createKey, dailyLimitMicros } = await import("./keys.js");
   const created = await createKey(
     {
       name: flag(args, "name") ?? (readOnly ? "Read-only key" : "My API key"),
       access: readOnly ? "read" : "full",
+      ...(has(args, "account-wide") ? { reach: "account" as const } : {}),
       dailyLimitMicros: limit === undefined ? null : dailyLimitMicros(limit),
     },
     env,
@@ -2358,6 +2364,7 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
   out.write(out.json ? JSON.stringify(key) : key.key);
   const terms = [
     key.access === "read" ? "read only" : "full access",
+    key.reach === "account" ? "account-wide" : undefined,
     key.access === "read"
       ? undefined
       : key.dailyLimitMicros === null

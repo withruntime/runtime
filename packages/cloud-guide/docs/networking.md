@@ -16,7 +16,7 @@ None of them belongs to one sandbox alone, so each is its own product in the CLI
 the SDKs and MCP: `runtime domain`, `runtime port`, `runtime address` and
 `runtime tunnel`; `runtime.domains`, `runtime.ports`, `runtime.addresses` and
 `runtime.tunnel`; `runtime_domain_*`, `runtime_port_*`, `runtime_address_*` and
-`runtime_tunnel_*`. A dedicated IPv4 address and a tunnel each cost $5 per
+`runtime_tunnel_*`. A dedicated IPv4 address and a tunnel each cost {{address-month}} per
 30-day month, prorated to funded time. IPv6, custom domains and TCP ports are
 included. See [pricing](./pricing).
 
@@ -109,6 +109,10 @@ other account sends from it while you hold it.
   before any other account gets it. Remove it from your allow-lists first.
 - Addresses are added to Runtime as accounts need them. If none is free, the
   answer is `no_capacity` (503): write to support.
+- An address is served from one place, so while you hold one your sandboxes are
+  started only where it can send from. If there is no room there just now, a
+  create answers `no_capacity` (503) rather than start a sandbox that would send
+  from a shared address; retry it with the same idempotency key.
 
 ## Your own upstream proxy
 
@@ -136,6 +140,9 @@ proxy sees, and UDP.
 A WireGuard tunnel from a machine or router on your network into your
 sandboxes. Every sandbox gets an address in the tunnel's subnet, and your
 machines reach any port of it there.
+While you have a tunnel, your sandboxes start where its gateway can reach them
+both ways; with no room there just now, a create answers `no_capacity` (503),
+and a retry with the same idempotency key goes ahead once there is.
 
 ```bash no-run
 runtime tunnel create                                # subnet 10.250.0.0/16 by default

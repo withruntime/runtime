@@ -112,8 +112,11 @@ type CreateOptions struct {
 	Pausable       *bool `json:"pausable,omitempty"`
 	// OnLeaseEnd is "pause" (the default) or "stop".
 	OnLeaseEnd string `json:"onLeaseEnd,omitempty"`
-	// IdlePauseSeconds pauses it after this many seconds with no exec, file,
-	// terminal, desktop or preview request (60 to 86400). A request wakes it.
+	// IdlePauseSeconds pauses it after this many seconds in which nothing
+	// happens in it: no request, no command or terminal running, no open
+	// connection, no network traffic and no CPU use (10 to 86400). Left 0, a
+	// pausable sandbox pauses after 60. To never pause it, pass
+	// Extra: map[string]any{"idlePauseSeconds": 0}. A request wakes it.
 	IdlePauseSeconds int `json:"idlePauseSeconds,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it. Default true.
 	AutoWake *bool `json:"autoWake,omitempty"`
@@ -236,7 +239,7 @@ type SandboxSettings struct {
 	// AutoWake: a request to a paused sandbox wakes it.
 	AutoWake *bool `json:"autoWake,omitempty"`
 	// IdlePauseSeconds pauses it after this many idle seconds, counted from
-	// now; 0 never.
+	// now; 0 never, otherwise 10 to 86400.
 	IdlePauseSeconds *int `json:"idlePauseSeconds,omitempty"`
 	// Persistent keeps it running while credit lasts. Paid only.
 	Persistent *bool `json:"persistent,omitempty"`

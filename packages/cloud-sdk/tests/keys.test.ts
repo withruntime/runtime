@@ -227,3 +227,24 @@ test("the command refuses what the keys page does not offer before asking anythi
   await run(["help"], env, { ...out, write: (text) => help.push(text) });
   expect(help.join("")).toContain("keys create");
 });
+
+test("--account-wide asks for a key that sees the whole account, and says so when it arrives", async () => {
+  const site = website(["connected"]);
+  const { options: opts } = options(site.fetcher);
+  const created = await createKey({ ...full, reach: "account" }, env, opts);
+  expect(created.reach).toBe("account");
+  expect(site.calls[0]!.body).toMatchObject({ purpose: "key", access: "full", reach: "account" });
+  // Without it the request carries no reach, which the website reads as the
+  // ordinary key.
+  const plain = website(["connected"]);
+  const { options: plainOpts } = options(plain.fetcher);
+  expect((await createKey(full, env, plainOpts)).reach).toBe("agent");
+  expect(plain.calls[0]!.body.reach).toBeUndefined();
+  const written: string[] = [];
+  await run(["keys", "help"], env, {
+    json: false,
+    write: (text) => written.push(text),
+    error: () => undefined,
+  });
+  expect(written.join("")).toContain("--account-wide");
+});

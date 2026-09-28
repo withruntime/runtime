@@ -18,7 +18,8 @@ export type SandboxInfo = {
   timeoutSeconds: number;
   /** Pauses after this many idle seconds; 0 is never. */
   idlePauseSeconds?: number;
-  /** True for the default idle pause, which pauses only a sandbox nothing has used yet. */
+  /** True only for a sandbox created before 27 September 2026 with the old
+   * default idle pause, which paused it only while nothing had used it. */
   idlePauseUnusedOnly?: boolean;
   /** A request (exec, files, terminal, a visit to a shared port) wakes it when paused. */
   autoWake?: boolean;
@@ -67,8 +68,10 @@ export type CreateSandbox = {
   pausable?: boolean;
   /** What happens when timeoutSeconds runs out: "pause" (default) or "stop". */
   onLeaseEnd?: "pause" | "stop";
-  /** Pause after this many seconds with no exec, file, terminal, desktop or
-   * preview request (60 to 86400; 0 never). A request wakes it again. */
+  /** Pause after this many seconds in which nothing happens in it: no
+   * request, no command or terminal running, no open connection, no network
+   * traffic and no CPU use. Default 60 for a pausable sandbox; 0 never;
+   * otherwise 10 to 86400. A request wakes it again. */
   idlePauseSeconds?: number;
   /** A request to a paused sandbox wakes it. Default true. */
   autoWake?: boolean;
@@ -172,8 +175,9 @@ export type Usage = {
   /** The part of spent that refunds and disputes took. */
   takenBack: string;
   trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
-  /** Outbound traffic this calendar month, UTC: the first `allowanceBytes`
-   * (100 GiB) an account sends are free, the rest $0.02 per decimal GB. */
+  /** Outbound traffic this calendar month, UTC: the first `allowanceBytes` an
+   * account sends are free, and the rest is charged at the rate in the pricing
+   * guide (https://withruntime.com/docs/pricing#network-products). */
   outbound?: {
     month: string;
     sentBytes: number;
@@ -204,7 +208,8 @@ export type SandboxSettings = {
   labels?: Record<string, string>;
   /** A request to a paused sandbox wakes it. */
   autoWake?: boolean;
-  /** Pause after this many seconds with no activity, counted from now; 0 never. */
+  /** Pause after this many seconds with no activity, counted from now; 0
+   * never, otherwise 10 to 86400. */
   idlePauseSeconds?: number;
   /** Keep it running while credit lasts and keep its disk after a stop. Paid only. */
   persistent?: boolean;

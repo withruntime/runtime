@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.8.1. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.8.2. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -41,7 +41,7 @@ needs Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
 
 With no arguments you get the free trial while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
-can have up to 16 vCPUs and 64 GiB; a trial one, 2 vCPU and 4 GiB. Every field
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and 4 GiB. Every field
 is optional:
 
 ```ts
@@ -317,10 +317,11 @@ how long it is kept.
 
 A paused sandbox wakes by itself when a request needs it: an `exec`, a file,
 process, terminal, desktop or code-interpreter call, or a visit to one of its
-shared ports. The call waits while it wakes, usually under a second, and
+shared ports. The call waits while it wakes, about {{wake}}, and
 then runs. A browser that visits a shared port sees a short "Waking up" page
 that reloads itself. The wake is billed like any wake, from the moment the
-sandbox runs again, and it gets a fresh lease of its own `timeoutSeconds`.
+sandbox runs again, and it gets a fresh lease of its own `timeoutSeconds`, or
+keeps the lease it paused with when that ends later.
 
 Turn it off with `autoWake: false` at create, or later with
 `sbx.update({ autoWake: false })`. A call to a paused sandbox that cannot wake
@@ -328,10 +329,15 @@ then fails with `sandbox_paused` until you call `wake()`.
 
 ### Pause when idle
 
-`idlePauseSeconds` pauses a sandbox after that many seconds with no exec, file,
-process, terminal, desktop or preview request (60 to 86,400; 0 is never). With
+A sandbox pauses itself after **{{idle-pause}}** in which nothing happens in it: no
+request, no command or terminal still running, no open preview, port, SSH or
+tunnel connection, no network traffic, and its processes using under a fortieth
+of a vCPU. A background job that computes or downloads keeps it running. With
 automatic wake, the next request wakes it, so a sandbox that is used now and
 then costs running time only while it is used and parked storage in between.
+
+`idlePauseSeconds` sets the idle time: {{idle-pause-min}} to {{idle-pause-max}} seconds, or 0 for never. A
+`persistent` sandbox has none unless you set it.
 
 ```ts check
 import { Sandbox } from "withruntime";
@@ -340,9 +346,10 @@ const sbx = await Sandbox.create({ idlePauseSeconds: 600 }); // ten idle minutes
 await sbx.update({ idlePauseSeconds: 1800 }); // change it later; 0 turns it off
 ```
 
-A sandbox created with no `timeoutSeconds` pauses after 300 seconds if nothing
-has used it yet. `sbx.info.idlePauseUnusedOnly` is `true` for that default and
-`false` for an idle time you set, which counts from the last request.
+The pause lands within about five seconds of the idle time. A sandbox that
+cannot pause (`pausable: false`) never pauses for being idle. One created before
+27 September 2026 keeps the idle setting it had; `sbx.info.idlePauseUnusedOnly`
+is `true` for the old default, which paused only a sandbox nothing had used.
 
 ### Keep a sandbox running
 
@@ -614,8 +621,8 @@ await using later = await runtime.sandboxes.create({ snapshot: snapshot.id });
 await runtime.snapshots.delete(snapshot.id);
 ```
 
-A running sandbox is paused for the moment a snapshot or fork takes (about a
-second for a fresh sandbox, longer the more memory it holds), then woken; a paused one stays paused. Copies get the source's
+A running sandbox is paused while a snapshot or fork captures it, then woken before the call
+returns (a snapshot of a fresh sandbox is ready in {{snapshot-take}}, longer the more memory it holds); a paused one stays paused. Copies get the source's
 vCPUs, memory, disk and CPU (reserved CPU, or a raised floor), are billed as a
 create with those would be, and run on its host. A snapshot is kept on that
 host and copied off it, encrypted, as soon as it is taken, so it survives the

@@ -1,27 +1,40 @@
 # Runtime vs Runloop
 
-Runtime runs agent code in microVMs, like Runloop's devboxes, and costs **88% less** for an agent that mostly waits on a model.
+Runtime runs agent code in microVMs, like Runloop's devboxes, and costs **{{saving:runloop}} less** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $5.33 on Runloop**. At 100,000 runs a month that is $63.89 against
-$532.56, **$469 a month saved**.
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:runloop:100000}}, **{{=$0 less:runloop:100000}} a month saved**.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Runloop bills a devbox's CPUs and memory for
   as long as it runs. Runtime measures the CPU your code actually uses, so time
-  spent waiting on a model costs only a small floor, a twentieth of a vCPU.
-- **Lower rates on every meter.** $0.025 per vCPU-hour against Runloop's
-  $0.108 per CPU-hour, and $0.0075 per GiB-hour of memory against $0.0252 per
-  GB-hour. Even with both CPUs busy the whole time, the example job costs $1.33
-  on Runtime and $5.33 on Runloop.
+  spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after
+  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
+  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  pays {{paused-storage-rate}} per GB of saved state a month.
+- **An uptime promise that pays itself.** Paid accounts are promised
+  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
+  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
+- **Lower rates on every meter.** {{cpu-rate}} per vCPU-hour against Runloop's
+  {{rate:runloop:cpu}} per CPU-hour, and {{memory-rate}} per GiB-hour of memory against {{rate:runloop:memory}} per
+  GB-hour. Even with both CPUs busy the whole time, the example job costs {{cost:runtime:busy}}
+  on Runtime and {{cost:runloop:busy}} on Runloop.
 - **Pause keeps memory.** A paused Runtime sandbox wakes with its processes
   still running, kept for 1 to 365 days. A suspended Runloop devbox keeps only
   its disk, and its processes must be restarted.
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
   processes, and try several things from exactly that point.
-- **No plan fee.** Runloop's Pro plan is $250 a month plus usage. Runtime is
-  prepaid credit from $10, with 100 free sandbox hours to start.
+- **No plan fee.** Runloop's Pro plan is {{term:runloop:pro}} a month plus usage. Runtime is
+  prepaid credit from {{topup-min}}, with {{trial-hours}} free sandbox hours to start.
+- **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
+  Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
+  every account ([single sign-on](./single-sign-on)).
+- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
+  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -30,17 +43,17 @@ $532.56, **$469 a month saved**.
 ## At a glance
 
 Runloop's figures come from its public pricing and documentation, checked
-23 September 2026.
+{{checked:runloop}}.
 
-|                 | Runtime                                                  | Runloop                                   |
-| --------------- | -------------------------------------------------------- | ----------------------------------------- |
-| Isolation       | Firecracker microVM, own kernel                          | microVM, with a container inside          |
-| CPU billing     | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.108 per CPU-hour while the devbox runs |
-| Memory billing  | $0.0075 per reserved GiB-hour                            | $0.0252 per GB-hour                       |
-| Disk            | Included while running                                   | $0.00034236 per GB-hour                   |
-| Plan fee        | None; prepaid credit from $10                            | Basic free; Pro $250 a month plus usage   |
-| Free start      | 100 sandbox hours, no card                               | $50 of credit, no card                    |
-| Suspend, resume | Pause keeps files, memory and processes                  | Suspend keeps the disk; processes restart |
+|                 | Runtime                                                        | Runloop                                                 |
+| --------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
+| Isolation       | Firecracker microVM, own kernel                                | microVM, with a container inside                        |
+| CPU billing     | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:runloop:cpu}} per CPU-hour while the devbox runs |
+| Memory billing  | {{memory-rate}} per reserved GiB-hour                          | {{rate:runloop:memory}} per GB-hour                     |
+| Disk            | Included while running                                         | {{rate:runloop:disk}} per GB-hour                       |
+| Plan fee        | None; prepaid credit from {{topup-min}}                        | Basic free; Pro {{term:runloop:pro}} a month plus usage |
+| Free start      | {{trial-hours}} sandbox hours, no card                         | {{term:runloop:credit}} of credit, no card              |
+| Suspend, resume | Pause keeps files, memory and processes                        | Suspend keeps the disk; processes restart               |
 
 ## Cost for the same job
 
@@ -50,24 +63,24 @@ waiting for a model. On Runloop that is the `MEDIUM` devbox: 2 CPUs, 4 GB and
 8 GB of disk.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025           = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075      = $0.50
-         Total                                             $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}           = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}}      = {{part:runtime:memory}}
+         Total                                             {{cost:runtime}}
 
-Runloop  CPU    1,000 × 60 s / 3,600 × 2 × $0.108       = $3.60
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0252      = $1.68
-         Disk   1,000 × 60 s / 3,600 × 8 × $0.00034236 = $0.05
-         Total                                             $5.33
+Runloop  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:runloop:cpu}}       = {{part:runloop:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{rate:runloop:memory}}      = {{part:runloop:memory}}
+         Disk   1,000 × 60 s / 3,600 × 8 × {{rate:runloop:disk}} = {{part:runloop:disk}}
+         Total                                             {{cost:runloop}}
 ```
 
-- **Saving:** 88%, or $4.69 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $532.56 on Runloop.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $5.33 on Runloop.
+- **Saving:** {{saving:runloop}}, or {{less:runloop}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:runloop:100000}} on Runloop.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:runloop}} on Runloop.
 
 Plan fees, storage while suspended, network, taxes and free credit are left out
-of both. On Runtime, inbound traffic is free, and each account's first 100 GiB
-out a month is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's
+of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}}
+out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's
 terms.
 
 ## How to switch
@@ -93,8 +106,7 @@ try {
 
 - **Agent benchmarks.** Runloop runs SWE-Bench and other public benchmarks, and
   builds custom ones from your data.
-- **Your own cloud and compliance.** Runloop deploys into your cloud account and
-  states SOC 2, HIPAA and GDPR readiness.
+- **Your own cloud.** Runloop deploys into your cloud account.
 
 ## Sources
 

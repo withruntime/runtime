@@ -1,18 +1,24 @@
 # Runtime vs Vercel Sandbox
 
-Runtime runs Firecracker microVMs and bills active CPU, like Vercel Sandbox, and costs **70% less** for an agent that mostly waits on a model.
+Runtime runs Firecracker microVMs and bills active CPU, like Vercel Sandbox, and costs **{{saving:vercel}} less** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU sandbox with 4 GiB cost **$0.64
-on Runtime and $2.12 on Vercel**. At 100,000 runs a month that is $63.89 against
-$212.44, **$149 a month saved**. Your Vercel Sandbox code keeps working: change one
+**The saving:** 1,000 one-minute runs of a 2 vCPU sandbox with 4 GiB cost **{{cost:runtime}}
+on Runtime and {{cost:vercel}} on Vercel**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:vercel:100000}}, **{{=$0 less:vercel:100000}} a month saved**. Your Vercel Sandbox code keeps working: change one
 import.
 
 ## Where Runtime is better
 
-- **About a fifth of the CPU price.** Active CPU costs $0.025 an hour on
-  Runtime and $0.128 on Vercel; memory costs about a third. Busier jobs save
-  more: with both CPUs busy the whole minute, the example job costs $1.33 on
-  Runtime and $5.68 on Vercel.
+- **{{=n0 100 * ( 1 - cpu-rate / rate:vercel:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} an hour on Runtime and {{rate:vercel:cpu}} on Vercel; memory costs {{=n0 100 * ( 1 - memory-rate / rate:vercel:memory )}}% less. Busier jobs save
+  more: with both CPUs busy the whole minute, the example job costs {{cost:runtime:busy}} on
+  Runtime and {{cost:vercel:busy}} on Vercel.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
+  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
+  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  processes still running and its next command done {{wake}} later.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
 - **Memory survives a pause.** A paused Runtime sandbox wakes with its
   processes still running, kept for 1 to 365 days. A stopped Vercel sandbox
   keeps its filesystem, and its processes start again.
@@ -23,10 +29,14 @@ import.
   that needs a token unless you make it public. Vercel's exposed ports are
   reachable at a public URL.
 - **No platform to join.** Runtime needs no hosting plan, team or project;
-  prepaid credit from $10 is the whole account.
+  prepaid credit from {{topup-min}} is the whole account.
 - **A one-line switch.** `withruntime/vercel` runs code written for Vercel
   Sandbox's SDK, in JavaScript and Python: commands, files, ports, snapshots and
-  persistent sandboxes, with no Vercel project or token.
+  persistent sandboxes, with no Vercel project or token. Run `runtime switch --from vercel` before your
+  first top-up and it is matched, up to {{switching-max}}.
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -35,19 +45,19 @@ import.
 ## At a glance
 
 Vercel's figures come from its public pricing and documentation, checked
-23 September 2026, at the rates of its default `iad1` region.
+{{checked:vercel}}, at the rates of its default `iad1` region.
 
-|                  | Runtime                                              | Vercel Sandbox                                       |
-| ---------------- | ---------------------------------------------------- | ---------------------------------------------------- |
-| Isolation        | Firecracker microVM, own kernel                      | Firecracker microVM, own kernel                      |
-| CPU billing      | $0.025 per active vCPU-hour, with a small floor      | $0.128 per active CPU-hour                           |
-| Memory billing   | $0.0075 per reserved GiB-hour                        | $0.0212 per provisioned GB-hour                      |
-| Plan             | None; prepaid credit from $10                        | Hobby allowance free; usage beyond it needs Pro      |
-| Free start       | 100 sandbox hours, no card                           | 5 active CPU-hours and 420 GB-hours a month on Hobby |
-| Session length   | Leases of up to an hour, extended as often as needed | 45 minutes on Hobby, 24 hours on Pro                 |
-| Stop and resume  | Pause keeps files, memory and processes              | Stop keeps the filesystem; processes start again     |
-| Snapshots, forks | Files, memory and running processes                  | The filesystem                                       |
-| Port URLs        | Private with a token by default                      | Public                                               |
+|                  | Runtime                                                                                                                         | Vercel Sandbox                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Isolation        | Firecracker microVM, own kernel                                                                                                 | Firecracker microVM, own kernel                      |
+| CPU billing      | {{cpu-rate}} per active vCPU-hour, with a small floor                                                                           | {{rate:vercel:cpu}} per active CPU-hour              |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                                                                           | {{rate:vercel:memory}} per provisioned GB-hour       |
+| Plan             | None; prepaid credit from {{topup-min}}                                                                                         | Hobby allowance free; usage beyond it needs Pro      |
+| Free start       | {{trial-hours}} sandbox hours, no card                                                                                          | 5 active CPU-hours and 420 GB-hours a month on Hobby |
+| Session length   | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | 45 minutes on Hobby, 24 hours on Pro                 |
+| Stop and resume  | Pause keeps files, memory and processes                                                                                         | Stop keeps the filesystem; processes start again     |
+| Snapshots, forks | Files, memory and running processes                                                                                             | The filesystem                                       |
+| Port URLs        | Private with a token by default                                                                                                 | Public                                               |
 
 ## Cost for the same job
 
@@ -56,24 +66,23 @@ which gives 2 GB per vCPU. Each run lasts 60 seconds and keeps the CPU busy for
 20 CPU-seconds: an agent that spends most of its time waiting for a model.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-         Total                                        $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+         Total                                        {{cost:runtime}}
 
-Vercel   CPU    1,000 × 20 s / 3,600 × $0.128      = $0.71
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0212 = $1.41
-         Total                                        $2.12
+Vercel   CPU    1,000 × 20 s / 3,600 × {{rate:vercel:cpu}}      = {{part:vercel:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{rate:vercel:memory}} = {{part:vercel:memory}}
+         Total                                        {{cost:vercel}}
 ```
 
-- **Saving:** 70%, or $1.49 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $212.44 on Vercel.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on
-  Runtime against $5.68 on Vercel, a 77% saving.
+- **Saving:** {{saving:vercel}}, or {{less:vercel}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:vercel:100000}} on Vercel.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on
+  Runtime against {{cost:vercel:busy}} on Vercel, a {{saving:vercel:busy}} saving.
 
 A GiB is about 7% larger than a GB, so Runtime's memory figure covers slightly
 more. Creations, network, storage, plan fees, taxes and free allowances are left
-out of both. On Runtime, inbound traffic is free, and each account's first 100
-GiB out a month is free, then $0.02 per GB. See [pricing](./pricing) for
+out of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch

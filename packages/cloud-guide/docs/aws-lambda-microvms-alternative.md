@@ -1,10 +1,10 @@
 # Runtime vs AWS Lambda MicroVMs
 
-Runtime runs agent code in Firecracker microVMs, like Lambda MicroVMs, and costs **85% less** for an agent that mostly waits on a model.
+Runtime runs agent code in Firecracker microVMs, like Lambda MicroVMs, and costs **{{saving:lambda-microvms}} less** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $4.20 on Lambda MicroVMs**. At 100,000 runs a month that is $63.89
-against $420.33, **$356 a month saved**, with no AWS account, IAM role or VPC to
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:lambda-microvms}} on Lambda MicroVMs**. At 100,000 runs a month that is {{cost:runtime:100000}}
+against {{cost:lambda-microvms:100000}}, **{{=$0 less:lambda-microvms:100000}} a month saved**, with no AWS account, IAM role or VPC to
 set up first.
 
 ## Where Runtime is better
@@ -12,12 +12,19 @@ set up first.
 - **You pay for the CPU you use.** Lambda MicroVMs bill the baseline vCPUs and
   memory for every second a MicroVM runs, busy or not. Runtime measures the CPU
   your code actually uses, so time spent waiting on a model costs only a small
-  floor, a twentieth of a vCPU.
-- **Lower rates on both meters.** $0.025 per vCPU-hour against about $0.0997,
-  and $0.0075 per GiB-hour of memory against about $0.0132 per GB-hour. With
-  both CPUs busy the whole time, the example job still costs $1.33 on Runtime
-  and $4.20 on Lambda MicroVMs.
-- **Bigger sandboxes.** A paid Runtime sandbox takes up to 16 vCPUs and 64 GiB,
+  floor, {{cpu-floor-share}}.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after
+  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
+  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  pays {{paused-storage-rate}} per GB of saved state a month.
+- **An uptime promise that pays itself.** Paid accounts are promised
+  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
+  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
+- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against about {{=$4 rate:lambda-microvms:cpu}},
+  and {{memory-rate}} per GiB-hour of memory against about {{=$4 rate:lambda-microvms:memory}} per GB-hour. With
+  both CPUs busy the whole time, the example job still costs {{cost:runtime:busy}} on Runtime
+  and {{cost:lambda-microvms}} on Lambda MicroVMs.
+- **Bigger sandboxes.** A paid Runtime sandbox takes up to {{max-vcpu}} vCPUs and {{max-memory}},
   with memory chosen apart from CPU. A MicroVM's baseline tops out at 4 vCPUs
   and 8 GB, always 2 GB per vCPU.
 - **Sessions that last.** A MicroVM keeps its state for up to 8 hours. A Runtime
@@ -25,6 +32,9 @@ set up first.
   `persistent: true`, and a paused one keeps its memory for 1 to 365 days.
 - **Fork a running machine.** A Runtime fork copies a sandbox as it is now,
   memory and processes included, into up to 10 running copies.
+- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
+  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No access key
   goes into a prompt or a config file, and the [MCP server](./mcp) reuses the
@@ -36,19 +46,19 @@ set up first.
 ## At a glance
 
 Lambda MicroVMs' figures come from AWS's public pricing and product pages,
-checked 25 September 2026. Rates are for Arm (Graviton) in US East (N. Virginia).
+checked {{checked:lambda-microvms}}. Rates are for Arm (Graviton) in US East (N. Virginia).
 
-|                | Runtime                                                  | AWS Lambda MicroVMs                                  |
-| -------------- | -------------------------------------------------------- | ---------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                          | Firecracker microVM                                  |
-| CPU billing    | $0.025 per vCPU-hour of measured CPU, with a small floor | $0.0000276944 per baseline vCPU-second while running |
-| Memory billing | $0.0075 per reserved GiB-hour                            | $0.0000036667 per baseline GB-second while running   |
-| Sizes          | Up to 16 vCPUs and 64 GiB paid, chosen apart             | Baseline up to 4 vCPUs and 8 GB, 2 GB per vCPU       |
-| Session length | Leases extended as needed, or `persistent`               | State kept up to 8 hours                             |
-| Suspend        | Files, memory and processes, kept 1 to 365 days          | Memory and disk in a snapshot, at $0.08 per GB-month |
-| Free start     | 100 sandbox hours, no card                               | No free tier for MicroVMs                            |
-| Plan fee       | None; prepaid credit from $10                            | None; an AWS account                                 |
-| Agent sign-in  | Browser approval; no key in the agent's config           | AWS credentials and IAM                              |
+|                | Runtime                                                        | AWS Lambda MicroVMs                                                              |
+| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                | Firecracker microVM                                                              |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{=$10 rate:lambda-microvms:cpu / 3600}} per baseline vCPU-second while running  |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{=$10 rate:lambda-microvms:memory / 3600}} per baseline GB-second while running |
+| Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Baseline up to 4 vCPUs and 8 GB, 2 GB per vCPU                                   |
+| Session length | Leases extended as needed, or `persistent`                     | State kept up to 8 hours                                                         |
+| Suspend        | Files, memory and processes, kept 1 to 365 days                | Memory and disk in a snapshot, at {{paused-storage-rate}} per GB-month           |
+| Free start     | {{trial-hours}} sandbox hours, no card                         | No free tier for MicroVMs                                                        |
+| Plan fee       | None; prepaid credit from {{topup-min}}                        | None; an AWS account                                                             |
+| Agent sign-in  | Browser approval; no key in the agent's config                 | AWS credentials and IAM                                                          |
 
 ## Cost for the same job
 
@@ -57,25 +67,25 @@ MicroVMs). Each run lasts 60 seconds and keeps the CPU busy for 20 CPU-seconds:
 an agent that spends most of its time waiting for a model.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025                 = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075            = $0.50
-         Total                                                   $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}                 = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}}            = {{part:runtime:memory}}
+         Total                                                   {{cost:runtime}}
 
-Lambda   CPU    1,000 × 60 s × 2 × $0.0000276944              = $3.32
-         Memory 1,000 × 60 s × 4 × $0.0000036667              = $0.88
-         Total                                                   $4.20
+Lambda   CPU    1,000 × 60 s × 2 × {{=$10 rate:lambda-microvms:cpu / 3600}}              = {{part:lambda-microvms:cpu}}
+         Memory 1,000 × 60 s × 4 × {{=$10 rate:lambda-microvms:memory / 3600}}              = {{part:lambda-microvms:memory}}
+         Total                                                   {{cost:lambda-microvms}}
 ```
 
-- **Saving:** 85%, or $3.56 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $420.33 on Lambda
+- **Saving:** {{saving:lambda-microvms}}, or {{less:lambda-microvms}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:lambda-microvms:100000}} on Lambda
   MicroVMs.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $4.20 on Lambda. At this size Runtime is cheaper however busy the
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:lambda-microvms}} on Lambda. At this size Runtime is cheaper however busy the
   sandbox is.
 
 Snapshot storage and its reads and writes, data transfer, taxes and credits are
 left out of both. On Runtime, inbound traffic is free, and each account's first
-100 GiB out a month is free, then $0.02 per GB. See [pricing](./pricing) for
+{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch

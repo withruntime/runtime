@@ -1,30 +1,40 @@
 # Runtime vs Blaxel
 
-Runtime bills the CPU your agent uses and costs **77% less than Blaxel** while running an agent that mostly waits on a model.
+Runtime bills the CPU your agent uses and costs **{{saving:blaxel}} less than Blaxel** while running an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **$0.64 on
-Runtime and $2.76 on Blaxel**. At 100,000 runs a month that is $63.89 against
-$276.00, **$212 a month saved**. Your Blaxel sandbox code keeps working: change
+**The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
+Runtime and {{cost:blaxel}} on Blaxel**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:blaxel:100000}}, **{{=$0 less:blaxel:100000}} a month saved**. Your Blaxel sandbox code keeps working: change
 one import.
 
 ## Where Runtime is better
 
-- **Lower cost while running.** Blaxel bills $0.0000115 per GB of memory per
-  second of active time, $0.0414 per GB-hour, and CPU comes with the memory.
-  Runtime charges $0.0075 per GiB-hour of memory and measured CPU at $0.025 per
+- **Lower cost while running.** Blaxel bills {{=$7 rate:blaxel:memory / 3600}} per GB of memory per
+  second of active time, {{rate:blaxel:memory}} per GB-hour, and CPU comes with the memory.
+  Runtime charges {{memory-rate}} per GiB-hour of memory and measured CPU at {{cpu-rate}} per
   vCPU-hour.
+- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
+  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  automatically ([Uptime Promise](/legal/sla)).
 - **Cheaper even when busy.** With both CPUs working the whole time, the example
-  job costs $1.33 on Runtime and $2.76 on Blaxel.
+  job costs {{cost:runtime:busy}} on Runtime and {{cost:blaxel}} on Blaxel.
 - **CPU and memory chosen apart.** Blaxel sets a sandbox's CPU from its memory:
   8 GB gets 4 cores. On Runtime you choose vCPUs and memory separately, so a
   CPU-heavy job does not pay for memory it does not need.
+- **Idle time costs no compute here either.** A Runtime sandbox pauses itself
+  after {{idle-pause}} with nothing happening in it, or after as few as 10 if you
+  set it, and a paused sandbox pays only paused storage. A command still
+  running, an open connection, network traffic or CPU use keeps it awake.
 - **Cheaper to keep paused work.** A paused Runtime sandbox keeps its files,
-  memory and processes for $0.08 per GB a month, for 1 to 365 days. Blaxel's
-  standby snapshots cost $0.20 per GB a month.
+  memory and processes for {{paused-storage-rate}} per GB a month, for 1 to 365 days. Blaxel's
+  standby snapshots cost {{term:blaxel:snapshot}} per GB a month.
 - **A one-line switch.** `withruntime/blaxel` runs code written for Blaxel's
   sandbox SDK, in JavaScript and Python: processes, files, previews, snapshots,
   forks and the code interpreter, with no Blaxel key. A switch from Blaxel gets
-  your first top-up matched, up to $100.
+  your first top-up matched, up to {{switching-max}}.
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+  real key is added at the egress proxy, only on HTTPS to the hosts you allow
+  ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -36,17 +46,17 @@ one import.
 ## At a glance
 
 Blaxel's figures come from its public pricing and documentation, checked
-27 September 2026.
+{{checked:blaxel}}.
 
-|                | Runtime                                                  | Blaxel                                           |
-| -------------- | -------------------------------------------------------- | ------------------------------------------------ |
-| Isolation      | Firecracker microVM, own kernel                          | Lightweight virtual machines                     |
-| CPU billing    | $0.025 per vCPU-hour of measured CPU, with a small floor | Included with memory; 8 GB gets 4 cores          |
-| Memory billing | $0.0075 per reserved GiB-hour                            | $0.0000115 per GB-second of active time          |
-| Paused storage | $0.08 per GB-month; files, memory and processes          | $0.20 per GB-month snapshot; files and processes |
-| Plan fee       | None; prepaid credit from $10                            | None; tiers grow with credit added               |
-| Free start     | 100 sandbox hours, no card                               | Up to $200 of credit                             |
-| Internet out   | First 100 GiB a month free, then $0.02 per GB            | Included                                         |
+|                | Runtime                                                                  | Blaxel                                                              |
+| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                          | Lightweight virtual machines                                        |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor           | Included with memory; 8 GB gets 4 cores                             |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                                    | {{=$7 rate:blaxel:memory / 3600}} per GB-second of active time      |
+| Paused storage | {{paused-storage-rate}} per GB-month; files, memory and processes        | {{term:blaxel:snapshot}} per GB-month snapshot; files and processes |
+| Plan fee       | None; prepaid credit from {{topup-min}}                                  | None; tiers grow with credit added                                  |
+| Free start     | {{trial-hours}} sandbox hours, no card                                   | Up to {{term:blaxel:credit}} of credit                              |
+| Internet out   | First {{outbound-allowance}} a month free, then {{outbound-rate}} per GB | Included                                                            |
 
 ## Cost for the same job
 
@@ -55,23 +65,23 @@ Take 1,000 runs of a 2 vCPU, 4 GiB sandbox (4 GB on Blaxel). Each run lasts
 its time waiting for a model.
 
 ```
-Runtime  CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-         Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-         Total                                        $0.64
+Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+         Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+         Total                                        {{cost:runtime}}
 
-Blaxel   Memory 1,000 × 60 s × 4 × $0.0000115      = $2.76
+Blaxel   Memory 1,000 × 60 s × 4 × {{=$7 rate:blaxel:memory / 3600}}      = {{part:blaxel:memory}}
 ```
 
-- **Saving:** 77%, or $2.12 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $276.00 on Blaxel.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on Runtime
-  against $2.76 on Blaxel.
+- **Saving:** {{saving:blaxel}}, or {{less:blaxel}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:blaxel:100000}} on Blaxel.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on Runtime
+  against {{cost:blaxel}} on Blaxel.
 
 The Blaxel figure assumes each sandbox goes to standby the moment its run ends;
 Blaxel's docs say standby starts about 15 seconds after the last connection
 closes. Storage, network, taxes and free credit are left out of both. On
-Runtime, inbound traffic is free, and each account's first 100 GiB out a month
-is free, then $0.02 per GB. See [pricing](./pricing) for Runtime's terms.
+Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month
+is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 
@@ -94,8 +104,8 @@ from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import S
 ```
 
 Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB. A
-sandbox pauses after 60 seconds without a call, keeping its memory, files and
-processes, and wakes by itself on the next command, file call or preview visit.
+sandbox pauses after {{idle-pause}} with nothing happening in it, keeping its
+memory, files and processes, and wakes by itself on the next command, file call or preview visit.
 Envs, processes by name, files, previews, snapshots, forks, volumes and the code
 interpreter carry over. Sandboxes use the free trial while the account has
 trial time, then prepaid credit; pass `withruntime: { create: { funding: "trial" } }`
@@ -103,10 +113,12 @@ trial time, then prepaid credit; pass `withruntime: { create: { funding: "trial"
 
 Four things to know before the first run:
 
-- **One key sees its own sandboxes.** A sandbox is visible only to the key
-  that created it; another key gets a 404, while names stay unique across the
-  account ([keys in a team](./teams#keys-in-a-team)). A web service and a worker
-  that share sandboxes must use the same key.
+- **Share sandboxes with an account-wide key.** A Blaxel workspace key sees
+  every sandbox. A Runtime key sees the sandboxes it made unless an owner or
+  admin makes it account-wide, on the [API keys](https://withruntime.com/account/keys)
+  page or, from CLI 0.8.2, with `runtime keys create --account-wide`. Give a web service and a
+  worker that share sandboxes account-wide keys, or one key
+  ([keys in a team](./teams#keys-in-a-team)).
 - **The trial caps a sandbox at 2 vCPU and 4096 MB.** Blaxel's default fits.
   `memory: 8192` or more needs paid credit.
 - **Custom images are Runtime images.** Blaxel's own templates, such as
@@ -149,19 +161,19 @@ try {
 ```
 
 Moving from Blaxel? Run `npx withruntime switch --from blaxel` before your first
-top-up, and that top-up is matched with credit, up to $100
+top-up, and that top-up is matched with credit, up to {{switching-max}}
 ([switching credit](./pricing#switching-credit)).
 
 ## When Blaxel may fit better
 
-- **Idle for free, back in milliseconds.** A Blaxel sandbox goes to standby by
-  itself when connections close, costs nothing for compute there, and resumes
-  in about 25 ms.
+- **Back from idle in milliseconds.** A Blaxel sandbox resumes from standby in
+  about 25 ms. A paused Runtime sandbox runs its next command {{wake}} after
+  the call that wakes it.
 - **Very large fleets.** Blaxel's top tier runs over 100,000 sandboxes at once.
   A tier is the credit topped up over the last 30 days, which is then spent on
-  usage: $20 unlocks 50 sandboxes and $50 unlocks 200.
+  usage: {{term:blaxel:tier-1}} unlocks 50 sandboxes and {{term:blaxel:tier-2}} unlocks 200.
 - **Heavy outbound traffic.** Blaxel includes internet egress in its rates.
-  Runtime's first 100 GiB out a month are free, then $0.02 per GB.
+  Runtime's first {{outbound-allowance}} out a month are free, then {{outbound-rate}} per GB.
 
 ## Sources
 

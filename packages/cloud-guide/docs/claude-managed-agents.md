@@ -5,7 +5,7 @@ Give a Claude Managed Agent Runtime's sandboxes through Runtime's remote MCP ser
 Claude Managed Agents runs the agent loop and a container for each session on
 Anthropic's side. Add Runtime's MCP server to the agent and it can also create
 Runtime sandboxes: Firecracker microVMs with their own kernel. They can run
-for days, pause with their memory and wake in under a second, share a
+for days, pause with their memory and wake in about {{wake}}, share a
 port at an HTTPS address, fork, run Docker, and start from your own images.
 Runtime bills them for the CPU they use. The Runtime key stays in an
 Anthropic vault and never enters the session's container.
@@ -125,10 +125,10 @@ wakes it, and carries on.
 
 ## What it costs
 
-CPU is billed as used, $0.025 per vCPU-hour with a floor of 50 millicores, and
-reserved memory at $0.0075 per GiB-hour. A 2 vCPU, 4 GiB sandbox costs $0.08 an
-hour with both CPUs busy and $0.03125 an hour while it waits. A paused sandbox
-pays only storage ([pricing](./pricing)). New accounts get 100 free sandbox
+CPU is billed as used, {{cpu-rate}} per vCPU-hour with a floor of {{cpu-floor}}, and
+reserved memory at {{memory-rate}} per GiB-hour. A 2 vCPU, 4 GiB sandbox costs {{busy-hour}} an
+hour with both CPUs busy and {{idle-hour}} an hour while it waits. A paused sandbox
+pays only storage ([pricing](./pricing)). New accounts get {{trial-hours}} free sandbox
 hours, no card.
 
 ## What was verified

@@ -1,3 +1,5 @@
+<!-- The source of README.md. Figures are {{facts}} from packages/cloud-guide/src/facts.ts; run `bun run generate` in packages/cloud-guide after editing, which writes README.md. -->
+
 # Runtime Cloud Python SDK
 
 One client for every Runtime Cloud product, sync and async. Python 3.10 or
@@ -25,7 +27,7 @@ with Sandbox.create() as sbx:
 
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
 leaving the `with` block stops it. With no arguments you get the free trial
-while it lasts: 100 free hours, no card, up to eight sandboxes running at once.
+while it lasts: {{trial-hours}} free hours, no card, up to {{trial-sandboxes}} sandboxes running at once.
 The current default image includes NumPy, pandas and matplotlib; see the
 [sandbox environment](https://withruntime.com/docs/sandbox-environment).
 `AsyncRuntime` is the same client for asyncio, method for method:
@@ -50,9 +52,9 @@ list, glob, stat, move, remove, upload and download directories), `pause`,
 `wake`, `extend`, `update`, `keep_alive`, `fork` and `snapshot`, and the
 `interpreter`, `network`, `previews` and `desktop` products. A paused sandbox
 also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
-the sandbox with that name or creates it. A sandbox pauses itself after 60 seconds
+the sandbox with that name or creates it. A sandbox pauses itself after {{idle-pause}}
 with nothing happening in it, keeping its memory and processes, so an
-idle sandbox costs no compute; `idle_pause_seconds` sets 10 to 86,400, or 0 for
+idle sandbox costs no compute; `idle_pause_seconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or 0 for
 never. The client has `sandboxes`, `images`,
 `volumes`, `snapshots`, `limits`, `feedback` and `support`;
 `runtime.limits.get()` (0.3.1 and later) says whether the key is read-only and

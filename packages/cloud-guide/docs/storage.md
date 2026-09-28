@@ -176,5 +176,5 @@ await sbx.exec("ls /data");
   `pending` until it is copied and checked, and a restored volume is `creating`
   until every byte is downloaded and checked.
 - Snapshot copies are part of the snapshot and its [price](./pricing).
-- Volume backups cost $0.012 per decimal GB per 30-day month, charged on
+- Volume backups cost {{backup-rate}} per decimal GB per 30-day month, charged on
   `storedBytes` once the copy is ready. See [pricing](./pricing).

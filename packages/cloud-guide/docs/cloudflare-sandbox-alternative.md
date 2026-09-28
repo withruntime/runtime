@@ -1,17 +1,22 @@
 # Runtime vs Cloudflare Sandbox
 
-Runtime bills CPU by use, like Cloudflare's Sandbox SDK, and costs **53% less** for an agent that mostly waits on a model.
+Runtime bills CPU by use, like Cloudflare's Sandbox SDK, and costs **{{saving:cloudflare}} less** for an agent that mostly waits on a model.
 
-**The saving:** 1,000 one-minute runs of a 2 vCPU sandbox cost **$0.64 on Runtime
-and $1.35 on Cloudflare**. At 100,000 runs a month that is $63.89 against
-$135.04, **$71 a month saved**, with no Worker to deploy and no $5 plan to
+**The saving:** 1,000 one-minute runs of a 2 vCPU sandbox cost **{{cost:runtime}} on Runtime
+and {{cost:cloudflare}} on Cloudflare**. At 100,000 runs a month that is {{cost:runtime:100000}} against
+{{cost:cloudflare:100000}}, **{{=$0 less:cloudflare:100000}} a month saved**, with no Worker to deploy and no {{term:cloudflare:workers-paid}} plan to
 hold.
 
 ## Where Runtime is better
 
-- **About a third of the CPU price.** Active CPU costs $0.025 a vCPU-hour on
-  Runtime and $0.072 on Cloudflare. Memory is cheaper too, $0.0075 per GiB-hour
-  against $0.009.
+- **{{=n0 100 * ( 1 - cpu-rate / rate:cloudflare:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} a vCPU-hour on Runtime and {{rate:cloudflare:cpu}} on Cloudflare. Memory is cheaper too, {{memory-rate}} per GiB-hour
+  against {{rate:cloudflare:memory}}.
+- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  month until a request wakes it; the next command runs {{wake}} after that.
+- **An uptime promise that pays itself.** Paid accounts are promised
+  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
+  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
 - **Memory sized to the job.** Cloudflare needs at least 3 GiB per vCPU, so a
   2 vCPU sandbox pays for 6 GiB. On Runtime you choose vCPUs and memory
   separately and pay for no more.
@@ -24,8 +29,14 @@ hold.
   in version 0.10.2, in June 2026.
 - **Call it from any backend, with no platform to join.** Runtime is an API
   with JavaScript and Python SDKs, a CLI and an [MCP server](./mcp); prepaid
-  credit from $10 is the whole account. The Sandbox SDK runs inside a Worker on
+  credit from {{topup-min}} is the whole account. The Sandbox SDK runs inside a Worker on
   the Workers Paid plan, deployed with Wrangler and a local Docker build.
+- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
+  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
+- **Switching credit.** Run `runtime switch --from cloudflare` before your first
+  top-up and that top-up is matched, up to {{switching-max}}
+  ([switching credit](./pricing#switching-credit)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file.
@@ -34,19 +45,19 @@ hold.
 
 Cloudflare's sandboxes run on Cloudflare Containers, so their prices are the
 Containers prices. Cloudflare's figures come from its public pricing and
-documentation, checked 23 September 2026.
+documentation, checked {{checked:cloudflare}}.
 
-|                | Runtime                                                   | Cloudflare Sandbox SDK                                   |
-| -------------- | --------------------------------------------------------- | -------------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                           | A container in its own VM                                |
-| CPU billing    | $0.025 per vCPU-hour of measured CPU, with a small floor  | $0.072 per active vCPU-hour, metered in 10 ms steps      |
-| Memory billing | $0.0075 per reserved GiB-hour                             | $0.009 per provisioned GiB-hour                          |
-| Disk           | Included while running; paused storage $0.08 per GB-month | $0.000252 per provisioned GB-hour                        |
-| Plan fee       | None; prepaid credit from $10                             | Workers Paid, at least $5 a month                        |
-| Free start     | 100 sandbox hours, no card                                | No free tier; the plan includes 375 vCPU-minutes a month |
-| Sizes          | Up to 16 vCPUs and 64 GiB paid, chosen apart              | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU |
-| When idle      | Pause keeps files and memory; paid retention 1–365 days   | Sleeps after 10 idle minutes by default; files are lost  |
-| Interfaces     | API, CLI, MCP server, JavaScript and Python SDKs          | A TypeScript SDK called from a Cloudflare Worker         |
+|                | Runtime                                                                     | Cloudflare Sandbox SDK                                               |
+| -------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                             | A container in its own VM                                            |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:cloudflare:cpu}} per active vCPU-hour, metered in 10 ms steps |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                                       | {{rate:cloudflare:memory}} per provisioned GiB-hour                  |
+| Disk           | Included while running; paused storage {{paused-storage-rate}} per GB-month | {{rate:cloudflare:disk}} per provisioned GB-hour                     |
+| Plan fee       | None; prepaid credit from {{topup-min}}                                     | Workers Paid, at least {{term:cloudflare:workers-paid}} a month      |
+| Free start     | {{trial-hours}} sandbox hours, no card                                      | No free tier; the plan includes 375 vCPU-minutes a month             |
+| Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart              | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU             |
+| When idle      | Pause keeps files and memory; paid retention 1–365 days                     | Sleeps after 10 idle minutes by default; files are lost              |
+| Interfaces     | API, CLI, MCP server, JavaScript and Python SDKs                            | A TypeScript SDK called from a Cloudflare Worker                     |
 
 ## Cost for the same job
 
@@ -57,30 +68,30 @@ a custom size needs at least 3 GiB per vCPU; it gets 12 GB of disk, the size in
 Cloudflare's own example.
 
 ```
-Runtime     CPU    1,000 × 20 s / 3,600 × $0.025      = $0.14
-            Memory 1,000 × 60 s / 3,600 × 4 × $0.0075 = $0.50
-            Total                                        $0.64
+Runtime     CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
+            Memory 1,000 × 60 s / 3,600 × 4 × {{memory-rate}} = {{part:runtime:memory}}
+            Total                                        {{cost:runtime}}
 
-Cloudflare  CPU    1,000 × 20 s × $0.000020           = $0.40
-            Memory 1,000 × 60 s × 6 × $0.0000025      = $0.90
-            Disk   1,000 × 60 s × 12 × $0.00000007    = $0.05
-            Total                                        $1.35
+Cloudflare  CPU    1,000 × 20 s × {{=$6 rate:cloudflare:cpu / 3600}}           = {{part:cloudflare:cpu}}
+            Memory 1,000 × 60 s × 6 × {{=$7 rate:cloudflare:memory / 3600}}      = {{part:cloudflare:memory}}
+            Disk   1,000 × 60 s × 12 × {{=$8 rate:cloudflare:disk / 3600}}    = {{part:cloudflare:disk}}
+            Total                                        {{cost:cloudflare}}
 ```
 
-- **Saving:** 53%, or $0.71 per 1,000 runs.
-- **Per month:** at 100,000 runs, $63.89 on Runtime against $135.04 on
+- **Saving:** {{saving:cloudflare}}, or {{less:cloudflare}} per 1,000 runs.
+- **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:cloudflare:100000}} on
   Cloudflare.
-- **Busier work:** with both CPUs busy for the whole minute, $1.33 on
-  Runtime against $3.35 on Cloudflare, a 60% saving.
+- **Busier work:** with both CPUs busy for the whole minute, {{cost:runtime:busy}} on
+  Runtime against {{cost:cloudflare:busy}} on Cloudflare, a {{saving:cloudflare:busy}} saving.
 - **Smaller shapes:** Cloudflare's `standard-1` (half a vCPU, 4 GiB, 8 GB of
   disk) costs $1.03 for the same runs. Runtime's nearest shape, 1 vCPU and
-  4 GiB, still costs $0.64, because CPU is billed as measured.
+  4 GiB, still costs {{cost:runtime}}, because CPU is billed as measured.
 
 The Cloudflare figure assumes each sandbox is destroyed when its run ends; one
 left alone keeps billing memory and disk until it has been idle for 10 minutes.
-Workers requests, Durable Object time, the $5 plan minimum, network, taxes and
+Workers requests, Durable Object time, the {{term:cloudflare:workers-paid}} plan minimum, network, taxes and
 free allowances are left out of both. On Runtime, inbound traffic is free, and
-each account's first 100 GiB out a month is free, then $0.02 per GB. See
+each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See
 [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
@@ -194,8 +205,8 @@ What does not carry over:
   billing and bindings, and a directory backed up to R2 can be restored by any
   sandbox.
 - **Very large fleets.** A Cloudflare account can run 1,500 vCPUs and 6 TiB of
-  memory at once. A paid Runtime account runs 100 sandboxes, 200 vCPUs and 400
-  GiB at once (50 sandboxes in its first week), raised on request.
+  memory at once. A paid Runtime account runs {{paid-sandboxes}} sandboxes, {{account-vcpus}} vCPUs and {{account-memory}}
+  at once ({{new-account-sandboxes}} sandboxes in its first week), raised on request.
 
 ## Sources
 

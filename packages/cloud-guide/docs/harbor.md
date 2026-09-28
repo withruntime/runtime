@@ -100,7 +100,7 @@ only to its built-in environments.
 
 ## Limits to plan for
 
-- The trial runs eight sandboxes at once, so keep `--n-concurrent` at 8 or
+- The trial runs {{trial-sandboxes}} sandboxes at once, so keep `--n-concurrent` at {{trial-concurrency}} or
   below on the trial. A paid account runs more; see [pricing](./pricing#how-many-at-once).
 - Each task is its own image. Builds run one at a time until your account has
   bought credit, then four. A free trial keeps its first three images free;
