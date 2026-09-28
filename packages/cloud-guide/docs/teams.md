@@ -82,7 +82,7 @@ account sees every key, with who made it, at
   key made it, and `getOrCreate` with a name another key holds returns that
   sandbox. Choose "Everything in the account" when you make the key, use
   **Make account-wide** on a key's row, or run
-  `runtime keys create --account-wide` (CLI 0.8.2 and later), which only an owner or admin can
+  `runtime keys create --account-wide`, which only an owner or admin can
   approve. This is how services that share sandboxes work, as a Blaxel
   workspace key does.
 - An account-wide key still acts as its own agent. The audit log names it, and

@@ -31,7 +31,7 @@ header.
 A key sees and uses what its own agent made: another key's sandbox answers 404
 `not_found`. An account-wide key, which an owner or admin makes at
 [API keys](https://withruntime.com/account/keys) or approves for
-`runtime keys create --account-wide` (CLI 0.8.2 and later), sees and uses everything in the account,
+`runtime keys create --account-wide`, sees and uses everything in the account,
 and `getOrCreate` returns a sandbox another key named. The API cannot make or
 change keys ([keys in a team](./teams#keys-in-a-team)).
 

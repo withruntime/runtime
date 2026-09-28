@@ -68,7 +68,7 @@ A CI runner has no browser, so it runs on a key. Make one from your own terminal
 runtime keys create --name ci                    # full access, until revoked
 runtime keys create --name ci --daily-limit 25   # at most $25 in any 24 hours
 runtime keys create --name monitor --read-only   # sees everything, changes nothing
-runtime keys create --name web --account-wide    # every sandbox in the account (0.8.2+)
+runtime keys create --name web --account-wide    # uses every sandbox in the account
 runtime keys create --name ci | gh secret set RUNTIME_API_KEY   # straight into GitHub
 ```
 

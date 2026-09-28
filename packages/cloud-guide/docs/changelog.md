@@ -46,10 +46,10 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   every sandbox, snapshot, image and volume in the account, whichever key made
   it, as a Blaxel workspace key does: choose **Everything in the account** at
   [API keys](https://withruntime.com/account/keys), switch an existing key from
-  its row, or, from CLI 0.8.2, approve `runtime keys create --account-wide`. `getOrCreate` with
+  its row, or approve `runtime keys create --account-wide`. `getOrCreate` with
   a name another key holds then returns that sandbox. Keys made without it are
   unchanged. See [keys in a team](./teams#keys-in-a-team).
-- **Coming in withruntime 0.8.2.** `runtime keys create --account-wide` makes an
+- **withruntime 0.8.2.** `runtime keys create --account-wide` makes an
   account-wide key from the command line. Large file writes send eight chunks
   at once in both SDKs, so a big upload finishes sooner: 100 MB took 11 s
   instead of 17 from a 12.6 MB/s connection.

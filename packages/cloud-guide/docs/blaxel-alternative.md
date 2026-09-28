@@ -116,7 +116,7 @@ Four things to know before the first run:
 - **Share sandboxes with an account-wide key.** A Blaxel workspace key sees
   every sandbox. A Runtime key sees the sandboxes it made unless an owner or
   admin makes it account-wide, on the [API keys](https://withruntime.com/account/keys)
-  page or, from CLI 0.8.2, with `runtime keys create --account-wide`. Give a web service and a
+  page or with `runtime keys create --account-wide`. Give a web service and a
   worker that share sandboxes account-wide keys, or one key
   ([keys in a team](./teams#keys-in-a-team)).
 - **The trial caps a sandbox at 2 vCPU and 4096 MB.** Blaxel's default fits.

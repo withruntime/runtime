@@ -123,7 +123,7 @@ naming what to use instead.
 
 - A Blaxel workspace key sees every sandbox; a Runtime key sees the ones it
   made unless an owner or admin makes it account-wide
-  (the API keys page, or `runtime keys create --account-wide` from CLI 0.8.2). Give services
+  (the API keys page, or `runtime keys create --account-wide`). Give services
   that share sandboxes account-wide keys
   ([keys in a team](./teams#keys-in-a-team)).
 - The trial caps a sandbox at 2 vCPU and 4096 MB; `memory: 8192` needs paid
