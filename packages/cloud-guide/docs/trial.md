@@ -26,8 +26,11 @@ Every new account gets **{{trial-hours}} hours of sandbox time** after a verifie
   long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)).
   A build counts toward the {{trial-hours}} hours: at most 2 vCPU and 4 GiB, 20 minutes
   and 10 builds a day, with only the time it builds used up.
-- A trial request never falls back to paid credit, even when the account has
-  some.
+- A request that asks for the trial (`funding: "trial"`, `--trial`) never falls
+  back to paid credit, even when the account has some. One that leaves funding
+  out, as the E2B, Daytona, Vercel and Blaxel drop-ins do by default, uses the
+  trial while it lasts and then prepaid credit, so pin the trial while you
+  test.
 - Model calls are not included. Opening ports beyond the web (`connect`) needs
   an account that has bought credit.
 

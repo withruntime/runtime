@@ -371,20 +371,29 @@ Anyone can sign up at https://withruntime.com/sign-in.
 
 ## Two-step sign-in
 
-Turn it on under **Settings → Two-step sign-in**: scan the QR code with an
-authenticator app (1Password, Google Authenticator, Authy or any app that shows
-six-digit codes), enter the code it shows, and keep the ten backup codes it
-gives you. From then on, every sign-in, whether with Google, an email link or
-single sign-on, asks for the app's current code before the account opens. A
-backup code works once, for when the phone is lost, and new ones replace the
-old whenever you ask.
+Turn it on under **Settings → Two-step sign-in** with a passkey, an
+authenticator app, or both, and keep the ten backup codes it gives you. From
+then on, every sign-in, whether with Google, an email link or single sign-on,
+asks for the second step before the account opens.
+
+- **A passkey** lives in iCloud Keychain, Google Password Manager, 1Password,
+  Windows Hello or a security key, and you confirm it with your fingerprint,
+  face or device PIN. It works only on withruntime.com, so a look-alike site
+  cannot phish it. **Sign in with a passkey** on the sign-in page counts as
+  both steps: no email link and no code.
+- **An authenticator app** (1Password, Google Authenticator, Authy or any app
+  that shows six-digit codes): scan the QR code and enter the code it shows.
+
+A backup code works once, for when your devices are lost, and new ones replace
+the old whenever you ask. Removing a passkey or the app asks you to confirm it
+is you first; removing the last one turns two-step sign-in off.
 
 An owner can require it of everyone in the account. Members who have not set
 it up do so at their next sign-in, and an owner turns on their own before
-requiring it. Turning it on or off, and the requirement, are recorded in the
-[audit log](./teams). API keys and connected agents are not affected: they do
-not sign in through a browser. Five wrong codes in a row pause the step for
-fifteen minutes.
+requiring it. Turning it on or off, each passkey added or removed, and the
+requirement are recorded in the [audit log](./teams). API keys and connected
+agents are not affected: they do not sign in through a browser. Five wrong
+codes in a row pause the step for fifteen minutes.
 
 ## Report a vulnerability
 

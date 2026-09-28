@@ -88,7 +88,7 @@ Each of these throws `NotSupportedError` before anything happens. Its
 | `timeout` over one hour                                    | Create with up to an hour, then `extendTimeout` before it ends.                                             |
 | Drives (`mounts`), `networkId`                             | Runtime volumes through `withruntime: { create: { volumes } }`; network rules.                              |
 | A region outside the US, `failoverRegions`                 | Runtime runs in one US region.                                                                              |
-| Network rules that transform or forward requests           | Allow the domain and pass credentials as `env`.                                                             |
+| Network rules that transform or forward requests           | Allow the domain and store the credential as a Runtime secret for it: the sandbox sees a placeholder.       |
 | `openInteractive`                                          | `sandbox.withruntime.terminal(...)` or `npx withruntime sandbox shell <id>`.                                |
 | Extra users and groups (`createUser`, `asUser`)            | `sudo useradd` and `sudo -u` through `runCommand`.                                                          |
 | Sessions (`currentSession`, `listSessions`)                | A Runtime sandbox is its own session.                                                                       |

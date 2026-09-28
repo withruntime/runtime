@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { run } from "../src/cli";
+import { dropInLines, run } from "../src/cli";
 import { Runtime } from "../src/client";
 
 /* runtime.switching and `runtime compare` / `runtime switch` against a stub
@@ -174,7 +174,10 @@ test("`runtime switch --from e2b` records it; `runtime switch` shows where it st
       const { lines, out } = capture();
       expect(await run(["switch", "--from", "e2b"], env, out)).toBe(0);
       expect(lines.join("\n")).toBe(
-        "Recorded: switching from E2B. This organization's switch from E2B was recorded on 23 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+        [
+          "Recorded: switching from E2B. This organization's switch from E2B was recorded on 23 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+          ...dropInLines("e2b"),
+        ].join("\n"),
       );
       expect(seen).toEqual(['POST /v1/switching {"provider":"e2b"}']);
     },
@@ -225,7 +228,10 @@ test("`runtime switch --from blaxel` records a switch from Blaxel by name", asyn
       const { lines, out } = capture();
       expect(await run(["switch", "--from", "Blaxel"], env, out)).toBe(0);
       expect(lines.join("\n")).toBe(
-        "Recorded: switching from Blaxel. This organization's switch from Blaxel was recorded on 27 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+        [
+          "Recorded: switching from Blaxel. This organization's switch from Blaxel was recorded on 27 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+          ...dropInLines("blaxel"),
+        ].join("\n"),
       );
       expect(seen).toEqual(['POST /v1/switching {"provider":"blaxel"}']);
     },

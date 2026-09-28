@@ -1472,9 +1472,89 @@ def watch_op(kind: str) -> str:
 RESTORE = ("Restoring a sandbox to a snapshot in place",
            "Start a new sandbox from it: await sandbox.fork(\"new-name\", snapshot_id=snapshot.id), or "
            "await snapshot.fork(\"new-name\"): files, memory and running processes as they were.")
-SESSIONS = ("Blaxel sandbox sessions",
-            "Share a port with sandbox.previews.create(...) and a token from preview.tokens.create(expires_at); "
-            "keep the Runtime key on your server.")
+# ---- sessions (ARCHITECTURE.md section 3.12) ------------------------------------
+#
+# Blaxel's session is a private preview of the sandbox's API with a token;
+# Runtime's is a sandbox session: a token that runs commands, uses files and
+# reaches previews of that one sandbox and nothing else. expires_at defaults to
+# a day, Blaxel's default and Runtime's most; the page that may use it is
+# response_headers["Access-Control-Allow-Origin"]; request_headers have nothing
+# to go to. url is the sandbox's address in Runtime's API, name session-<id>.
+
+SESSION_PREFIX = "session-"
+_SESSION_URL = re.compile(
+    r"^(https?://[^/]+)/v1/sandboxes/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", re.I)
+
+
+def session_options(options: Any) -> Tuple[int, List[str]]:
+    """What Runtime is asked for: the lifetime in seconds and the origins.
+    Refuses, before anything is sent, what a Runtime session cannot be."""
+    if options is None:
+        options = SessionCreateOptions()
+    elif isinstance(options, dict):
+        options = SessionCreateOptions(expires_at=options.get("expires_at", options.get("expiresAt")),
+                                       response_headers=options.get("response_headers",
+                                                                    options.get("responseHeaders")),
+                                       request_headers=options.get("request_headers",
+                                                                   options.get("requestHeaders")))
+    if options.request_headers:
+        raise NotSupportedError("Session request headers (request_headers)",
+                                "A Runtime session drives the sandbox's commands and files directly; pass what "
+                                "the headers carried as the command's env or a file.")
+    origins: List[str] = []
+    for name, value in (options.response_headers or {}).items():
+        lower = name.lower()
+        if lower == "access-control-allow-origin":
+            for origin in (one.strip() for one in str(value).split(",")):
+                if not origin:
+                    continue
+                if origin == "*":
+                    raise NotSupportedError('A session for every origin (Access-Control-Allow-Origin: "*")',
+                                            'Name the page that uses it: response_headers={"Access-Control-Allow-'
+                                            'Origin": "https://app.example.com"}.')
+                origins.append(origin.rstrip("/"))
+        elif not lower.startswith("access-control-"):
+            raise NotSupportedError(f"Session response header {name}",
+                                    "Runtime answers a session's CORS headers itself; set other headers in the "
+                                    "server your page talks to.")
+    expires = options.expires_at
+    now = datetime.now(timezone.utc)
+    if expires is None:
+        seconds = 86_400
+    else:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        seconds = int((expires - now).total_seconds())
+    if seconds < 60:
+        raise SandboxAPIError("A session must last at least a minute.", 400, "invalid_request")
+    if seconds > 86_405:
+        raise NotSupportedError("A session lasting more than a day",
+                                "Make one for a day at most, and create_if_expired() again before it ends.")
+    return min(seconds, 86_400), origins
+
+
+def session_with_token(session: Dict[str, Any], api_url: str, token: str = "") -> SessionWithToken:
+    return SessionWithToken(name=SESSION_PREFIX + session["id"],
+                            url=f"{api_url}/v1/sandboxes/{session['sandboxId']}",
+                            token=session.get("token") or token,
+                            expires_at=datetime.fromisoformat(str(session["expiresAt"]).replace("Z", "+00:00")))
+
+
+def session_id(name: str) -> str:
+    return name[len(SESSION_PREFIX):] if name.startswith(SESSION_PREFIX) else name
+
+
+def session_target(session: Any) -> Tuple[str, str, str]:
+    """The API origin, sandbox id and token a session reaches; a session
+    Runtime did not make is refused, never sent."""
+    url = session.get("url") if isinstance(session, dict) else getattr(session, "url", None)
+    token = session.get("token") if isinstance(session, dict) else getattr(session, "token", None)
+    found = _SESSION_URL.match(str(url or ""))
+    if not found or not str(token or "").startswith("rtsess_"):
+        raise NotSupportedError("A session Runtime did not make",
+                                "Make the session with sandbox.sessions.create() on your backend, where a Runtime "
+                                "key is set, and pass what it returns.")
+    return found.group(1), found.group(2), str(token)
 
 
 def check_fork(target_type: str, port: Any, traffic: Any, custom_domain: Any, prefix: Any) -> None:

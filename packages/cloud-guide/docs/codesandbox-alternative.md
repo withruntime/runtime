@@ -36,6 +36,14 @@ against {{cost:codesandbox:100000}}, **{{=$0 less:codesandbox:100000}} a month s
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, a Linux desktop, metrics, webhooks, OpenTelemetry export, S3, R2 and
+GCS bucket mounts, MCP servers from a catalog, identity tokens for AWS and
+Google Cloud and free single sign-on. Paid accounts add custom domains, TCP
+ports, dedicated outbound addresses and WireGuard private networks. See
+[products](./products).
+
 ## At a glance
 
 CodeSandbox's figures come from the Together Code Sandbox documentation, which

@@ -22,9 +22,10 @@ Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cos
   {{rate:runloop:cpu}} per CPU-hour, and {{memory-rate}} per GiB-hour of memory against {{rate:runloop:memory}} per
   GB-hour. Even with both CPUs busy the whole time, the example job costs {{cost:runtime:busy}}
   on Runtime and {{cost:runloop:busy}} on Runloop.
-- **Pause keeps memory.** A paused Runtime sandbox wakes with its processes
-  still running, kept for 1 to 365 days. A suspended Runloop devbox keeps only
-  its disk, and its processes must be restarted.
+- **Pause keeps memory, on every account.** A paused Runtime sandbox wakes
+  with its processes still running, kept for 1 to 365 days. A suspended Runloop
+  devbox keeps only its disk, its processes must be restarted, and suspend and
+  resume come with Runloop's Pro plan.
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
   processes, and try several things from exactly that point.
 - **No plan fee.** Runloop's Pro plan is {{term:runloop:pro}} a month plus usage. Runtime is
@@ -32,13 +33,17 @@ Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cos
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)).
-- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
-  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
-  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
+
+**Also included:** a code interpreter, network allow and deny lists, secrets the
+sandbox never sees, custom images, volumes backed up daily, private previews, a
+Linux desktop, metrics, webhooks, OpenTelemetry export, S3, R2 and GCS bucket
+mounts, MCP servers from a catalog and identity tokens for AWS and Google Cloud.
+Paid accounts add custom domains, TCP ports, dedicated outbound addresses and
+WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -110,7 +115,7 @@ try {
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; plan features checked 27 September 2026.
 
 - [Runloop pricing](https://www.runloop.ai/pricing)
 - [Devbox sizes](https://docs.runloop.ai/docs/devboxes/configuration/sizes)

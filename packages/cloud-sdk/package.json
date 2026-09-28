@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -121,6 +121,12 @@
   },
   "bugs": "https://github.com/withruntime/runtime/issues",
   "sideEffects": false,
+  "browser": {
+    "./dist/tar.js": "./dist/browser-stub.js",
+    "./dist/image-context.js": "./dist/browser-stub.js",
+    "./dist/credentials.js": "./dist/browser-stub.js",
+    "undici": false
+  },
   "keywords": [
     "sandbox",
     "cloud",

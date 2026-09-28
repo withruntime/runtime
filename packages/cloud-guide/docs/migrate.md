@@ -117,9 +117,10 @@ sandbox; `delete()` ends it. See [JavaScript](./javascript) and
 `from withruntime.blaxel import SandboxInstance`). Standby becomes a pause that
 keeps memory and processes after {{idle-pause}} idle, and the next call wakes the
 sandbox. Pass `withruntime: { create: { funding: "trial" } }` (Python
-`runtime_create={"funding": "trial"}`) while you test. A call Runtime handles
-differently, such as sessions, drives or schedules, throws `NotSupportedError`
-naming what to use instead.
+`runtime_create={"funding": "trial"}`) while you test. Sessions carry over as
+Runtime's [sandbox sessions](./javascript#a-sandbox-from-a-browser). A call
+Runtime handles differently, such as drives or schedules, throws
+`NotSupportedError` naming what to use instead.
 
 - A Blaxel workspace key sees every sandbox; a Runtime key sees the ones it
   made unless an owner or admin makes it account-wide

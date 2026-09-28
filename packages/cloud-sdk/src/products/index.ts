@@ -13,6 +13,7 @@ import { sso } from "./sso.js";
 import { switching } from "./switching.js";
 import { limits } from "./limits.js";
 import { volumes } from "./volumes.js";
+import { jobs } from "./jobs.js";
 import { sandboxMounts } from "./mounts.js";
 import { secrets } from "./secrets.js";
 import { mcp, sandboxMcp } from "./mcp.js";
@@ -36,6 +37,7 @@ import { events, otel, sandboxMetrics, webhooks } from "./observability.js";
 export const clientExtensions = {
   images,
   volumes,
+  jobs,
   referrals,
   billing,
   limits,

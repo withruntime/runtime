@@ -45,6 +45,13 @@ against {{cost:freestyle:100000}}, **{{=$0 less:freestyle:100000}} a month saved
   write takes an idempotency key.
 - **Python and JavaScript.** Runtime has SDKs for both, a CLI and an MCP server.
 
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, a Linux desktop, metrics, webhooks, OpenTelemetry export, S3, R2 and
+GCS bucket mounts, MCP servers from a catalog and identity tokens for AWS and
+Google Cloud. Paid accounts add custom domains, TCP ports, dedicated outbound
+addresses and WireGuard private networks. See [products](./products).
+
 ## At a glance
 
 Freestyle's figures come from its public pricing page and VM documentation,

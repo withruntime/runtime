@@ -28,7 +28,12 @@ against {{cost:northflank:100000}}, **{{=$0 less:northflank:100000}} a month sav
   sandbox with its memory.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
-  every account ([single sign-on](./single-sign-on)).
+  every account ([single sign-on](./single-sign-on)). Northflank lists SAML and OIDC
+  sign-in on its Enterprise plan.
+- **A fixed outbound address on any paid account.** Every sandbox of the
+  account sends from one dedicated address you can allow-list, for
+  {{address-month}} a month ([dedicated addresses](./networking#dedicated-outbound-addresses)).
+  Northflank lists egress IPs on its Enterprise plan.
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
@@ -39,6 +44,12 @@ against {{cost:northflank:100000}}, **{{=$0 less:northflank:100000}} a month sav
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
   limit per key, and cap any create with `maxCostMicros`. Every write takes an
   idempotency key, so a lost response never creates a second sandbox.
+
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, private previews, a Linux desktop, metrics,
+webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts, MCP servers from a
+catalog and identity tokens for AWS and Google Cloud. Paid accounts add custom
+domains, TCP ports and WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -111,7 +122,8 @@ try {
 
 ## Sources
 
-Checked 23 September 2026; isolation rechecked 25 September 2026.
+Checked 23 September 2026; isolation rechecked 25 September 2026; single
+sign-on and egress IPs checked 27 September 2026.
 
 - [Northflank pricing](https://northflank.com/pricing)
 - [Northflank sandboxes](https://northflank.com/product/sandboxes)

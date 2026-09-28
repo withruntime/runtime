@@ -751,13 +751,13 @@ class Sandbox:
                                                "Runtime sets labels once, at create."))
     recover = staticmethod(core.unsupported("Recovering a failed sandbox", "Create a new sandbox."))
     resize = staticmethod(core.unsupported("Resizing a sandbox", "Create a new one with the resources you need."))
-    get_metrics = staticmethod(core.unsupported("Sandbox metrics", "Use `npx withruntime usage`."))
+    get_metrics = staticmethod(core.unsupported("Sandbox metrics", "Use `sandbox.withruntime.metrics(range=\"1h\")` for its CPU and memory over time."))
     get_metrics_latest = get_metrics
     set_ttl = staticmethod(core.unsupported("Changing the time to live after create",
                                             "Pass ttl_minutes when creating the sandbox."))
     create_lsp_server = staticmethod(core.unsupported(
         "Daytona's language servers", "Start one in a session with process.execute_session_command(..., run_async)."))
-    update_secrets = staticmethod(core.unsupported("Daytona secrets", "Pass credentials as env_vars."))
+    update_secrets = staticmethod(core.unsupported("Daytona secrets", "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host."))
     create_signed_preview_url = staticmethod(core.unsupported(
         "Signed preview URLs", "Use get_preview_link(port) and send its token as x-runtime-preview-token, or "
         "create the sandbox with public=True."))
@@ -766,7 +766,7 @@ class Sandbox:
         "Rotating the preview signing key", "Use sandbox.withruntime.previews.rotate(port)."))
     upload_url = staticmethod(core.unsupported("Signed upload URLs", "Use sandbox.fs.upload_file(data, path)."))
     download_url = staticmethod(core.unsupported("Signed download URLs", "Use sandbox.fs.download_file(path)."))
-    create_ssh_access = staticmethod(core.unsupported("SSH access", "Use `npx withruntime sandbox shell <id>`."))
+    create_ssh_access = staticmethod(core.unsupported("SSH access", "Use `npx withruntime sandbox ssh <id>` (also VS Code and JetBrains)."))
     revoke_ssh_access = create_ssh_access
     validate_ssh_access = create_ssh_access
 

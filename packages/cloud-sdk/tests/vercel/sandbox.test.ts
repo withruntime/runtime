@@ -158,6 +158,13 @@ describe("Sandbox.create", () => {
       expect((error as Error).message).toMatch(message);
       expect((error as NotSupportedError).alternative.length).toBeGreaterThan(0);
     }
+    // A header rule is how Vercel injects a credential; a Runtime secret does that.
+    const transform = await create({
+      networkPolicy: { allow: { "api.github.com": [{ transform: [] }] } },
+    }).catch((e: unknown) => e);
+    expect((transform as NotSupportedError).alternative).toContain(
+      "withruntime secrets set NAME --host api.github.com",
+    );
     expect(world.called("sandboxes.create")).toEqual([]);
   });
 });

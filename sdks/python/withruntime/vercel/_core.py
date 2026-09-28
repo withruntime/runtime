@@ -327,7 +327,7 @@ def network_rules(policy: Any) -> Dict[str, Any]:
         for domain, rules in allow.items():
             if rules:
                 raise NotSupportedError(f"Network rules that transform or forward requests (for {domain})",
-                                        "Allow the domain with no rules and pass credentials as env instead.")
+                                        f"Allow the domain with no rules and store the credential as a Runtime secret for it: `npx withruntime secrets set NAME --host {domain}`. The sandbox sees a placeholder, and the egress proxy adds the value.")
             domains.append(domain)
     elif allow:
         domains = list(allow)

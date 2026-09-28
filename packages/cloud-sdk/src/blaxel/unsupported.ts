@@ -27,8 +27,7 @@ export function unsupportedExport(name: string, alternative: string): Unsupporte
   }) as unknown as Unsupported;
 }
 
-/** A sandbox part Runtime has no counterpart for (`sandbox.sessions`,
- * `sandbox.codegen`, ...): every method answers a rejected promise with
+/** A sandbox part Runtime has no counterpart for (`sandbox.codegen`, ...): every method answers a rejected promise with
  * NotSupportedError naming the alternative. */
 export function unsupportedPart(name: string, alternative: string): UnsupportedPart {
   return new Proxy(
@@ -46,12 +45,10 @@ export function unsupportedPart(name: string, alternative: string): UnsupportedP
 }
 export type UnsupportedPart = { readonly [method: string]: (...args: unknown[]) => Promise<never> };
 
-export const SESSIONS =
-  "Share a port with sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt); drive the sandbox itself through this SDK.";
 export const CODEGEN =
   "Runtime has no hosted edit or rerank models: apply edits with sandbox.fs.write, and rank files with your own model.";
 export const SCHEDULES =
-  "Schedule the call from your own scheduler (cron, a queue) and run it with sandbox.process.exec.";
+  "A Blaxel schedule runs inside one sandbox; a Runtime job runs its command on a cron schedule or at a time in a fresh sandbox each run: runtime.jobs.create({ name, schedule: { cron }, command }) from withruntime. To run inside this sandbox, call sandbox.process.exec from your own scheduler.";
 export const SYSTEM =
   "Runtime keeps each sandbox's agent current itself; there is nothing to upgrade.";
 export const DRIVES =

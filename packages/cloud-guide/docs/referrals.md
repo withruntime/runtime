@@ -15,8 +15,7 @@ The details:
 - Your link is `https://withruntime.com/r/<code>`, and
   `https://withruntime.com/?ref=<code>` works too. Owners find it under
   **Refer & earn** on [Usage & billing](https://withruntime.com/account/billing),
-  which **Refer & earn** in the account menu and **Settings → Referrals** both
-  open. You can also ask for it with the API, an SDK, the CLI or MCP (below). The code belongs to your organization and
+  which **Refer & earn** in the account menu also opens. You can also ask for it with the API, an SDK, the CLI or MCP (below). The code belongs to your organization and
   never changes.
 - Showing someone what you built? A preview link is a good way; the answer to
   creating one says so. Runtime adds nothing to the pages a preview serves: no

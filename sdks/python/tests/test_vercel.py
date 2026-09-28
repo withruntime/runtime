@@ -95,8 +95,9 @@ class Create(Base):
         self.assertEqual(network_rules(NetworkPolicy.deny_all()), {"internet": False})
         self.assertEqual(network_rules(NetworkPolicy.allow_all()), {"internet": True})
         self.assertEqual(network_rules(NetworkPolicy.custom()), {"internet": False})
-        with self.assertRaises(NotSupportedError):
+        with self.assertRaises(NotSupportedError) as caught:
             network_rules(NetworkPolicy.custom(allow={"api.github.com": ["rule"]}))
+        self.assertIn("withruntime secrets set NAME --host api.github.com", caught.exception.alternative)
 
 
 class Keys(unittest.TestCase):

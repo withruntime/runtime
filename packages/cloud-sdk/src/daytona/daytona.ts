@@ -340,7 +340,7 @@ export class Daytona implements AsyncDisposable {
     this.volume = new VolumeService(this.#client);
     this.secret = unsupportedService(
       "secrets",
-      "Pass credentials as envVars or per command, never in the command text.",
+      "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.",
     );
     this.warmPool = unsupportedService(
       "warm pools",
@@ -599,11 +599,15 @@ function refuseCreate(params: CreateSandboxBaseParams) {
       "Linked sandboxes (linkedSandbox)",
       "Run both programs in one sandbox, or connect them through a preview address.",
     ],
-    ["secrets", "Daytona secrets", "Pass credentials as envVars, never in the command text."],
+    [
+      "secrets",
+      "Daytona secrets",
+      "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.",
+    ],
     [
       "otelEndpointOverride",
       "Sending sandbox telemetry elsewhere (otelEndpointOverride)",
-      "Remove it: Runtime does not export sandbox telemetry.",
+      "Remove it: runtime.otel.create() exports every sandbox's events and CPU and memory metrics over OTLP/HTTP.",
     ],
   ];
   for (const [field, feature, alternative] of refusals)

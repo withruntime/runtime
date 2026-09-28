@@ -10,7 +10,7 @@
 import { RuntimeError } from "../errors.js";
 import { initialize, type Config } from "./client.js";
 import { NotSupportedError } from "./errors.js";
-import { CODEGEN, DRIVES, SCHEDULES, SESSIONS, SYSTEM, unsupportedExport } from "./unsupported.js";
+import { CODEGEN, DRIVES, SCHEDULES, SYSTEM, unsupportedExport } from "./unsupported.js";
 
 export {
   SandboxInstance,
@@ -209,9 +209,10 @@ export const settings: {
   },
 );
 
+export { SandboxSessions } from "./session.js";
+
 /* The sandbox parts Runtime has no counterpart for. On a sandbox they are
    objects whose methods reject; as exports, stand-ins. */
-export const SandboxSessions = unsupportedExport("SandboxSessions", SESSIONS);
 export const SandboxSchedules = unsupportedExport("SandboxSchedules", SCHEDULES);
 export const SandboxCodegen = unsupportedExport("SandboxCodegen", CODEGEN);
 export const SandboxSystem = unsupportedExport("SandboxSystem", SYSTEM);

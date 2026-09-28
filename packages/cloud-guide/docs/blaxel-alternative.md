@@ -32,9 +32,14 @@ one import.
   sandbox SDK, in JavaScript and Python: processes, files, previews, snapshots,
   forks and the code interpreter, with no Blaxel key. A switch from Blaxel gets
   your first top-up matched, up to {{switching-max}}.
-- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
-  real key is added at the egress proxy, only on HTTPS to the hosts you allow
-  ([security](./security)).
+- **Single sign-on at no extra charge.** SAML or OIDC sign-in, SCIM, roles
+  and an audit log come with every Runtime account
+  ([single sign-on](./single-sign-on)). Blaxel lists SAML among the enterprise
+  features of its Dedicated Support add-on.
+- **Private networks without a custom plan.** A paid Runtime account joins its
+  own network to its sandboxes over WireGuard, for {{address-month}} a month
+  ([private networks](./networking#private-networks)). Blaxel lists private
+  network connectivity on its Custom plan.
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -42,6 +47,13 @@ one import.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
   limit per key, and cap any create with `maxCostMicros`. Every write takes an
   idempotency key, so a lost response never creates a second sandbox.
+
+**Also included:** a code interpreter, network allow and deny lists, secrets the
+sandbox never sees, custom images, volumes backed up daily, snapshots and forks
+with memory, private previews, a Linux desktop, metrics, webhooks, OpenTelemetry
+export, S3, R2 and GCS bucket mounts, MCP servers from a catalog and identity
+tokens for AWS and Google Cloud. Paid accounts add custom domains, TCP ports and
+dedicated outbound addresses. See [products](./products).
 
 ## At a glance
 
@@ -129,10 +141,21 @@ Four things to know before the first run:
   `X-Blaxel-Preview-Token` header and `?bl_preview_token=` parameter are
   accepted, as are Runtime's own, and the token never reaches your server.
 
-A call Runtime handles differently, such as sessions, drives, schedules or
-Blaxel's agent and MCP hosting, throws `NotSupportedError` before anything
-happens and names what to use instead. `BLAXEL.md` in the package lists every
-mapping.
+**Sessions work as they did.** `sandbox.sessions.create()` makes a Runtime
+[sandbox session](./javascript#a-sandbox-from-a-browser): a token your
+frontend uses to run commands, use files and reach previews of that one
+sandbox, and nothing else. Blaxel's default of a day is Runtime's longest;
+`responseHeaders["Access-Control-Allow-Origin"]` names the page that may use
+it, and `SandboxInstance.fromSession(session)` drives the sandbox with the
+token alone.
+
+A call Runtime handles differently, such as drives, schedules or Blaxel's
+agent and MCP hosting, throws `NotSupportedError` before anything happens and
+names what to use instead. `BLAXEL.md` in the package lists every
+mapping. For MCP, Runtime runs servers from its catalog inside a sandbox
+([MCP servers in a sandbox](./javascript#mcp-servers-in-a-sandbox)), and a
+bucket mounted in several sandboxes shares files between them
+([mount your own bucket](./storage#mount-your-own-bucket)).
 
 ### Or port the calls
 
@@ -166,9 +189,10 @@ top-up, and that top-up is matched with credit, up to {{switching-max}}
 
 ## When Blaxel may fit better
 
-- **Back from idle in milliseconds.** A Blaxel sandbox resumes from standby in
-  about 25 ms. A paused Runtime sandbox runs its next command {{wake}} after
-  the call that wakes it.
+- **Back from idle in milliseconds.** Blaxel states a resume from standby in
+  about 25 ms. On Runtime's server a wake takes {{server-wake}}, and from a
+  laptop a paused sandbox runs its next command {{wake}} after the call that
+  wakes it ({{server-date}}).
 - **Very large fleets.** Blaxel's top tier runs over 100,000 sandboxes at once.
   A tier is the credit topped up over the last 30 days, which is then spent on
   usage: {{term:blaxel:tier-1}} unlocks 50 sandboxes and {{term:blaxel:tier-2}} unlocks 200.
@@ -182,4 +206,5 @@ Checked 27 September 2026.
 - [Blaxel pricing](https://blaxel.ai/pricing)
 - [Blaxel sandboxes](https://docs.blaxel.ai/Sandboxes/Overview)
 - [Blaxel usage and quotas](https://docs.blaxel.ai/Security/Quotas)
+- [Blaxel proxy and network](https://docs.blaxel.ai/Sandboxes/Proxy)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

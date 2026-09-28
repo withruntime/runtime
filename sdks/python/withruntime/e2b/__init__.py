@@ -40,7 +40,7 @@ Template = _Unsupported("Template builder", _TEMPLATES)
 AsyncTemplate = _Unsupported("Template builder", _TEMPLATES)
 Volume = _Unsupported("Volume", "Use Runtime volumes: runtime_create={'volumes': [{'volume_id': ..., 'path': ...}]}.")
 AsyncVolume = Volume
-Secret = _Unsupported("Secret", "Pass secrets as envs at create or per command, never inside the command text.")
+Secret = _Unsupported("Secret", "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.")
 AsyncSecret = Secret
 wait_for_port = wait_for_url = wait_for_process = wait_for_file = wait_for_timeout = _Unsupported(
     "template ready checks", _TEMPLATES)

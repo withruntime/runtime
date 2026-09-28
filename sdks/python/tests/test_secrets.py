@@ -39,7 +39,8 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Stub.seen.append((self.command, self.path, None))
-        self.answer({"secrets": [SECRET]})
+        # The jobs copies: none here.
+        self.answer([] if self.path.startswith("/v1/secrets") else {"secrets": [SECRET]})
 
     def do_PUT(self):
         Stub.seen.append((self.command, self.path, self.body()))
@@ -75,6 +76,7 @@ class SecretsTest(unittest.TestCase):
             ("PUT", "/v1/egress-secrets/OPENAI_API_KEY", {"value": "sk-live", "hosts": ["api.openai.com"],
                                                   "header": "Authorization", "format": "Bearer {value}"}),
             ("GET", "/v1/egress-secrets", None),
+            ("GET", "/v1/secrets?limit=100", None),
             ("DELETE", "/v1/egress-secrets/OPENAI_API_KEY", None),
         ])
 

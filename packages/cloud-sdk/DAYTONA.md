@@ -85,22 +85,22 @@ package talks only to Runtime.
 Each of these throws `NotSupportedError` before anything happens. Its
 `feature` names the gap and its `alternative` says what to use.
 
-| Daytona                                                               | Use instead                                                                                                            |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| A snapshot name with no Runtime image or snapshot                     | `daytona.snapshot.create({ name, image })` here, or `npx withruntime image build`. This throws `DaytonaNotFoundError`. |
-| GPUs, `spot`, `linkedSandbox`, `secrets`, `otelEndpointOverride`      | Runtime runs Linux on CPUs; pass credentials as `envVars`.                                                             |
-| A `target` other than `us`, `jwtToken`                                | Runtime runs in one US region and signs in with keys.                                                                  |
-| `user` other than `daytona`                                           | Commands run as the sandbox owner with passwordless `sudo`.                                                            |
-| PTY sessions, the entrypoint session, language servers                | `sandbox.withruntime.terminal(...)`, and sessions with `runAsync`.                                                     |
-| `computerUse`                                                         | Runtime's desktop, `sandbox.withruntime.desktop`.                                                                      |
-| `setLabels`, `resize`, `recover`                                      | Set labels and resources at create; create a new sandbox.                                                              |
-| Signed preview URLs, signed upload and download URLs, SSH access      | `getPreviewLink`, `fs.uploadFile` and `downloadFile`, `npx withruntime sandbox shell <id>`.                            |
-| `getMetrics`                                                          | `npx withruntime usage`.                                                                                               |
-| `Image.pipInstallFromPyproject`, snapshot `resources` or `entrypoint` | `pipInstallFromRequirements`; resources at create; a session after create.                                             |
-| `volume.create(name)`                                                 | Runtime volumes have a size: `runtime.volumes.create({ name, sizeMiB })`.                                              |
-| `secret`, `warmPool`                                                  | Credentials as `envVars`; Runtime starts from warm templates already.                                                  |
-| `runCode(code, { envs })`                                             | `envVars` at create, or `os.environ` in the code.                                                                      |
-| Listing by anything but name, labels and states                       | Filter the result yourself.                                                                                            |
+| Daytona                                                               | Use instead                                                                                                                                                                             |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A snapshot name with no Runtime image or snapshot                     | `daytona.snapshot.create({ name, image })` here, or `npx withruntime image build`. This throws `DaytonaNotFoundError`.                                                                  |
+| GPUs, `spot`, `linkedSandbox`, `secrets`, `otelEndpointOverride`      | Runtime runs Linux on CPUs. For `secrets`, a Runtime secret (`npx withruntime secrets set NAME --host <host>`): the sandbox sees a placeholder. For telemetry, `runtime.otel.create()`. |
+| A `target` other than `us`, `jwtToken`                                | Runtime runs in one US region and signs in with keys.                                                                                                                                   |
+| `user` other than `daytona`                                           | Commands run as the sandbox owner with passwordless `sudo`.                                                                                                                             |
+| PTY sessions, the entrypoint session, language servers                | `sandbox.withruntime.terminal(...)`, and sessions with `runAsync`.                                                                                                                      |
+| `computerUse`                                                         | Runtime's desktop, `sandbox.withruntime.desktop`.                                                                                                                                       |
+| `setLabels`, `resize`, `recover`                                      | Set labels and resources at create; create a new sandbox.                                                                                                                               |
+| Signed preview URLs, signed upload and download URLs, SSH access      | `getPreviewLink`, `fs.uploadFile` and `downloadFile`, `npx withruntime sandbox ssh <id>`.                                                                                               |
+| `getMetrics`                                                          | `sandbox.withruntime.metrics()`: its CPU and memory over time.                                                                                                                          |
+| `Image.pipInstallFromPyproject`, snapshot `resources` or `entrypoint` | `pipInstallFromRequirements`; resources at create; a session after create.                                                                                                              |
+| `volume.create(name)`                                                 | Runtime volumes have a size: `runtime.volumes.create({ name, sizeMiB })`.                                                                                                               |
+| `secret`, `warmPool`                                                  | A Runtime secret for credentials; Runtime starts from warm templates already.                                                                                                           |
+| `runCode(code, { envs })`                                             | `envVars` at create, or `os.environ` in the code.                                                                                                                                       |
+| Listing by anything but name, labels and states                       | Filter the result yourself.                                                                                                                                                             |
 
 Some differences are not refusals:
 

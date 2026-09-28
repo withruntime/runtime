@@ -28,6 +28,10 @@ each.
   browser, and no key goes into a prompt or a project file.
 - **Built for agents that retry and spend.** Idempotency keys on every write,
   read-only keys, and a daily spending limit per key.
+- **Everything around the sandbox.** Network rules, secrets the sandbox never
+  sees, volumes, bucket mounts, a desktop, metrics, webhooks and OpenTelemetry
+  export on every account; custom domains, TCP ports, dedicated outbound
+  addresses and WireGuard private networks on paid ones ([products](./products)).
 - **Free to try.** {{trial-hours}} sandbox hours, no card, then prepaid credit from {{topup-min}} with
   no plan fee.
 
@@ -39,19 +43,22 @@ dependencies, run its test suite, make one change, and export the test report.
 Record the language version, CPU and memory needs, network destinations, files
 to keep, expected duration and acceptable failure rate.
 
-| Requirement             | What to verify                                                | Runtime                                                                                                                                                        |
-| ----------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Isolated code execution | Boundary between guest, host and other tenants                | A Firecracker microVM with its own kernel for every sandbox                                                                                                    |
-| Agent integration       | Actual remote execution, structured results, file round trip  | API, CLI, Python, JavaScript and MCP; an OpenAI Agents SDK sandbox client and ready tools for ten agent frameworks                                             |
-| Easy authentication     | Connection without secrets in prompts or project files        | Browser-approved CLI connection; local MCP reuses it                                                                                                           |
-| Outbound network        | Your package registries and service destinations work         | Every port on paid accounts, 80 and 443 on the trial; per-sandbox rules; secrets the sandbox never sees                                                        |
-| Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default                                                                                                        |
-| Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept 1–365 days; a failed wake says so                                                                                             |
-| Custom environments     | Dependencies installed once, reused on every start            | Custom images from a recipe, any public or private image, or a Dockerfile; volumes                                                                             |
-| Predictable cost        | CPU, memory, idle time, storage, retries and fees             | Pauses itself after {{idle-pause}} idle; measured CPU with a floor, reserved memory, separately quoted paused storage, {{outbound-allowance}} out a month free |
-| Spending control        | Limits an agent cannot raise itself                           | Read-only keys and a daily spending limit per key, set only by a person                                                                                        |
-| Team access             | Roles for people, and a record of who changed what            | Single sign-on (SAML, OIDC) and SCIM free; owner, admin, developer and billing roles; an audit log kept at least 400 days                                      |
-| Reliability             | A published uptime figure, and what you get when it is missed | {{uptime-promise}} a month for paid accounts, {{uptime-credit}} back automatically; a status page checked from outside                                         |
+| Requirement             | What to verify                                                | Runtime                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Isolated code execution | Boundary between guest, host and other tenants                | A Firecracker microVM with its own kernel for every sandbox                                                                                                     |
+| Agent integration       | Actual remote execution, structured results, file round trip  | API, CLI, Python, JavaScript and MCP; an OpenAI Agents SDK sandbox client and ready tools for ten agent frameworks; MCP servers from a catalog run in a sandbox |
+| Easy authentication     | Connection without secrets in prompts or project files        | Browser-approved CLI connection; local MCP reuses it                                                                                                            |
+| Outbound network        | Your package registries and service destinations work         | Every port on paid accounts, 80 and 443 on the trial; per-sandbox rules; secrets the sandbox never sees                                                         |
+| Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default; custom domains and TCP ports on paid accounts                                                          |
+| Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept 1–365 days; a failed wake says so                                                                                              |
+| Custom environments     | Dependencies installed once, reused on every start            | Custom images from a recipe, any public or private image, or a Dockerfile                                                                                       |
+| Storage                 | Data that outlives a sandbox, and your own buckets            | Volumes backed up off their server daily; S3, R2 and GCS buckets mounted as directories                                                                         |
+| Predictable cost        | CPU, memory, idle time, storage, retries and fees             | Pauses itself after {{idle-pause}} idle; measured CPU with a floor, reserved memory, separately quoted paused storage, {{outbound-allowance}} out a month free  |
+| Spending control        | Limits an agent cannot raise itself                           | Read-only keys and a daily spending limit per key, set only by a person                                                                                         |
+| Observability           | What each sandbox did, in the tools you already watch         | CPU and memory metrics, signed webhooks and OpenTelemetry export, at no charge                                                                                  |
+| Private connectivity    | Fixed egress for allow-lists; a way into your own network     | Dedicated outbound addresses and WireGuard private networks on paid accounts; identity tokens for AWS and Google Cloud                                          |
+| Team access             | Roles for people, and a record of who changed what            | Single sign-on (SAML, OIDC) and SCIM free; owner, admin, developer and billing roles; an audit log kept at least 400 days                                       |
+| Reliability             | A published uptime figure, and what you get when it is missed | {{uptime-promise}} a month for paid accounts, {{uptime-credit}} back automatically; a status page checked from outside                                          |
 
 For exact terms, read [security](./security), [pricing](./pricing),
 [trial access](./trial), and the [API reference](./api).

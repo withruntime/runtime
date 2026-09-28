@@ -28,7 +28,15 @@ Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtim
   first top-up and it is matched, up to {{switching-max}}.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
-  every account ([single sign-on](./single-sign-on)).
+  every account ([single sign-on](./single-sign-on)). E2B lists SSO, SCIM and roles as
+  planned for its Enterprise plan.
+- **OpenTelemetry export on every account.** Runtime pushes events as logs and
+  CPU and memory as metrics to any OTLP endpoint, at no charge
+  ([observability](./observability#opentelemetry-export)). E2B sends OTLP
+  metrics and logs on its Enterprise plan.
+- **Custom domains built in.** A paid account serves a sandbox port at your own
+  hostname, with HTTPS, from one command ([custom domains](./networking#custom-domains)).
+  E2B's custom domain guide has you run your own proxy on a virtual machine.
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
@@ -40,6 +48,13 @@ Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtim
   limit per key, and cap any create with `maxCostMicros`. Every write takes an
   idempotency key and the SDKs retry with it, so a lost response never creates
   a second sandbox.
+
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, a Linux desktop, metrics, webhooks, S3, R2 and GCS bucket mounts, MCP
+servers from a catalog and identity tokens for AWS and Google Cloud. Paid
+accounts add TCP ports, dedicated outbound addresses and WireGuard private
+networks. See [products](./products).
 
 ## At a glance
 
@@ -55,7 +70,7 @@ E2B's figures come from its public pricing and documentation, checked
 | Free start       | {{trial-hours}} sandbox hours, no card                                                                                          | {{term:e2b:credit}} of usage credit on Hobby           |
 | Session length   | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
 | Pause and resume | Files, memory and running processes                                                                                             | Files, memory and running processes                    |
-| Interfaces       | API, CLI, MCP server, JavaScript and Python SDKs                                                                                | API, CLI, MCP server, JavaScript and Python SDKs       |
+| Interfaces       | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs                                                                | API, CLI, MCP server, JavaScript and Python SDKs       |
 | Agent sign-in    | Browser approval; no key in the agent's config                                                                                  | API key                                                |
 
 ## Cost for the same job
@@ -163,9 +178,12 @@ and `{ check: true }`, as above, makes it throw `CommandError` instead.
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; single sign-on, OpenTelemetry and custom domains
+checked 27 September 2026.
 
 - [E2B pricing](https://e2b.dev/pricing)
+- [E2B Enterprise](https://e2b.dev/enterprise)
+- [E2B custom domain](https://docs.e2b.dev/sandbox/custom-domain)
 - [E2B sandbox persistence](https://docs.e2b.dev/sandbox/persistence)
 - [E2B security](https://e2b.dev/security)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

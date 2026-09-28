@@ -27,6 +27,11 @@ async function withStub(
       line: `${request.method} ${new URL(request.url).pathname}`,
       body: await request.clone().text(),
     });
+    // The jobs copies: none, unless a test answers for them.
+    if (new URL(request.url).pathname === "/v1/secrets" && request.method === "GET") {
+      const own = answer(request);
+      return Response.json(Array.isArray(own) ? own : []);
+    }
     return Response.json(answer(request));
   }) as typeof fetch;
   try {
@@ -64,6 +69,7 @@ test("secrets.set, list and delete call the routes, and set sends the value once
       expect(seen.map((s) => s.line)).toEqual([
         "PUT /v1/egress-secrets/OPENAI_API_KEY",
         "GET /v1/egress-secrets",
+        "GET /v1/secrets",
         "DELETE /v1/egress-secrets/OPENAI_API_KEY",
       ]);
       expect(JSON.parse(seen[0]!.body)).toEqual({ value: "sk-live", hosts: ["api.openai.com"] });

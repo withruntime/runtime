@@ -238,6 +238,17 @@ class Process(Base):
         with self.assertRaises(NotSupportedError):
             sandbox.process.create_pty_session()
 
+    def test_refusals_point_at_what_runtime_has(self):
+        sandbox = self.daytona.create()
+        for call, text in ((sandbox.update_secrets, "withruntime secrets set"),
+                           (sandbox.get_metrics, "sandbox.withruntime.metrics("),
+                           (sandbox.create_ssh_access, "withruntime sandbox ssh"),
+                           (lambda: self.daytona.create(CreateSandboxFromSnapshotParams(secrets={"A": "s"})),
+                            "withruntime secrets set")):
+            with self.assertRaises(NotSupportedError) as caught:
+                call()
+            self.assertIn(text, caught.exception.alternative)
+
 
 class Files(Base):
     def test_files(self):

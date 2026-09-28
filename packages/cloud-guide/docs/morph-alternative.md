@@ -36,6 +36,14 @@ Runtime and {{cost:morph}} on Morph**. At 100,000 runs a month that is {{cost:ru
   limit per key, and cap any create with `maxCostMicros`. Every write takes an
   idempotency key, so a lost response never creates a second sandbox.
 
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, a Linux desktop, metrics, webhooks, OpenTelemetry export, S3, R2 and
+GCS bucket mounts, MCP servers from a catalog, identity tokens for AWS and
+Google Cloud and free single sign-on. Paid accounts add custom domains, TCP
+ports, dedicated outbound addresses and WireGuard private networks. See
+[products](./products).
+
 ## At a glance
 
 Morph's figures come from its public pricing and product pages, checked

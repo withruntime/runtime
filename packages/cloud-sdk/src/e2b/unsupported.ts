@@ -49,5 +49,5 @@ export const Volume = unsupportedExport(
 );
 export const Secret = unsupportedExport(
   "Secret",
-  "Pass secrets as envs at create or per command, never inside the command text.",
+  "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.",
 );

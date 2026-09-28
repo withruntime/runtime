@@ -1,75 +1,113 @@
 # Speed
 
-**A new default sandbox took 374 ms from the create request through the first
+**A new default sandbox took 331 ms from the create request through the first
 Python result at the median**, measured from a laptop through the public API
-on 26 September 2026. The p95 was 495 ms across 20 sequential starts, with no
+on 28 September 2026. The p95 was 465 ms across 20 sequential starts, with no
 errors.
 
 **A paused sandbox runs its next command {{wake}} after the call that wakes
 it**, and a preview visit to one answers in {{preview-visit}}, measured the same
-way on {{operations-date}}. A snapshot of a running sandbox is ready in
-{{snapshot-take}}. A sandbox pauses itself after {{idle-pause}} with nothing
-happening in it, so idle time costs paused storage only.
+way on {{operations-date}}. On the server, without the network between your
+machine and Virginia, a pause answers in 81 ms, a wake in 75 ms and a stop in
+37 ms. A sandbox pauses itself after {{idle-pause}} with nothing happening in
+it, so idle time costs paused storage only.
 
-## Startup, 26 September 2026
+## Startup, 28 September 2026
 
-The script at the end of this page ran 20 sequential starts at 22:25 UTC, then
+The script at the end of this page ran 20 sequential starts at 02:35 UTC, then
 20 more straight after, from a MacBook Pro in the US Mountain time zone with
-Node 24.20.0 and `withruntime` 0.7.1 from npm. Runtime runs in one region, in
+Node 24.20.0 and `withruntime` 0.8.1 from npm. Runtime runs in one region, in
 Virginia, so these are the times your own code sees, network included. Each
 trial sandbox had 2 vCPU, 4 GiB memory and 4 GiB disk, with shared CPU, ran
 `python3 -c pass` as its first command, and was stopped before the next began.
 
 | Step                               | Median | p95    | Repeat median | Repeat p95 |
 | ---------------------------------- | ------ | ------ | ------------- | ---------- |
-| Create until running               | 193 ms | 317 ms | 184 ms        | 510 ms     |
-| Create through first Python result | 374 ms | 495 ms | 348 ms        | 715 ms     |
-| First Python request after create  | 171 ms | 250 ms | 146 ms        | 216 ms     |
+| Create until running               | 181 ms | 257 ms | 163 ms        | 359 ms     |
+| Create through first Python result | 331 ms | 465 ms | 338 ms        | 604 ms     |
+| First Python request after create  | 155 ms | 258 ms | 160 ms        | 472 ms     |
 
 Each run had 20 successful starts and no errors; p95 is nearest-rank. The
 server keeps a few sandboxes of the most common shapes started ahead of time,
 this one included, and hands one over when a create asks for exactly that
-shape: 38 of these 40 creates were handed one, and 26 reached running in under
-200 ms. A shape with no spare starts from a saved template instead. The
-[40 recorded samples](/benchmarks/startup-2026-09-26.jsonl) include every
+shape; 30 of these 40 creates reached running in under 200 ms. A shape with no
+spare starts from a saved template instead. The
+[40 recorded samples](/benchmarks/startup-2026-09-28.jsonl) include every
 attempt and its cleanup; these are observations, not a latency promise.
 
-## Fork, snapshot, pause and wake, 27 September 2026
+## Fork, snapshot, pause and wake, 28 September 2026
 
-Ten rounds from the same laptop at 22:59 UTC, through the public API with
+Ten rounds from the same laptop at 02:29 UTC, through the public API with
 `withruntime` 0.8.1, one source sandbox at a time. The source was the same
 trial default shape, running a Python web server.
 
 | Step                                                | Median | p95    | Samples |
 | --------------------------------------------------- | ------ | ------ | ------- |
-| Pause, until paused                                 | 226 ms | 280 ms | 10      |
-| Wake, until running                                 | 294 ms | 471 ms | 10      |
-| Wake, through the first command                     | 588 ms | 811 ms | 10      |
-| Wake straight after a pause, until running          | 150 ms | 271 ms | 10      |
-| Preview visit to a paused sandbox, until it answers | 0.47 s | 0.72 s | 10      |
-| Fork of one, until the copy is running              | 4.01 s | 4.36 s | 10      |
-| Fork of four, until all four are running            | 4.88 s | 5.79 s | 5       |
-| Snapshot of a running sandbox, until it is ready    | 3.49 s | 3.75 s | 10      |
-| Create from a snapshot, until running               | 585 ms | 651 ms | 10      |
-| Create from a snapshot, through the first command   | 742 ms | 799 ms | 10      |
+| Pause, until paused                                 | 165 ms | 193 ms | 10      |
+| Wake, until running                                 | 282 ms | 414 ms | 10      |
+| Wake, through the first command                     | 569 ms | 764 ms | 10      |
+| Wake straight after a pause, until running          | 137 ms | 236 ms | 10      |
+| Preview visit to a paused sandbox, until it answers | 0.51 s | 0.62 s | 10      |
+| Fork of one, until the copy is running              | 4.57 s | 5.03 s | 10      |
+| Fork of four, until all four are running            | 5.33 s | 5.67 s | 5       |
+| Snapshot of a running sandbox, until it is ready    | 3.27 s | 3.81 s | 10      |
+| Create from a snapshot, until running               | 601 ms | 807 ms | 10      |
+| Create from a snapshot, through the first command   | 745 ms | 978 ms | 10      |
 
 - **Pause** answers once the sandbox is frozen; its memory is written after.
-- **Wake** was asked for 10 seconds after the pause. A paused sandbox's memory
-  now stays on the server while there is room, so the wake does not read it
-  back from disk. Straight after a pause it is quicker still.
-- **Preview visit** is a separate run at 23:03 UTC: one request to a private
+- **Wake** was asked for 10 seconds after the pause, by which time this
+  sandbox's memory had been written to disk, and the wake read it back.
+  Straight after a pause the memory has not left the server, so the wake is
+  quicker.
+- **Preview visit** is a separate run at 02:33 UTC: one request to a private
   preview, with its token, of a sandbox paused 15 seconds earlier, timed until
-  the web server in the sandbox answered with 200. Its [samples](/benchmarks/preview-wake-2026-09-27.jsonl)
+  the web server in the sandbox answered with 200. Its [samples](/benchmarks/preview-wake-2026-09-28.jsonl)
   are recorded apart.
 - **Fork** and **snapshot** pause a running source for the capture and wake it
   again; each answered only when its copies were running, or its snapshot was
   ready and the source running again.
-- The [recorded samples](/benchmarks/operations-2026-09-27.jsonl) hold every
+- The [recorded samples](/benchmarks/operations-2026-09-28.jsonl) hold every
   step of every round.
+
+## On the server, 28 September 2026
+
+The same kind of requests timed inside Runtime: from the moment each reached
+the API in Virginia until it answered, read from the API's own timing log for
+the 20 runs of create, command, pause, wake, command, extend, pause, wake and
+stop that the same laptop made at 02:28 UTC. The host's work and our database
+are in it; the network between your machine and Virginia, and TLS, are not. It
+is the figure to set beside a provider's own server-side claim.
+
+| Step      | Median | p95    | Of it, the host (median) | Requests |
+| --------- | ------ | ------ | ------------------------ | -------- |
+| A create  | 89 ms  | 155 ms | 32 ms                    | 21       |
+| A command | 71 ms  | 241 ms | –                        | 41       |
+| A pause   | 81 ms  | 171 ms | 53 ms                    | 41       |
+| A wake    | 75 ms  | 227 ms | 45 ms                    | 40       |
+| An extend | 54 ms  | 296 ms | 22 ms                    | 20       |
+| A stop    | 37 ms  | 102 ms | 8 ms                     | 20       |
+
+A command's time is the API and the sandbox together; the log does not split
+them. The [timings](/benchmarks/server-2026-09-28.json) are published beside
+the samples.
 
 ## Earlier public benchmarks
 
 The measurements below are dated history, each with its own conditions.
+
+### Pause, wake, snapshot and fork, 27 September 2026
+
+The same scripts a day earlier: a pause in 226 ms, a wake in 294 ms and through
+its first command in 588 ms, a preview visit to a paused sandbox in 0.47 s, a
+snapshot in 3.49 s, a create from a snapshot in 585 ms and a fork in 4.01 s, at
+the median. The [operations](/benchmarks/operations-2026-09-27.jsonl) and
+[preview](/benchmarks/preview-wake-2026-09-27.jsonl) samples are kept.
+
+### Startup, 26 September 2026
+
+374 ms at the median from the create request through the first Python result
+(495 ms p95) and 193 ms until running, with `withruntime` 0.7.1. The
+[40 samples](/benchmarks/startup-2026-09-26.jsonl) are kept.
 
 ### Pause, wake, snapshot and fork, 26 September 2026
 

@@ -31,7 +31,12 @@ Runtime and {{cost:modal}} on Modal**. At 100,000 runs a month that is {{cost:ru
   project. Outside Modal, a Modal sandbox needs an App.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
-  every account ([single sign-on](./single-sign-on)).
+  every account ([single sign-on](./single-sign-on)). Modal puts SAML single sign-on and
+  audit logs on its Enterprise plan.
+- **Custom domains and a fixed address without a plan.** A paid account serves
+  a sandbox port at your own hostname, and sends from a dedicated outbound
+  address for {{address-month}} a month ([networking](./networking)). Modal's custom
+  domains and static IP proxy come with its Team plan, {{term:modal:team}} a month.
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
@@ -42,6 +47,12 @@ Runtime and {{cost:modal}} on Modal**. At 100,000 runs a month that is {{cost:ru
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
+
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, private previews, a Linux desktop, metrics,
+webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts, MCP servers from a
+catalog and identity tokens for AWS and Google Cloud. Paid accounts add TCP
+ports and WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -120,7 +131,7 @@ with Sandbox.create(funding="trial") as box:
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; plan features checked 27 September 2026.
 
 - [Modal pricing](https://modal.com/pricing)
 - [Modal resources and billing](https://modal.com/docs/guide/resources)

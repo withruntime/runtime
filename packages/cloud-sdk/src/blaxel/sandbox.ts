@@ -33,6 +33,7 @@ import {
 import { paginate, type PaginatedList } from "./pagination.js";
 import { portAccess, SandboxPreviews } from "./preview.js";
 import { SandboxProcess } from "./process.js";
+import { SandboxSessions, sessionSandbox } from "./session.js";
 import {
   appendEnvs,
   envRecord,
@@ -65,7 +66,6 @@ import {
   CODEGEN,
   DRIVES,
   SCHEDULES,
-  SESSIONS,
   SYSTEM,
   unsupportedPart,
   type UnsupportedPart,
@@ -367,7 +367,9 @@ export class SandboxInstance {
   readonly process: SandboxProcess;
   readonly previews: SandboxPreviews;
   readonly snapshots: SandboxSnapshotsResource;
-  readonly sessions: UnsupportedPart = unsupportedPart("sandbox.sessions", SESSIONS);
+  /** Tokens a frontend uses to reach this sandbox directly (Runtime's
+   * sandbox sessions). */
+  readonly sessions: SandboxSessions;
   readonly schedules: UnsupportedPart = unsupportedPart("sandbox.schedules", SCHEDULES);
   readonly codegen: UnsupportedPart = unsupportedPart("sandbox.codegen", CODEGEN);
   readonly system: UnsupportedPart = unsupportedPart("sandbox.system", SYSTEM);
@@ -406,6 +408,11 @@ export class SandboxInstance {
       client: this.#client,
       run,
       labels: () => this.#rt.info.labels,
+    });
+    this.sessions = new SandboxSessions({
+      id: this.#rt.id,
+      run,
+      apiUrl: () => this.#client.transport.baseUrl,
     });
     this.network = { fetch: (port, path, init) => this.fetch(port, path, init) };
   }
@@ -969,13 +976,15 @@ export class SandboxInstance {
     return { name: targetName, snapshotId: "", type: "sandbox" };
   }
 
-  static fromSession(_session: SessionWithToken): Promise<never> {
-    return Promise.reject(
-      new NotSupportedError(
-        "Blaxel sessions (SandboxInstance.fromSession)",
-        "Use SandboxInstance.get(name) with a Runtime key; to reach a port from a browser, share it with sandbox.previews.create and a token.",
-      ),
-    );
+  /** A sandbox reached with a session instead of a key: what a frontend
+   * does with the session its backend made. Commands, processes, files and
+   * previews work; anything that manages the sandbox is refused by Runtime. */
+  static async fromSession<T extends typeof SandboxInstance>(
+    this: T,
+    session: SessionWithToken,
+  ): Promise<InstanceType<T>> {
+    const { client, runtime } = await sessionSandbox(session);
+    return new this({ runtime, client }) as InstanceType<T>;
   }
 }
 

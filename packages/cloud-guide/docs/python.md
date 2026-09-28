@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.8.2. `pip show withruntime` shows the
+This guide describes `withruntime` 0.8.3. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -606,6 +606,25 @@ returns a new one; `sbx.previews.delete(3000)` stops sharing it. A preview's
 address is under `runtimehost.com`, the domain for everything sandboxes serve,
 kept apart from Runtime's own site.
 See [JavaScript](./javascript#share-a-port) for what each does.
+
+## A sandbox from a browser
+
+A session lets your own frontend reach one sandbox directly, without a key in
+the browser. Make it on your server and hand the page the token and the
+sandbox id; the page uses them with the JavaScript SDK
+(`Sandbox.fromSession({ token, sandboxId })`) or the HTTP API:
+
+```python no-run
+session = sbx.sessions.create(origins=["https://app.example.com"], ttl_seconds=900)
+token, sandbox_id = session["token"], session["sandboxId"]
+```
+
+A session runs commands, uses files and reaches previews of that one sandbox,
+and nothing else. It lasts {{session-default}} unless asked and
+{{session-max}} at most; `sbx.sessions.revoke(session_id)` ends it at once, and
+revoking the key that made it ends all of them. Python code can use one too:
+`Sandbox.from_session(token, sandbox_id)`. [A sandbox from a
+browser](./javascript#a-sandbox-from-a-browser) has the rest.
 
 ## MCP servers in a sandbox
 

@@ -380,6 +380,9 @@ class ForksPortsAndGaps(Base):
                      lambda: e2b.Secret.create("s"), lambda: e2b.wait_for_port(3000)):
             with self.assertRaises(NotSupportedException):
                 call()
+        with self.assertRaises(NotSupportedException) as caught:
+            e2b.Secret.create("s")
+        self.assertIn("withruntime secrets set", str(caught.exception))
 
 
 class Async(unittest.TestCase):

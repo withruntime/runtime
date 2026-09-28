@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.8.2. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.8.3. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -717,6 +717,64 @@ to refuse every token issued so far, and `previews.delete(port)` to stop sharing
   a deleted or failed one 410, neither with `Retry-After`.
   A preview's address is under `runtimehost.com`, the domain for everything
   sandboxes serve, kept apart from Runtime's own site.
+
+## A sandbox from a browser
+
+A session lets your own frontend reach one sandbox directly, without passing
+every call through your servers and without a key in the browser. Your backend
+makes it with its key and hands the page the token:
+
+```ts no-run
+// On your server, with RUNTIME_API_KEY.
+import { Sandbox } from "withruntime";
+
+export async function sessionFor(sandboxId: string) {
+  const sbx = await Sandbox.connect(sandboxId);
+  const session = await sbx.sessions.create({
+    origins: ["https://app.example.com"],
+    ttlSeconds: 900,
+  });
+  return { token: session.token, sandboxId: session.sandboxId };
+}
+```
+
+```ts no-run
+// In the page, with what your server returned.
+import { Sandbox } from "withruntime";
+
+const { token, sandboxId } = (await (await fetch("/api/sandbox-session")).json()) as {
+  token: string;
+  sandboxId: string;
+};
+const sbx = Sandbox.fromSession({ token, sandboxId });
+const { stdout } = await sbx.exec("ls /workspace");
+await sbx.files.write("/workspace/notes.txt", "from the browser");
+console.log(stdout);
+```
+
+- **What it can do:** run commands and read their output as it streams, start
+  and drive processes, read, write and watch files, run the code interpreter,
+  and read the sandbox's previews with their tokens.
+- **What it cannot:** stop, pause, extend, fork, snapshot or change the
+  sandbox, create anything, or reach another sandbox, keys, billing or
+  secrets. Those answer `403 forbidden`.
+- **How long:** {{session-default}} unless `ttlSeconds` asks otherwise, and
+  {{session-max}} at most. `sbx.sessions.revoke(id)` ends one at once, and
+  revoking the key that made it ends all of its sessions. `sbx.sessions.list()`
+  shows them.
+- **Which pages:** `origins` lists up to {{session-origins}} exact origins,
+  `https://host` or `http://localhost:5173` while developing. The API answers
+  CORS for those alone and refuses a request from any other page.
+- **Who can make one:** a key that can run commands in the sandbox. The
+  session acts as that key's agent, so it can never do more than the key.
+- **Money:** a session spends only what the sandbox already does. A paused
+  sandbox wakes for its commands only if the sandbox wakes on requests
+  (`autoWake`, on by default), with the lease it had.
+- **Terminals:** a session has no WebSocket terminal. Start a process with
+  `spawn(command, { pty: {}, stdin: "pipe" })`, write to it and follow its
+  output.
+
+The token is in the answer to `create` only; keep it out of logs and URLs.
 
 ## A desktop
 

@@ -374,7 +374,6 @@ describe("exports", () => {
       "postProcess",
       "VolumeInstance",
       "ImageInstance",
-      "SandboxSessions",
     ]) {
       let error: unknown;
       try {
@@ -386,18 +385,13 @@ describe("exports", () => {
       expect((error as NotSupportedError).alternative.length).toBeGreaterThan(0);
     }
     const sandbox = await SandboxInstance.create({ withruntime: withruntime() });
-    for (const part of [
-      sandbox.sessions,
-      sandbox.codegen,
-      sandbox.schedules,
-      sandbox.system,
-      sandbox.drives,
-    ]) {
+    for (const part of [sandbox.codegen, sandbox.schedules, sandbox.system, sandbox.drives]) {
       const method = Object.values({
         call: (part as Record<string, () => Promise<never>>).create!,
       })[0]!;
       expect(await method().catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
     }
+    // A session Runtime did not make (Blaxel's own) is refused, never sent.
     expect(
       await SandboxInstance.fromSession({
         name: "s",

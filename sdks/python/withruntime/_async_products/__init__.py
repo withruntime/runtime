@@ -18,6 +18,7 @@ from typing import Any
 from .audit import AsyncAudit
 from .desktop import AsyncDesktop
 from .images import AsyncImages
+from .jobs import AsyncJobs
 from .mounts import AsyncMounts
 from .interpreter import AsyncInterpreter
 from .limits import AsyncLimits
@@ -37,6 +38,7 @@ CLIENT: dict[str, Any] = {}
 SANDBOX: dict[str, Any] = {}
 CLIENT["images"] = AsyncImages
 CLIENT["volumes"] = AsyncVolumes
+CLIENT["jobs"] = AsyncJobs
 CLIENT["referrals"] = AsyncReferrals
 CLIENT["billing"] = AsyncBilling
 CLIENT["limits"] = AsyncLimits

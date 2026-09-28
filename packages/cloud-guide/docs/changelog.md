@@ -8,8 +8,50 @@ Each day also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 28 September 2026
+
+- **A sandbox from a browser.** A sandbox session is a short-lived token your
+  own web page uses to run commands, read and write files and reach previews in
+  one sandbox, with no API key and no proxy of your own. It cannot stop, extend
+  or change the sandbox, lasts {{session-default}} unless you ask for up to
+  {{session-max}}, can be revoked at once, and is answered only from the pages
+  you list. `sbx.sessions.create({ origins })` makes one and
+  `Sandbox.fromSession({ token, sandboxId })` uses it, from `withruntime`
+  0.8.3; Blaxel's `sandbox.sessions` and `fromSession` now work in the
+  drop-in. See [JavaScript](./javascript) and [Python](./python).
+- **The one import, printed.** `runtime switch --from` and
+  `runtime compare --from` print the import that moves E2B, Daytona, Vercel
+  Sandbox or Blaxel code to Runtime, from `withruntime` 0.8.3.
+- **Passkeys.** Sign in with a passkey, with no email link and no code, or use
+  one as the second step in place of an authenticator app's code. Add them
+  under Settings → Two-step sign-in, beside the app or instead of it. See
+  [two-step sign-in](./security#two-step-sign-in).
+- **A Go SDK.** `go get withruntime.com/go` installs one Go client for every
+  Runtime product, with a `context.Context` on every call and only the standard
+  library underneath. See the [Go guide](./go).
+- **A Ruby SDK.** `gem install withruntime` installs one Ruby client for every
+  Runtime product, with only the standard library underneath. See the
+  [Ruby guide](./ruby).
+- **A Java SDK.** `com.withruntime:withruntime` on Maven Central is one Java
+  client for every Runtime product, for Java 17 and later with nothing beyond
+  the JDK. See the [Java guide](./java).
+- **Faster starts, pauses and stops.** A new sandbox runs its first command
+  331 ms after the create request at the median, down from 374 ms, and
+  30 of 40 creates were running in under 200 ms. A pause answers in 165 ms,
+  down from 226 ms, and a snapshot is ready in 3.27 s. On the server, without
+  the network to Virginia, a pause answers in 81 ms, a wake in 75 ms and a stop
+  in 37 ms; the [speed](./speed) page now shows those figures beside the ones
+  from a laptop.
+- **Idle pause sees a download that has just started.** A background download
+  or any other traffic now keeps a sandbox awake from its first second; before,
+  traffic that began right after the last command could go unseen for up to
+  15 seconds.
+
 ## 27 September 2026
 
+- **Settings in the sidebar.** Open Settings and the sidebar lists its pages
+  in three groups, Developers, Team and Security, with a way back to where you
+  were. Referrals stay on Usage & billing and Support in the account menu.
 - **Security and compliance page.** One page for a security review: where
   data lives and the certifications of the companies that hold it, isolation,
   encryption, sign-in, recovery, and how Runtime is run, with the date each

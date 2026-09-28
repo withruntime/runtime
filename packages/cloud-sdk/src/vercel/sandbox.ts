@@ -168,7 +168,7 @@ export function networkRules(policy: NetworkPolicy): NonNullable<RuntimeCreate["
       if (rules.length)
         throw new NotSupportedError(
           `Network rules that transform or forward requests (for ${domain})`,
-          "Allow the domain with an empty rule list and pass credentials to the command as env instead.",
+          `Allow the domain with an empty rule list and store the credential as a Runtime secret for it: \`npx withruntime secrets set NAME --host ${domain}\`. The sandbox sees a placeholder, and the egress proxy adds the value.`,
         );
       domains.push(domain);
     }

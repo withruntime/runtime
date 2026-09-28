@@ -3,7 +3,7 @@
 Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use, and connects them with one browser approval.
 
 Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
-One API, one CLI, one MCP server and SDKs for JavaScript and Python cover
+One API, one CLI, one MCP server and SDKs for JavaScript, Python, Go, Ruby and Java cover
 every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), no card.
 
 - **{{trial-hours}} free hours, no card:** enough to run your real workload before you pay.
@@ -18,11 +18,22 @@ every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), n
   and processes.
 - **An uptime promise:** paid accounts are promised {{uptime-promise}} API
   uptime a month, and {{uptime-credit}} of a short month's charges comes back
-  automatically ([Uptime Promise](/legal/sla)).
+  automatically ([Uptime Promise](/legal/sla)). The [status page](/status)
+  publishes the record it is measured by.
 - **Secrets the sandbox never sees,** and single sign-on, SCIM and roles free
   for every team.
 - **Built in:** a desktop, a code interpreter, custom images, volumes, and
   preview URLs that are private by default.
+- **MCP servers and your own data:** run servers from the MCP catalog in a
+  sandbox ([MCP](./mcp)), and mount your S3, R2 or Google Cloud Storage bucket
+  as a folder ([storage](./storage#mount-your-own-bucket)).
+- **Connected to the rest of your world:** your own domain with HTTPS, public
+  TCP ports, a dedicated outbound address and a WireGuard private network on
+  paid accounts ([networking](./networking)), and
+  [identity tokens](./identity-tokens) that reach AWS or Google Cloud with no
+  stored key.
+- **See what runs:** each sandbox's CPU and memory over time, signed webhooks
+  and OpenTelemetry export ([observability](./observability)).
 
 ## Give your agent one instruction
 
@@ -175,15 +186,18 @@ See [troubleshooting](./troubleshooting) for safe retries and cleanup.
 
 ## What you can do next
 
-| You want to                                                        | Read                                             |
-| ------------------------------------------------------------------ | ------------------------------------------------ |
-| Run commands, stream output, start servers                         | [JavaScript](./javascript) or [Python](./python) |
-| Drive sandboxes from a terminal or a script                        | [CLI](./cli)                                     |
-| Give an agent Runtime tools                                        | [MCP](./mcp)                                     |
-| Call the API from any language                                     | [API reference](./api)                           |
-| Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment) |
-| Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                       |
-| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                        |
-| Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)   |
+| You want to                                                        | Read                                                                                         |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Run commands, stream output, start servers                         | [JavaScript](./javascript), [Python](./python), [Go](./go), [Ruby](./ruby) or [Java](./java) |
+| Drive sandboxes from a terminal or a script                        | [CLI](./cli)                                                                                 |
+| Give an agent Runtime tools                                        | [MCP](./mcp)                                                                                 |
+| Call the API from any language                                     | [API reference](./api)                                                                       |
+| Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment)                                             |
+| Keep data on volumes, or mount your own bucket                     | [Storage and backups](./storage)                                                             |
+| Serve on your own domain, open a TCP port or reach your network    | [Networking](./networking)                                                                   |
+| Watch CPU and memory, get webhooks, export to OpenTelemetry        | [Observability](./observability)                                                             |
+| Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                                                                   |
+| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                                                                    |
+| Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)                                               |
 
 Keep important results outside the sandbox: a sandbox is not a backup.

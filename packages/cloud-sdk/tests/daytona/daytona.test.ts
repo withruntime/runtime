@@ -354,6 +354,21 @@ describe("process", () => {
     ])
       expect(await refuse().catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
   });
+
+  test("secrets, metrics, SSH and telemetry refusals point at what Runtime has", async () => {
+    const sandbox = await daytona.create();
+    const alternative = async (refuse: () => Promise<unknown>) =>
+      ((await refuse().catch((e: unknown) => e)) as NotSupportedError).alternative;
+    expect(await alternative(() => sandbox.updateSecrets())).toContain("withruntime secrets set");
+    expect(await alternative(() => sandbox.getMetrics())).toContain("sandbox.withruntime.metrics(");
+    expect(await alternative(() => sandbox.createSshAccess())).toContain("withruntime sandbox ssh");
+    expect(await alternative(() => daytona.create({ secrets: { A: "b" } }))).toContain(
+      "withruntime secrets set",
+    );
+    expect(
+      await alternative(() => daytona.create({ otelEndpointOverride: "https://otel.example.com" })),
+    ).toContain("runtime.otel.create()");
+  });
 });
 
 describe("fs and git", () => {

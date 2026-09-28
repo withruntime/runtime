@@ -4,6 +4,7 @@ from typing import Any
 from .audit import Audit
 from .desktop import Desktop
 from .images import Images
+from .jobs import Jobs
 from .mounts import Mounts
 from .interpreter import Interpreter
 from .limits import Limits
@@ -23,6 +24,7 @@ CLIENT: dict[str, Any] = {}
 SANDBOX: dict[str, Any] = {}
 CLIENT["images"] = Images
 CLIENT["volumes"] = Volumes
+CLIENT["jobs"] = Jobs
 CLIENT["referrals"] = Referrals
 CLIENT["billing"] = Billing
 CLIENT["limits"] = Limits

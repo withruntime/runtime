@@ -1053,7 +1053,7 @@ class Interpreter(Base):
 class Unsupported(Base):
     def test_every_gap_is_importable_and_names_its_alternative(self):
         box = self.create()
-        calls = [lambda: box.sessions.create(), lambda: box.codegen.fastapply("a", "b"), lambda: box.system.upgrade(),
+        calls = [lambda: box.codegen.fastapply("a", "b"), lambda: box.system.upgrade(),
                  lambda: box.drives.mount("d", "/d"), lambda: box.schedules.list(),
                  lambda: SyncSandboxInstance.from_session({}), lambda: bl.BlAgent("x"), lambda: bl.bl_model("m"),
                  lambda: bl.settings.region, lambda: bl.SyncVolumeInstance.create({}),

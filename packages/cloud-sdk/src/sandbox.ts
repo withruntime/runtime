@@ -7,7 +7,7 @@ import {
   type WatchHandle,
   type WatchOptions,
 } from "./products/watch.js";
-import type { Query, RequestOptions, Transport } from "./transport.js";
+import { Transport, type Query, type RequestOptions } from "./transport.js";
 import type {
   CommandResult,
   ExecOptions,
@@ -30,8 +30,22 @@ const CHUNK = 1_048_576;
  * connections at once. */
 const PARALLEL = 8;
 const enc = (id: string) => encodeURIComponent(id);
-const toBase64 = (data: string | Uint8Array) =>
-  (typeof data === "string" ? Buffer.from(data) : Buffer.from(data)).toString("base64");
+/* Web APIs only, so the sandbox's commands, processes and files work in a
+   browser with a session token (Sandbox.fromSession): no Buffer, no
+   node:crypto. */
+const utf8 = (data: string | Uint8Array) =>
+  typeof data === "string" ? new TextEncoder().encode(data) : data;
+function base64(bytes: Uint8Array): string {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+const toBase64 = (data: string | Uint8Array) => base64(utf8(data));
+async function sha256Hex(data: Uint8Array | string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", utf8(data) as Uint8Array<ArrayBuffer>);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function commandBody(command: string | readonly string[], options: ExecOptions) {
   return {
@@ -61,16 +75,50 @@ export class Sandbox implements AsyncDisposable {
   readonly #t: Transport;
   readonly files: Files;
   readonly processes: Processes;
+  /** Short-lived tokens that let a browser reach this sandbox directly. */
+  readonly sessions: SandboxSessions;
   constructor(transport: Transport, info: SandboxInfo) {
     this.#t = transport;
     this.#info = info;
     this.files = new Files(transport, info.id);
     this.processes = new Processes(transport, info.id);
+    this.sessions = new SandboxSessions(transport, info.id);
     for (const [name, make] of sandboxFactories())
       Object.defineProperty(this, name, { value: make(transport, this), enumerable: false });
   }
   get id(): string {
     return this.#info.id;
+  }
+  /** A sandbox reached with a session token instead of an API key, for code in
+   * a browser: commands and their streams, processes, files and previews of
+   * this one sandbox. Makes no call; `info` holds only the id until
+   * `refresh()`. Your backend makes the session with `sbx.sessions.create()`
+   * and hands the page `token` and `sandboxId`.
+   *
+   *   const sbx = Sandbox.fromSession({ token, sandboxId });
+   *   const { stdout } = await sbx.exec("ls /workspace");
+   */
+  static fromSession(session: {
+    token: string;
+    sandboxId: string;
+    /** The API's origin, `apiUrl` in the session; https://api.withruntime.com
+     * unless you run your own. */
+    apiUrl?: string;
+    fetch?: typeof fetch;
+  }): Sandbox {
+    if (!/^rtsess_/.test(session.token))
+      throw new RuntimeError({
+        message: "That is not a sandbox session token (they start rtsess_).",
+        code: "invalid_request",
+        status: 0,
+        hint: "Make one on your backend with sbx.sessions.create() and pass its token.",
+      });
+    const transport = new Transport({
+      apiKey: session.token,
+      ...(session.apiUrl ? { baseUrl: session.apiUrl } : {}),
+      ...(session.fetch ? { fetch: session.fetch } : {}),
+    });
+    return new Sandbox(transport, { id: session.sandboxId } as SandboxInfo);
   }
   /** What the API last said about this sandbox. `refresh()` asks again. */
   get info(): SandboxInfo {
@@ -520,7 +568,7 @@ class OutputCursor {
           droppedBytes: event.offset - this.cursor,
           resumeAt: event.offset,
         };
-      this.cursor = Math.max(this.cursor, event.offset + Buffer.byteLength(event.data));
+      this.cursor = Math.max(this.cursor, event.offset + utf8(event.data).byteLength);
     }
     yield event;
   }
@@ -546,6 +594,93 @@ function pick(options: RequestOptions): RequestOptions {
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs + 60_000 } : {}),
   };
+}
+
+/** A sandbox session, as the API answers it. `token` is set only in the
+ * answer to `create`. */
+export type SandboxSession = {
+  id: string;
+  sandboxId: string;
+  name: string | null;
+  origins: string[];
+  /** The agent whose key made it; the session acts as it. */
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  state: "active" | "expired" | "revoked";
+};
+export type CreatedSandboxSession = SandboxSession & {
+  /** The bearer token, `rtsess_...`: hand it to the page, never log it. */
+  token: string;
+  /** The API's origin, for `Sandbox.fromSession({ apiUrl })`. */
+  apiUrl: string;
+};
+
+/** Sessions: a token your backend makes and hands to your own frontend, which
+ * then runs commands, reads and writes files and reaches previews in this one
+ * sandbox directly, without proxying through your servers. A session cannot
+ * stop, pause, extend, fork, snapshot or change the sandbox, create anything,
+ * or reach anything else. It lasts an hour unless asked (a day at most), ends
+ * when the key that made it is revoked, and is revocable at once. */
+export class SandboxSessions {
+  constructor(
+    private readonly t: Transport,
+    private readonly sandboxId: string,
+  ) {}
+  /** A new session. `origins` are the exact pages that will use it
+   * (`https://app.example.com`, or `http://localhost:5173` while developing):
+   * the API answers CORS for them and refuses any other page. */
+  async create(
+    input: { ttlSeconds?: number; origins?: string[]; name?: string } = {},
+    options: RequestOptions = {},
+  ): Promise<CreatedSandboxSession> {
+    const path = `/v1/sandboxes/${enc(this.sandboxId)}/sessions`;
+    const made = await this.t.json<SandboxSession & { token: string | null; apiUrl: string }>({
+      method: "POST",
+      path,
+      body: input,
+      ...options,
+    });
+    if (made.token) return made as CreatedSandboxSession;
+    /* The answer replayed an earlier create whose reply was lost, and a token
+       is shown only once: end that session and make a fresh one. */
+    await this.revoke(made.id).catch(() => undefined);
+    const fresh = await this.t.json<SandboxSession & { token: string | null; apiUrl: string }>({
+      method: "POST",
+      path,
+      body: input,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+    });
+    if (!fresh.token)
+      throw new RuntimeError({
+        message: "The session was made but its token did not arrive.",
+        code: "session_token_lost",
+        status: 0,
+        hint: `Revoke session ${fresh.id} and create another.`,
+      });
+    return fresh as CreatedSandboxSession;
+  }
+  /** Sessions still active, and those that ended in the last day, newest first. */
+  async list(options: RequestOptions = {}): Promise<SandboxSession[]> {
+    return (
+      await this.t.json<{ data: SandboxSession[] }>({
+        method: "GET",
+        path: `/v1/sandboxes/${enc(this.sandboxId)}/sessions`,
+        ...options,
+      })
+    ).data;
+  }
+  /** Ends a session now; its next request is refused. */
+  async revoke(sessionId: string, options: RequestOptions = {}): Promise<SandboxSession> {
+    return this.t.json<SandboxSession>({
+      method: "POST",
+      path: `/v1/sandboxes/${enc(this.sandboxId)}/sessions/${enc(sessionId)}:revoke`,
+      body: {},
+      ...options,
+    });
+  }
 }
 
 export class Processes {
@@ -649,14 +784,14 @@ export class Process {
   }
   /** Sends input. Offsets are tracked for you, so a retried write is never typed twice. */
   async write(data: string | Uint8Array, options: { eof?: boolean } = {}): Promise<void> {
-    const bytes = typeof data === "string" ? Buffer.from(data) : Buffer.from(data);
+    const bytes = utf8(data);
     let sent = 0;
     do {
       const reply = await this.t.json<{ offset: number }>({
         method: "POST",
         path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:write`,
         body: {
-          base64: bytes.subarray(sent).toString("base64"),
+          base64: base64(bytes.subarray(sent)),
           offset: this.#inputOffset,
           ...(options.eof ? { eof: true } : {}),
         },
@@ -845,16 +980,16 @@ export class Files {
       });
       return { path, size: bytes.length };
     }
-    const { createHash } = await import("node:crypto");
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const sha256 = await sha256Hex(bytes);
     // A guest journals mutations across operations, not per URL. One logical
     // write therefore owns separate stable keys for each mutation phase.
     const uploadKey = options.idempotencyKey ?? crypto.randomUUID();
+    const phaseKeys = new Map<string, string>();
+    for (const phase of ["begin", "legacy-begin", "commit", "chmod", "abort"])
+      phaseKeys.set(phase, await sha256Hex(JSON.stringify(["files.write", uploadKey, phase])));
     const phaseOptions = (phase: string): RequestOptions => ({
       ...options,
-      idempotencyKey: createHash("sha256")
-        .update(JSON.stringify(["files.write", uploadKey, phase]))
-        .digest("hex"),
+      idempotencyKey: phaseKeys.get(phase)!,
     });
     type Upload = { uploadId: string; chunkBytes: number; mode?: string; replayed?: boolean };
     let begin: Upload;

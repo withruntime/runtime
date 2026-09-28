@@ -40,6 +40,14 @@ against {{cost:fly-machines:100000}} on Machines, {{=$0 less:fly-machines:100000
 - **Safe retries.** Every write takes an idempotency key, and the SDKs retry
   with it automatically, so a lost response never creates a second sandbox.
 
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, a Linux desktop, metrics, webhooks, OpenTelemetry export, S3, R2 and
+GCS bucket mounts, MCP servers from a catalog, identity tokens for AWS and
+Google Cloud and free single sign-on. Paid accounts add custom domains, TCP
+ports, dedicated outbound addresses and WireGuard private networks. See
+[products](./products).
+
 ## At a glance
 
 This compares Runtime with Fly.io's two ways to run agent code: Sprites, its
@@ -47,16 +55,16 @@ sandboxes for agents, and Machines, its general-purpose VMs. Fly.io's figures
 come from its public pricing and documentation, checked 23 September 2026, with
 Machines at the rates of its Ashburn (`iad`) region.
 
-|                | Runtime                                                        | Fly Sprites                                               | Fly Machines                                                                           |
-| -------------- | -------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                                | Firecracker microVM                                       | Firecracker microVM                                                                    |
-| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:fly-sprites:cpu}} per CPU-hour of measured CPU     | By size while started; 2 performance vCPUs and 4 GB {{rate:fly-machines:size}} an hour |
-| Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{rate:fly-sprites:memory}} per GB-hour of memory in use  | Included in the size; more at {{term:fly-machines:extra-memory}} per GB a month        |
-| Size           | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Memory managed by Fly, 100 GB disk                        | Up to 16 performance vCPUs and 128 GB                                                  |
-| Plan fee       | None; prepaid credit from {{topup-min}}                        | None required; optional monthly plans                     | None; pay as you go                                                                    |
-| Free start     | {{trial-hours}} sandbox hours, no card                         | {{term:fly-sprites:credit}} of trial credit               | Not stated on the pricing page                                                         |
-| When idle      | Pause keeps files and memory; paid retention 1–365 days        | Pauses itself; memory kept at first, the disk kept always | Root disk is temporary; volumes keep files; suspend, 2 GB or less                      |
-| Interfaces     | API, CLI, MCP server, JavaScript and Python SDKs               | API, CLI, MCP server; JavaScript, Python, Go, Elixir SDKs | Machines API and flyctl                                                                |
+|                | Runtime                                                          | Fly Sprites                                               | Fly Machines                                                                           |
+| -------------- | ---------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                  | Firecracker microVM                                       | Firecracker microVM                                                                    |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor   | {{rate:fly-sprites:cpu}} per CPU-hour of measured CPU     | By size while started; 2 performance vCPUs and 4 GB {{rate:fly-machines:size}} an hour |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                            | {{rate:fly-sprites:memory}} per GB-hour of memory in use  | Included in the size; more at {{term:fly-machines:extra-memory}} per GB a month        |
+| Size           | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart   | Memory managed by Fly, 100 GB disk                        | Up to 16 performance vCPUs and 128 GB                                                  |
+| Plan fee       | None; prepaid credit from {{topup-min}}                          | None required; optional monthly plans                     | None; pay as you go                                                                    |
+| Free start     | {{trial-hours}} sandbox hours, no card                           | {{term:fly-sprites:credit}} of trial credit               | Not stated on the pricing page                                                         |
+| When idle      | Pause keeps files and memory; paid retention 1–365 days          | Pauses itself; memory kept at first, the disk kept always | Root disk is temporary; volumes keep files; suspend, 2 GB or less                      |
+| Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs | API, CLI, MCP server; JavaScript, Python, Go, Elixir SDKs | Machines API and flyctl                                                                |
 
 ## Cost for the same job
 

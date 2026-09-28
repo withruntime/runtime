@@ -777,6 +777,57 @@ class Files:
                 pass
 
 
+class SandboxSessions:
+    """Sessions: a short-lived token your backend makes and hands to your own
+    frontend, which then runs commands, uses files and reaches previews in this
+    one sandbox directly. A session cannot stop, pause, extend, fork, snapshot
+    or change the sandbox, create anything, or reach anything else. It lasts an
+    hour unless asked (a day at most), ends when the key that made it is
+    revoked, and is revocable at once."""
+
+    def __init__(self, t: _Transport, sandbox_id: str) -> None:
+        self._t, self._id = t, sandbox_id
+
+    def _path(self, suffix: str = "") -> str:
+        return f"/v1/sandboxes/{_enc(self._id)}/sessions{suffix}"
+
+    def create(self, ttl_seconds: Optional[int] = None, origins: Optional[list[str]] = None,
+                     name: Optional[str] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """A new session. ``origins`` are the exact pages that will use it
+        (``https://app.example.com``, or ``http://localhost:5173`` while
+        developing): the API answers CORS for them and refuses other pages.
+        ``token`` is in this answer only."""
+        body: dict[str, Any] = {}
+        if ttl_seconds is not None:
+            body["ttlSeconds"] = ttl_seconds
+        if origins is not None:
+            body["origins"] = list(origins)
+        if name is not None:
+            body["name"] = name
+        made = self._t.json("POST", self._path(), body=body, idempotency_key=idempotency_key)
+        if made.get("token"):
+            return made
+        # A replay of a create whose answer was lost: a token is shown once, so
+        # end that session and make a fresh one.
+        try:
+            self.revoke(made["id"])
+        except RuntimeError:
+            pass
+        fresh = self._t.json("POST", self._path(), body=body)
+        if not fresh.get("token"):
+            raise RuntimeError("The session was made but its token did not arrive.", code="session_token_lost",
+                               status=0, hint=f"Revoke session {fresh['id']} and create another.")
+        return fresh
+
+    def list(self) -> list[dict[str, Any]]:
+        """Sessions still active, and those that ended in the last day, newest first."""
+        return (self._t.json("GET", self._path()))["data"]
+
+    def revoke(self, session_id: str) -> dict[str, Any]:
+        """Ends a session now; its next request is refused."""
+        return self._t.json("POST", self._path(f"/{_enc(session_id)}:revoke"), body={})
+
+
 class Sandbox:
     """A sandbox. ``with runtime.sandboxes.create() as sbx:`` stops it at the end."""
 
@@ -785,6 +836,7 @@ class Sandbox:
         self.info = info
         self._keep_alive: Optional[Callable[[], None]] = None
         self.files = Files(t, info["id"])
+        self.sessions = SandboxSessions(t, info["id"])
         # Imported here, not at the top, so a product module may itself import
         # this one without a cycle.
         from ._sync_products import SANDBOX as SANDBOX_PRODUCTS
@@ -798,6 +850,19 @@ class Sandbox:
     @property
     def state(self) -> str:
         return self.info.get("state", "")
+
+    @staticmethod
+    def from_session(token: str, sandbox_id: str, api_url: Optional[str] = None, *,
+                     timeout: float = 300) -> "Sandbox":
+        """A sandbox reached with a session token instead of an API key: its
+        commands, processes, files and previews, and nothing else. Makes no
+        call. The backend makes the session with ``sbx.sessions.create()``."""
+        if not token.startswith("rtsess_"):
+            raise RuntimeError("That is not a sandbox session token (they start rtsess_).",
+                               code="invalid_request", status=0,
+                               hint="Make one on your backend with sbx.sessions.create() and pass its token.")
+        t = _Transport(token, api_url or os.environ.get("RUNTIME_API_URL", DEFAULT_BASE_URL), timeout, 4)
+        return Sandbox(t, {"id": sandbox_id})
 
     def _path(self, suffix: str = "") -> str:
         return f"/v1/sandboxes/{_enc(self.id)}{suffix}"
@@ -1309,5 +1374,5 @@ class Runtime:
         self.close()
 
 
-__all__ = ["Runtime", "Sandbox", "Sandboxes", "Files", "Process", "Terminal",
+__all__ = ["Runtime", "Sandbox", "Sandboxes", "SandboxSessions", "Files", "Process", "Terminal",
            "Page", "Feedback", "Support", "Snapshots", "CommandResult"]

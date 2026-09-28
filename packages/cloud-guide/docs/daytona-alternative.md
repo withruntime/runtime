@@ -33,10 +33,12 @@ Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cos
   first top-up and it is matched, up to {{switching-max}}.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
-  every account ([single sign-on](./single-sign-on)).
-- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
-  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
-  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
+  every account ([single sign-on](./single-sign-on)). Daytona's single sign-on is OIDC,
+  on its Enterprise plan.
+- **Custom domains built in.** A paid account serves a sandbox port at your own
+  hostname, with HTTPS, from one command ([custom domains](./networking#custom-domains)).
+  On Daytona, a preview under your own domain needs a preview proxy you deploy
+  and run yourself.
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
@@ -45,6 +47,13 @@ Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cos
   limit per key, and cap any create with `maxCostMicros`. Every write takes an
   idempotency key and the SDKs retry with it, so a lost response never creates
   a second sandbox.
+
+**Also included:** a code interpreter, network allow and deny lists, secrets the
+sandbox never sees, custom images, volumes backed up daily, snapshots and forks
+with memory, private previews, a Linux desktop, metrics, webhooks, OpenTelemetry
+export, S3, R2 and GCS bucket mounts, MCP servers from a catalog and identity
+tokens for AWS and Google Cloud. Paid accounts add TCP ports, dedicated outbound
+addresses and WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -154,9 +163,12 @@ try {
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; single sign-on and custom domains checked
+27 September 2026.
 
 - [Daytona pricing](https://www.daytona.io/pricing)
+- [Daytona organization SSO](https://www.daytona.io/docs/en/sso)
+- [Daytona custom preview proxy](https://www.daytona.io/docs/en/custom-preview-proxy)
 - [Daytona sandboxes](https://www.daytona.io/docs/en/sandboxes)
 - [Daytona on microVMs, pause and fork](https://www.daytona.io/dotfiles/vms-pause-and-fork)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

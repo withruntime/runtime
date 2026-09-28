@@ -43,7 +43,9 @@ The sandbox object does the rest:
 - `pause`, `wake`, `extend`, `fork` and `snapshot` (a paused sandbox also wakes
   by itself on the next call), `update` for its name, automatic wake, idle pause
   and persistence, and `keepAlive` to extend its lease while your process runs;
-- `interpreter`, `network`, `previews` and `desktop` for the other products.
+- `interpreter`, `network`, `previews`, `desktop`, `mounts` (your S3, R2 or
+  Google Cloud Storage bucket as a folder), `metrics` and `mcp` (servers from
+  the MCP catalog, run in the sandbox) for the other products.
 
 A sandbox pauses itself after 60 seconds with nothing happening in it, keeping
 its memory and processes, and the next call wakes it, so an idle sandbox costs
@@ -52,8 +54,11 @@ no compute; `idlePauseSeconds` sets 10 to 86,400, or 0 for never.
 `Sandbox.getOrCreate(name)` returns the sandbox with that name, woken if it is
 paused, or creates it.
 
-The client has `sandboxes`, `images`, `volumes`, `snapshots`, `limits`,
-`feedback` and `support`. `runtime.limits.get()` (0.3.1 and later) says whether
+The client has `sandboxes`, `images`, `volumes`, `snapshots`, `secrets`,
+`limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and `audit`
+to watch the account; `domains`, `ports`, `addresses`, `tunnel` and `network`
+to connect sandboxes to your own world (paid accounts); and `mcp`, `sso`,
+`billing`, `referrals` and `switching`. `runtime.limits.get()` (0.3.1 and later) says whether
 the key is read-only and what its agent may still spend today. Every write carries an idempotency key, made for you, so the SDK's
 own retries (timeouts, 429, 503) never do anything twice. Errors are typed and
 carry a `code`, a `hint` and a `requestId`.
@@ -124,8 +129,9 @@ Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB.
 Standby becomes Runtime's pause: after 60 seconds without a call a sandbox
 pauses with its memory and processes, and the next call wakes it. Envs,
 processes by name, files, previews, snapshots, forks and the code interpreter
-work as they do on Blaxel. A Blaxel key is never sent anywhere. Sessions,
-drives, codegen, schedules and Blaxel's agent, model and MCP hosting throw
+work as they do on Blaxel, and so do sessions: `sandbox.sessions` makes a
+Runtime sandbox session and `SandboxInstance.fromSession` drives the sandbox
+with its token. A Blaxel key is never sent anywhere. Drives, codegen, schedules and Blaxel's agent, model and MCP hosting throw
 `NotSupportedError` before anything happens, naming what to use instead.
 `BLAXEL.md` in this package lists every mapping and gap.
 
@@ -163,6 +169,21 @@ The bridge serves Runtime's MCP tools on stdio over the saved connection; not
 connected yet, it offers `runtime_connect`, which walks you through the browser
 approval. Remote clients add `https://api.withruntime.com/mcp` and sign in through
 the browser, or send a bearer key.
+
+## Reliability and support
+
+- **Status:** https://withruntime.com/status checks the API from outside every
+  two minutes and starts a real sandbox every ten, with every day's record
+  kept; also as https://withruntime.com/status.md and
+  https://withruntime.com/status.json.
+- **Uptime Promise:** paid accounts are promised 99% API uptime
+  each calendar month, and a month below it pays 10% of that
+  month's charges back as credit, automatically
+  (https://withruntime.com/legal/sla).
+- **Security and compliance:** https://withruntime.com/docs/trust.
+- **What changed:** https://withruntime.com/changelog.
+- **Help:** `runtime support "<question>"`, or `runtime feedback "<text>"` for
+  anything that got in your way.
 
 Docs: https://withruntime.com/docs/javascript and https://withruntime.com/docs/cli.
 

@@ -1045,6 +1045,73 @@ class _Calling:
         return on_instance
 
 
+class SandboxSessions:
+    """Blaxel's ``sandbox.sessions`` over Runtime's sandbox sessions: a token a
+    frontend holds to run commands, use files and reach previews of this one
+    sandbox directly."""
+
+    # The session create_if_expired made last, per sandbox, in this process: a
+    # token is shown only when its session is made.
+    _made: Dict[str, core.SessionWithToken] = {}
+
+    def __init__(self, sandbox: "SandboxInstance") -> None:
+        self._sandbox = sandbox
+
+    def _runtime(self) -> Any:
+        return self._sandbox._live()
+
+    def _api_url(self, runtime: Any) -> str:
+        return runtime._t.base_url
+
+    def create(self, options: Any = None) -> core.SessionWithToken:
+        """A new session, for a day unless ``expires_at`` says sooner."""
+        seconds, origins = core.session_options(options)
+        runtime = self._runtime()
+        made = _guard("sandbox", lambda: runtime.sessions.create(ttl_seconds=seconds, origins=origins))
+        return core.session_with_token(made, made.get("apiUrl") or self._api_url(runtime))
+
+    def create_if_expired(self, options: Any = None, delta_seconds: int = 3600) -> core.SessionWithToken:
+        """The session made last in this process, if it lasts ``delta_seconds``
+        more; else a new one, and the old one ends."""
+        runtime = self._runtime()
+        kept = SandboxSessions._made.get(runtime.id)
+        if kept is not None:
+            live = any(one.name == kept.name for one in self.list())
+            left = (kept.expires_at - datetime.now(timezone.utc)).total_seconds()
+            if live and left >= delta_seconds:
+                return kept
+            if live:
+                try:
+                    self.delete(kept.name)
+                except Exception:  # noqa: BLE001 - it expires by itself
+                    pass
+        fresh = self.create(options)
+        SandboxSessions._made[runtime.id] = fresh
+        return fresh
+
+    def list(self) -> List[core.SessionWithToken]:
+        """Active sessions, newest first, each with an empty token: a token is
+        shown only when its session is made."""
+        runtime = self._runtime()
+        found = _guard("sandbox", lambda: runtime.sessions.list())
+        return [core.session_with_token(one, self._api_url(runtime)) for one in found if one.get("state") == "active"]
+
+    def get(self, name: str) -> Dict[str, Any]:
+        runtime = self._runtime()
+        wanted = core.session_id(name)
+        for one in _guard("sandbox", lambda: runtime.sessions.list()):
+            if one.get("id") == wanted:
+                found = core.session_with_token(one, self._api_url(runtime))
+                return {"url": found.url, "token": found.token, "expires_at": found.expires_at}
+        raise SandboxAPIError(f"Session '{name}' not found", 404, "not_found")
+
+    def delete(self, name: str) -> core.SessionWithToken:
+        """Ends the session at once."""
+        runtime = self._runtime()
+        ended = _guard("sandbox", lambda: runtime.sessions.revoke(core.session_id(name)))
+        return core.session_with_token(ended, self._api_url(runtime))
+
+
 class SandboxInstance:
     """A Blaxel sandbox on Runtime. ``sandbox.withruntime`` is the Runtime
     sandbox underneath, for anything Blaxel has no name for.
@@ -1068,14 +1135,17 @@ class SandboxInstance:
         self.previews = SandboxPreviews(self)
         self.snapshots = SandboxSnapshots(self)
         self.network = _Network(self)
-        self.sessions = _Unsupported(*core.SESSIONS)
+        self.sessions = SandboxSessions(self)
         self.codegen = _Unsupported("Blaxel codegen (fast apply and reranking)",
                                     "Edit files with sandbox.fs.read and sandbox.fs.write, or run your own model.")
         self.system = _Unsupported("Blaxel's sandbox-api system calls",
                                    "Runtime updates the in-sandbox agent itself; nothing to upgrade.")
         self.drives = _Unsupported(*core.VOLUMES)
         self.schedules = _Unsupported("Sandbox schedules",
-                                      "Schedule the call from your own scheduler; a paused sandbox wakes on it.")
+                                      "A Runtime job runs a command on a cron schedule or at a time in a fresh "
+                                      "sandbox each run: Runtime().jobs.create(name, cron=..., command=[...]). "
+                                      "To run inside this sandbox, call sandbox.process.exec from your own "
+                                      "scheduler; a paused sandbox wakes on it.")
 
     # ---- Blaxel's fields ------------------------------------------------------
 
@@ -1454,7 +1524,15 @@ class SandboxInstance:
         _guard("sandbox", lambda: box.withruntime.network.set(**rules))
         return box
 
-    from_session = staticmethod(core.unsupported(*core.SESSIONS))
+    @classmethod
+    def from_session(cls, session: Any) -> "SandboxInstance":
+        """A sandbox reached with a session instead of a key: what a frontend
+        does with the session its backend made. Commands, processes, files and
+        previews work; anything that manages the sandbox is refused by Runtime."""
+        api_url, sandbox_id, token = core.session_target(session)
+        runtime = _guard("sandbox", lambda: Runtime(api_key=token, base_url=api_url)
+                               .sandboxes.get(sandbox_id))
+        return cls(_runtime=runtime)
 
 
 def _write_envs(runtime: Any, envs: Dict[str, str], append: bool) -> None:

@@ -13,7 +13,7 @@ from ._async_client import (AsyncFeedback, AsyncFiles, AsyncPage, AsyncProcess, 
                             AsyncSandboxes, AsyncSnapshots, AsyncSupport, AsyncTerminal, CommandResult)
 from ._errors import (AccountBlockedError, AuthenticationError, CommandError, ConflictError, ConnectionError,
                       InvalidRequestError, NotFoundError, PermissionDeniedError, RateLimitError, RuntimeError,
-                      ServiceUnavailableError)
+                      SecretPartlyStoredError, ServiceUnavailableError)
 from ._sync_client import Feedback, Files, Page, Process, Runtime, Sandboxes, Snapshots, Support, Terminal
 from ._sync_client import Sandbox as _Sandbox
 from ._tunnel import AsyncPortForward, PortForward
@@ -98,6 +98,6 @@ __all__ = [
     "Runtime", "AsyncRuntime", "Sandbox", "AsyncSandbox", "Sandboxes", "AsyncSandboxes", "Files", "AsyncFiles",
     "Process", "AsyncProcess", "Terminal", "AsyncTerminal", "Page", "AsyncPage", "Feedback", "AsyncFeedback",
     "Support", "AsyncSupport", "Snapshots", "AsyncSnapshots", "CommandResult", "RuntimeError", "AuthenticationError", "PermissionDeniedError",
-    "NotFoundError", "ConflictError", "InvalidRequestError", "RateLimitError", "ServiceUnavailableError", "AccountBlockedError",
+    "NotFoundError", "ConflictError", "InvalidRequestError", "RateLimitError", "ServiceUnavailableError", "AccountBlockedError", "SecretPartlyStoredError",
     "ConnectionError", "CommandError", "verify_webhook", "WebhookVerificationError", "PortForward", "AsyncPortForward", "VERSION", "__version__",
 ]

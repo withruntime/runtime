@@ -13,7 +13,8 @@ from typing import Any
 from . import _async_sandbox, _sync_sandbox
 from ._async_sandbox import (AsyncCodeInterpreter, AsyncPaginatedList, AsyncSandboxFileSystem, AsyncSandboxInstance,
                              AsyncSandboxPreview, AsyncSandboxPreviews, AsyncSandboxPreviewToken,
-                             AsyncSandboxPreviewTokens, AsyncSandboxProcess, AsyncSandboxSnapshots, AsyncSnapshot)
+                             AsyncSandboxPreviewTokens, AsyncSandboxProcess, AsyncSandboxSessions, AsyncSandboxSnapshots,
+                             AsyncSnapshot)
 from ._core import (ApplicationAPIError, AsyncStreamHandle, AsyncWatchHandle, ContentSearchMatch,
                     ContentSearchResponse, Context, CopyResponse, Directory, DriveAPIError, Env, Execution,
                     ExecutionError, ExpirationPolicy, File, FindMatch, FindResponse, Logs, Metadata, NotSupportedError,
@@ -36,6 +37,8 @@ SandboxPreview = AsyncSandboxPreview
 SandboxPreviewToken = AsyncSandboxPreviewToken
 SandboxPreviewTokens = AsyncSandboxPreviewTokens
 SandboxSnapshots = AsyncSandboxSnapshots
+SandboxSessions = AsyncSandboxSessions
+SyncSandboxSessions = _sync_sandbox.SandboxSessions
 Snapshot = AsyncSnapshot
 SyncSandboxInstance = _sync_sandbox.SandboxInstance
 SyncCodeInterpreter = _sync_sandbox.CodeInterpreter
@@ -91,8 +94,8 @@ DriveInstance = SyncDriveInstance = DriveCreateConfiguration = _Unsupported("dri
 ApplicationInstance = SyncApplicationInstance = ApplicationCreateConfiguration = _Unsupported(
     "applications", "Run the app in a sandbox and share its port with sandbox.previews.create(...).")
 ImageInstance = ImageBuildContext = LocalFile = _Unsupported("image builder", _IMAGES)
-_SANDBOX_PARTS = ("sessions, codegen, system, drives and schedules",
-                  "See NotSupportedError's alternative for each call on sandbox.sessions and the rest.")
+_SANDBOX_PARTS = ("codegen, system, drives and schedules",
+                  "See NotSupportedError's alternative for each call on sandbox.codegen and the rest.")
 SandboxCodegen = SyncSandboxCodegen = SandboxSystem = SyncSandboxSystem = SandboxDrive = SyncSandboxDrive = \
     SandboxSchedules = SyncSandboxSchedules = _Unsupported(*_SANDBOX_PARTS)
 
@@ -100,6 +103,7 @@ __all__ = [
     "SandboxInstance", "SyncSandboxInstance", "CodeInterpreter", "SyncCodeInterpreter", "SandboxProcess",
     "SyncSandboxProcess", "SandboxFileSystem", "SyncSandboxFileSystem", "SandboxPreviews", "SyncSandboxPreviews",
     "SandboxPreview", "SandboxPreviewToken", "SandboxPreviewTokens", "SandboxSnapshots", "SyncSandboxSnapshots",
+    "SandboxSessions", "SyncSandboxSessions",
     "Snapshot", "SyncSnapshot", "PaginatedList", "AsyncPaginatedList", "Sandbox", "Metadata", "SandboxSpec",
     "SandboxRuntime", "SandboxLifecycle", "ExpirationPolicy", "SandboxNetwork", "Port", "Env", "VolumeAttachment",
     "VolumeBinding", "Status", "SandboxState", "SandboxConfiguration", "SandboxCreateConfiguration",

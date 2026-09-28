@@ -7,7 +7,7 @@ import { connectionOrigins, connectionStore, resolveCredential } from "./credent
 import { me, named } from "./cli-name.js";
 import { Runtime } from "./client.js";
 import { Sandbox as SandboxHandle, type Sandbox } from "./sandbox.js";
-import { RuntimeError } from "./errors.js";
+import { NotFoundError, RuntimeError } from "./errors.js";
 import { NETWORK_PRODUCTS, networkProductCommand, type NetworkProduct } from "./network-cli.js";
 import { billingCommand } from "./billing-cli.js";
 import { envFetch } from "./proxy.js";
@@ -15,7 +15,8 @@ import { VERSION } from "./transport.js";
 import type { CreateSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
 import type { MetricRange, SandboxMetrics, WebhookEventType } from "./products/observability.js";
 import type { SwitchingSummary, SwitchProvider } from "./products/switching.js";
-import type { Secret, SecretRule } from "./products/secrets.js";
+import type { SecretRule, SecretUse } from "./products/secrets.js";
+import type { Job } from "./products/jobs.js";
 import type { InterpreterLanguage } from "./products/interpreter.js";
 
 /* runtime <product> <verb>, and account commands at the top level. */
@@ -51,8 +52,11 @@ Account
             [--allow '[GET,HEAD] /path/*']...  Store a secret sandboxes use without seeing it; the
                                                value is read from standard input, never an argument.
                                                --allow (paid): only these methods and paths get it
-  secrets ls                                   Names, hosts and placeholders, never values
-  secrets rm <NAME>                            Delete a secret
+  secrets ls | get <NAME>                      Names, hosts and placeholders, never values
+  secrets rotate <NAME>                        A new version of the jobs copy, from standard input
+  secrets reveal <NAME> [--version N]          Print the jobs copy's value. The sandboxes' copy is
+                                               never readable, by anyone
+  secrets rm <NAME>                            Delete a secret, every copy
   keys create [--name <name>] [--read-only] [--daily-limit <usd>] [--account-wide]
                                                A new API key for CI, approved by an owner in the browser
   referrals                                    Your referral link: you both get up to $500
@@ -158,6 +162,11 @@ const SANDBOX_HELP = `runtime sandbox <command>
                                               far; prints the new token
   previews <id>                               Every shared port
   unshare <id> <port>                         Stop sharing a port
+  session create <id> [--origin <url>]... [--ttl <s>] [--name <n>]
+                                              A token a web page uses for this sandbox's commands,
+                                              files and previews; printed once
+  session ls <id> | session revoke <id> <session-id>
+                                              Its sessions; end one now
   network <id> [--no-internet|--internet] [--allow <host>]... [--deny <host>]... [--connect <host:port>]...
                                               Show its network rules, or replace them
   identity-token --audience <aud> [--lifetime <seconds>]
@@ -358,6 +367,7 @@ const COMMANDS = [
   "snapshot",
   "image",
   "volume",
+  "job",
   "domain",
   "port",
   "address",
@@ -380,6 +390,8 @@ const OWN_HELP = [
   "images",
   "volume",
   "volumes",
+  "job",
+  "jobs",
   "keys",
   "webhooks",
   "webhook",
@@ -427,6 +439,7 @@ const SANDBOX_VERBS = [
   "preview",
   "previews",
   "unshare",
+  "session",
   "network",
   "desktop",
   "metrics",
@@ -1016,6 +1029,10 @@ export async function run(
     product = "volume";
     return volume(rest, env, out);
   }
+  if (command === "job" || command === "jobs") {
+    product = "job";
+    return jobCommand(rest, env, out);
+  }
   const networkProduct =
     { domains: "domain", ports: "port", addresses: "address", tunnels: "tunnel" }[command] ??
     command;
@@ -1231,6 +1248,39 @@ const RIVAL_NAMES: Record<SwitchProvider, string> = {
   blaxel: "Blaxel",
 };
 
+/** The rivals whose SDK runs on Runtime unchanged but for one import, and that
+ * import in JavaScript and Python. Held to the guides' own lines by
+ * `tests/cli-drop-in.test.ts`. */
+const DROP_IN: Partial<Record<SwitchProvider, { js: string; py: string }>> = {
+  e2b: {
+    js: 'import { Sandbox } from "withruntime/e2b"; // was: from "e2b"',
+    py: "from withruntime.e2b import Sandbox  # was: from e2b import Sandbox",
+  },
+  daytona: {
+    js: 'import { Daytona } from "withruntime/daytona"; // was: from "@daytona/sdk"',
+    py: "from withruntime.daytona import Daytona  # was: from daytona import Daytona",
+  },
+  vercel: {
+    js: 'import { Sandbox } from "withruntime/vercel"; // was: from "@vercel/sandbox"',
+    py: "from withruntime.vercel import sandbox  # was: from vercel import sandbox",
+  },
+  blaxel: {
+    js: 'import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"',
+    py: "from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance",
+  },
+};
+
+/** How to move a rival's code across, when one import does it. */
+export function dropInLines(provider: SwitchProvider | undefined): string[] {
+  const drop = provider && DROP_IN[provider];
+  if (!drop) return [];
+  return [
+    `Your ${RIVAL_NAMES[provider]} code runs on Runtime with one import changed:`,
+    `  ${drop.js}`,
+    `  ${drop.py}`,
+  ];
+}
+
 /** A date as the CLI writes one: 23 September 2026. */
 const longDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", {
@@ -1332,7 +1382,10 @@ async function switching(
       throw unknown("provider", from, Object.keys(RIVAL_NAMES));
     const summary = await api.record({ provider });
     print(
-      `Recorded: switching from ${RIVAL_NAMES[provider]}. ${switchingLine(summary) ?? ""}`.trim(),
+      [
+        `Recorded: switching from ${RIVAL_NAMES[provider]}. ${switchingLine(summary) ?? ""}`.trim(),
+        ...dropInLines(provider),
+      ].join("\n"),
       summary,
     );
     return 0;
@@ -1385,11 +1438,11 @@ async function switching(
   lines.push(
     `${c.rival.name}'s published rates, checked ${longDate(`${c.rival.checked}T12:00:00Z`)}: ${c.rival.rates.join("; ")}. Compute only, with the disk where a rival bills it while running: storage at rest, network, plan fees and free allowances are left out.`,
   );
-  const line = switchingLine(
-    c.switching,
-    Object.hasOwn(SWITCH_FROM, from) ? SWITCH_FROM[from] : undefined,
-  );
+  const rival = Object.hasOwn(SWITCH_FROM, from) ? SWITCH_FROM[from] : undefined;
+  const line = switchingLine(c.switching, rival);
   if (line) lines.push("", line);
+  const drop = dropInLines(rival);
+  if (drop.length) lines.push("", ...drop);
   print(lines.join("\n"), c);
   return 0;
 }
@@ -1823,6 +1876,58 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       );
       return 0;
     }
+    case "session": {
+      const verb = rest[0];
+      if (verb === "ls") {
+        const list = await (await use(rest[1])).sessions.list();
+        print(
+          list.length
+            ? table([
+                ["ID", "STATE", "EXPIRES", "ORIGINS"],
+                ...list.map((one) => [
+                  one.id,
+                  one.state,
+                  one.expiresAt,
+                  one.origins.join(",") || "-",
+                ]),
+              ])
+            : "No sessions. Make one: runtime sandbox session create <id> --origin https://app.example.com",
+          list,
+        );
+        return 0;
+      }
+      if (verb === "revoke") {
+        const sessionId = need(
+          rest[2],
+          "a session id: runtime sandbox session revoke <id> <session-id>",
+        );
+        const ended = await (await use(rest[1])).sessions.revoke(sessionId);
+        print(`Session ${ended.id} ended.`, ended);
+        return 0;
+      }
+      if (verb !== "create")
+        throw usage(
+          "runtime sandbox session create <id> [--origin <url>]..., session ls <id>, or session revoke <id> <session-id>",
+        );
+      const args = parse(rest.slice(1), [], ["origin", "ttl", "name"]);
+      const origins = args.flags.get("origin") ?? [];
+      const ttl = integer(args, "ttl");
+      const name = flag(args, "name");
+      const made = await (
+        await use(args.positional[0])
+      ).sessions.create({
+        ...(ttl === undefined ? {} : { ttlSeconds: ttl }),
+        ...(origins.length ? { origins } : {}),
+        ...(name === undefined ? {} : { name }),
+      });
+      print(
+        `${made.token}\nFor sandbox ${made.sandboxId} until ${made.expiresAt}${
+          made.origins.length ? `, from ${made.origins.join(", ")}` : ", from no browser page"
+        }. Shown once: hand it to your page (Sandbox.fromSession), never log it.`,
+        made,
+      );
+      return 0;
+    }
     case "unshare": {
       const port = portOf(rest[1], "runtime sandbox unshare <id> 3000");
       const sbx = await use(rest[0]);
@@ -1994,33 +2099,53 @@ export async function secretsCommand(
   read: () => Promise<string> = readSecret,
 ): Promise<number> {
   const [verb, ...rest] = argv;
-  const args = parse(rest, [], ["host", "header", "format", "allow", "value"]);
+  const args = parse(rest, ["jobs"], ["host", "header", "format", "allow", "value", "version"]);
   const print = (human: string, value: unknown) =>
     out.write(out.json ? JSON.stringify(value) : human);
-  const rows = (list: Secret[]) =>
+  const rows = (list: SecretUse[]) =>
     list.length
       ? table([
-          ["name", "hosts", "header", "placeholder", "allow"],
-          ...list.map((secret) => [
-            secret.name,
-            secret.hosts.join(","),
-            secret.header ? `${secret.header}: ${secret.format ?? "{value}"}` : "-",
-            secret.placeholder,
-            ruleText(secret.rules),
+          ["name", "hosts", "header", "placeholder", "allow", "jobs"],
+          ...list.map(({ name, sandboxes: secret, jobs }) => [
+            name,
+            secret ? secret.hosts.join(",") : "-",
+            secret?.header ? `${secret.header}: ${secret.format ?? "{value}"}` : "-",
+            secret ? secret.placeholder : "-",
+            secret ? ruleText(secret.rules) : "-",
+            jobs ? `v${jobs.version}` : "-",
           ]),
         ])
       : "No secrets.";
   if (verb === "ls" || verb === "list" || verb === undefined) {
-    const list = await (await client(env)).secrets.list();
-    print(rows(list), list);
+    const runtime = await client(env);
+    const all = await runtime.secrets.all();
+    // --json keeps the sandboxes' list it always printed; the jobs copies
+    // are in `runtime secrets get <NAME> --json`.
+    print(
+      rows(all),
+      all.flatMap((s) => (s.sandboxes ? [s.sandboxes] : [])),
+    );
     return 0;
   }
-  if (verb === "set") {
+  const jobsOnly = "Only a secret's copy for jobs has versions and can be read back";
+  if (verb === "get") {
+    const found = await (
+      await client(env)
+    ).secrets.get(need(args.positional[0], "the secret's name"));
+    print(rows([found]), found);
+    return 0;
+  }
+  if (verb === "set" || verb === "rotate") {
     const name = need(args.positional[0], "the secret's name, such as OPENAI_API_KEY");
     const hosts = args.flags.get("host") ?? [];
-    if (!hosts.length)
+    const jobs = verb === "rotate" || has(args, "jobs");
+    if (verb === "rotate" && (hosts.length || args.flags.has("header") || args.flags.has("allow")))
       throw usage(
-        "Give --host once for each host the value may go to, such as --host api.openai.com.",
+        `rotate replaces the copy for jobs. ${jobsOnly}; to change the sandboxes' copy, set it again with --host.`,
+      );
+    if (!hosts.length && !jobs)
+      throw usage(
+        "Give --host once for each host the value may go to, such as --host api.openai.com, and/or --jobs to let scheduled jobs use it.",
       );
     if (args.flags.has("value"))
       throw usage(
@@ -2031,18 +2156,34 @@ export async function secretsCommand(
       throw usage(
         'The value is empty. Pipe it in: printf %s "$KEY" | runtime secrets set NAME --host ...',
       );
+    const runtime = await client(env);
+    if (verb === "rotate") {
+      const rotated = await runtime.secrets.rotate(name, value);
+      print(
+        `Rotated ${name} for jobs to version ${rotated.version}. Runs bound to the old version are refused it.`,
+        rotated,
+      );
+      return 0;
+    }
+    if (!hosts.length) {
+      const saved = await runtime.secrets.set(name, { value, jobs: true });
+      print(
+        `Stored ${name} for jobs, version ${saved.jobs.version}. Bind it: ${me} job create ... --secret ${name}`,
+        saved,
+      );
+      return 0;
+    }
     const header = flag(args, "header");
     const format = flag(args, "format");
     const allow = args.flags.get("allow");
     const rules = allow ? parseSecretRules(allow) : undefined;
-    const saved = await (
-      await client(env)
-    ).secrets.set(name, {
+    const saved = await runtime.secrets.set(name, {
       value,
       hosts,
       ...(header ? { header } : {}),
       ...(format ? { format } : {}),
       ...(rules ? { rules } : {}),
+      ...(jobs ? { jobs: true as const } : {}),
     });
     print(
       [
@@ -2054,18 +2195,36 @@ export async function secretsCommand(
         ...(saved.enforced
           ? []
           : ["A host is catching up; running sandboxes have it within a minute."]),
+        ...(saved.jobs
+          ? [
+              `Also stored for jobs, version ${saved.jobs.version}: --secret ${saved.name} on ${me} job create.`,
+            ]
+          : []),
       ].join("\n"),
       saved,
     );
     return 0;
   }
+  if (verb === "reveal") {
+    const name = need(args.positional[0], "the secret's name");
+    const version = flag(args, "version");
+    if (version !== undefined && !/^\d+$/.test(version)) throw usage("--version takes a number.");
+    const shown = await (
+      await client(env)
+    ).secrets.reveal(name, version === undefined ? {} : { version: Number(version) });
+    print(shown.value, shown);
+    return 0;
+  }
   if (verb === "rm" || verb === "delete") {
     const name = need(args.positional[0], "the secret's name");
     const removed = await (await client(env)).secrets.delete(name);
-    print(`Deleted ${name}.`, removed);
+    print(
+      `Deleted ${name}${removed.from.length > 1 ? " for sandboxes and jobs" : removed.from[0] === "jobs" ? " for jobs" : ""}.`,
+      removed,
+    );
     return 0;
   }
-  throw usage("secrets takes set, ls or rm. Run `runtime help`.");
+  throw usage("secrets takes set, ls, get, rotate, reveal or rm. Run `runtime help`.");
 }
 
 async function readInput(source: string): Promise<string> {
@@ -2710,6 +2869,278 @@ export async function imageCommand(
     "untag",
     "rm",
     "registry",
+  ]);
+}
+
+const JOB_HELP = `runtime job <command>
+
+  A job runs a command in a fresh sandbox, once or on a schedule. Each run is a
+  paid sandbox billed at the sandbox rates; the trial's hours do not fund jobs.
+
+  create <name> (--cron "<min hour day month weekday>" [--timezone Europe/Berlin] | --at <time|now>)
+         [--vcpu 2] [--memory 4096] [--disk 4096] [--cpu shared|reserved] [--cpu-floor <thousandths>]
+         [--timeout 1800] [--attempts 1] [--backoff 30] [--secret NAME[=ENV_NAME]]...
+         [--cwd /workspace/dir] [--max-cost <usd>] [--max-total-cost <usd>] [--region r] -- <command...>
+                                              Schedule it; prints its id. Nothing runs until its time.
+                                              --at takes an ISO time (2026-10-01T03:00:00Z) or now.
+                                              The command runs as given, no shell: -- bash -lc '...'
+                                              --attempts: tries per occurrence when it exits non-zero, 1 to 5.
+                                              --secret: a secret stored with --jobs, in the run's
+                                              environment as ENV_NAME (NAME by default)
+  ls                                          Your jobs: state, schedule and next run
+  get <id>                                    One job, in full
+  runs <id>                                   Its runs: state, exit code, when
+  logs <runId|jobId> [-f]                     A run's output (a job id: its latest run); -f follows it
+  pause <id> | resume <id>                    Stop or restart scheduling; a run already going finishes
+  cancel <id>                                 End it for good and stop a run in progress
+
+Examples
+  runtime job create nightly --cron "0 3 * * *" --timezone Europe/Berlin -- python3 /workspace/report.py
+  runtime job create once --at now -- bash -lc 'echo hello from a job'
+  runtime job logs <jobId> -f
+`;
+
+const when = (ms: number | null | undefined) => (ms == null ? "-" : new Date(ms).toISOString());
+function scheduleText(job: Job): string {
+  const s = job.definition.schedule;
+  return s.kind === "once" ? `once at ${when(s.at)}` : `${s.expression} ${s.timezone ?? "UTC"}`;
+}
+/** Seconds from the command line, `--at`: an ISO time, Unix milliseconds or
+ * `now`. A time well in the past is refused: the job would run at once, and
+ * that is what `now` says. */
+function atTime(value: string, now = Date.now()): number {
+  if (value === "now") return now;
+  const at = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isSafeInteger(at))
+    throw usage(`--at takes an ISO time such as 2026-10-01T03:00:00Z, or now; got ${value}.`);
+  if (at < now - 60_000)
+    throw usage(`--at ${value} is in the past. To run it at once, say --at now.`);
+  return at;
+}
+
+async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<number> {
+  const [verb, ...rest] = argv;
+  const print = (human: string, value: unknown) =>
+    out.write(out.json ? JSON.stringify(value) : human);
+  if (!verb || verb === "help" || verb === "--help") {
+    print(named(JOB_HELP), { usage: named(JOB_HELP) });
+    return 0;
+  }
+  const runtime = await client(env);
+  const api = runtime.jobs;
+  switch (verb) {
+    case "create": {
+      const args = parse(
+        rest,
+        [],
+        [
+          "cron",
+          "timezone",
+          "at",
+          "vcpu",
+          "memory",
+          "disk",
+          "cpu",
+          "cpu-floor",
+          "timeout",
+          "attempts",
+          "backoff",
+          "secret",
+          "cwd",
+          "max-cost",
+          "max-total-cost",
+          "region",
+        ],
+        `${me} job create <name> --cron "0 3 * * *" -- python3 -c '...'`,
+      );
+      const name = need(args.positional[0], "the job's name, such as nightly-report");
+      if (args.positional.length > 1)
+        throw usage(
+          `Put the command after --: ${me} job create ${name} ... -- ${args.positional.slice(1).join(" ")}`,
+        );
+      const argv = args.rest ?? [];
+      if (!argv.length)
+        throw usage(`Give the command after --: ${me} job create ${name} --at now -- echo hello`);
+      const cron = flag(args, "cron");
+      const at = flag(args, "at");
+      if ((cron === undefined) === (at === undefined))
+        throw usage('Give --cron "<five fields>" for a schedule, or --at <time|now> for one run.');
+      if (at !== undefined && flag(args, "timezone") !== undefined)
+        throw usage("--timezone goes with --cron; --at takes a time with its own offset.");
+      const attempts = integer(args, "attempts");
+      const backoff = integer(args, "backoff");
+      if (backoff !== undefined && attempts === undefined)
+        throw usage("--backoff goes with --attempts: the seconds between tries.");
+      const bindings = args.flags.get("secret") ?? [];
+      let secrets: Array<{ name: string; secretId: string }> | undefined;
+      if (bindings.length) {
+        const known = await runtime.secrets.all();
+        secrets = bindings.map((binding) => {
+          const [secret, env = secret] = binding.split("=", 2) as [string, string | undefined];
+          const found = known.find((s) => s.name === secret)?.jobs;
+          if (!found)
+            throw usage(
+              `${secret} has no copy for jobs. Store one: printf %s "$VALUE" | ${me} secrets set ${secret} --jobs`,
+            );
+          return { name: env, secretId: found.id };
+        });
+      }
+      const cwd = flag(args, "cwd");
+      const job = await api.create({
+        name,
+        schedule:
+          cron !== undefined
+            ? { cron, ...(flag(args, "timezone") ? { timezone: flag(args, "timezone")! } : {}) }
+            : { at: atTime(at!) },
+        command: cwd ? { argv, cwd } : argv,
+        ...(integer(args, "timeout") ? { timeoutSeconds: integer(args, "timeout")! } : {}),
+        compute: {
+          ...(integer(args, "vcpu") ? { vcpu: integer(args, "vcpu")! } : {}),
+          ...(integer(args, "memory") ? { memoryMiB: integer(args, "memory")! } : {}),
+          ...(integer(args, "disk") ? { diskMiB: integer(args, "disk")! } : {}),
+          ...(flag(args, "cpu")
+            ? { cpuMode: oneOf(args, "cpu", ["shared", "reserved"] as const) }
+            : {}),
+          ...(integer(args, "cpu-floor") ? { cpuFloorMillis: integer(args, "cpu-floor")! } : {}),
+          ...(flag(args, "region") ? { region: flag(args, "region")! } : {}),
+          ...(usdMicros(args, "max-cost") ? { maxCostMicros: usdMicros(args, "max-cost")! } : {}),
+        },
+        ...(attempts !== undefined
+          ? { retry: { maxAttempts: attempts, backoffSeconds: backoff ?? 30 } }
+          : {}),
+        ...(secrets ? { secrets } : {}),
+        ...(usdMicros(args, "max-total-cost")
+          ? { maxTotalCostMicros: usdMicros(args, "max-total-cost")! }
+          : {}),
+      });
+      if (!out.json)
+        out.error(
+          `Scheduled ${job.name}: ${scheduleText(job)}. Next run ${when(job.nextRunAt)}. Follow it: ${me} job logs ${job.id} -f`,
+        );
+      print(job.id, job);
+      return 0;
+    }
+    case "ls":
+    case "list": {
+      const all = await (await api.list({ limit: 100 })).toArray(1000);
+      print(
+        all.length
+          ? table([
+              ["ID", "NAME", "STATE", "SCHEDULE", "NEXT RUN", "BLOCKED"],
+              ...all.map((j) => [
+                j.id,
+                j.name,
+                j.state,
+                scheduleText(j),
+                when(j.nextRunAt),
+                j.blockedReason ?? "-",
+              ]),
+            ])
+          : `No jobs. Schedule one: ${me} job create hello --at now -- echo hello`,
+        all,
+      );
+      return 0;
+    }
+    case "get": {
+      const found = await api.get(need(rest[0], "a job id"));
+      print(JSON.stringify(found, null, 2), found);
+      return 0;
+    }
+    case "runs": {
+      const jobId = need(rest[0], "a job id");
+      const all = await (await api.runs(jobId, { limit: 100 })).toArray(1000);
+      print(
+        all.length
+          ? table([
+              ["RUN", "ATTEMPT", "STATE", "EXIT", "SCHEDULED", "STARTED", "ENDED", "REASON"],
+              ...all.map((r) => [
+                r.id,
+                String(r.attempt),
+                r.state,
+                r.exitCode === null ? "-" : String(r.exitCode),
+                when(r.scheduledFor),
+                when(r.startedAt),
+                when(r.endedAt),
+                r.reason ?? "-",
+              ]),
+            ])
+          : "No runs yet.",
+        all,
+      );
+      return 0;
+    }
+    case "logs": {
+      const args = parse(rest, ["f", "follow"], []);
+      const id = need(args.positional[0], "a run id or a job id");
+      let runId = id;
+      try {
+        await api.run(id);
+      } catch (error) {
+        if (!(error instanceof NotFoundError)) throw error;
+        // A job's id: its latest run.
+        const runs = await (await api.runs(id, { limit: 100 })).toArray(1000);
+        const latest = runs.at(-1);
+        if (!latest) {
+          const job = await api.get(id);
+          print(`${job.name} has not run yet. Next run ${when(job.nextRunAt)}.`, {
+            chunks: [],
+            nextCursor: 0,
+            truncated: false,
+            complete: false,
+          });
+          return 0;
+        }
+        runId = latest.id;
+      }
+      const follow = has(args, "f") || has(args, "follow");
+      let cursor = 0;
+      for (;;) {
+        const page = await api.logs(runId, { cursor, limitBytes: 65536 });
+        if (out.json) out.write(JSON.stringify(page));
+        else
+          for (const chunk of page.chunks)
+            (chunk.stream === "stderr" ? process.stderr : process.stdout).write(chunk.text);
+        cursor = page.nextCursor;
+        if (page.complete) {
+          if (!out.json) {
+            const run = await api.run(runId);
+            if (page.truncated)
+              process.stderr.write("[the run printed more than it keeps; this is its last part]\n");
+            process.stderr.write(
+              `[${run.state}${run.exitCode === null ? "" : `, exit code ${run.exitCode}`}${run.reason ? `, ${run.reason}` : ""}]\n`,
+            );
+          }
+          return 0;
+        }
+        if (page.chunks.length) continue;
+        if (!follow) {
+          if (!out.json)
+            process.stderr.write(
+              `[${runId} is still going; follow it: ${me} job logs ${runId} -f]\n`,
+            );
+          return 0;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+    case "pause":
+    case "resume":
+    case "cancel": {
+      const id = need(rest[0], "a job id");
+      const job = await api[verb](id);
+      print(`${job.name} ${job.state}.`, job);
+      return 0;
+    }
+  }
+  throw unknown("job command", verb, [
+    "create",
+    "ls",
+    "get",
+    "runs",
+    "logs",
+    "pause",
+    "resume",
+    "cancel",
   ]);
 }
 

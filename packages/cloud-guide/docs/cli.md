@@ -231,6 +231,9 @@ runtime sandbox preview "${id}" 3000 --public                  # an HTTPS addres
 runtime sandbox previews "${id}"
 runtime sandbox preview rotate "${id}" 3000                   # withruntime 0.7.0: refuse every token so far
 runtime sandbox unshare "${id}" 3000
+runtime sandbox session create "${id}" --origin https://app.example.com --ttl 900   # a token a web page uses; printed once
+runtime sandbox session ls "${id}"
+runtime sandbox session revoke "${id}" "${session}"
 runtime sandbox network "${id}"                                # show its rules
 runtime sandbox network "${id}" --allow pypi.org --allow '*.pythonhosted.org'
 runtime sandbox network "${id}" --no-internet
@@ -241,6 +244,10 @@ runtime sandbox desktop "${id}" record start --fps 10 --max-mib 256   # prints t
 runtime sandbox desktop "${id}" record stop "${rec}"
 runtime sandbox desktop "${id}" record fetch "${rec}" demo.mp4
 ```
+
+A session lets your own web page reach one sandbox's commands, files and
+previews directly, for {{session-default}} unless `--ttl` says otherwise and
+{{session-max}} at most; see [a sandbox from a browser](./javascript#a-sandbox-from-a-browser).
 
 The first `desktop start` in a sandbox installs the desktop, which took about
 90 seconds and 1 GB of the sandbox's disk on 23 September 2026; the browser
@@ -435,7 +442,8 @@ runtime ls
 - `runtime switch --from <provider>` records the provider you are leaving. Do it
   before your first top-up: that top-up is then matched, up to {{switching-max}} of credit
   ([switching credit](./pricing#switching-credit)). `runtime switch` on its own
-  shows where it stands.
+  shows where it stands. From withruntime 0.8.3, for E2B, Daytona, Vercel
+  Sandbox and Blaxel, both commands also print the one import that runs your existing code on Runtime.
 - `runtime account` lists the accounts this machine is connected to and marks
   the one in use; `runtime account switch <name>` uses another for every command
   after it, and `runtime account add` connects one more, chosen in the browser.

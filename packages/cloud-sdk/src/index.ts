@@ -20,12 +20,21 @@ export {
   type RuntimeOptions,
   type SupportReply,
 } from "./client.js";
-export { Files, Process, Processes, Terminal } from "./sandbox.js";
+export {
+  Files,
+  Process,
+  Processes,
+  SandboxSessions,
+  Terminal,
+  type CreatedSandboxSession,
+  type SandboxSession,
+} from "./sandbox.js";
 export { Tunnel, TunnelStream, type PortForward } from "./tunnel.js";
 export { Page } from "./page.js";
 export type { KeyLimits } from "./products/limits.js";
 export type { AuditEvent, AuditPage } from "./products/audit.js";
-export type { Secret, SecretRule, SetSecret } from "./products/secrets.js";
+export type { JobSecret, Secret, SecretRule, SecretUse, SetSecret } from "./products/secrets.js";
+export { SecretPartlyStoredError } from "./products/secrets.js";
 export type { McpCatalogEntry, McpGateway, McpServerRequest } from "./products/mcp.js";
 export type {
   FileEvent,
@@ -36,6 +45,16 @@ export type {
 } from "./products/watch.js";
 export type { Mount, MountBucket } from "./products/mounts.js";
 export type { Volume, VolumeBackup, CreateVolume } from "./products/volumes.js";
+export type {
+  CreateJob,
+  Job,
+  JobCompute,
+  JobDefinition,
+  JobLogs,
+  JobRun,
+  JobRunState,
+  JobSchedule,
+} from "./products/jobs.js";
 export type {
   CheckedDomain,
   DnsRecord,

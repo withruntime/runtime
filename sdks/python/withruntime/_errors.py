@@ -64,6 +64,11 @@ class RateLimitError(RuntimeError): ...
 class ServiceUnavailableError(RuntimeError): ...
 
 
+class SecretPartlyStoredError(RuntimeError):
+    """A secret write that reached one copy and not the other:
+    ``details["stored"]`` names what took effect. The same call again is safe."""
+
+
 class AccountBlockedError(RuntimeError):
     """The account may not spend: a payment on it is disputed or under review
     (``account_blocked``, 402). The message says which and what clears it."""

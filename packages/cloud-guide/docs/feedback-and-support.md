@@ -100,8 +100,8 @@ npx withruntime support "Sandbox 0b8f3c52-… has been starting for ten minutes"
 npx withruntime support read <conversationId>
 ```
 
-People can use the Help button on withruntime.com, or **Settings → Support** in
-the account, which the account menu also opens.
+People can use the Help button on withruntime.com, or **Support** in the
+account menu.
 
 ### Actions need your approval
 

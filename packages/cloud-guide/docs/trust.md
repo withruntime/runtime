@@ -15,7 +15,7 @@ Everything runs in one region, in Virginia, United States
 
 | What                                         | Who                   | Their certifications, checked 27 September 2026 |
 | -------------------------------------------- | --------------------- | ----------------------------------------------- |
-| Sandboxes, their disks and memory            | OVHcloud US, Virginia | SOC 1, SOC 2 and SOC 3 Type 2; ISO 27001        |
+| Sandboxes, their disks and memory            | Data center, Virginia | SOC 1, SOC 2 and SOC 3 Type 2; ISO 27001        |
 | Accounts, billing, audit log, sealed secrets | Neon                  | SOC 2 Type 2; ISO 27001 and 27701               |
 | The website, the API and the console         | Vercel                | SOC 2 Type 2; ISO 27001                         |
 | Encrypted backups                            | Backblaze B2          | SOC 2 Type 2                                    |
@@ -59,8 +59,9 @@ The full list, with what each company does and where, is on the
 
 - **Single sign-on** over SAML or OIDC and **directory sync** over SCIM, free on
   every account ([single sign-on](./single-sign-on)).
-- **Two-step sign-in** with an authenticator app, which an owner can require of
-  everyone in the account ([two-step sign-in](./security#two-step-sign-in)).
+- **Two-step sign-in** with a passkey or an authenticator app, which an owner
+  can require of everyone in the account, and sign-in with a passkey alone
+  ([two-step sign-in](./security#two-step-sign-in)).
 - **Four roles** (owner, admin, developer, billing) and keys scoped to named
   operations, read-only keys and daily spending limits per key.
 - **An audit log** of every change to the account, who made it, from where and
@@ -96,6 +97,10 @@ These are the practices every change and every operator follows.
   every change. Reports go to security@withruntime.com, as
   [security.txt](https://withruntime.com/.well-known/security.txt) says
   ([report a vulnerability](./security#report-a-vulnerability)).
+- **Monitoring.** Security events, such as an account locked after wrong
+  two-step codes, every sign-in to the operator's dashboard and a backup that
+  did not complete, are reviewed automatically every ten minutes, and the
+  operator is alerted to anything unusual.
 - **Incidents.** A written procedure covers containing an incident, keeping the
   evidence, finding who is affected and telling them without undue delay, as
   the [data processing addendum](/legal/dpa) promises.

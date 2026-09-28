@@ -38,6 +38,13 @@ against {{cost:prime:100000}}, **{{=$0 less:prime:100000}} a month saved**.
   `maxCostMicros` on each create keep an agent inside its budget, and every
   write takes an idempotency key.
 
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, private previews, a Linux desktop, metrics,
+webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts, MCP servers from a
+catalog, identity tokens for AWS and Google Cloud and free single sign-on. Paid
+accounts add custom domains, TCP ports, dedicated outbound addresses and
+WireGuard private networks. See [products](./products).
+
 ## At a glance
 
 Prime's figures come from its sandbox documentation and launch post, checked

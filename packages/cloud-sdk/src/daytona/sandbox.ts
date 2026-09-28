@@ -516,7 +516,7 @@ export class Sandbox {
   getMetrics(): Promise<never> {
     return refusal(
       "Sandbox metrics",
-      "Runtime reports CPU, memory and charges per sandbox in `npx withruntime usage` and runtime.usage().",
+      'Use `await sandbox.withruntime.metrics({ range: "1h" })` for its CPU and memory over time; runtime.otel exports them to your own tools.',
     );
   }
   getMetricsLatest(): Promise<never> {
@@ -531,7 +531,7 @@ export class Sandbox {
   updateSecrets(): Promise<never> {
     return refusal(
       "Daytona secrets",
-      "Pass credentials as envVars or per command, never in the command text.",
+      "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.",
     );
   }
   getSignedPreviewUrl(): Promise<never> {
@@ -558,7 +558,7 @@ export class Sandbox {
   createSshAccess(): Promise<never> {
     return refusal(
       "SSH access",
-      "Use `npx withruntime sandbox shell <id>` or sandbox.withruntime.terminal().",
+      "Use `npx withruntime sandbox ssh <id>` (also VS Code and JetBrains) or sandbox.withruntime.terminal().",
     );
   }
   revokeSshAccess(): Promise<never> {

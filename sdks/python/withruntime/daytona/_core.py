@@ -628,9 +628,9 @@ REFUSED_CREATE = {
     "spot": ("Spot GPU sandboxes (spot)", "Remove it: Runtime runs sandboxes on CPUs."),
     "linked_sandbox": ("Linked sandboxes (linked_sandbox)",
                        "Run both programs in one sandbox, or connect them through a preview address."),
-    "secrets": ("Daytona secrets", "Pass credentials as env_vars, never in the command text."),
+    "secrets": ("Daytona secrets", "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host."),
     "otel_endpoint_override": ("Sending sandbox telemetry elsewhere (otel_endpoint_override)",
-                               "Remove it: Runtime does not export sandbox telemetry."),
+                               "Remove it: runtime.otel.create() exports every sandbox's events and CPU and memory metrics over OTLP/HTTP."),
 }
 
 

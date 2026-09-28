@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.authors = ["Runtime"]
   spec.homepage = "https://withruntime.com"
   spec.required_ruby_version = ">= 3.2"
-  spec.files = Dir["lib/**/*.rb"] + ["GUIDE.md", "LICENSE"]
+  spec.files = Dir["lib/**/*.rb"] + ["LICENSE"]
   spec.license = "Apache-2.0"
   spec.require_paths = ["lib"]
   spec.metadata = {

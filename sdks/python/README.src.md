@@ -50,14 +50,18 @@ A sandbox has `exec`, `exec_stream`, `spawn`, `terminal`, `forward_port` (any
 TCP port in the sandbox on a local port), `files` (read, write,
 list, glob, stat, move, remove, upload and download directories), `pause`,
 `wake`, `extend`, `update`, `keep_alive`, `fork` and `snapshot`, and the
-`interpreter`, `network`, `previews` and `desktop` products. A paused sandbox
+`interpreter`, `network`, `previews`, `desktop`, `mounts` (your S3, R2 or Google
+Cloud Storage bucket as a folder), `metrics` and `mcp` (servers from the MCP
+catalog, run in the sandbox) products. A paused sandbox
 also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
 the sandbox with that name or creates it. A sandbox pauses itself after {{idle-pause}}
 with nothing happening in it, keeping its memory and processes, so an
 idle sandbox costs no compute; `idle_pause_seconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or 0 for
-never. The client has `sandboxes`, `images`,
-`volumes`, `snapshots`, `limits`, `feedback` and `support`;
-`runtime.limits.get()` (0.3.1 and later) says whether the key is read-only and
+never. The client has `sandboxes`, `images`, `volumes`, `snapshots`,
+`secrets`, `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and
+`audit` to watch the account; `domains`, `ports`, `addresses`, `tunnel` and
+`network` to connect sandboxes to your own world (paid accounts); and `mcp`,
+`sso`, `billing`, `referrals` and `switching`. `runtime.limits.get()` (0.3.1 and later) says whether the key is read-only and
 what its agent may still spend today. Every write carries an
 idempotency key, so retries never do anything twice; errors are typed and carry
 `code`, `hint` and `request_id`.
@@ -187,12 +191,17 @@ Differences you can hit:
   ([teams](https://withruntime.com/docs/teams#keys-in-a-team)).
 - Public previews need a paid sandbox.
 - A process's `pid` is Runtime's process id, not an operating-system number.
+- `sandbox.sessions` makes a Runtime sandbox session, and
+  `SandboxInstance.from_session` drives the sandbox with its token: commands,
+  files and previews of that one sandbox. A session lasts a day at most, and
+  `Access-Control-Allow-Origin` in `response_headers` names the page that may
+  use it.
 
 These raise `NotSupportedError` before anything happens, naming what to use:
 regions outside the US, read-only and ephemeral volumes, drives, `extra_args`
 other than `iptables`, egress and subnet settings, preview headers, custom
 domains and preview expiry, restoring a snapshot in place (fork from it
-instead), sessions, codegen, `system`, schedules, and Blaxel's agents, models,
+instead), codegen, `system`, schedules, and Blaxel's agents, models,
 tools, jobs and applications. The sync module is generated from the async one
 by `scripts/generate_dropin_sync.py`.
 
@@ -204,6 +213,21 @@ by `scripts/generate_dropin_sync.py`.
 gives LangChain, CrewAI, LlamaIndex, Pydantic AI, Google ADK and any framework
 that takes typed functions four sandbox tools. See
 https://withruntime.com/docs/frameworks.
+
+## Reliability and support
+
+- **Status:** https://withruntime.com/status checks the API from outside every
+  two minutes and starts a real sandbox every ten, with every day's record
+  kept; also as https://withruntime.com/status.md and
+  https://withruntime.com/status.json.
+- **Uptime Promise:** paid accounts are promised {{uptime-promise}} API uptime
+  each calendar month, and a month below it pays {{uptime-credit}} of that
+  month's charges back as credit, automatically
+  (https://withruntime.com/legal/sla).
+- **Security and compliance:** https://withruntime.com/docs/trust.
+- **What changed:** https://withruntime.com/changelog.
+- **Help:** `npx withruntime support "<question>"`, or
+  `npx withruntime feedback "<text>"` for anything that got in your way.
 
 Docs: https://withruntime.com/docs/python.
 

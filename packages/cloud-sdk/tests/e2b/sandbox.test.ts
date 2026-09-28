@@ -95,6 +95,18 @@ describe("Sandbox.create", () => {
     expect(world.called("sandboxes.create")).toEqual([]);
   });
 
+  test("Secret points at Runtime secrets, which the sandbox never sees", () => {
+    const error = (() => {
+      try {
+        (Secret as unknown as () => unknown)();
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(error).toBeInstanceOf(NotSupportedError);
+    expect((error as NotSupportedError).alternative).toContain("withruntime secrets set");
+  });
+
   test("refuses a non-positive timeout", async () => {
     expect(await create({ timeoutMs: 0 }).catch((e: unknown) => e)).toBeInstanceOf(
       InvalidArgumentError,

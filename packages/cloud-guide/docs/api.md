@@ -12,7 +12,8 @@ API version: **0.2.0**.
 ## Requests
 
 Send the key as a bearer token. Keys stay in server-side secret storage; never in
-a URL, a browser or a command line others can read.
+a URL, a browser or a command line others can read. A browser uses a
+[session](#sessions) instead.
 
 ```bash no-run
 curl https://api.withruntime.com/v1/sandboxes \
@@ -294,6 +295,36 @@ seconds, and with `paused` when the sandbox pauses; reading never wakes a
 sandbox, and a read after it wakes carries on from the cursor with nothing lost.
 At most four watches run in a sandbox, each for `timeoutMs` (one hour by
 default, at most a day).
+
+## Sessions
+
+A session is a short-lived token a browser uses to reach one sandbox without
+your key. A key that can run commands in the sandbox makes, lists and revokes
+them:
+
+| Method and path                                       | What it does                                                                                        |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `POST /v1/sandboxes/{id}/sessions`                    | `{"ttlSeconds", "origins", "name"}`; answers the session with its `token`, shown once, and `apiUrl` |
+| `GET /v1/sandboxes/{id}/sessions`                     | Its sessions still active, and those that ended in the last day                                     |
+| `POST /v1/sandboxes/{id}/sessions/{sessionId}:revoke` | End one now                                                                                         |
+
+`ttlSeconds` is {{session-default-seconds}} unless given and
+{{session-max-seconds}} at most. `origins` lists up to {{session-origins}}
+exact origins, `https://host[:port]` or `http://localhost[:port]`.
+
+Send the token as the bearer: `Authorization: Bearer rtsess_...`. It is served
+the sandbox's routes under `:exec`, `/processes`, `/files`, `/uploads`,
+`/interpreter`, `GET /v1/sandboxes/{id}` and `GET /v1/sandboxes/{id}/previews`,
+for its own sandbox only; everything else answers `403 forbidden`, and an ended
+session `401 unauthorized`. A preview token it is handed ends when it does.
+
+The API answers CORS only for a session's own origins: a preflight from a page
+some session of that sandbox lists, and the answers to that session's
+requests, errors included. A session request from any other page is refused.
+Requests with a key carry no CORS headers.
+
+A replay of a create with the same `Idempotency-Key` answers the session with
+`token: null`; revoke it and make another. The SDKs do that for you.
 
 ## Other products
 

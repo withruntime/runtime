@@ -34,13 +34,21 @@ import.
   Sandbox's SDK, in JavaScript and Python: commands, files, ports, snapshots and
   persistent sandboxes, with no Vercel project or token. Run `runtime switch --from vercel` before your
   first top-up and it is matched, up to {{switching-max}}.
-- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
-  real key is added at the egress proxy, only on HTTPS to the hosts you allow
-  ([security](./security)).
+- **Single sign-on included.** SAML or OIDC sign-in, SCIM, roles and an audit
+  log come with every Runtime account ([single sign-on](./single-sign-on)).
+  Vercel sells SAML single sign-on as an add-on for Pro teams and keeps
+  directory sync for Enterprise.
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
+
+**Also included:** a code interpreter, network allow and deny lists, secrets the
+sandbox never sees, custom images, volumes backed up daily, a Linux desktop,
+metrics, webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts, MCP
+servers from a catalog and identity tokens for AWS and Google Cloud. Paid
+accounts add custom domains, TCP ports, dedicated outbound addresses and
+WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -148,8 +156,11 @@ try {
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; single sign-on and the firewall checked
+27 September 2026.
 
 - [Vercel Sandbox pricing and quotas](https://vercel.com/docs/sandbox/pricing)
+- [Vercel SAML single sign-on](https://vercel.com/docs/saml)
+- [Vercel Sandbox firewall](https://vercel.com/docs/sandbox/concepts/firewall)
 - [Understanding Vercel Sandboxes](https://vercel.com/docs/sandbox/concepts)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

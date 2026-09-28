@@ -28,7 +28,7 @@ hold.
   with clicks, keys and screenshots. Cloudflare removed its Sandbox SDK desktop
   in version 0.10.2, in June 2026.
 - **Call it from any backend, with no platform to join.** Runtime is an API
-  with JavaScript and Python SDKs, a CLI and an [MCP server](./mcp); prepaid
+  with JavaScript, Python, Go, Ruby and Java SDKs, a CLI and an [MCP server](./mcp); prepaid
   credit from {{topup-min}} is the whole account. The Sandbox SDK runs inside a Worker on
   the Workers Paid plan, deployed with Wrangler and a local Docker build.
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
@@ -40,6 +40,13 @@ hold.
 - **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file.
+
+**Also included:** a code interpreter, network allow and deny lists, custom
+images, volumes backed up daily, snapshots and forks with memory, private
+previews, metrics, webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts,
+MCP servers from a catalog, identity tokens for AWS and Google Cloud and free
+single sign-on. Paid accounts add custom domains, TCP ports, dedicated outbound
+addresses and WireGuard private networks. See [products](./products).
 
 ## At a glance
 
@@ -57,7 +64,7 @@ documentation, checked {{checked:cloudflare}}.
 | Free start     | {{trial-hours}} sandbox hours, no card                                      | No free tier; the plan includes 375 vCPU-minutes a month             |
 | Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart              | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU             |
 | When idle      | Pause keeps files and memory; paid retention 1–365 days                     | Sleeps after 10 idle minutes by default; files are lost              |
-| Interfaces     | API, CLI, MCP server, JavaScript and Python SDKs                            | A TypeScript SDK called from a Cloudflare Worker                     |
+| Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs            | A TypeScript SDK called from a Cloudflare Worker                     |
 
 ## Cost for the same job
 
