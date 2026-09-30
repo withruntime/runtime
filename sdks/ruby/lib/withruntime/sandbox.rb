@@ -25,7 +25,7 @@ module WithRuntime
                                               key: idempotency_key, room: room)
       sandbox = Sandbox.new(@t, info)
       if wait && sandbox.state != "running"
-        sandbox.wait_for("running", timeout: 60)
+        sandbox.wait_for("running", timeout: ApiDefaults::WAIT_FOR_TIMEOUT_SECONDS)
         unless sandbox.state == "running"
           raise Error.new("Sandbox #{sandbox.id} is #{sandbox.state}, not running.", code: "start_failed",
                                                                                        hint: "Read it with runtime.sandboxes.get(id); stop_reason says why.")
@@ -94,7 +94,7 @@ module WithRuntime
 
     # Waits, on the server with no polling, until the sandbox reaches +state+
     # (running, paused or stopped) or +timeout+ seconds pass.
-    def wait_for(state, timeout: 60)
+    def wait_for(state, timeout: ApiDefaults::WAIT_FOR_TIMEOUT_SECONDS)
       seconds = [1, timeout.to_i].max
       @info = Record.new(@t.json("GET", path, query: { "waitFor" => state, "timeoutSeconds" => seconds },
                                               timeout: seconds + 60))
@@ -138,7 +138,7 @@ module WithRuntime
     # that +margin+ seconds remain, never more than the hour ahead the API
     # allows. Running time is billed as it is used. A paused sandbox is left
     # paused; a stopped one ends the loop.
-    def keep_alive(every: 60, margin: 600, &on_error)
+    def keep_alive(every: 60, margin: ApiDefaults::KEEP_ALIVE_MARGIN_SECONDS, &on_error)
       stop_keep_alive
       every = [10, every].max
       margin = margin.clamp(60, 3600)
@@ -239,10 +239,11 @@ module WithRuntime
                                                idempotency_key: idempotency_key)
       end
 
-      body = command_body(command, cwd, env, stdin, timeout || 86_400).merge("stream" => true)
+      longest = ApiDefaults::STREAMED_EXEC_TIMEOUT_SECONDS
+      body = command_body(command, cwd, env, stdin, timeout || longest).merge("stream" => true)
       handed_over = nil
       @t.events("POST", path(":exec"), body: body, key: idempotency_key,
-                                       timeout: timeout ? timeout + 60 : 86_400) do |event|
+                                       timeout: timeout ? timeout + 60 : longest) do |event|
         case event["type"]
         when "continue" then handed_over = event
         when "error" then raise stream_error(event)
@@ -536,20 +537,38 @@ module WithRuntime
       nil
     end
 
-    # Copies a local file or directory in. A directory travels as one gzipped tar.
+    # Copies a local file or directory in. A directory travels as one gzipped
+    # tar to the API's folder routes, unpacked by the sandbox's own tar as it
+    # arrives.
     def upload(local, remote)
       return write(remote, File.binread(local)) unless File.directory?(local)
 
-      staging = "/tmp/.runtime-upload-#{SecureRandom.uuid}.tar.gz"
-      write(staging, Tar.pack_directory(local))
-      result = @sandbox.exec(["sh", "-c", 'mkdir -p "$1" && tar -xzf "$2" -C "$1"; code=$?; rm -f "$2"; exit $code',
-                              "sh", remote, staging])
-      raise CommandError, result unless result.ok?
-
+      archive = Tar.pack_directory(local)
+      if archive.bytesize <= CHUNK
+        t.bytes("PUT", @sandbox.path("/files/archive"), query: { "path" => remote }, raw: archive)
+        return nil
+      end
+      # Larger: parts in order; a part resent after a lost answer is not written twice.
+      upload = t.json("POST", @sandbox.path("/files/archive/uploads"), body: { "path" => remote, "gzip" => true })
+      base = @sandbox.path("/files/archive/uploads/#{Transport.segment(upload["uploadId"])}")
+      begin
+        (0...archive.bytesize).step(upload["chunkBytes"].to_i) do |offset|
+          t.bytes("PUT", base, query: { "offset" => offset }, raw: archive.byteslice(offset, upload["chunkBytes"].to_i))
+        end
+        t.json("POST", "#{base}:commit", body: {})
+      rescue StandardError
+        begin
+          t.json("POST", "#{base}:abort", body: {}, timeout: 10)
+        rescue Error
+          nil
+        end
+        raise
+      end
       nil
     end
 
-    # Copies a file or directory out.
+    # Copies a file or directory out. A directory comes as one tar from the
+    # API's folder route.
     def download(remote, local)
       entry = stat(remote)
       raise NotFoundError.new("#{remote} does not exist.", code: "file_not_found", status: 404) unless entry
@@ -559,18 +578,14 @@ module WithRuntime
         File.binwrite(local, read(remote))
         return nil
       end
-      staging = "/tmp/.runtime-download-#{SecureRandom.uuid}.tar.gz"
-      packed = @sandbox.exec(["tar", "-czf", staging, "-C", remote, "."])
-      raise CommandError, packed unless packed.ok?
-
+      # The sandbox's own tar packs it as it streams, and it is unpacked as it
+      # arrives; one cut short is refused and nothing is put in place.
+      unpacker = Tar::Unpacker.new(local)
       begin
-        Tar.unpack(read(staging), local)
+        t.chunks(@sandbox.path("/files/archive"), query: { "path" => remote, "gzip" => true }) { |chunk| unpacker.feed(chunk) }
+        unpacker.finish
       ensure
-        begin
-          remove(staging)
-        rescue Error
-          nil # /tmp is cleared with the sandbox.
-        end
+        unpacker.discard
       end
       nil
     end
@@ -587,11 +602,16 @@ module WithRuntime
       @sandbox = sandbox
     end
 
-    # Shares +port+, or changes its visibility if it is shared already.
-    # +visibility+ is "private" (the default: a token is needed) or "public";
-    # +ttl_seconds+ is how long the returned token lasts (60 s to 7 days).
-    def create(port, visibility: nil, ttl_seconds: nil)
-      body = { "port" => port, "visibility" => visibility, "ttlSeconds" => ttl_seconds }.compact
+    # Shares +port+, or changes its visibility and embed origins if it is
+    # shared already. +visibility+ is "private" (the default: a token is
+    # needed) or "public"; +ttl_seconds+ is how long the returned token lasts
+    # (60 s to 7 days). +embed_origins+ names the sites that may show it in an
+    # iframe (["https://app.example.com", "https://*.example.com"]); any other
+    # site's iframe is refused. Omitted, a shared port keeps its list; [] is
+    # any site, the default.
+    def create(port, visibility: nil, ttl_seconds: nil, embed_origins: nil)
+      body = { "port" => port, "visibility" => visibility, "ttlSeconds" => ttl_seconds,
+               "embedOrigins" => embed_origins }.compact
       Record.new(t.json("POST", path, body: body))
     end
 

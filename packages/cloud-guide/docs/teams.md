@@ -44,6 +44,9 @@ pick the new one in their row.
   Someone who already has an account keeps it and joins yours as well.
 - Sending an invitation again to the same address replaces the first one.
   **Withdraw** cancels an invitation that has not been used.
+- An invitation lasts only while its sender could send it again. When they
+  leave, are removed or lose the role that can invite, their open invitations
+  are withdrawn.
 - An account can have 50 open invitations and send 25 in any 24 hours.
 
 ## Several accounts
@@ -148,7 +151,7 @@ Owners and admins read the audit log at
 
 - **Members:** joined, added, removed, left, and role changes; invitations sent
   and withdrawn
-- **Keys:** created and revoked; CLI connections and key requests approved or
+- **Keys:** created and revoked, with the reason when Runtime revoked one; CLI connections and key requests approved or
   denied; spending limits set and removed
 - **Credit:** top-ups started, credit bought, granted, earned by referral,
   refunded, disputed, taken back or expired
@@ -166,11 +169,13 @@ Owners and admins read the audit log at
 
 Each entry has the action, who did it (a person, a key, your directory, or
 Runtime itself for things like a card payment), the time, the client's IP address, the request id
-and whether it came through the website, the API or MCP. A sandbox's pauses,
+and whether it came through the website, the API or MCP. A call made by code
+inside one of your sandboxes also names that sandbox. A sandbox's pauses,
 wakes and stops are not in the audit log; each sandbox has its own history.
 
 Entries are kept for at least 400 days. Nobody can edit an entry, and none is
-deleted before then.
+deleted before then. The page downloads the whole log, or one group of it, as
+a CSV file.
 
 ### Read it from code
 

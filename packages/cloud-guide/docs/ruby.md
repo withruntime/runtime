@@ -398,6 +398,8 @@ p runtime.request("GET", "/v1/volumes") # any endpoint, same rules
 
 - `RUNTIME_API_URL` points the client at another API origin, as `base_url:`
   does.
+- Code inside a Runtime sandbox calls Runtime's API at `http://runtime.internal`
+  ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
 - The client is safe to share between threads. It keeps its connections open
   and holds at most 32 calls in flight (`max_connections:`).
 - It honours `HTTPS_PROXY` and `NO_PROXY`.

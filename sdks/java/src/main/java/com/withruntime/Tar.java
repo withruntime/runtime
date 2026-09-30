@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
 import java.util.Set;
@@ -16,7 +17,7 @@ import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
-/** A small ustar writer and reader for directory uploads, downloads and build contexts. */
+/** A small ustar writer and reader for folder uploads, downloads and build contexts. */
 final class Tar {
   private Tar() {}
 
@@ -109,49 +110,181 @@ final class Tar {
     return gzip(tar.toByteArray());
   }
 
-  /** Unpacks a gzipped tar into target, refusing any entry that would land outside it, and links. */
+  /**
+   * A folder that did not arrive whole: tar in the sandbox stopped part way (a file it may not
+   * read, one that changed as it was read), which ends the gzip stream short, or the connection was
+   * lost (ARCHITECTURE.md section 10, "Folders over HTTP").
+   */
+  static RuntimeCloudException cutShort(Throwable cause) {
+    return new RuntimeCloudException(
+        "The folder's archive arrived cut short: tar in the sandbox stopped part way, or the"
+            + " connection was lost. Nothing was written.",
+        "download_incomplete",
+        0,
+        "Try again. If it fails the same way, a file in the folder cannot be read by the sandbox"
+            + " user or changes as it is read.",
+        null,
+        null,
+        null,
+        null,
+        cause);
+  }
+
+  /** Unpacks a whole gzipped tar held in memory, by the rules of the streamed one. */
   static void unpack(byte[] archive, Path target) throws IOException {
-    byte[] data;
-    try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(archive))) {
-      data = in.readAllBytes();
+    unpack(new ByteArrayInputStream(archive), target);
+  }
+
+  /**
+   * Unpacks a gzipped tar that arrives as a stream into target, holding no more than a read at a
+   * time. Entries land only inside target, and links are not made. It unpacks into a folder beside
+   * target and moves it into place only once the whole archive arrived, its end blocks and gzip's
+   * checksum included, so an archive cut short leaves nothing behind that could pass for the
+   * folder: it is {@code download_incomplete}. A target that exists is merged into, files of the
+   * same name replaced, never through a link in it.
+   */
+  static void unpack(InputStream source, Path target) throws IOException {
+    Path destination = target.toAbsolutePath().normalize();
+    Path parent = destination.getParent();
+    Files.createDirectories(parent);
+    Path staging =
+        Files.createTempDirectory(parent, destination.getFileName() + ".runtime-partial-");
+    try {
+      InputStream in;
+      try {
+        in = new GZIPInputStream(source, 1 << 16);
+      } catch (IOException cut) {
+        throw cutShort(cut);
+      }
+      unpackEntries(in, staging.toRealPath());
+      if (!Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
+        try {
+          Files.setPosixFilePermissions(staging, permissions(0755));
+        } catch (UnsupportedOperationException windows) {
+          // The file system keeps its own permissions.
+        }
+        Files.move(staging, destination);
+      } else {
+        Path real = destination.toRealPath();
+        merge(staging, real, real);
+      }
+    } finally {
+      deleteTree(staging);
     }
-    Path root = target.toAbsolutePath().normalize();
-    Files.createDirectories(root);
+  }
+
+  /** Exactly n bytes, or fewer at the stream's end; a failed read is the archive cut short. */
+  private static byte[] take(InputStream in, int n) {
+    try {
+      return in.readNBytes(n);
+    } catch (IOException cut) {
+      throw cutShort(cut);
+    }
+  }
+
+  private static void unpackEntries(InputStream in, Path root) throws IOException {
     String longName = null;
-    for (int offset = 0; offset + 512 <= data.length; ) {
+    for (; ; ) {
+      byte[] header = take(in, 512);
+      if (header.length < 512) throw cutShort(null);
       boolean empty = true;
-      for (int i = offset; i < offset + 512 && empty; i++) empty = data[i] == 0;
-      if (empty) break;
-      long size = Long.parseLong(field(data, offset + 124, 12).trim().isEmpty() ? "0" : field(data, offset + 124, 12).trim(), 8);
-      char type = (char) data[offset + 156];
-      String prefix = field(data, offset + 345, 155);
-      String name = longName != null ? longName : prefix.isEmpty() ? field(data, offset, 100) : prefix + "/" + field(data, offset, 100);
+      for (int i = 0; i < 512 && empty; i++) empty = header[i] == 0;
+      if (empty) {
+        // Read to gzip's end, so its checksum is checked.
+        try {
+          in.transferTo(java.io.OutputStream.nullOutputStream());
+        } catch (IOException cut) {
+          throw cutShort(cut);
+        }
+        return;
+      }
+      String sizeText = field(header, 124, 12).trim();
+      long size = sizeText.isEmpty() ? 0 : Long.parseLong(sizeText, 8);
+      long padding = (512 - size % 512) % 512;
+      char type = (char) header[156];
+      String prefix = field(header, 345, 155);
+      String name =
+          longName != null
+              ? longName
+              : prefix.isEmpty() ? field(header, 0, 100) : prefix + "/" + field(header, 0, 100);
       longName = null;
-      String modeText = field(data, offset + 100, 8).trim();
+      String modeText = field(header, 100, 8).trim();
       int mode = modeText.isEmpty() ? 0644 : Integer.parseInt(modeText, 8);
-      int start = offset + 512;
-      offset += 512 + (int) ((size + 511) / 512) * 512;
       if (type == 'L') {
-        longName = new String(data, start, (int) size, StandardCharsets.UTF_8).replaceAll("\0.*$", "");
+        byte[] value = take(in, (int) size);
+        if (value.length < size) throw cutShort(null);
+        longName = new String(value, StandardCharsets.UTF_8).replaceAll("\0.*$", "");
+        skip(in, padding);
         continue;
       }
       if (name.startsWith("./")) name = name.substring(2);
-      if (name.isEmpty() || name.equals(".") || name.equals("./")) continue;
       Path destination = root.resolve(name).normalize();
+      if (name.isEmpty() || name.equals(".") || name.equals("./")) {
+        skip(in, size + padding);
+        continue;
+      }
       if (!destination.startsWith(root) || destination.equals(root))
         throw new IOException("Refusing an archive entry outside the target: " + name);
       if (type == '5') {
         Files.createDirectories(destination);
+        skip(in, size + padding);
       } else if (type == '0' || type == '\0' || type == '7') {
         Files.createDirectories(destination.getParent());
-        Files.write(destination, java.util.Arrays.copyOfRange(data, start, start + (int) size));
+        try (java.io.OutputStream out = Files.newOutputStream(destination)) {
+          for (long left = size; left > 0; ) {
+            byte[] part = take(in, (int) Math.min(left, 1 << 16));
+            if (part.length == 0) throw cutShort(null);
+            out.write(part);
+            left -= part.length;
+          }
+        }
         try {
           Files.setPosixFilePermissions(destination, permissions(mode & 0777));
         } catch (UnsupportedOperationException windows) {
           // The file system keeps its own permissions.
         }
+        skip(in, padding);
+      } else {
+        skip(in, size + padding);
       }
     }
+  }
+
+  private static void skip(InputStream in, long n) {
+    for (long left = n; left > 0; ) {
+      byte[] part = take(in, (int) Math.min(left, 1 << 16));
+      if (part.length == 0) throw cutShort(null);
+      left -= part.length;
+    }
+  }
+
+  /**
+   * Moves what was unpacked in from into to, merging with what is there and replacing files of the
+   * same name, never through a link in to.
+   */
+  private static void merge(Path from, Path to, Path root) throws IOException {
+    List<Path> entries;
+    try (Stream<Path> listed = Files.list(from)) {
+      entries = listed.toList();
+    }
+    for (Path source : entries) {
+      Path destination = to.resolve(source.getFileName().toString());
+      if (Files.isSymbolicLink(destination))
+        throw new IOException(
+            "Refusing an archive entry that passes through a link: " + root.relativize(destination));
+      if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)
+          && Files.isDirectory(destination, LinkOption.NOFOLLOW_LINKS)) merge(source, destination, root);
+      else Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private static void deleteTree(Path root) throws IOException {
+    if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
+    List<Path> paths;
+    try (Stream<Path> walk = Files.walk(root)) {
+      paths = walk.sorted(java.util.Comparator.reverseOrder()).toList();
+    }
+    for (Path path : paths) Files.deleteIfExists(path);
   }
 
   private static Set<PosixFilePermission> permissions(int mode) {

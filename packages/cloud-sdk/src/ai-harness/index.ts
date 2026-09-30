@@ -26,6 +26,7 @@ import {
   type HarnessV1PortEndpoint,
   type HarnessV1SandboxProvider,
 } from "@ai-sdk/harness";
+import { AI_HARNESS_COMMAND_TIMEOUT_MS } from "../api-defaults.js";
 import { Runtime } from "../client.js";
 import {
   AuthenticationError,
@@ -59,7 +60,6 @@ export const PREVIEW_TOKEN_HEADER = "x-runtime-preview-token";
 const TOKEN_QUERY = "runtime_preview_token";
 const SESSION_NAME_PREFIX = "ai-harness-";
 const MAX_COMMAND_MS = 86_400_000;
-const DEFAULT_COMMAND_MS = 3_600_000;
 /** Exit codes for a command that ended without one, as coreutils `timeout` and SIGKILL give. */
 const TIMED_OUT_EXIT = 124;
 const KILLED_EXIT = 137;
@@ -253,7 +253,7 @@ export class RuntimeSandboxSession implements SandboxSession {
       ...(Object.keys(env).length ? { env } : {}),
       timeoutMs: Math.min(
         MAX_COMMAND_MS,
-        options.timeoutMs ?? this.settings.commandTimeoutMs ?? DEFAULT_COMMAND_MS,
+        options.timeoutMs ?? this.settings.commandTimeoutMs ?? AI_HARNESS_COMMAND_TIMEOUT_MS,
       ),
     };
   }

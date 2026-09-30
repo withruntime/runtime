@@ -10,6 +10,7 @@
  * chooses commands and paths, never the sandbox, the account or the key.
  * Relative paths are under /workspace, and output is capped so one noisy
  * command cannot flood the model's context. */
+import { TOOL_EXEC_TIMEOUT_SECONDS } from "../api-defaults.js";
 import { NotFoundError } from "../errors.js";
 import type { Sandbox } from "../sandbox.js";
 
@@ -79,7 +80,7 @@ export function clip(text: string, limit: number): string {
 /** runtime_exec, runtime_read_file, runtime_write_file and runtime_list_files, bound to `sandbox`. */
 export function sandboxTools(sandbox: Sandbox, options: SandboxToolOptions = {}): SandboxTools {
   const root = resolvePath("/", options.root ?? WORKSPACE);
-  const timeoutSeconds = options.timeoutSeconds ?? 300;
+  const timeoutSeconds = options.timeoutSeconds ?? TOOL_EXEC_TIMEOUT_SECONDS;
   const limit = options.maxOutputChars ?? 20_000;
   const inFilesApi = (path: string) => path.startsWith(`${WORKSPACE}/`);
   return [

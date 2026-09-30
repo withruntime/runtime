@@ -7,11 +7,14 @@ module WithRuntime
   # Java SDKs.
   class Error < StandardError
     # 503s that are a deliberate state, not a passing one: retrying cannot change them.
-    DELIBERATE = %w[fork_unavailable previews_unavailable unavailable].freeze
+    DELIBERATE = %w[
+      unavailable unsupported fork_unavailable previews_unavailable
+      network_unavailable network_rules_unavailable secrets_unavailable identity_unavailable env_unavailable
+    ].freeze
     # Refusals that pass on their own: a host frees room, a trial slot frees.
     PASSING = %w[no_capacity trial_busy].freeze
     # Refusals of a create that clear when a sandbox stops or a host frees room.
-    WAITS_FOR_ROOM = %w[trial_busy trial_domain_limit trial_capacity quota_exceeded no_capacity].freeze
+    WAITS_FOR_ROOM = %w[trial_busy trial_domain_limit trial_capacity quota_exceeded no_capacity volume_releasing].freeze
 
     attr_reader :code, :status, :hint, :request_id, :details, :idempotency_key, :retry_after
 

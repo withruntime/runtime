@@ -267,32 +267,71 @@ public final class Files {
     t().json(new Transport.Call("POST", sandbox.path("/files:rename")).body(body));
   }
 
-  /** Copies a local file or directory in. A directory travels as one gzipped tar. */
+  /**
+   * Copies a local file or directory in. A directory travels as one gzipped tar to the API's folder
+   * routes, and the sandbox's own tar unpacks it as it arrives, making the folder and its parents.
+   */
   public void upload(Path local, String remote) {
+    byte[] archive;
     try {
       if (!java.nio.file.Files.isDirectory(local)) {
         write(remote, java.nio.file.Files.readAllBytes(local));
         return;
       }
-      String staging = "/tmp/.runtime-upload-" + UUID.randomUUID() + ".tar.gz";
-      write(staging, Tar.packDirectory(local));
-      CommandResult result =
-          sandbox.execArgv(
-              List.of(
-                  "sh",
-                  "-c",
-                  "mkdir -p \"$1\" && tar -xzf \"$2\" -C \"$1\"; code=$?; rm -f \"$2\"; exit $code",
-                  "sh",
-                  remote,
-                  staging),
-              new ExecOptions());
-      if (!result.ok()) throw new RuntimeCloudException.Command(result);
+      archive = Tar.packDirectory(local);
     } catch (IOException error) {
       throw new UncheckedIOException(error);
     }
+    if (archive.length <= CHUNK) {
+      t().bytes(
+              new Transport.Call("PUT", sandbox.path("/files/archive"))
+                  .query("path", remote)
+                  .raw(archive));
+      return;
+    }
+    // Larger: parts in order, each unpacked as it arrives; a part resent after a lost answer is not
+    // written twice.
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("path", remote);
+    body.put("gzip", true);
+    JsonObject upload =
+        new JsonObject(
+            t().object(
+                    new Transport.Call("POST", sandbox.path("/files/archive/uploads")).body(body)));
+    long chunk = upload.getLong("chunkBytes", 0);
+    if (chunk <= 0 || upload.getString("uploadId") == null)
+      throw new RuntimeCloudException(
+          "The folder upload omitted its ID or chunk size.", "unexpected_answer", null);
+    String base =
+        sandbox.path("/files/archive/uploads/" + Transport.segment(upload.getString("uploadId")));
+    try {
+      for (long offset = 0; offset < archive.length; offset += chunk)
+        t().bytes(
+                new Transport.Call("PUT", base)
+                    .query("offset", offset)
+                    .raw(
+                        Arrays.copyOfRange(
+                            archive, (int) offset, (int) Math.min(archive.length, offset + chunk))));
+      t().json(new Transport.Call("POST", base + ":commit").body(Map.of()));
+    } catch (RuntimeException failure) {
+      try {
+        t().json(
+                new Transport.Call("POST", base + ":abort")
+                    .body(Map.of())
+                    .noRetry()
+                    .timeout(java.time.Duration.ofSeconds(10)));
+      } catch (RuntimeException ignored) {
+        // The first failure is the one to report; an unfinished upload ends on its own.
+      }
+      throw failure;
+    }
   }
 
-  /** Copies a file or directory out. */
+  /**
+   * Copies a file or directory out. A directory comes as one gzipped tar from the API's folder
+   * route, packed by the sandbox's own tar as it streams and unpacked here as it arrives; one cut
+   * short is {@code download_incomplete} and nothing is put in place.
+   */
   public void download(String remote, Path local) {
     FileEntry entry = stat(remote);
     if (entry == null)
@@ -305,19 +344,12 @@ public final class Files {
         java.nio.file.Files.write(local, read(remote));
         return;
       }
-      String staging = "/tmp/.runtime-download-" + UUID.randomUUID() + ".tar.gz";
-      CommandResult packed =
-          sandbox.execArgv(List.of("tar", "-czf", staging, "-C", remote, "."), new ExecOptions());
-      if (!packed.ok()) throw new RuntimeCloudException.Command(packed);
-      try {
-        Tar.unpack(read(staging), local);
-      } finally {
-        try {
-          remove(staging, false);
-        } catch (RuntimeException ignored) {
-          // /tmp is cleared with the sandbox.
-        }
-      }
+      t().stream(
+              new Transport.Call("GET", sandbox.path("/files/archive"))
+                  .query("path", remote)
+                  .query("gzip", true)
+                  .accept("application/gzip"),
+              body -> Tar.unpack(body, local));
     } catch (IOException error) {
       throw new UncheckedIOException(error);
     }

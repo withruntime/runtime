@@ -7,7 +7,8 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .. import _core as core
-from .._sync_io import call, wrap
+from .._sync_io import call
+from ..._request_scope import request_scope
 from .._sync_sandbox import Sandbox as _Base
 from .._sync_sandbox import _guard
 from ._models import Context, Execution, ExecutionError, Logs, OutputMessage, Result
@@ -24,10 +25,11 @@ def _language(requested: Optional[str]) -> str:
         return "python"
     if requested in ("javascript", "js"):
         return "javascript"
+    if requested in ("typescript", "r", "java", "bash", "go"):
+        return requested
     raise core.NotSupportedException(
         f"Running {requested} code in the interpreter",
-        "Use sandbox.commands.run(code)." if requested == "bash" else
-        "Runtime's interpreter runs Python and JavaScript; install the language and use sandbox.commands.run(...).")
+        "Use Python, JavaScript, TypeScript, R, Java, Bash or Go.")
 
 
 class Sandbox(_Base):
@@ -35,33 +37,9 @@ class Sandbox(_Base):
 
     default_template = "code-interpreter-v1"
 
-    def __init__(self, runtime: Any, client: Any, envs: Optional[Dict[str, str]] = None) -> None:
-        super().__init__(runtime, client, envs)
-        self._env_contexts: Dict[str, str] = {}
-
     @property
     def _interpreter(self) -> Any:
         return self.runtime.interpreter
-
-    def _context_for(self, language: str, context: Optional[Context]) -> Optional[str]:
-        """The context asked for; else, when the sandbox has envs, one made once
-        with them; else Runtime's default one."""
-        if context is not None:
-            return context.id
-        if not self._envs:
-            return None
-        if language not in self._env_contexts:
-            wanted = f"e2b-{language}"
-            try:
-                made = _guard("sandbox", lambda: self._interpreter.contexts.create(
-                    id=wanted, language=language, env=self._envs))
-                self._env_contexts[language] = made["id"]
-            except core.SandboxException:
-                existing = _guard("sandbox", lambda: self._interpreter.contexts.list())
-                if not any(one["id"] == wanted for one in existing):
-                    raise
-                self._env_contexts[language] = wanted
-        return self._env_contexts[language]
 
     def _inline(self, result: Dict[str, Any]) -> Dict[str, Any]:
         data = dict(result.get("data") or {})
@@ -89,19 +67,22 @@ class Sandbox(_Base):
                 "Make a context with them: sandbox.runtime.interpreter.contexts.create(env=...), then "
                 "run_code(code, context=Context(id, language, cwd)).")
         lang = _language(context.language if context is not None else language)
-        target = self._context_for(lang, context)
-        timeout_ms = 60_000 if timeout is None else core.command_timeout_ms(timeout)
+        target = context.id if context is not None else None
+        timeout_ms = 300_000 if timeout is None else core.command_timeout_ms(timeout)
         now = lambda: time.time_ns()  # noqa: E731
         streams: Dict[str, Any] = {}
         if on_stdout is not None:
-            streams["on_stdout"] = wrap(lambda text: on_stdout(OutputMessage(text, now(), False)))
+            streams["on_stdout"] = lambda text: on_stdout(OutputMessage(text, now(), False))
         if on_stderr is not None:
-            streams["on_stderr"] = wrap(lambda text: on_stderr(OutputMessage(text, now(), True)))
+            streams["on_stderr"] = lambda text: on_stderr(OutputMessage(text, now(), True))
         if on_error is not None:
-            streams["on_error"] = wrap(lambda error: on_error(ExecutionError(
-                error["name"], error["value"], error["traceback"])))
-        execution = _guard("sandbox", lambda: self._interpreter.run(
-            code, **({"context": target} if target else {"language": lang}), timeout_ms=timeout_ms, **streams))
+            streams["on_error"] = lambda error: on_error(ExecutionError(
+                error["name"], error["value"], error["traceback"]))
+        # A consumer deadline detaches its request; it must not interrupt the cell.
+        with request_scope(timeout_ms / 1000, connect_timeout=core.request_seconds(self, request_timeout)):
+            execution = _guard("sandbox", lambda: self._interpreter.run(
+                code, **({"context": target} if target else {"language": lang}), timeout_ms=0,
+                interrupt_on_disconnect=False, **streams))
         status = execution.get("status")
         if status == "timeout":
             raise core.TimeoutException(f"Execution timed out after {timeout_ms} ms: pass a larger 'timeout'.")
@@ -109,7 +90,7 @@ class Sandbox(_Base):
             raise core.SandboxException("The interpreter lost this run (its context stopped); run it again.")
         results = []
         for result in execution.get("results") or []:
-            results.append(Result(self._inline(result), bool(result.get("main"))))
+            results.append(Result._from_mime(self._inline(result), bool(result.get("main"))))
         for result in results:
             call(on_result, result)
         error = execution.get("error")
@@ -123,7 +104,7 @@ class Sandbox(_Base):
                                   request_timeout: Optional[float] = None) -> Context:
         lang = _language(language)
         made = _guard("sandbox", lambda: self._interpreter.contexts.create(
-            language=lang, cwd=cwd, env=self._envs or None))
+            language=lang, cwd=cwd), core.request_seconds(self, request_timeout))
         return Context(made["id"], made["language"], made["cwd"])
 
     def remove_code_context(self, context: Union[Context, str]) -> None:

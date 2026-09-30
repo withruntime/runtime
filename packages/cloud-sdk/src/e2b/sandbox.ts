@@ -46,7 +46,8 @@ export interface SandboxOpts extends ConnectionOpts {
   template?: string;
   /** Stored as the sandbox's labels (at most 32, values up to 256 characters). */
   metadata?: Record<string, string>;
-  /** Given to every command and code run through this object. */
+  /** The sandbox's own environment: every command, terminal and code run in it
+   * gets these, whoever connects. Values are never shown again. */
   envs?: Record<string, string>;
   /** Default 300 000. Runtime's leases run 60 s to 1 hour; shorter rounds up
    * to 60 s (with a warning), longer is refused. */
@@ -241,18 +242,19 @@ export class Sandbox {
   readonly commands: Commands;
   readonly #client: Runtime;
   #runtime: RuntimeSandbox;
-  readonly #envs: Record<string, string>;
   #home: Promise<void> | undefined;
   /** Ports shared as public previews, by port: the one share each asked for. */
   readonly #shares = new Map<number, Promise<string>>();
 
   /** Use Sandbox.create or Sandbox.connect. */
-  constructor(runtime: RuntimeSandbox, client: Runtime, envs: Record<string, string> = {}) {
+  constructor(
+    runtime: RuntimeSandbox,
+    client: Runtime,
+    protected readonly requestTimeoutMs = 60_000,
+  ) {
     this.#runtime = runtime;
     this.#client = client;
-    this.#envs = envs;
     const ctx = {
-      envs,
       ensureHome: (text: string | undefined) => this.#ensureHome(text),
     } as unknown as SandboxContext;
     // A getter, so the modules see the sandbox as it is after each refresh.
@@ -271,9 +273,6 @@ export class Sandbox {
   }
   protected get client(): Runtime {
     return this.#client;
-  }
-  protected get envs(): Record<string, string> {
-    return this.#envs;
   }
 
   /** E2B's home is /home/user and Runtime's is /workspace. The first time a
@@ -322,6 +321,9 @@ export class Sandbox {
       // asked (autoResume); Runtime's automatic wake is the same thing (0093).
       ...(opts.lifecycle ? { autoWake: opts.lifecycle.autoResume === true } : {}),
       ...(opts.metadata && Object.keys(opts.metadata).length ? { labels: opts.metadata } : {}),
+      // Runtime keeps them with the sandbox: every command, terminal and
+      // interpreter in it gets them, from this client or any other.
+      ...(opts.envs && Object.keys(opts.envs).length ? { env: opts.envs } : {}),
       ...(opts.allowInternetAccess === false ? { network: { internet: false } } : {}),
     };
     const source = await guard("other", () => resolveTemplate(client, template));
@@ -333,7 +335,7 @@ export class Sandbox {
       ...opts.runtime?.create,
     };
     const runtime = await guard("sandbox", () => client.sandboxes.create(create, request(opts)));
-    return new this(runtime, client, { ...opts.envs }) as InstanceType<S>;
+    return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
   /** Connects to a sandbox by id, waking it if it is paused, as E2B does. A
@@ -346,7 +348,7 @@ export class Sandbox {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
     await resume(runtime, opts);
-    return new this(runtime, client) as InstanceType<S>;
+    return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
   /** Wakes this sandbox if it is paused. */
@@ -465,12 +467,9 @@ export class Sandbox {
     const copies = await guard("sandbox", () =>
       this.#runtime.fork({ count: opts.count ?? 1, ...request(opts) }),
     );
-    const Kind = this.constructor as new (
-      runtime: RuntimeSandbox,
-      client: Runtime,
-      envs: Record<string, string>,
-    ) => this;
-    return copies.map((copy) => new Kind(copy, this.#client, { ...this.#envs }));
+    // Copies keep the source's environment on Runtime's side.
+    const Kind = this.constructor as new (runtime: RuntimeSandbox, client: Runtime) => this;
+    return copies.map((copy) => new Kind(copy, this.#client));
   }
 
   /** Keeps the sandbox's whole machine as a Runtime snapshot; start from it

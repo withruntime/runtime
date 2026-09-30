@@ -16,20 +16,56 @@ import (
 
 var keyPattern = regexp.MustCompile(`^rtcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$`)
 
+var errOrigin = errors.New("withruntime: use an HTTPS API origin (or http://runtime.internal inside a sandbox, http://localhost for tests)")
+
 // origin normalizes an API or sign-in origin exactly as the CLI does: HTTPS,
-// or plain HTTP to localhost for tests, with no path, query or credentials.
+// plain HTTP to runtime.internal inside a sandbox, or plain HTTP to localhost
+// for tests, with no path, query or credentials. runtime.internal is reserved
+// and never resolves outside a sandbox, so a key sent there in plain HTTP
+// never leaves the sandbox's host.
 func origin(value string) (string, error) {
 	u, err := url.Parse(value)
 	if err != nil || u.Host == "" {
-		return "", errors.New("withruntime: use an HTTPS API origin (or http://localhost for tests)")
+		return "", errOrigin
 	}
 	host := u.Hostname()
-	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	internal := host == "runtime.internal"
+	local := host == "localhost" || host == "127.0.0.1" || host == "::1" || internal
 	if (u.Scheme != "https" && !(local && u.Scheme == "http")) || u.User != nil ||
+		(internal && (u.Scheme != "http" || (u.Port() != "" && u.Port() != "80"))) ||
 		u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return "", errors.New("withruntime: use an HTTPS API origin (or http://localhost for tests)")
+		return "", errOrigin
+	}
+	if internal {
+		return SandboxBaseURL, nil
 	}
 	return u.Scheme + "://" + u.Host, nil
+}
+
+// SandboxBaseURL is Runtime's API as code inside a Runtime sandbox reaches
+// it: the sandbox's own host sends each request on to DefaultBaseURL over
+// HTTPS. The API runs on that host, whose addresses a sandbox cannot reach
+// directly. Plain HTTP because the hop never leaves the machine: from the
+// program to the guest's own proxy, then over the sandbox's private channel
+// to its host.
+const SandboxBaseURL = "http://runtime.internal"
+
+// sandboxMarker is a file every Runtime sandbox has; the guest keeps it current.
+var sandboxMarker = "/run/runtime/environment.json"
+
+func inRuntimeSandbox() bool {
+	_, err := os.Stat(sandboxMarker)
+	return err == nil
+}
+
+// reachable is the origin calls for apiOrigin are sent to from here. In a
+// sandbox the public API is its own host, which it cannot reach directly, so
+// calls for it go to runtime.internal; every other origin is left as it is.
+func reachable(apiOrigin string, inSandbox func() bool) string {
+	if apiOrigin == DefaultBaseURL && inSandbox() {
+		return SandboxBaseURL
+	}
+	return apiOrigin
 }
 
 // savedConnection is the file `runtime login` writes. Its format is the CLI's

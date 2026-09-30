@@ -41,19 +41,20 @@ npx withruntime sandbox metrics <id> --range 6h
 
 What you get:
 
-| Field             | Meaning                                                               |
-| ----------------- | --------------------------------------------------------------------- |
-| `cpuPercent`      | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)        |
-| `cpuCores`        | The same as a number of cores                                         |
-| `cpuPeakPercent`  | The busiest interval between two readings inside the bucket           |
-| `memoryBytes`     | Memory the sandbox's machine holds, as its host measures it           |
-| `memoryPeakBytes` | The most it held inside the bucket                                    |
-| `latest`          | The newest reading, or null when there is none in the last 15 minutes |
+| Field             | Meaning                                                                |
+| ----------------- | ---------------------------------------------------------------------- |
+| `cpuPercent`      | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)         |
+| `cpuCores`        | The same as a number of cores                                          |
+| `cpuPeakPercent`  | The busiest interval between two readings inside the bucket            |
+| `memoryBytes`     | Memory the sandbox's machine holds, as its host measures it            |
+| `memoryPeakBytes` | The most it held inside the bucket                                     |
+| `latest`          | The newest reading while the sandbox runs; null when it is not running |
 
 CPU is measured, not estimated: the machine's CPU time between two readings of
 its host, the same reading the bill is made from. The host reads every running
-sandbox once a minute. A paused or stopped sandbox has no new readings; its
-earlier ones stay.
+sandbox at least every half minute. A paused or stopped sandbox uses nothing
+and has no new readings: `latest` is null, and its earlier readings stay in
+`points`.
 
 `range` picks the window and the bucket each point sums:
 
@@ -70,9 +71,22 @@ Each reading is kept 24 hours. Hourly averages and peaks are kept 30 days.
 
 In your account, [Sandboxes](https://withruntime.com/account/sandboxes) shows
 each sandbox's CPU and memory now, and Home draws a trace of each running one.
-A sandbox's own page charts CPU with its events marked on it, and its Metrics
-tab charts CPU and memory over any of the ranges above, updating while it runs.
-Its Events tab lists what happened to it.
+A sandbox's own page charts CPU with its events marked on it, and its Activity
+tab charts CPU and memory over any of the ranges above, updating while it runs,
+and lists its commands and what happened to it. Once it has stopped, its page
+shows its whole life: CPU and memory from start to stop, and a timeline of its
+events and commands.
+
+## Commands
+
+Each command run in a sandbox through the API, an SDK, the CLI or MCP is kept
+14 days as its program's name, its exit code and how long it ran:
+`pytest · exit 1 · 28 s`. A command still running shows as running; a process
+started in the background gets its exit when a read or a list of its processes
+sees it end, and one never read before its sandbox stopped says so. The name
+is the program alone (`python3` for `FOO=1 python3 train.py --key …`, `pytest`
+for `bash -c "pytest -q"`); arguments and environment values are never stored
+([security](./security#keys-and-secrets)).
 
 Code written for E2B's `getMetrics()` gets CPU and memory from these readings
 through `withruntime/e2b`; its `diskUsed` is null.
@@ -82,21 +96,22 @@ through `withruntime/e2b`; its `diskUsed` is null.
 Every lifecycle change of a sandbox, a snapshot or a volume is an event, kept
 14 days.
 
-| Type                   | When                                                      |
-| ---------------------- | --------------------------------------------------------- |
-| `sandbox.created`      | A sandbox is made; it is starting                         |
-| `sandbox.running`      | It is ready and running                                   |
-| `sandbox.paused`       | It paused, keeping its memory and files                   |
-| `sandbox.woken`        | A paused sandbox is running again                         |
-| `sandbox.stopped`      | It stopped. `stopReason` says why                         |
-| `sandbox.start_failed` | It stopped before it ever ran; `sandbox.stopped` follows  |
-| `sandbox.wake_failed`  | A wake did not complete; the sandbox is paused or stopped |
-| `snapshot.ready`       | A snapshot finished and can be started from               |
-| `snapshot.failed`      | A snapshot could not be taken                             |
-| `snapshot.deleted`     | A snapshot was deleted or expired                         |
-| `volume.ready`         | A volume is made and can be attached                      |
-| `volume.failed`        | A volume could not be made                                |
-| `volume.deleted`       | A volume was deleted                                      |
+| Type                    | When                                                      |
+| ----------------------- | --------------------------------------------------------- |
+| `sandbox.created`       | A sandbox is made; it is starting                         |
+| `sandbox.running`       | It is ready and running                                   |
+| `sandbox.paused`        | It paused, keeping its memory and files                   |
+| `sandbox.woken`         | A paused sandbox is running again                         |
+| `sandbox.stopped`       | It stopped. `stopReason` says why                         |
+| `sandbox.start_failed`  | It stopped before it ever ran; `sandbox.stopped` follows  |
+| `sandbox.wake_failed`   | A wake did not complete; the sandbox is paused or stopped |
+| `sandbox.files.changed` | Files changed under a watch that sends to webhooks        |
+| `snapshot.ready`        | A snapshot finished and can be started from               |
+| `snapshot.failed`       | A snapshot could not be taken                             |
+| `snapshot.deleted`      | A snapshot was deleted or expired                         |
+| `volume.ready`          | A volume is made and can be attached                      |
+| `volume.failed`         | A volume could not be made                                |
+| `volume.deleted`        | A volume was deleted                                      |
 
 Each event carries the resource as it was:
 
@@ -122,6 +137,44 @@ Each event carries the resource as it was:
     }
   }
 }
+```
+
+`sandbox.files.changed` comes only from a file watch started with
+`webhook: true` ([files in the API guide](./api#files)): Runtime reads the watch
+without waking the sandbox and sends what changed since the last read, at most
+once every {{file-hook-window}} a watch, with up to {{file-hook-events}}
+changes. `more` counts the ones left out, and `overflow` says changes were
+dropped (a flood, or the watch fell behind): list the folder again for either.
+`ended` says the watch stopped (`timeout`, `stopped`, `root-removed`, `gone`
+when the sandbox restarted). While a sandbox that pauses itself does nothing,
+its watch is not read, so the watch never keeps it awake; a change arrives
+within seconds of the sandbox next doing work, or when it wakes.
+
+```json
+{
+  "type": "sandbox.files.changed",
+  "data": {
+    "sandbox": { "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f", "name": "build-runner" },
+    "watch": { "id": "sync", "path": "/workspace/app" },
+    "events": [
+      { "type": "write", "path": "/workspace/app/notes.md", "isDir": false, "count": 2 },
+      {
+        "type": "rename",
+        "path": "/workspace/app/b.txt",
+        "oldPath": "/workspace/app/a.txt",
+        "isDir": false
+      }
+    ]
+  }
+}
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const sbx = await runtime.sandboxes.get("<sandbox id>");
+await sbx.files.watches.webhook("/workspace/app", { recursive: true, id: "sync" });
 ```
 
 List them newest first, for the account or one sandbox:
@@ -166,7 +219,8 @@ npx withruntime webhooks deliveries <id>
 
 Owners and admins can do the same on the [Webhooks page](https://withruntime.com/account/webhooks),
 which picks event types grouped by product and shows each webhook's delivery
-log, with **Resend** on each finished delivery.
+log, with **Resend** on each finished delivery and a CSV download of every
+delivery kept.
 
 ### Check the signature
 

@@ -170,7 +170,11 @@ public class FilesExample {
 `write` makes parent directories and replaces the file atomically; a file over
 1 MiB goes in parallel chunks checked by SHA-256. `stat` returns `null` for a
 path that does not exist. `upload` and `download` move a whole directory as
-one gzipped archive.
+one gzipped tar archive through the API's folder routes, which pack and unpack
+it with `tar` inside the sandbox ([files in the API guide](./api#files)); a
+large one uploads in parts. A downloaded folder is unpacked as it arrives and
+lands in place only once it has all arrived: one cut short is
+`download_incomplete` and writes nothing.
 
 ## Pause, wake, fork and snapshot
 
@@ -362,6 +366,8 @@ public class Configured {
 
 - `RUNTIME_API_URL` points the client at another API origin, as `baseUrl`
   does.
+- Code inside a Runtime sandbox calls Runtime's API at `http://runtime.internal`
+  ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
 - The client is safe for concurrent use. Make one and share it: it keeps its
   connections open and holds at most 32 calls in flight (`maxConnections`).
 - It honours `HTTPS_PROXY` and `NO_PROXY`. `httpClient` supplies your own

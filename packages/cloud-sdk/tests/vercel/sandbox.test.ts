@@ -368,7 +368,9 @@ describe("files", () => {
     expect([stats.isFile(), stats.size]).toEqual([true, 5]);
     expect(await sandbox.fs.exists("dir/a.txt")).toBe(true);
     await sandbox.fs.appendFile("dir/a.txt", "!");
-    expect(await sandbox.fs.readFile("dir/a.txt", { encoding: "utf8" })).toBe("hello!");
+    // Actual append and concurrent writers are exercised on a real filesystem
+    // in filesystem-real.test.ts. Here verify stdin reaches the native SDK.
+    expect(execs().at(-1)![1]).toMatchObject({ stdin: Buffer.from("!") });
     const missing = (await sandbox.fs.readFile("nope").catch((e: unknown) => e)) as {
       code: string;
     };

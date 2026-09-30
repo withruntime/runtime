@@ -115,7 +115,7 @@ export async function guard<T>(work: () => Promise<T>, sandboxName?: string): Pr
 
 /** A node:fs-style error, as Vercel's `sandbox.fs` throws. */
 export function fsError(
-  code: "ENOENT" | "EEXIST" | "EISDIR" | "ENOTDIR",
+  code: "ENOENT" | "EEXIST" | "EISDIR" | "ENOTDIR" | "EACCES" | "ENOTEMPTY" | "EINVAL",
   syscall: string,
   path: string,
 ) {
@@ -124,8 +124,19 @@ export function fsError(
     EEXIST: "file already exists",
     EISDIR: "illegal operation on a directory",
     ENOTDIR: "not a directory",
+    EACCES: "permission denied",
+    ENOTEMPTY: "directory not empty",
+    EINVAL: "invalid argument",
   }[code];
-  const errno = { ENOENT: -2, EEXIST: -17, EISDIR: -21, ENOTDIR: -20 }[code];
+  const errno = {
+    ENOENT: -2,
+    EEXIST: -17,
+    EISDIR: -21,
+    ENOTDIR: -20,
+    EACCES: -13,
+    ENOTEMPTY: -39,
+    EINVAL: -22,
+  }[code];
   return Object.assign(new Error(`${code}: ${text}, ${syscall} '${path}'`), {
     code,
     errno,

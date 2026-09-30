@@ -6,6 +6,8 @@ Runtime runs agent code in microVMs, like Runloop's devboxes, and costs **{{savi
 Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:runloop:100000}}, **{{=$0 less:runloop:100000}} a month saved**.
 
+Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Runloop bills a devbox's CPUs and memory for
@@ -13,7 +15,8 @@ Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cos
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  and runs its next command {{server-wake-command}} after the request that
+  wakes it reaches Runtime. Paused, it
   pays {{paused-storage-rate}} per GB of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that

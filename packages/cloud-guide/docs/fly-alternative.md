@@ -7,12 +7,15 @@ Runtime, {{cost:fly-sprites}} on Fly Sprites and {{cost:fly-machines}} on a Fly 
 month that is {{cost:runtime:100000}} against {{cost:fly-sprites:100000}} on Sprites, **{{=$0 less:fly-sprites:100000}} a month saved**, or
 against {{cost:fly-machines:100000}} on Machines, {{=$0 less:fly-machines:100000}} saved.
 
+Weighing more than two? [Fly.io alternatives for agent sandboxes](/compare/fly-io-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **Lower rates.** Measured CPU costs {{cpu-rate}} a vCPU-hour, {{=n0 100 * ( 1 - cpu-rate / rate:fly-sprites:cpu )}}% below Sprites' {{rate:fly-sprites:cpu}}. Reserved memory costs {{memory-rate}} per GiB-hour, {{=n0 100 * ( 1 - memory-rate / rate:fly-sprites:memory )}}% below Sprites' {{rate:fly-sprites:memory}} per GB-hour of memory in use.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  and runs its next command {{server-wake-command}} after the request that
+  wakes it reaches Runtime. Paused, it
   pays {{paused-storage-rate}} per GB of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that

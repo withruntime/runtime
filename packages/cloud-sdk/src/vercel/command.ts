@@ -75,24 +75,33 @@ export class Command {
   ): AsyncGenerator<LogOutputLine, void, void> & Disposable & { close(): void } {
     const abort = new AbortController();
     const forward = () => abort.abort();
-    opts.signal?.addEventListener("abort", forward, { once: true });
+    if (opts.signal?.aborted) abort.abort();
+    else opts.signal?.addEventListener("abort", forward, { once: true });
     const lines = this.init.lines;
     const process = this.init.process;
     const sandboxName = this.init.sandboxName;
     async function* read(): AsyncGenerator<LogOutputLine, void, void> {
       try {
+        if (abort.signal.aborted) return;
         if (lines) {
           yield* lines;
           return;
         }
         try {
           for await (const event of process!.output({ signal: abort.signal })) {
+            if (event.type === "truncated")
+              throw new StreamError(
+                "output_truncated",
+                "Some command output is no longer available.",
+                process!.id,
+              );
             if (event.type === "stdout" || event.type === "stderr")
               yield { stream: event.type, data: event.data };
             if (event.type === "exit") return;
           }
         } catch (error) {
           if (abort.signal.aborted) return;
+          if (error instanceof StreamError) throw error;
           const translated = translate(error, sandboxName);
           throw translated instanceof Error && translated !== error
             ? translated
@@ -126,6 +135,12 @@ export class Command {
       for await (const event of this.init.process!.output(
         params.signal ? { signal: params.signal } : {},
       )) {
+        if (event.type === "truncated")
+          throw new StreamError(
+            "output_truncated",
+            "Some command output is no longer available.",
+            this.init.process!.id,
+          );
         if (event.type === "stdout" || event.type === "stderr")
           lines.push({ stream: event.type, data: event.data });
         else if (event.type === "exit")

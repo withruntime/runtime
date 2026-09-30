@@ -44,6 +44,12 @@ export type {
   WatchOptions,
 } from "./products/watch.js";
 export type { Mount, MountBucket } from "./products/mounts.js";
+export type {
+  TailscaleJoin,
+  TailscaleJoined,
+  TailscaleNode,
+  TailscaleStatus,
+} from "./products/tailscale.js";
 export type { Volume, VolumeBackup, CreateVolume } from "./products/volumes.js";
 export type {
   CreateJob,

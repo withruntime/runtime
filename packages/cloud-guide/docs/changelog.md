@@ -8,8 +8,140 @@ Each day also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 30 September 2026
+
+- **Environment variables for a whole sandbox.** Pass `env` at create, or
+  change it later with an update, and every command, background process,
+  terminal, SSH session and image start command gets those variables. Values
+  are stored encrypted and never shown back. See [the API](./api).
+- **Delete a sandbox for good.** `DELETE /v1/sandboxes/{id}`, `sbx.delete()`
+  and `runtime sandbox rm` stop it, remove its disk and paused memory, revoke
+  its previews and ports, and free its name. Usage and audit history stay.
+- **Switch a sandbox to a new image and keep your work.** Switching keeps the
+  sandbox's id, name, `/workspace`, volumes, environment, previews and ports;
+  processes restart. See [images](./images).
+- **Folders over plain HTTP.** Upload or download a whole folder of any size
+  as a tar stream; the SDKs unpack a download as it arrives and put it in
+  place only once it is whole.
+- **File changes to your webhooks.** A watch started with `webhook: true`
+  sends `sandbox.files.changed` events, signed and retried like every webhook,
+  without keeping the sandbox awake. See [observability](./observability).
+- **Choose which sites may embed a preview.** `embedOrigins` lists them, and
+  a private link's token is refused in any other site's frame.
+- **Join your Tailscale network.** A paid sandbox can join your tailnet with
+  an auth key stored as a secret. See [networking](./networking#your-tailscale-network).
+- **Trial sandboxes keep going while they work.** A trial sandbox that is still
+  busy when its lease ends gets its `timeoutSeconds` again, until the trial
+  hours run out. See [the trial](./trial).
+- **Commands near the end of a lease run.** A command with no timeout of its
+  own gets the time the lease has left instead of being refused, and a paused
+  sandbox is never woken for a command that could not fit.
+- **A failed pause keeps your files.** If a sandbox's memory cannot be saved,
+  it stays paused with its disk, and its next wake starts it from that disk.
+- **The CLI lists everything and says why.** `runtime sandbox ls --all` lists
+  every sandbox, `sandbox get` shows when and why one stopped, errors name the
+  option you typed, and `<command> help` prints help.
+- **Clearer errors.** The API reference lists every error code you can meet,
+  a trial refusal names only the limits you crossed, and paid-only features
+  say what counts as a paid account. See [troubleshooting](./troubleshooting).
+- **Console links land where they point.** Signing in from any console page
+  brings you back to that page.
+- **Custom images look up names.** Images built from Debian or Ubuntu bases,
+  such as `python:3.12-slim`, brought their own `/etc/resolv.conf`, and name
+  lookups in them timed out. Every image now uses Runtime's resolver, in its
+  build steps and in the sandbox; build an older such image again. See
+  [images](./images).
+- **A payment under review says so.** When a payment is held for review, the
+  console says it is under review rather than disputed, and spending returns
+  when the review clears.
+
+## 29 September 2026
+
+- **Global installs run by name, and pnpm and yarn are ready.** In a new
+  sandbox, `npm install -g` failed without `sudo`, and with it, or with
+  `bun add -g`, the command installed but was not found. Now all three put
+  their commands on `PATH`, so `npm install -g @anthropic-ai/claude-code`
+  gives you `claude` straight away, and `pnpm` and `yarn` work through
+  Corepack. See [the sandbox environment](./sandbox-environment#who-you-are).
+- **Private previews work inside your own site's iframe.** Set an iframe's
+  `src` to a preview's `urlWithToken`: the link keeps its token for your site
+  alone, a paused sandbox shows its waking page in the frame and reloads by
+  itself, and a public preview skips its warning page when it is framed. See
+  [previews](./javascript).
+- **Disk-only snapshots.** `mode: "disk"` on a snapshot keeps only the root
+  filesystem, and a sandbox created from it boots fresh with your files and no
+  saved processes. Memory snapshots stay the default. See [the API](./api).
+- **Large uploads say where they go.** An upload to a path outside
+  `/workspace` is refused with a hint to move the file with a command after it
+  lands, and a file write too big for `files/content` names `/uploads`. See
+  [the API](./api).
+- **Image builds ask for the disk they need.** A build with less than
+  {{image-build-disk-min-gib}} of scratch disk is refused before it
+  queues, with the size it needs. See
+  [the build machine](./images#build-machine).
+- **Wakes read memory from memory.** A paused sandbox's memory image stays in
+  the server's memory until its wake, so waking no longer reads it back from
+  disk first.
+- **Keys with one label are told apart.** The list of keys to revoke shows
+  when each was made, and the Agents & API keys page loads again for every
+  account, with Try again asking the server afresh.
+- **A mistyped address finds its page.** The not-found page shows the address
+  you asked for, the closest page the site has, and the pages people most
+  often want.
+- **Faster disks, shared fairly.** A sandbox's disk no longer has a fixed
+  speed or a burst to run out. It shares its server's drives with the
+  sandboxes beside it, in proportion: at least about {{disk-floor}} each way,
+  and up to about {{disk-up-to}} when its neighbours are quiet. A busy
+  neighbour slows your writes a little rather than stalling them, and a pause
+  stays quick on a busy server. See
+  [the sandbox environment](./sandbox-environment#disk-cpu-and-memory).
+- **A paused sandbox shows no live use.** Your account, the CLI and the
+  metrics API showed a sandbox paused a few minutes earlier as still using CPU
+  and memory, from its last reading before it slept. Now `latest` is empty
+  unless the sandbox is running, and a paused sandbox reads as using nothing.
+  See [observability](./observability).
+
 ## 28 September 2026
 
+- **Refused creates are counted, and the Sandboxes page is quicker.** A create
+  Runtime refuses, such as an image or tag that does not exist, leaves no
+  sandbox, so until now it showed nowhere. The Sandboxes page now counts each
+  one with the reason and the image asked for, and Images names a tag your
+  agents keep asking for that no image has. "How long they live" counts the
+  runs that ended; one still running has no lifetime yet.
+- **A console that reports your day.** Home, Sandboxes, Images, Volumes, Usage
+  & billing and Agents & API keys each open on what needs you, then today in a
+  line, two charts and the list. Sandboxes describes today's runs as a whole,
+  hour by hour against yesterday, by who started them and by image, and its
+  list opens on what runs now, with search over every day. A sandbox's page
+  says how it ended and why, draws its life from start to stop and copies what
+  happened for your agent. Usage & billing shows spend by who started it and
+  each key's use against its daily limit. Agents & API keys, in Settings, tells
+  agents connected from a tool apart from API keys. Today is counted in your
+  browser's time zone.
+- **Each sandbox's commands, on its page.** A sandbox's page lists the commands
+  run in it, `pytest · exit 1 · 28 s`, with failures in red and a running one
+  as running: on its Activity tab while it runs, and in its life once it ends.
+  Runtime keeps each command's program name, exit code and duration for 14
+  days, never its arguments. See [observability](./observability#commands).
+- **Speed, timed the way other providers time it.** The [speed guide](./speed)
+  now leads with each step's time on Runtime's servers, from the moment a
+  request reaches the API to its answer, the way other providers quote theirs:
+  a warm create answers in 102 ms, a pause in 63 ms and a wake in 76 ms at the
+  median, across 1,800 requests. Beside them are the figures E2B, Blaxel,
+  Daytona, Modal, Vercel, Cloudflare, Fly.io and CodeSandbox publish, and the
+  times from a laptop, network included, as what your own machine sees.
+- **Scheduled jobs.** Run a command in a fresh sandbox once at a time you
+  choose or on a cron schedule in your timezone, with each run's exit code and
+  output kept, retries when you ask for them, and pause, resume and cancel:
+  `runtime job create nightly --cron "0 3 * * *" -- python3 report.py`,
+  `runtime.jobs` in the SDKs, or the `runtime_job` MCP tool. Runs are paid
+  sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
+- **Secrets for jobs.** `runtime secrets set NAME --jobs` keeps a copy a job
+  puts into its run's environment (`--secret NAME` on `runtime job create`);
+  with `--host` as well, one command stores it for sandboxes and jobs alike.
+  The jobs copy can be rotated and read back; the sandboxes' copy still never
+  can.
 - **The region is now `us-east`.** It was `us-east-vin`, the name of one
   building; a region is named for its place, so more data centres nearby can
   join it. Every sandbox, snapshot, volume, image and job moved with it and
@@ -62,6 +194,35 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   or any other traffic now keeps a sandbox awake from its first second; before,
   traffic that began right after the last command could go unseen for up to
   15 seconds.
+- **A stop keeps the files written just before it.** A persistent sandbox now
+  restarts with every file it had, including ones written a moment before the
+  stop; before, writes from the last few seconds could be lost unless the
+  program had synced them. The stop still answers at once and billing ends
+  there: its programs are paused and its network cut first, the disk is written
+  out afterwards, and a restart waits for that. Sandboxes created from the next
+  base image on get the pause; older ones are written out with their programs
+  running. A stop of a sandbox with a volume no longer waits for the volume to
+  be let go: a create that names it straight away waits in the SDKs instead.
+- **A lease that runs out keeps the files written just before it too.** When
+  a sandbox's time or credit runs out, a persistent sandbox's disk and any
+  volume it writes to are written out the same way: its programs are paused
+  and its network cut just before the lease ends, and billing ends there. The
+  write after it is not charged. An ordinary sandbox still stops at the end of
+  its lease.
+- **Persistence can be turned off, and a stopped persistent sandbox deleted.**
+  `runtime sandbox update <id> --persistent off`, `update({ persistent: false })`
+  or `:update` with `{"persistent": false}` now works as the guides said: a
+  running sandbox stops paying for its disk at once, and a stopped one has its
+  disk deleted and its name freed. A stopped persistent sandbox is listed by
+  `runtime ls`, `runtime sandbox ls` and `GET /v1/sandboxes` with the live
+  ones, since its disk is still kept and billed.
+- **Agents can list images, volumes, volume backups and snapshots.** Over
+  MCP, `runtime_image`, `runtime_volume`, `runtime_volume_backup` and
+  `runtime_snapshot` take the action `list`, with the filters and pages of
+  `GET /v1/images`, `/v1/volumes`, `/v1/volume-backups` and `/v1/snapshots`:
+  `state`, `limit`, `cursor` from the last page's `nextCursor`, and `name`,
+  or `volumeId` for backups and `name` and `sandboxId` for snapshots. Their
+  `get` now reads one by `id`. See [MCP](./mcp).
 
 ## 27 September 2026
 
@@ -337,7 +498,8 @@ tool --json` passes the second `--json` to the tool, and a streamed command
 
 - **Disk bursts.** A sandbox now writes at about 250 MB/s for up to 30 seconds
   before settling at about 40 MB/s, so installs, builds and test runs finish
-  sooner. In a measurement a sandbox wrote at 200 MB/s instead of 38. See
+  sooner. In a measurement a sandbox wrote at 200 MB/s instead of 38 (now up
+  to about {{disk-up-to}}, with no burst to run out). See
   [the sandbox environment](./sandbox-environment).
 - **Volumes and snapshots are backed up off their server.** Every kept snapshot
   is copied off its server, encrypted with your organization's own key, and a

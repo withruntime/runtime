@@ -4,15 +4,15 @@
 
 and set RUNTIME_API_KEY (or put a Runtime key in E2B_API_KEY). What Runtime
 cannot do the way E2B does raises NotSupportedException, naming what to use."""
-from ._async_sandbox import (AsyncCommandHandle, AsyncCommands, AsyncFilesystem, AsyncSandbox,
+from ._async_sandbox import (AsyncCommandHandle, AsyncCommands, AsyncFilesystem, AsyncPty, AsyncSandbox,
                              AsyncSandboxPaginator)
 from ._core import (AuthenticationException, CommandExitException, CommandResult, EntryInfo,
-                    FileNotFoundException, FileType, InvalidArgumentException, NotEnoughSpaceException,
-                    NotFoundException, NotSupportedException, ProcessInfo, RateLimitException, SandboxException,
+                    FileNotFoundException, FileType, FilesystemEvent, FilesystemEventType, InvalidArgumentException, NotEnoughSpaceException,
+                    NotFoundException, NotSupportedException, ProcessInfo, PtySize, RateLimitException, SandboxException,
                     SandboxInfo, SandboxInfoLifecycle, SandboxNotFoundException, SandboxQuery,
                     ServiceBusyException, SnapshotInfo, TemplateException, TimeoutException, WriteInfo)
 from ._core import unsupported as _unsupported
-from ._sync_sandbox import CommandHandle, Commands, Filesystem, Sandbox, SandboxPaginator
+from ._sync_sandbox import CommandHandle, Commands, Filesystem, Pty, Sandbox, SandboxPaginator
 
 __version__ = "0.1.0"
 
@@ -46,12 +46,16 @@ wait_for_port = wait_for_url = wait_for_process = wait_for_file = wait_for_timeo
     "template ready checks", _TEMPLATES)
 
 __all__ = [
-    "Sandbox", "AsyncSandbox", "Commands", "AsyncCommands", "CommandHandle", "AsyncCommandHandle", "Filesystem",
+    "Sandbox", "AsyncSandbox", "PtySize", "Pty", "AsyncPty", "Commands", "AsyncCommands", "CommandHandle", "AsyncCommandHandle", "Filesystem",
     "AsyncFilesystem", "SandboxPaginator", "AsyncSandboxPaginator", "CommandResult", "CommandExitException",
-    "EntryInfo", "WriteInfo", "FileType", "ProcessInfo", "SandboxInfo", "SandboxInfoLifecycle", "SandboxQuery",
+    "EntryInfo", "WriteInfo", "FileType", "FilesystemEvent", "FilesystemEventType", "ProcessInfo", "SandboxInfo", "SandboxInfoLifecycle", "SandboxQuery",
     "SnapshotInfo", "SandboxException", "TimeoutException", "InvalidArgumentException", "NotEnoughSpaceException",
     "NotFoundException", "FileNotFoundException", "SandboxNotFoundException", "AuthenticationException",
     "TemplateException", "RateLimitException", "ServiceBusyException", "NotSupportedException", "Template",
     "AsyncTemplate", "Volume", "AsyncVolume", "Secret", "AsyncSecret", "wait_for_port", "wait_for_url",
     "wait_for_process", "wait_for_file", "wait_for_timeout",
 ]
+
+from ._async_io import AsyncWatchHandle
+from ._sync_io import WatchHandle
+__all__ += ["WatchHandle", "AsyncWatchHandle"]

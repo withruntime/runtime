@@ -13,7 +13,8 @@ each.
   a floor of {{cpu-floor-share}}, and {{memory-rate}} per GiB-hour of memory.
 - **Idle time bills only storage.** A sandbox pauses itself after
   {{idle-pause}} with nothing happening in it and wakes on the next request,
-  running its next command {{wake}} later with its memory and processes intact.
+  running its next command {{server-wake-command}} later on Runtime's servers,
+  with its memory and processes intact.
 - **It costs {{saving-range}} less** than {{rival-count}} other sandbox providers on an agent
   job that mostly waits ([the comparison](#compared-with-a-specific-provider)).
 - **Every sandbox is a Firecracker microVM** with its own kernel, on dedicated

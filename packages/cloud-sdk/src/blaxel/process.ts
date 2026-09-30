@@ -303,6 +303,8 @@ export class SandboxProcess {
     const startedAt = new Date().toISOString();
     const run = async () => {
       for await (const event of runtime.execStream(line, { ...options, signal: abort.signal })) {
+        if (event.type === "truncated")
+          throw responseError(502, "Some command output is no longer available.");
         if (event.type === "start") {
           id = event.processId;
           this.#remember(id, meta);
@@ -440,12 +442,15 @@ export class SandboxProcess {
     const runtime = await this.#ctx.live();
     const abort = new AbortController();
     const forward = () => abort.abort();
+    signal?.throwIfAborted();
     signal?.addEventListener("abort", forward, { once: true });
     try {
       for await (const event of runtime.processes.follow(found.id, {
         cursor: 0,
         signal: abort.signal,
       })) {
+        if (event.type === "truncated")
+          throw responseError(502, "Some command output is no longer available.");
         if (event.type === "stdout" || event.type === "stderr") {
           out[event.type] += event.data;
           out.logs += event.data;
@@ -476,10 +481,11 @@ export class SandboxProcess {
   /** The process, with the output it has written so far. */
   async get(
     identifier: string,
-    _options: { signal?: AbortSignal; retry?: boolean } = {},
+    options: { signal?: AbortSignal; retry?: boolean } = {},
   ): Promise<GetProcessByIdentifierResponse> {
+    options.signal?.throwIfAborted();
     const found = await this.#find(identifier);
-    const out = await this.#output(found, false);
+    const out = await this.#output(found, false, options.signal);
     return this.#settled(this.#response(found.info, this.#registry.meta.get(found.id), out));
   }
 
@@ -508,6 +514,7 @@ export class SandboxProcess {
     if (maxWait === 0) throw late();
     const abort = new AbortController();
     const forward = () => abort.abort(signal?.reason);
+    signal?.throwIfAborted();
     signal?.addEventListener("abort", forward, { once: true });
     const timer = maxWait === -1 ? undefined : setTimeout(() => abort.abort(late()), maxWait);
     try {
@@ -621,6 +628,8 @@ export class SandboxProcess {
           cursor: 0,
           signal: abort.signal,
         })) {
+          if (event.type === "truncated")
+            throw responseError(502, "Some command output is no longer available.");
           if (event.type === "stdout" || event.type === "stderr") {
             const lines = (partial[event.type] + event.data).split(/\r?\n/);
             partial[event.type] = lines.pop()!;

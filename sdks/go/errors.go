@@ -55,7 +55,17 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // deliberate are 503s that are a deliberate state, not a passing one: a
 // product switched off here. Retrying cannot change them.
-var deliberate = map[string]bool{"fork_unavailable": true, "previews_unavailable": true, "unavailable": true}
+var deliberate = map[string]bool{
+	"unavailable":               true,
+	"unsupported":               true,
+	"fork_unavailable":          true,
+	"previews_unavailable":      true,
+	"network_unavailable":       true,
+	"network_rules_unavailable": true,
+	"secrets_unavailable":       true,
+	"identity_unavailable":      true,
+	"env_unavailable":           true,
+}
 
 // passing are refusals that clear by themselves: a host frees room, a trial
 // slot frees.
@@ -70,6 +80,8 @@ var waitsForRoom = map[string]bool{
 	"trial_capacity":     true,
 	"quota_exceeded":     true,
 	"no_capacity":        true,
+	// A volume whose last sandbox is stopping: free within seconds.
+	"volume_releasing": true,
 }
 
 // Retryable reports whether retrying this exact call (with the same

@@ -6,6 +6,8 @@ Runtime and Prime Sandboxes both give every sandbox a microVM with its own kerne
 Runtime and {{cost:prime}} on Prime Sandboxes**. At 100,000 runs a month that is {{cost:runtime:100000}}
 against {{cost:prime:100000}}, **{{=$0 less:prime:100000}} a month saved**.
 
+Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Prime bills the vCPUs, memory and disk a
@@ -14,7 +16,8 @@ against {{cost:prime:100000}}, **{{=$0 less:prime:100000}} a month saved**.
   job costs {{cost:runtime:busy}} on Runtime and {{cost:prime}} on Prime.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
   sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
-  month until a request wakes it; the next command runs {{wake}} after that.
+  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+  Runtime's servers.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).

@@ -11,9 +11,11 @@ SDK's ``unpackArchive`` in ``packages/cloud-sdk/src/tar.ts`` keeps the same rule
 """
 from __future__ import annotations
 
-import io
 import os
-import tarfile
+import shutil
+import tempfile
+import zlib
+from typing import Optional
 
 from ._errors import RuntimeError
 
@@ -57,43 +59,207 @@ def _link_stays_inside(root: str, directory: str, link: str) -> bool:
     return True
 
 
-def unpack_archive(data: bytes, target: str) -> None:
-    """Unpacks a gzipped tar into ``target``, refusing any entry that would
-    land outside it."""
-    os.makedirs(target, exist_ok=True)
-    root = os.path.realpath(target)
-    links: list[tuple[str, str, str]] = []
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        for member in archive:
-            name = member.name
+def _cut_short() -> RuntimeError:
+    """A folder that did not arrive whole: tar in the sandbox stopped part way
+    (a file it may not read, one that changed as it was read), which ends the
+    gzip stream short, or the connection was lost."""
+    return RuntimeError(
+        "The folder's archive arrived cut short: tar in the sandbox stopped part way, or the "
+        "connection was lost. Nothing was written.",
+        code="download_incomplete",
+        hint="Try again. If it fails the same way, a file in the folder cannot be read by the "
+             "sandbox user or changes as it is read.")
+
+
+def _text(field: bytes) -> str:
+    return field.split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
+
+
+def _size(field: bytes) -> int:
+    """An octal size, or GNU's base-256 one for a file of 8 GiB or more."""
+    if field[0] & 0x80:
+        return int.from_bytes(field[1:], "big")
+    return int(_text(field).strip() or "0", 8)
+
+
+def _pax(body: bytes) -> dict[str, str]:
+    """A pax header's records, ``<length> <key>=<value>\\n`` each."""
+    out: dict[str, str] = {}
+    while body:
+        length = int(body.split(b" ", 1)[0])
+        key, _, value = body[:length].split(b" ", 1)[1].rstrip(b"\n").partition(b"=")
+        out[key.decode()] = value.decode("utf-8", "surrogateescape")
+        body = body[length:]
+    return out
+
+
+class Unpacker:
+    """Unpacks a gzipped tar fed to it a chunk at a time into ``target``,
+    refusing any entry that would land outside it, and holding no more than a
+    chunk. It unpacks into a folder beside the target and moves it into place
+    only once the whole archive arrived (``finish``), so an archive cut short
+    leaves nothing behind that could pass for the folder. A target that exists
+    is merged into, files of the same name replaced. ``discard`` removes what
+    was unpacked if ``finish`` was never reached."""
+
+    def __init__(self, target: str) -> None:
+        self._final = os.path.abspath(target)
+        os.makedirs(os.path.dirname(self._final), exist_ok=True)
+        self._staging = tempfile.mkdtemp(prefix=os.path.basename(self._final) + ".runtime-partial-",
+                                         dir=os.path.dirname(self._final))
+        self._root = os.path.realpath(self._staging)
+        self._inflate = zlib.decompressobj(wbits=31)
+        self._held = bytearray()
+        self._links: list[tuple[str, str, str]] = []
+        self._ended = False
+        # What the bytes after the header are: ("file", handle, path, mode),
+        # ("long", key, parts) or ("skip",), with how many are left of the
+        # entry's body and then of its padding.
+        self._entry: Optional[tuple] = None
+        self._left = 0
+        self._padding = 0
+        self._long: dict[str, str] = {}
+
+    def feed(self, data: bytes) -> None:
+        try:
+            self._held += self._inflate.decompress(data)
+        except zlib.error as error:
+            raise _cut_short() from error
+        while self._step():
+            pass
+
+    def _step(self) -> bool:
+        if self._ended:
+            self._held.clear()
+            return False
+        if self._entry is None:
+            if len(self._held) < 512:
+                return False
+            header = bytes(self._held[:512])
+            del self._held[:512]
+            if not any(header):
+                self._ended = True
+                return True
+            self._begin(header)
+            return True
+        if self._left:
+            if not self._held:
+                return False
+            part = bytes(self._held[:self._left])
+            del self._held[:len(part)]
+            self._left -= len(part)
+            kind = self._entry[0]
+            if kind == "file":
+                self._entry[1].write(part)
+            elif kind == "long":
+                self._entry[2].append(part)
+            if self._left:
+                return False
+            self._end_body()
+            return True
+        if self._padding:
+            if not self._held:
+                return False
+            taken = min(self._padding, len(self._held))
+            del self._held[:taken]
+            self._padding -= taken
+            if self._padding:
+                return False
+        self._entry = None
+        return True
+
+    def _begin(self, header: bytes) -> None:
+        size = _size(header[124:136])
+        kind = chr(header[156]) if header[156] else "0"
+        prefix = _text(header[345:500])
+        name = self._long.pop("path", None) or (f"{prefix}/{_text(header[:100])}" if prefix else _text(header[:100]))
+        link = self._long.pop("linkpath", None) or _text(header[157:257])
+        self._long.clear()
+        mode = int(_text(header[100:108]).strip() or "644", 8)
+        self._left, self._padding = size, -size % 512
+        if kind in ("L", "K", "x"):
+            self._entry = ("long", kind, [])
+        else:
+            self._entry = ("skip",)
             while name.startswith("./"):
                 name = name[2:]
-            if name in ("", "."):
-                continue
-            destination = os.path.normpath(os.path.join(root, name))
+            if name not in ("", ".", "./"):
+                destination = os.path.normpath(os.path.join(self._root, name))
+                _assert_plain(self._root, destination, name)
+                if kind == "5":
+                    os.makedirs(destination, exist_ok=True)
+                elif kind == "2":
+                    self._links.append((destination, link, name))
+                elif kind in ("0", "7"):
+                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    self._entry = ("file", open(destination, "wb"), destination, mode)
+        if not self._left:
+            self._end_body()
+
+    def _end_body(self) -> None:
+        entry = self._entry
+        assert entry is not None
+        if entry[0] == "file":
+            entry[1].close()
+            os.chmod(entry[2], entry[3] & 0o777)
+        elif entry[0] == "long":
+            body = b"".join(entry[2])
+            if entry[1] == "x":
+                self._long.update(_pax(body))
+            else:
+                self._long["path" if entry[1] == "L" else "linkpath"] = _text(body)
+        self._entry = ("skip",)
+
+    def finish(self) -> None:
+        """Checks the archive arrived whole, makes its links and puts it in place."""
+        if not self._inflate.eof or not self._ended:
+            raise _cut_short()
+        root = self._root
+        for destination, link, name in self._links:
             _assert_plain(root, destination, name)
-            if member.isdir():
-                os.makedirs(destination, exist_ok=True)
-            elif member.issym():
-                links.append((destination, member.linkname, name))
-            elif member.isfile():
-                os.makedirs(os.path.dirname(destination), exist_ok=True)
-                source = archive.extractfile(member)
-                with open(destination, "wb") as out:
-                    out.write(source.read() if source else b"")
-                os.chmod(destination, member.mode & 0o777)
-    for destination, link, name in links:
-        _assert_plain(root, destination, name)
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        try:
-            os.symlink(link, destination)
-        except FileExistsError:
-            pass
-    for destination, link, name in links:
-        if _link_stays_inside(root, os.path.dirname(destination), link):
-            continue
-        try:
-            os.unlink(destination)
-        except OSError:
-            pass
-        raise _refuse(f"Refusing an archive link that leads outside the target: {name} -> {link}")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            try:
+                os.symlink(link, destination)
+            except FileExistsError:
+                pass
+        for destination, link, name in self._links:
+            if _link_stays_inside(root, os.path.dirname(destination), link):
+                continue
+            try:
+                os.unlink(destination)
+            except OSError:
+                pass
+            raise _refuse(f"Refusing an archive link that leads outside the target: {name} -> {link}")
+        if not os.path.lexists(self._final):
+            os.rename(self._staging, self._final)
+        else:
+            final = os.path.realpath(self._final)
+            _merge(root, final, final)
+
+    def discard(self) -> None:
+        if self._entry is not None and self._entry[0] == "file":
+            self._entry[1].close()
+        shutil.rmtree(self._staging, ignore_errors=True)
+
+
+def _merge(source_dir: str, target_dir: str, root: str) -> None:
+    """Moves what was unpacked into ``target_dir``, merging with what is there
+    and replacing files of the same name, never through a link in it."""
+    for name in os.listdir(source_dir):
+        source = os.path.join(source_dir, name)
+        destination = os.path.join(target_dir, name)
+        _assert_plain(root, destination, os.path.relpath(destination, root))
+        if os.path.isdir(source) and not os.path.islink(source) and os.path.isdir(destination):
+            _merge(source, destination, root)
+        else:
+            os.replace(source, destination)
+
+
+def unpack_archive(data: bytes, target: str) -> None:
+    """Unpacks a whole gzipped tar held in memory, by the same rules."""
+    unpacker = Unpacker(target)
+    try:
+        unpacker.feed(data)
+        unpacker.finish()
+    finally:
+        unpacker.discard()

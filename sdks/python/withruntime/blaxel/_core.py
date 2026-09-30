@@ -1338,7 +1338,8 @@ def process_line(command: str, name: str, max_restarts: Optional[int] = None, li
                *([f"{{ [ -e {HOME} ] || sudo ln -s {RUNTIME_HOME} {HOME}; }} 2>/dev/null"] if link_home else []),
                f"__rt_cmd={shell_quote(command)}"]
     if max_restarts is None:
-        return "; ".join([*prelude, f"{AS_ROOT} {shell_quote('eval \"$__rt_cmd\"')}"])
+        evaluate = shell_quote('eval "$__rt_cmd"')
+        return "; ".join([*prelude, f"{AS_ROOT} {evaluate}"])
     limit = "unlimited" if max_restarts < 0 else str(max_restarts)
     loop = ('__rt_n=0; while :; do ( eval "$__rt_cmd" ); __rt_c=$?; [ $__rt_c -eq 0 ] && exit 0; '
             + ("" if max_restarts < 0 else f"[ $__rt_n -ge {max_restarts} ] && exit $__rt_c; ")

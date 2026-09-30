@@ -3,6 +3,7 @@ the rules that map an E2B call onto Runtime's SDK. Nothing here does I/O."""
 from __future__ import annotations
 
 import math
+import asyncio
 import os
 import re
 import time
@@ -83,7 +84,28 @@ class NotSupportedException(SandboxException):
         self.code = "not_supported"
 
 
+class FilesystemEventType(Enum):
+    CHMOD = "chmod"
+    CREATE = "create"
+    REMOVE = "remove"
+    RENAME = "rename"
+    WRITE = "write"
+
+
+@dataclass
+class FilesystemEvent:
+    name: str
+    type: FilesystemEventType
+    entry: Optional["EntryInfo"] = None
+
+
 # ---- data classes --------------------------------------------------------
+
+
+@dataclass
+class PtySize:
+    rows: int
+    cols: int
 
 
 @dataclass
@@ -141,7 +163,7 @@ class EntryInfo(WriteInfo):
     mode: int
     permissions: str
     owner: str
-    """Runtime's listing does not say who owns a file: always ""."""
+    """Owner name when supplied by the guest; empty on older guest images."""
     group: str
     modified_time: datetime
     symlink_target: Optional[str] = None
@@ -239,11 +261,23 @@ REFUSED_CONNECTION = {
     "api_headers": "Remove it: this package talks only to Runtime.",
     "proxy": "Set HTTPS_PROXY in the environment instead.",
 }
-IGNORED_CONNECTION = {"request_timeout", "retries", "validate_api_key", "logger", "secure"}
+IGNORED_CONNECTION = {"retries", "validate_api_key", "logger", "secure"}
+
+
+def request_seconds(owner: Any, value: Optional[float]) -> float:
+    if value is not None:
+        return value
+    owner = getattr(owner, "_filesystem", owner)
+    owner = getattr(owner, "_sandbox", owner)
+    return getattr(owner, "_request_timeout", 60)
 
 
 def check_connection(opts: Dict[str, Any]) -> None:
     for name, value in opts.items():
+        if name == "request_timeout":
+            from .._request_scope import limits
+            limits(value)
+            continue
         if value is None or name in IGNORED_CONNECTION or name in ("api_key", "client"):
             continue
         if name == "debug":
@@ -320,11 +354,13 @@ def refuse_user(user: Optional[str]) -> None:
 
 
 def command_timeout_ms(timeout: Optional[float]) -> int:
-    if timeout is None:
-        return COMMAND_TIMEOUT * 1000
-    if timeout == 0:
-        return LONGEST_MS
-    return min(int(math.ceil(timeout * 1000)), LONGEST_MS)
+    # Pinned E2B SDKs treat None and 0 as an unlimited connection, not a
+    # process lifetime. The default of 60 seconds lives on Commands.run.
+    if timeout is None or timeout == 0:
+        return 0
+    if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+        raise InvalidArgumentException("timeout must be a nonnegative finite number of seconds")
+    return max(1, round(timeout * 1000))
 
 
 def to_result(exit_code: Optional[int], stdout: str, stderr: str, truncated: bool = False) -> CommandResult:
@@ -393,14 +429,18 @@ def _date(value: Any) -> datetime:
 
 def entry_info(entry: Dict[str, Any]) -> EntryInfo:
     try:
-        mode = int(str(entry.get("mode", "0")), 8)
-    except ValueError:
+        raw_mode = entry.get("mode", 0)
+        mode = int(raw_mode, 8) if isinstance(raw_mode, str) else int(raw_mode)
+    except (ValueError, TypeError):
         mode = 0
     bits = mode & 0o777
     return EntryInfo(name=entry.get("name", ""), type=_TYPES.get(entry.get("type", "")), path=entry["path"],
                      size=int(entry.get("size", 0)), mode=mode,
                      permissions=_PERMS[(bits >> 6) & 7] + _PERMS[(bits >> 3) & 7] + _PERMS[bits & 7],
-                     owner="", group="", modified_time=_date(entry.get("modifiedAt")))
+                     owner=entry.get("owner", ""), group=entry.get("group", ""),
+                     modified_time=(datetime.fromtimestamp(entry["mtimeMs"] / 1000, tz=timezone.utc)
+                                    if "mtimeMs" in entry else _date(entry.get("modifiedAt"))),
+                     symlink_target=entry.get("symlinkTarget"))
 
 
 def to_bytes(data: Any) -> bytes:
@@ -463,8 +503,18 @@ def list_filter(query: Optional[SandboxQuery], limit: Optional[int], next_token:
     return out
 
 
+def file_timeout(error: BaseException) -> BaseException:
+    try:
+        from httpx import ReadTimeout
+    except ImportError:
+        return TimeoutException(str(error) or "The file transfer timed out")
+    return ReadTimeout(str(error) or "The file transfer timed out")
+
+
 def translate(error: BaseException, subject: str = "other") -> BaseException:
     """A Runtime SDK error as the E2B exception code written for E2B expects."""
+    if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
+        return file_timeout(error) if subject == "file_http" else TimeoutException(str(error) or "The request deadline expired")
     if not isinstance(error, _SDKError):
         return error
     parts = [error.message]
@@ -479,7 +529,7 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
         out = NotSupportedException(code[: -len("_unavailable")], error.hint or "", message)
     elif status in (401, 403):
         out = AuthenticationException(message)
-    elif code == "file_not_found" or (status == 404 and subject == "file"):
+    elif code == "file_not_found" or (status == 404 and subject in ("file", "file_http")):
         out = FileNotFoundException(message)
     elif status == 404 and subject == "sandbox":
         out = SandboxNotFoundException(message)
@@ -493,8 +543,8 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
         out = InvalidArgumentException(message)
     elif status == 503:
         out = ServiceBusyException(message)
-    elif code == "command_timeout":
-        out = TimeoutException(message)
+    elif code in ("command_timeout", "request_timeout"):
+        out = file_timeout(error) if subject == "file_http" else TimeoutException(message)
     else:
         out = SandboxException(message)
     if isinstance(out, SandboxException) and status:

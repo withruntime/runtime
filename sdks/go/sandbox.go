@@ -47,7 +47,7 @@ func (s *SandboxService) Create(ctx context.Context, opts *CreateOptions) (*Sand
 	}
 	sbx := newSandbox(s.c, info)
 	if !opts.NoWait && info.State != "running" {
-		if err := sbx.WaitFor(ctx, "running", 60*time.Second); err != nil {
+		if err := sbx.WaitFor(ctx, "running", waitForTimeoutSeconds*time.Second); err != nil {
 			return sbx, err
 		}
 		if sbx.State() != "running" {
@@ -359,7 +359,7 @@ func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 	}
 	margin := opts.Margin
 	if margin == 0 {
-		margin = 10 * time.Minute
+		margin = keepAliveMarginSeconds * time.Second
 	}
 	margin = min(time.Hour, max(time.Minute, margin))
 	loop, cancel := context.WithCancel(ctx)
@@ -512,11 +512,11 @@ func (s *Sandbox) Snapshot(ctx context.Context, opts *SnapshotOptions) (*Snapsho
 	// of it is refused as not paused.
 	switch s.State() {
 	case "resuming", "starting":
-		if err := s.WaitFor(ctx, "running", time.Minute); err != nil {
+		if err := s.WaitFor(ctx, "running", waitForTimeoutSeconds*time.Second); err != nil {
 			return nil, err
 		}
 	case "pausing":
-		if err := s.WaitFor(ctx, "paused", time.Minute); err != nil {
+		if err := s.WaitFor(ctx, "paused", waitForTimeoutSeconds*time.Second); err != nil {
 			return nil, err
 		}
 	}

@@ -15,6 +15,11 @@ export type KeyLimits = {
     remainingMicros: string | null;
     window: "24h";
   };
+  /** The account's free trial time in milliseconds, the same figures as
+   * `usage.get()`, or null when the account has no trial. A trial sandbox
+   * that has not ended holds its whole lease in `reservedMs`;
+   * `availableMs = totalMs - usedMs - reservedMs`. */
+  trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
 };
 
 /** `runtime.limits.get()`: whether this key is read-only, and what its agent

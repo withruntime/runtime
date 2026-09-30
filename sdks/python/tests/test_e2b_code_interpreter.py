@@ -31,11 +31,14 @@ class RunCode(unittest.TestCase):
         self.assertEqual(execution.execution_count, 1)
         self.assertIsNone(execution.error)
         self.assertEqual(self.world.called("interpreter.run")[0],
-                         ("1 + 1", {"language": "python", "timeout_ms": 60_000}))
+                         ("1 + 1", {"language": "python", "timeout_ms": 0, "interrupt_on_disconnect": False}))
 
     def test_base_commands_still_work(self):
         from e2b_fake import Result as Run
         self.world.exec = lambda *_: Run(1, "", "no\n")
+        self.world.output = lambda *_: [
+            {"type": "stderr", "data": "no\n", "offset": 0},
+            {"type": "exit", "exitCode": 1, "timedOut": False}]
         with self.assertRaises(CommandExitException):
             self.create().commands.run("false")
 
@@ -64,11 +67,18 @@ class RunCode(unittest.TestCase):
         self.world.interpreter = lambda *_: {"status": "timeout", "stdout": "", "stderr": "", "results": []}
         with self.assertRaises(TimeoutException):
             sbx.run_code("while True: pass", timeout=1)
-        for language in ("bash", "r", "typescript", "java"):
+        for language in ("cobol",):
             with self.assertRaises(NotSupportedException):
                 sbx.run_code("1", language=language)
         with self.assertRaises(NotSupportedException):
             sbx.run_code("1", envs={"A": "1"})
+
+    def test_all_interpreter_languages(self):
+        sbx = self.create()
+        for language in ("bash", "r", "typescript", "java", "go"):
+            sbx.run_code("1", language=language)
+            self.assertEqual(self.world.called("interpreter.run")[-1][1]["language"], language)
+            self.assertEqual(sbx.create_code_context(language=language).language, language)
 
     def test_streams(self):
         sbx = self.create()
@@ -78,18 +88,16 @@ class RunCode(unittest.TestCase):
         self.assertEqual((out[0].line, out[0].error), ("out print(1)\n", False))
         self.assertEqual([one.text for one in results], ["2"])
 
-    def test_sandbox_envs_reach_code_through_one_context(self):
+    def test_sandbox_envs_are_runtimes_so_code_in_any_context_from_any_client_has_them(self):
         sbx = self.create(envs={"TOKEN": "t"})
+        self.assertEqual(self.world.called("sandboxes.create")[-1][0]["env"], {"TOKEN": "t"})
         sbx.run_code("import os")
-        sbx.run_code("os.environ['TOKEN']")
-        self.assertEqual(self.world.called("contexts.create"),
-                         [({"id": "e2b-python", "language": "python", "env": {"TOKEN": "t"}},)])
+        again = Sandbox.connect(sbx.sandbox_id, client=self.world.client())
+        again.run_code("os.environ['TOKEN']")
+        # No context is made to carry them: the default one already has them.
+        self.assertEqual(self.world.called("contexts.create"), [])
         self.assertEqual([call[1] for call in self.world.called("interpreter.run")],
-                         [{"context": "e2b-python", "timeout_ms": 60_000}] * 2)
-        other = Sandbox.create(client=self.world.client(), envs={"TOKEN": "t"})
-        other.runtime.contexts["e2b-python"] = {"id": "e2b-python", "language": "python", "cwd": "/workspace"}
-        other.run_code("1")
-        self.assertEqual(self.world.called("interpreter.run")[-1][1]["context"], "e2b-python")
+                         [{"language": "python", "timeout_ms": 0, "interrupt_on_disconnect": False}] * 2)
 
     def test_contexts(self):
         sbx = self.create()
@@ -97,12 +105,12 @@ class RunCode(unittest.TestCase):
         self.assertEqual(context, Context("ctx-1", "javascript", "/tmp"))
         self.assertEqual(sbx.list_code_contexts(), [context])
         sbx.run_code("x", context=context)
-        self.assertEqual(self.world.called("interpreter.run")[0][1], {"context": "ctx-1", "timeout_ms": 60_000})
+        self.assertEqual(self.world.called("interpreter.run")[0][1], {"context": "ctx-1", "timeout_ms": 0, "interrupt_on_disconnect": False})
         sbx.restart_code_context(context)
         sbx.remove_code_context("ctx-1")
         self.assertEqual(self.world.called("contexts.remove"), [("ctx-1",)])
         with self.assertRaises(NotSupportedException):
-            sbx.create_code_context(language="r")
+            sbx.create_code_context(language="cobol")
 
 
 class AsyncRunCode(unittest.TestCase):

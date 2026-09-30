@@ -43,11 +43,14 @@ The sandbox object does the rest:
 - `files` to read, write, list, glob, stat, move and remove, and to copy whole
   directories with `upload` and `download`;
 - `pause`, `wake`, `extend`, `fork` and `snapshot` (a paused sandbox also wakes
-  by itself on the next call), `update` for its name, automatic wake, idle pause
-  and persistence, and `keepAlive` to extend its lease while your process runs;
+  by itself on the next call), `update` for its name, environment, automatic
+  wake, idle pause and persistence, `keepAlive` to extend its lease while your
+  process runs, `switchImage` to move it to a new image keeping /workspace,
+  and `delete` to remove it for good;
 - `interpreter`, `network`, `previews`, `desktop`, `mounts` (your S3, R2 or
-  Google Cloud Storage bucket as a folder), `metrics` and `mcp` (servers from
-  the MCP catalog, run in the sandbox) for the other products.
+  Google Cloud Storage bucket as a folder), `tailscale` (a paid sandbox on your
+  own tailnet), `metrics` and `mcp` (servers from the MCP catalog, run in the
+  sandbox) for the other products.
 
 A sandbox pauses itself after {{idle-pause}} with nothing happening in it, keeping
 its memory and processes, and the next call wakes it, so an idle sandbox costs
@@ -56,7 +59,7 @@ no compute; `idlePauseSeconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or
 `Sandbox.getOrCreate(name)` returns the sandbox with that name, woken if it is
 paused, or creates it.
 
-The client has `sandboxes`, `images`, `volumes`, `snapshots`, `secrets`,
+The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`, `secrets`,
 `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and `audit`
 to watch the account; `domains`, `ports`, `addresses`, `tunnel` and `network`
 to connect sandboxes to your own world (paid accounts); and `mcp`, `sso`,

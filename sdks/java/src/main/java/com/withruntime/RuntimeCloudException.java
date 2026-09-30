@@ -15,14 +15,30 @@ public class RuntimeCloudException extends RuntimeException {
   private static final long serialVersionUID = 1L;
 
   /** 503s that are a deliberate state, not a passing one: retrying cannot change them. */
-  static final Set<String> DELIBERATE = Set.of("fork_unavailable", "previews_unavailable", "unavailable");
+  static final Set<String> DELIBERATE =
+      Set.of(
+          "unavailable",
+          "unsupported",
+          "fork_unavailable",
+          "previews_unavailable",
+          "network_unavailable",
+          "network_rules_unavailable",
+          "secrets_unavailable",
+          "identity_unavailable",
+          "env_unavailable");
 
   /** Refusals that pass on their own: a host frees room, a trial slot frees. */
   static final Set<String> PASSING = Set.of("no_capacity", "trial_busy");
 
   /** Refusals of a create that clear when a sandbox stops or a host frees room. */
   static final Set<String> WAITS_FOR_ROOM =
-      Set.of("trial_busy", "trial_domain_limit", "trial_capacity", "quota_exceeded", "no_capacity");
+      Set.of(
+          "trial_busy",
+          "trial_domain_limit",
+          "trial_capacity",
+          "quota_exceeded",
+          "no_capacity",
+          "volume_releasing");
 
   private final String code;
   private final int status;

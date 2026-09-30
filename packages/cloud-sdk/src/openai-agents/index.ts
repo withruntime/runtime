@@ -25,6 +25,7 @@ import {
   type Editor,
 } from "@openai/agents-core";
 import type { Manifest } from "@openai/agents-core/sandbox";
+import { OPENAI_AGENTS_EXEC_TIMEOUT_MS } from "../api-defaults.js";
 import {
   SandboxProviderError,
   SandboxUnsupportedFeatureError,
@@ -628,32 +629,11 @@ export class RuntimeCloudSandboxSession implements SandboxSession<RuntimeCloudSa
         await this.#writeBytes(path, await readFile(entry.src));
         return;
       }
-      case "local_dir": {
-        // One gzipped tar, staged inside /workspace where uploads of any size are accepted.
-        const { packDirectory } = await import("../tar.js");
-        const staging = `${STAGING}/${crypto.randomUUID()}.tar.gz`;
-        const archive = await packDirectory(entry.src);
-        try {
-          await this.#call((sbx) => sbx.files.write(staging, archive));
-          const unpacked = await this.#call((sbx) =>
-            sbx.exec([
-              "sh",
-              "-c",
-              'mkdir -p -- "$1" && tar -xzf "$2" -C "$1"',
-              "sh",
-              path,
-              staging,
-            ]),
-          );
-          if (unpacked.exitCode !== 0)
-            throw new SandboxProviderError(`${PROVIDER} could not place ${entry.src}.`, {
-              stderr: unpacked.stderr,
-            });
-        } finally {
-          await this.#call((sbx) => sbx.files.remove(staging)).catch(() => undefined);
-        }
+      case "local_dir":
+        // One archive through the API's folder routes, unpacked by the
+        // sandbox's own tar as it arrives.
+        await this.#call((sbx) => sbx.files.upload(entry.src, path));
         return;
-      }
       case "git_repo": {
         const url = /^[a-z]+:\/\//.test(entry.repo)
           ? entry.repo
@@ -857,7 +837,7 @@ export class RuntimeCloudSandboxClient implements SandboxClient<
       ...(options.exposedPorts ? { configuredExposedPorts: options.exposedPorts } : {}),
       previewVisibility: options.previewVisibility ?? "private",
       pauseOnExit: options.pauseOnExit ?? false,
-      execTimeoutMs: Math.min(MAX_EXEC_MS, options.execTimeoutMs ?? 3_600_000),
+      execTimeoutMs: Math.min(MAX_EXEC_MS, options.execTimeoutMs ?? OPENAI_AGENTS_EXEC_TIMEOUT_MS),
     };
     const session = new RuntimeCloudSandboxSession({ state, runtime: this.runtime });
     await session.sandbox();
@@ -948,7 +928,10 @@ export class RuntimeCloudSandboxClient implements SandboxClient<
         : {}),
       previewVisibility: record.previewVisibility === "public" ? "public" : "private",
       pauseOnExit: record.pauseOnExit === true,
-      execTimeoutMs: typeof record.execTimeoutMs === "number" ? record.execTimeoutMs : 3_600_000,
+      execTimeoutMs:
+        typeof record.execTimeoutMs === "number"
+          ? record.execTimeoutMs
+          : OPENAI_AGENTS_EXEC_TIMEOUT_MS,
     };
   }
 }

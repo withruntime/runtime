@@ -16,6 +16,7 @@ require "openssl"
 
 require_relative "withruntime/version"
 require_relative "withruntime/errors"
+require_relative "withruntime/api_defaults"
 require_relative "withruntime/record"
 require_relative "withruntime/fields"
 require_relative "withruntime/transport"

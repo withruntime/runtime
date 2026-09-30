@@ -124,7 +124,7 @@ test("an uploaded file keeps its mode, and a directory unpacks with its modes", 
   const script = nodePath.join(dir, "run.sh");
   await writeFile(script, "#!/bin/sh\necho hi\n");
   await chmod(script, 0o755);
-  const { sbx, seen, bodies } = await sandboxWith((request) =>
+  const { sbx, seen } = await sandboxWith((request) =>
     new URL(request.url).pathname.endsWith(":exec")
       ? Response.json({ exitCode: 0, stdout: "", stderr: "", timedOut: false })
       : Response.json({ ok: true }),
@@ -136,8 +136,33 @@ test("an uploaded file keeps its mode, and a directory unpacks with its modes", 
   await mkdir(nodePath.join(dir, "tree"));
   await writeFile(nodePath.join(dir, "tree", "x"), "x");
   await sbx.files.upload(nodePath.join(dir, "tree"), "/workspace/tree");
-  const exec = bodies.find((body) => (body as { argv?: string[] } | undefined)?.argv) as {
-    argv: string[];
-  };
-  expect(exec.argv[2]).toContain("tar -xpzf");
+  expect(seen.at(-1)).toBe(`PUT /v1/sandboxes/${SANDBOX}/files/archive?path=%2Fworkspace%2Ftree`);
+});
+
+test("a webhook watch runs until stopped, and a preview names the sites that may embed it", async () => {
+  const { sbx, seen, bodies } = await sandboxWith((request) =>
+    request.method === "POST" && new URL(request.url).pathname.endsWith("/files/watches")
+      ? Response.json({
+          id: "sync",
+          path: "/workspace/app",
+          processId: "p1",
+          state: "running",
+          startedAt: 0,
+          cursor: 0,
+          webhook: true,
+        })
+      : Response.json({ port: 3000, embedOrigins: ["https://app.example.com"] }),
+  );
+  const watch = await sbx.files.watches.webhook("/workspace/app", { recursive: true, id: "sync" });
+  expect(watch.webhook).toBe(true);
+  expect(seen[0]).toBe(`POST /v1/sandboxes/${SANDBOX}/files/watches`);
+  expect(bodies[0]).toEqual({
+    path: "/workspace/app",
+    recursive: true,
+    id: "sync",
+    timeoutMs: 0,
+    webhook: true,
+  });
+  await sbx.previews.create(3000, { embedOrigins: ["https://app.example.com"] });
+  expect(bodies[1]).toEqual({ port: 3000, embedOrigins: ["https://app.example.com"] });
 });

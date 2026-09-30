@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-09-29",
+  "providers": [
+    {
+      "id": "e2b",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "e2b",
+          "version": "2.51.0",
+          "artifacts": {
+            "2.51.0": "sha512-P+50lx1nOYpgCFyE1xuz6JVN/TqJivMUiH7v+RW0CUSfb4+NCu8IkC5KruT2sNPgp6aexddQQ77+OZKGpZZJ+Q=="
+          }
+        },
+        {
+          "registry": "npm",
+          "name": "@e2b/code-interpreter",
+          "version": "2.8.0",
+          "artifacts": {
+            "2.8.0": "sha512-tWFi8IJYV3V6jOVfQ8V5PkzockrYP+ndWB/jKiJvRATTmNAy8+S/7S+iSh2Lb2Hrul869G2adRiN2xW8peJTig=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "e2b",
+          "version": "2.51.0",
+          "artifacts": {
+            "e2b-2.51.0-py3-none-any.whl": "sha256-951d0fd069f017e760b338a435bdb83589b4bfb9574fc5203a7f777e9cb994c2",
+            "e2b-2.51.0.tar.gz": "sha256-902ee861b30c8ec3e46e7f84db8c993f30695872c7b4490efaad1627ec6e08ba"
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "e2b-code-interpreter",
+          "version": "2.10.0",
+          "artifacts": {
+            "e2b_code_interpreter-2.10.0-py3-none-any.whl": "sha256-6ba776122086261875bc6033ef2dc42ac6b6e22cefdffdfd19d30e93bb09786f",
+            "e2b_code_interpreter-2.10.0.tar.gz": "sha256-57fb7f9b9ad99ebbdf407619786fdb84e31537c2fbc8358c394aa0f0cbc1af28"
+          }
+        }
+      ]
+    },
+    {
+      "id": "daytona",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@daytona/sdk",
+          "version": "0.220.0",
+          "artifacts": {
+            "0.220.0": "sha512-PJio3vbDwRApzlsK6AGO7r4CHJcF9PI5DWuUW2yUnA2MVJSh/jotS0onKBv6boC5F+oboljTibUMxrwVPIrOlQ=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "daytona",
+          "version": "0.220.0",
+          "artifacts": {
+            "daytona-0.220.0-py3-none-any.whl": "sha256-5f71299eaf3a446e6569ada69919fc49997c1b2c587845057394aab886f113c8",
+            "daytona-0.220.0.tar.gz": "sha256-eda82eac9b3601e757b1dbe3ec2d966b46a9e3038b69ce44a0d90e01dac8417a"
+          }
+        },
+        {
+          "registry": "npm",
+          "name": "@daytona/api-client",
+          "version": "0.220.0",
+          "artifacts": {
+            "0.220.0": "sha512-XaMEtiQCaIHc3T7y3HUqx1A5eWSnd+FJvhpSHDwP3Snu9Nnhy4t+K2LHBWgJQn9dGtWXsdOsbB9K0BqpmFJtyA=="
+          }
+        },
+        {
+          "registry": "npm",
+          "name": "@daytona/toolbox-api-client",
+          "version": "0.220.0",
+          "artifacts": {
+            "0.220.0": "sha512-Kn94AOxhGQil0XygOOR26SaCkndE4dOtxYS0hLbqrTxcP3H1uq1HGFGSRkHFQNkaR8eL9QwFUPSMqd0Vr3A64A=="
+          }
+        },
+        {
+          "registry": "npm",
+          "name": "@daytona/analytics-api-client",
+          "version": "0.220.0",
+          "artifacts": {
+            "0.220.0": "sha512-3BGYILzjo2aFTJhLd6XBXlNEQBSo9Zr2Nj31OdX9o50fMRVUwVydF6ekIGkPGSLwskz6b6xxg5BSS+f9dbrxCQ=="
+          }
+        }
+      ]
+    },
+    {
+      "id": "vercel",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@vercel/sandbox",
+          "version": "3.5.1",
+          "artifacts": {
+            "3.5.1": "sha512-VHItQtcv4FkSXET29b088p87MNPAIhRscF3ifrup2KkC8ix4hy4NpgCO9F3GI4yOsztgGtuV7bDx29Iufun2hQ=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "vercel",
+          "version": "0.11.4",
+          "artifacts": {
+            "vercel-0.11.4-py3-none-any.whl": "sha256-3ba3a0de2276a2b3daf590263082f6a82850dc77b35cf68f86a1e5bc9e83b6f1",
+            "vercel-0.11.4.tar.gz": "sha256-80038906615bf4182787af8354bce71b57d9fd5471a35ebca457d34ab5f50b2e"
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "vercel-sandbox",
+          "version": "0.7.0",
+          "artifacts": {
+            "vercel_sandbox-0.7.0-py3-none-any.whl": "sha256-f7eb897a1a5092fe8c38319ce803033b1a9ced8f414564a43a668432f91ffcd9",
+            "vercel_sandbox-0.7.0.tar.gz": "sha256-07d703790d0141dc75e0962baf35d666a6961bc1de913749137267a2550c81e2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "blaxel",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@blaxel/core",
+          "version": "0.3.24",
+          "artifacts": {
+            "0.3.24": "sha512-zF1S7vx+mYHDbK9F4FQbdobz3N+YIlNqHCyOC7R7QpbQ4nP9laeCuQRaN1OTfJVZcRwFvFQ5Nx1lh0su+esd7g=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "blaxel",
+          "version": "0.4.12",
+          "artifacts": {
+            "blaxel-0.4.12-py3-none-any.whl": "sha256-9ca08aa0c1c5aaac87055f684eae002365c55010eaa008d5dc36c552e153210a",
+            "blaxel-0.4.12.tar.gz": "sha256-58dc5c9aea5b21aa65538f811c7de0b24e8e7a411bdf64e374a295eb1b9cb15e"
+          }
+        }
+      ]
+    },
+    {
+      "id": "runloop",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@runloop/api-client",
+          "version": "1.32.0",
+          "artifacts": {
+            "1.32.0": "sha512-aCNKjlGzLVEAFl8WA42LmgiYkdIkaocOlFK/cMGppijsM0AGS+1hkw/RxroQxyHlkIhjyRaqLv7m5ZNMGhks7Q=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "runloop-api-client",
+          "version": "1.32.0",
+          "artifacts": {
+            "runloop_api_client-1.32.0-py3-none-any.whl": "sha256-23c36910de7423f73aef91d4a963abea80a6b2f5b2df5bb8e439d788d5486cc7",
+            "runloop_api_client-1.32.0.tar.gz": "sha256-1f2077fb5a99b5ef30dbc1d96d47c1ca1d3f77895b9e186d985e47365fe85634"
+          }
+        }
+      ]
+    },
+    {
+      "id": "codesandbox",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@codesandbox/sdk",
+          "version": "2.4.2",
+          "artifacts": {
+            "2.4.2": "sha512-pwz/+xNPLiCEvIYLxk2VJwiAFuy28V3J6FuO+xIB5U3AV/EylHlm77Lsi/WNYeXoSljIlaLLU7IemAjw3ojNfg=="
+          }
+        }
+      ]
+    },
+    {
+      "id": "sprites",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@fly/sprites",
+          "version": "0.2.3",
+          "artifacts": {
+            "0.2.3": "sha512-LB3xmHpHLdVECTQej+Vyi/aFFTc/Otf8bZ8GwVe/Hhlx4kIFS0K+9O5B8ru8Llg+cEwvYmzyeV69vNZPpCt0fw=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "sprites-py",
+          "version": "0.7.1",
+          "artifacts": {
+            "sprites_py-0.7.1-py3-none-any.whl": "sha256-23774f8111c9a4fbb7007f8e305677734eb7616bebb6c668c394788399ff38a8",
+            "sprites_py-0.7.1.tar.gz": "sha256-c45596f3994376eb25dd7c4f988b3a6893dd8218502bacd7eedf2b20888d8456"
+          }
+        }
+      ]
+    },
+    {
+      "id": "freestyle",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "freestyle",
+          "version": "0.2.16",
+          "artifacts": {
+            "0.2.16": "sha512-8pC7lh/R2PDanbs9Noc1Q7YlPl8Be8hHaQA/rpwFmELrcLTUAuCuxpoZ1Xm+7fuxqhJqJzO83bTTeLcSUoJ9SA=="
+          }
+        }
+      ]
+    },
+    {
+      "id": "prime",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "pypi",
+          "name": "prime-sandboxes",
+          "version": "0.4.0",
+          "artifacts": {
+            "prime_sandboxes-0.4.0-py3-none-any.whl": "sha256-2a15263a30f3a3a27307c83701b92317af83ec8df0968e910100ccdb557cbb6b",
+            "prime_sandboxes-0.4.0.tar.gz": "sha256-a6934a5f5fce8342dbe9ade9816242e893ebf23b83a4fa5fda5b0ddbce651f27"
+          }
+        }
+      ]
+    },
+    {
+      "id": "modal",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "modal",
+          "version": "0.11.0",
+          "artifacts": {
+            "0.11.0": "sha512-Kvy2nejPkice2FI82p5e8TJrFDy0BaSYZjJVmvnTnu51bOH9Ok7IRtp8NavBQqMuXhbpbj6gRULwxsjNkweF6A=="
+          }
+        },
+        {
+          "registry": "pypi",
+          "name": "modal",
+          "version": "1.6.0",
+          "artifacts": {
+            "modal-1.6.0-py3-none-any.whl": "sha256-2f5981ba656570ad96379d29f0ddff876880708c84966024ce130e9e1794fa68",
+            "modal-1.6.0.tar.gz": "sha256-c5dd551b5e0a283f3c764476c0a4ebe5bdef1e4a69432fa27e1b1ad8ca5e0817"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "status": "partial",
+      "upstreams": [
+        {
+          "registry": "npm",
+          "name": "@cloudflare/sandbox",
+          "version": "0.12.10",
+          "artifacts": {
+            "0.12.10": "sha512-245s6xEdR1v0Jti0YYd8ORWcTG/f/ksjJfpubvnbky0KxFC/ZDOpbpNKdtyiRBYZqmJGtEncYW7Cwge47tDrpg=="
+          },
+          "unsupported": {
+            "version": "1.0.0",
+            "artifacts": {
+              "1.0.0": "sha512-+TZVuCey6OBDTvPLWisq4Ie7/R5Zy3zFyYOFCNRpdEIyQsKq3xwzpctonE43DfZ+wYZvvu6QYpR138PayDjF+A=="
+            },
+            "reason": "1.0 removes getSandbox, the Sandbox class, exec, processes, sessions and preview proxying and keeps only Files, S3Mount and DirectoryBackup for the caller's own Durable Object; withruntime/cloudflare implements the 0.x API"
+          }
+        }
+      ]
+    }
+  ]
+}

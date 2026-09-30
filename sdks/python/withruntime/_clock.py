@@ -27,6 +27,16 @@ def sync_interrupts() -> tuple[type[BaseException], ...]:
     return (KeyboardInterrupt,)
 
 
+def async_timeouts() -> tuple[type[BaseException], ...]:
+    """What a missed deadline raises: before Python 3.11 asyncio's is its own class."""
+    import asyncio
+    return (TimeoutError, asyncio.TimeoutError)
+
+
+def sync_timeouts() -> tuple[type[BaseException], ...]:
+    return (TimeoutError,)
+
+
 async def async_parallel(fn: Callable[[T], Awaitable[Any]], items: Iterable[T], limit: int) -> None:
     import asyncio
     gate = asyncio.Semaphore(limit)
@@ -64,7 +74,24 @@ class AsyncSlots:
         if self._gate is None:
             import asyncio
             self._gate = asyncio.Semaphore(self._limit)
-        await self._gate.acquire()
+        from ._request_scope import current
+        from ._http import within
+        remaining = current().remaining()
+        if remaining is None:
+            await self._gate.acquire()
+            return
+        acquired = False
+        async def acquire():
+            nonlocal acquired
+            await self._gate.acquire()
+            acquired = True
+        try:
+            await within(acquire(), remaining)
+        except BaseException:
+            # Python 3.10 can cancel while within() receives a completed task.
+            if acquired:
+                self._gate.release()
+            raise
 
     async def __aexit__(self, *_: Any) -> None:
         self._gate.release()
@@ -76,7 +103,9 @@ class SyncSlots:
         self._gate = threading.BoundedSemaphore(limit)
 
     def __enter__(self) -> None:
-        self._gate.acquire()
+        from ._request_scope import current
+        if not self._gate.acquire(timeout=current().remaining()):
+            raise TimeoutError("The request deadline expired waiting for an SDK slot")
 
     def __exit__(self, *_: Any) -> None:
         self._gate.release()

@@ -32,7 +32,7 @@ public final class Sandboxes {
                 .room(room.isNegative() ? Duration.ZERO : room));
     Sandbox sandbox = new Sandbox(t, info);
     if (!options.noWait && !"running".equals(sandbox.state())) {
-      sandbox.waitFor("running", Duration.ofSeconds(60));
+      sandbox.waitFor("running", Duration.ofSeconds(ApiDefaults.WAIT_FOR_TIMEOUT_SECONDS));
       if (!"running".equals(sandbox.state()))
         throw new RuntimeCloudException(
             "Sandbox " + sandbox.id() + " is " + sandbox.state() + ", not running.",

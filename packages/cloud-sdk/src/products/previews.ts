@@ -18,6 +18,8 @@ export type Preview = {
   urlWithToken: string | null;
   /** Turned off by Runtime after a report. */
   disabled: boolean;
+  /** The sites that may show it in an iframe; null for any site. */
+  embedOrigins: string[] | null;
   createdAt: string;
   /** On create only: how to share the address, in one line. */
   hint?: string;
@@ -28,6 +30,11 @@ export type CreatePreview = {
   visibility?: "private" | "public";
   /** How long the returned token lasts, 60 s to 7 days (default 1 day). */
   ttlSeconds?: number;
+  /** The sites that may show it in an iframe, as origins
+   * (`https://app.example.com`, `https://*.example.com`, `http://localhost:3000`),
+   * up to 16. Any other site's iframe is refused. Omitted: a shared port keeps
+   * its list; `[]` or null: any site, the default. */
+  embedOrigins?: string[] | null;
 };
 
 /** `sbx.previews`: share ports of this sandbox at public HTTPS addresses.
@@ -39,7 +46,8 @@ export type CreatePreview = {
 export function sandboxPreviews(t: Transport, sandbox: Sandbox) {
   const base = () => `/v1/sandboxes/${encodeURIComponent(sandbox.id)}/previews`;
   return {
-    /** Shares `port`, or changes its visibility if it is shared already. */
+    /** Shares `port`, or changes its visibility and embedOrigins if it is
+     * shared already. */
     create: (port: number, input: CreatePreview = {}, options?: RequestOptions) =>
       t.json<Preview>({ method: "POST", path: base(), body: { port, ...input }, ...options }),
     /** Every shared port, each private one with a fresh token. */
@@ -56,7 +64,7 @@ export function sandboxPreviews(t: Transport, sandbox: Sandbox) {
     /** Refuses every token issued for this port so far and returns a new one. */
     rotate: (port: number, options?: RequestOptions) =>
       t.json<Preview>({ method: "POST", path: `${base()}/${port}:rotate`, ...options }),
-    /** Stops sharing `port`. Open connections close within seconds. */
+    /** Stops sharing `port`. Its open connections are closed before this returns. */
     delete: (port: number, options?: RequestOptions) =>
       t.json<{ id: string; sandboxId: string; port: number; deleted: true }>({
         method: "DELETE",

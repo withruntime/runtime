@@ -81,6 +81,7 @@ except ImportError as error:  # pragma: no cover - depends on the optional extra
         "withruntime.openai_agents needs the OpenAI Agents SDK 0.22.3 or newer: "
         'pip install "withruntime[openai-agents]"') from error
 
+from ._api_defaults import OPENAI_AGENTS_EXEC_TIMEOUT_SECONDS
 from ._async_client import AsyncProcess, AsyncRuntime, AsyncSandbox
 from ._errors import NotFoundError
 from ._errors import RuntimeError as RuntimeCloudError
@@ -88,7 +89,7 @@ from ._errors import RuntimeError as RuntimeCloudError
 logger = logging.getLogger("withruntime.openai_agents")
 
 BACKEND_ID = "runtime_cloud"
-DEFAULT_EXEC_TIMEOUT_S = 3600.0
+DEFAULT_EXEC_TIMEOUT_S = float(OPENAI_AGENTS_EXEC_TIMEOUT_SECONDS)
 """A command with no timeout of its own may run this long. The API allows 24 hours."""
 _MAX_EXEC_TIMEOUT_MS = 86_400_000
 _FAST_TIMEOUT_MS = 60_000

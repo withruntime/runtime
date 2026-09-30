@@ -38,10 +38,27 @@ export class FakeWorld {
     stdout: `ran ${command}\n`,
   });
   /** The events a spawned process produces. */
-  output: (command: string) => OutputEvent[] = (command) => [
-    { type: "stdout", data: `ran ${command}\n`, offset: 0 },
-    { type: "exit", exitCode: 0, state: "exited", timedOut: false },
-  ];
+  output: (command: string, options?: Record<string, unknown>) => OutputEvent[] = (
+    command,
+    options = {},
+  ) => {
+    const answer = this.exec(command, options);
+    let offset = 0;
+    const events: OutputEvent[] = [];
+    if (answer.lost) events.push({ type: "truncated", droppedBytes: 10, resumeAt: 10 });
+    for (const channel of ["stdout", "stderr"] as const) {
+      const data = answer[channel] ?? "";
+      if (data) events.push({ type: channel, data, offset });
+      offset += Buffer.byteLength(data);
+    }
+    events.push({
+      type: "exit",
+      exitCode: answer.exitCode ?? null,
+      state: "exited",
+      timedOut: answer.timedOut ?? false,
+    });
+    return events;
+  };
   interpreter: (code: string, options: Record<string, unknown>) => Record<string, unknown> = (
     code,
   ) => ({
@@ -399,7 +416,9 @@ export class FakeSandbox {
         world.record("interpreter.run", code, options);
         const execution = world.interpreter(code, options);
         if (typeof options.onStdout === "function")
-          (options.onStdout as (text: string) => void)(execution.stdout as string);
+          await (options.onStdout as (text: string) => unknown)(execution.stdout as string);
+        if (typeof options.onResult === "function")
+          for (const result of execution.results as unknown[]) await options.onResult(result);
         return execution;
       },
       async result(ref: { path: string }) {
@@ -478,7 +497,7 @@ export class FakeSandbox {
       `proc-${this.processList.length + 1}`,
       command,
       options.stdin === "pipe",
-      this.world.output(command),
+      this.world.output(command, options),
     );
     this.processList.push(process);
     return process;

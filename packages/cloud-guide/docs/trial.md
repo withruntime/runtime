@@ -9,7 +9,7 @@ Every new account gets **{{trial-hours}} hours of sandbox time** after a verifie
   (`cpuFloorMillis`) is at most 250 thousandths of a vCPU; the default is 50.
   A create that asks for more is refused with `invalid_trial`, naming each
   field, and a fork of such a sandbox can go only onto `"paid"`.
-- Trial sandboxes reach the web at 20 Mbit/s each, and move 5 GiB a day in all,
+- Trial sandboxes reach the web at {{trial-bandwidth}} each, and move {{trial-daily-transfer}} a day in all,
   in and out together.
 - A trial sandbox that keeps trying to reach internal or cloud metadata
   addresses has its network cut and the account suspended. One that holds its
@@ -19,13 +19,19 @@ Every new account gets **{{trial-hours}} hours of sandbox time** after a verifie
 - The {{trial-hours}} hours are shared by all your trial sandboxes, so {{trial-sandboxes}} at once use them
   {{trial-sandboxes}} times as fast. Running time counts, idle or busy; paused or stopped time
   does not.
-- Each session can last up to one hour; the server enforces `timeoutSeconds` of
-  at most 3600. Extend a running sandbox or wake a paused one to keep going,
-  within the time you have left.
+- Each lease can last up to one hour; the server enforces `timeoutSeconds` of
+  at most 3600. A sandbox that is still working when its lease is about to end
+  keeps going: it gets its `timeoutSeconds` again, each time, until your trial
+  hours run out, and then pauses. Working means a command, terminal, SSH
+  session or port forward is open, or the sandbox used CPU or moved traffic in
+  the last ten seconds; a browser tab left open on a preview does not count.
+  An idle sandbox pauses at its lease's end, or sooner when idle pause is on;
+  extend it or wake it to keep going.
 - Your first three images and first 10 GiB of volumes are stored free, for as
   long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)).
-  A build counts toward the {{trial-hours}} hours: at most 2 vCPU and 4 GiB, 20 minutes
-  and 10 builds a day, with only the time it builds used up.
+  A build counts toward the {{trial-hours}} hours: at most 2 vCPU and 4 GiB, {{trial-build-time}}
+  and {{trial-builds-a-day}} builds a day, with only the time it builds used up, and none when it
+  fails through a fault of ours.
 - A request that asks for the trial (`funding: "trial"`, `--trial`) never falls
   back to paid credit, even when the account has some. One that leaves funding
   out, as the E2B, Daytona, Vercel and Blaxel drop-ins do by default, uses the
@@ -114,8 +120,11 @@ credit at
 [Usage & billing](https://withruntime.com/account/billing), any amount from
 {{topup-min}}, with no subscription. Then choose paid funding.
 
-- At the standard rates, 100 fully busy hours of a 2 vCPU, 4 GiB sandbox cost
-  $8.00 in compute ([pricing](./pricing)).
+- At the standard rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox cost
+  {{=$2 trial-hours * busy-hour}} in compute ([pricing](./pricing)).
+- A paid sandbox's lease ends on time, whatever it is doing, because
+  `timeoutSeconds` bounds what it costs. For a long run make it `persistent`,
+  which renews the lease while credit lasts, or call `keepAlive` from the SDK.
 - A paid account runs {{paid-sandboxes}} sandboxes at once, and more on request; a new one runs
   {{new-account-sandboxes}} until its first week or {{new-account-spend}} of paid use is behind it
   ([pricing](./pricing#how-many-at-once)).

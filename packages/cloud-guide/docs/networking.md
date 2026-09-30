@@ -1,6 +1,6 @@
 # Custom domains, TCP ports, dedicated addresses and private networks
 
-Four ways to connect sandboxes to the rest of your world. They are for paid
+Five ways to connect sandboxes to the rest of your world. They are for paid
 accounts: an account that has not added credit gets `payment_required` (402).
 A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
 
@@ -11,14 +11,17 @@ A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
   address of its own, so you can allow-list it.
 - **Private network:** a WireGuard tunnel from your own network, in any cloud or
   on your premises, into your sandboxes.
+- **Your Tailscale network:** a sandbox joins your tailnet as a machine of its
+  own, with your auth key.
 
 None of them belongs to one sandbox alone, so each is its own product in the CLI,
 the SDKs and MCP: `runtime domain`, `runtime port`, `runtime address` and
 `runtime tunnel`; `runtime.domains`, `runtime.ports`, `runtime.addresses` and
 `runtime.tunnel`; `runtime_domain_*`, `runtime_port_*`, `runtime_address_*` and
-`runtime_tunnel_*`. A dedicated IPv4 address and a tunnel each cost {{address-month}} per
-30-day month, prorated to funded time. IPv6, custom domains and TCP ports are
-included. See [pricing](./pricing).
+`runtime_tunnel_*`. A tailnet belongs to one sandbox: `runtime sandbox tailscale`,
+`sbx.tailscale` and `runtime_sandbox_tailscale`. A dedicated IPv4 address and a tunnel each cost {{address-month}} per
+30-day month, prorated to funded time. IPv6, custom domains, TCP ports and
+joining a tailnet are included. See [pricing](./pricing).
 
 ## Custom domains
 
@@ -54,12 +57,13 @@ woken by a visit, like a preview.
 - **The DNS owner wins.** If another account proves the same name later, it
   takes the name over and your claim ends.
 - **To move the name to another sandbox or port,** run `add` again with the new
-  target. To stop serving it, `runtime domain rm app.example.com`.
+  target. To stop serving it, `runtime domain rm app.example.com`. Either
+  takes effect, open connections included, before the command returns.
 - **Limits:** 50 domains per account, 20 added a day. Certificates are issued
   for proved names only.
 - **Reports** reach Runtime through the `X-Runtime-Report` header on every
   answer and the abuse address, as for previews. Runtime can take a name down;
-  it then stays down for every account.
+  it stops serving at once and stays down for every account.
 
 ## TCP ports
 
@@ -78,13 +82,19 @@ sandbox. Opening the same sandbox and port again returns the same public port.
 - **Limits:** 5 ports per sandbox, 20 per account and 50 opened a day. Each
   sandbox's ports share 256 open connections, 50 new connections a second, and
   32 connections from any one client address. Traffic through a port has its
-  own limits, whatever the sandbox's outbound tier: 100 Mbit/s, 20 Mbit/s once
-  2 GiB has moved at that speed, and 50 GiB a day, in and out together.
+  own limits, whatever the sandbox's outbound tier: {{port-bandwidth}}, {{port-bandwidth-sustained}} once
+  {{port-bandwidth-burst}} has moved at that speed, and {{port-daily-transfer}} a day, in and out together.
+- **Use the address each port was given.** A port keeps its address for as
+  long as it is open, but ports opened later may be given a different address
+  from earlier ones, so read it from the answer (`address`, `connect`) rather
+  than assuming one address for all of them.
 - **A closed port rests for a day** before anyone else can be given it, so a
   client still pointed at it never reaches someone else's service.
 - **A paused sandbox is woken** by a connection, and its connections end when
   it stops, pauses or is deleted.
-- `runtime port ls` lists them; `runtime port close <portId>` closes one.
+- `runtime port ls` lists them; `runtime port close <portId>` closes one, and
+  its open connections, before it returns. A port you open listens before its
+  address is returned.
 
 ## Dedicated outbound addresses
 
@@ -195,6 +205,59 @@ runtime.tunnel.create()
 office = runtime.tunnel.add_peer("office", routes=["10.0.0.0/16"])
 ```
 
+## Your Tailscale network
+
+A paid sandbox can join your own tailnet, so your machines, databases and
+services on Tailscale reach it, and it reaches them, by their tailnet
+addresses. Make an auth key in Tailscale's admin console: ephemeral, tagged,
+and one-use unless the sandbox may pause for long (see below). Store it for
+jobs, which is the copy a sandbox can be given, then join:
+
+```bash no-run
+printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs
+runtime sandbox tailscale up <sandbox> --auth-key-secret TS_AUTHKEY --tag tag:agents
+runtime sandbox tailscale status <sandbox>     # its 100.x address and name
+runtime sandbox tailscale down <sandbox>       # removed from the tailnet at once
+```
+
+`--hostname` names the machine; the default is the sandbox's name. At create,
+`tailscale: { authKeySecret: "TS_AUTHKEY", tags: ["tag:agents"] }` joins as
+soon as it runs; a join that fails stops the new sandbox and answers why.
+
+- **The key stays in memory.** It is read from your secret with your key's
+  right to reveal it, and given to `tailscaled` in the sandbox on a memory-only
+  mount. It is never in an answer, a log, the sandbox's disk or a command line.
+  Code running as root in the sandbox could read it, as on any machine running
+  Tailscale, which is why an ephemeral, tagged key is the one to use.
+- **An ephemeral machine.** `down` logs it out and takes it off the tailnet at
+  once. A stop or a delete does not log it out first: the machine goes offline
+  with the sandbox, and Tailscale removes an ephemeral machine by itself once
+  it has been offline a while, up to about an hour. To have it gone at once,
+  run `down` before the stop, or remove it in Tailscale's admin console.
+- **Pausing.** A paused sandbox is offline on the tailnet and back when it
+  wakes. If Tailscale removed it meanwhile, the sandbox logs in again by itself
+  with a reusable key; a one-use key cannot, so join again.
+- **How it reaches the tailnet.** Where the sandbox's kernel allows a TUN
+  device, which is the default image, it has a `tailscale0` interface and
+  reaches 100.x addresses directly (`mode: "kernel"`). Otherwise
+  (`mode: "userspace"`) your tailnet still reaches the sandbox's ports, and
+  programs in it reach the tailnet through the SOCKS5 and HTTP proxy on
+  `localhost:1055`. MagicDNS names are not resolved in the sandbox; use the
+  100.x address or the `dnsName` the answer gives with your own resolver.
+- **Your network rules still apply.** Tailscale's traffic leaves through the
+  same proxy as everything else, so the sandbox needs `*.tailscale.com` and
+  `pkgs.tailscale.com` on port 443, which paid sandboxes reach by default, and
+  UDP for direct connections, which falls back to Tailscale's relays without
+  it. What travels inside the tailnet is encrypted by Tailscale: your
+  [secrets](./security#secrets-sandboxes-never-see) are never put into it, and
+  your tailnet's access rules decide what the sandbox's tags reach.
+- **Not copied from memory.** While a sandbox is on a tailnet, a fork or a
+  memory snapshot of it is refused with `tailscale_joined`: the copy would be
+  the same Tailscale machine and would hold the key. Take it off, copy it, and
+  join each. A disk snapshot is taken as ever.
+- **Trial sandboxes** cannot join (`payment_required`). The first join
+  downloads Tailscale into the sandbox, a few seconds more; later joins reuse it.
+
 ## Outbound UDP
 
 Paid sandboxes send UDP to any public address and port: HTTP/3 and QUIC, DNS
@@ -208,7 +271,7 @@ Google in 16 ms.
 - Private, link-local and cloud metadata addresses are refused, and so are the
   ports no sandbox reaches over TCP either. The sandbox's network rules apply.
 - Datagrams are limited to 1,472 bytes. A sandbox sends and receives at most
-  50,000 datagrams a second, enough for full-size traffic at its 500 Mbit/s
+  50,000 datagrams a second, enough for full-size traffic at its {{paid-bandwidth}}
   peak, inside its bandwidth limits and daily allowance.
 - A flow that has sent 256 datagrams without an answer is closed, so a sandbox
   cannot flood a host that does not reply.
@@ -222,6 +285,8 @@ Google in 16 ms.
 | Code                  | Status | Meaning                                                         |
 | --------------------- | -----: | --------------------------------------------------------------- |
 | `payment_required`    |    402 | The account has not added credit, or the sandbox is a trial one |
+| `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it  |
+| `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet             |
 | `network_not_allowed` |    403 | Runtime turned network features off for the account             |
 | `quota_exceeded`      |    409 | A limit above was reached                                       |
 | `rate_limited`        |    429 | Too many added today                                            |

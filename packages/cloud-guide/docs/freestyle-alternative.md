@@ -6,6 +6,8 @@ Runtime runs agent code in its own microVMs, like Freestyle's VMs, and costs **{
 Runtime and {{cost:freestyle}} on Freestyle**. At 100,000 runs a month that is {{cost:runtime:100000}}
 against {{cost:freestyle:100000}}, **{{=$0 less:freestyle:100000}} a month saved**.
 
+Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Freestyle bills the vCPUs, memory and disk
@@ -16,7 +18,8 @@ against {{cost:freestyle:100000}}, **{{=$0 less:freestyle:100000}} a month saved
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
   storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
-  processes still running and its next command done {{wake}} later.
+  processes still running and its next command done {{server-wake-command}}
+  after the request reaches Runtime.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).
@@ -125,10 +128,10 @@ await box.stop();
 - **More than 16 vCPUs in one VM.** Freestyle's Pro plan goes to 32 vCPUs.
 - **Forking without a pause.** Freestyle clones a running VM without pausing
   it. A Runtime fork pauses the source for the capture and has it running
-  again when the call returns, {{fork}} for one copy.
+  again when the call returns, {{server-fork}} on Runtime's servers for one copy.
 - **The fastest start.** Freestyle states VMs provision with a p99 under
-  400 ms. A Runtime sandbox ran its first command {{first-command}} after the request at
-  the median and {{first-command-p95}} at the 95th percentile on {{speed-date}}
+  400 ms. A Runtime sandbox ran its first command {{server-first-command}} after the request at
+  the median on Runtime's servers and {{server-first-command-p95}} at the 95th percentile on {{server-date}}
   ([speed](./speed)).
 
 ## Sources

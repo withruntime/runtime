@@ -1,6 +1,8 @@
+import { WEBHOOK_WATCH_TIMEOUT_MS } from "../api-defaults.js";
 import type { RequestOptions, Transport } from "../transport.js";
+import { RuntimeError } from "../errors.js";
 
-export type FileEventType = "create" | "write" | "remove" | "rename" | "chmod";
+export type FileEventType = "create" | "write" | "remove" | "rename" | "chmod" | "access";
 export type FileEvent = {
   type: FileEventType;
   /** Absolute path in the sandbox. */
@@ -17,7 +19,7 @@ export type WatchNotice =
   | { k: "lost"; bytes: number };
 export type WatchOptions = Omit<RequestOptions, "timeoutMs"> & {
   recursive?: boolean;
-  /** Only these event types; all five by default. */
+  /** Only these event types; the five mutation types by default; access is opt-in. */
   events?: FileEventType[];
   /** Globs relative to the path: only matching paths are reported. */
   include?: string[];
@@ -25,7 +27,7 @@ export type WatchOptions = Omit<RequestOptions, "timeoutMs"> & {
   exclude?: string[];
   /** Events are gathered this long and delivered together. Default 100. */
   batchMs?: number;
-  /** The watch ends by itself after running this long. Default 1 hour. */
+  /** The watch ends by itself after running this long. Default 1 hour; 0 runs until stopped or the sandbox ends. */
   timeoutMs?: number;
   maxWatches?: number;
   /** A batch at a time, rather than one call per event. */
@@ -43,6 +45,19 @@ export type WatchInfo = {
   processId: string;
   state: string;
   startedAt: number;
+  /** Its changes go to the account's webhooks as `sandbox.files.changed`. */
+  webhook?: boolean;
+};
+/** A watch whose changes Runtime sends to the account's webhooks. */
+export type WebhookWatchOptions = Omit<
+  WatchOptions,
+  "onBatch" | "onNotice" | "onExit" | "timeoutMs"
+> & {
+  /** The watch ends by itself after running this long; 0 (the default here)
+   * runs until stopped or the sandbox ends. */
+  timeoutMs?: number;
+  /** Its own id, 1 to 40 lowercase letters, digits or dashes. */
+  id?: string;
 };
 
 type StreamEvent =
@@ -51,12 +66,25 @@ type StreamEvent =
   | { k: "end"; reason: string; cursor: number }
   | { k: "paused"; cursor: number }
   | { k: "continue"; cursor: number }
-  | { k: "failure"; code: string; message: string; cursor: number };
+  | {
+      k: "failure";
+      code: string;
+      message: string;
+      cursor: number;
+      status?: number;
+      hint?: string;
+      requestId?: string;
+    };
 
 /** A running watch. Events arrive through the callbacks until `stop()`. */
 export class WatchHandle {
   cursor: number;
   #stopped = false;
+  /** stop() was called: deliver what the watch reports until its end. */
+  #stopping = false;
+  /** Callbacks under way. */
+  #delivering = 0;
+  #exitNotified = false;
   #following: Promise<void> | undefined;
   #abort = new AbortController();
   constructor(
@@ -76,20 +104,39 @@ export class WatchHandle {
   }
   /** Start delivering again from where it left off, after a pause. */
   resume(): void {
-    if (this.#stopped) throw new Error("This watch was stopped");
+    if (this.#stopped || this.#stopping) throw new Error("This watch was stopped");
     this.#abort = new AbortController();
     this.begin();
   }
-  /** Stop the watch in the sandbox, and stop delivering. */
+  /** Stop the watch in the sandbox. What changed before the stop is still
+   * delivered: the watch reports it and ends, and this returns once that has
+   * arrived (at most 5 s). Called from inside a callback, it stops at once. */
   async stop(options?: RequestOptions): Promise<void> {
-    if (this.#stopped) return;
-    this.#stopped = true;
-    this.#abort.abort();
+    if (this.#stopped || this.#stopping) return;
+    this.#stopping = true;
     await this.t
       .json({ method: "DELETE", path: `${this.base}/${encodeURIComponent(this.id)}`, ...options })
       .catch(() => undefined);
-    await this.#following?.catch(() => undefined);
-    this.options.onExit?.("stopped");
+    // Inside a callback, #following is awaiting the caller: waiting for it
+    // here would make that callback await itself.
+    if (this.#following && this.#delivering === 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        this.#following.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 5_000);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
+    this.#stopped = true;
+    this.#abort.abort();
+    this.#notifyExit("stopped");
+  }
+  #notifyExit(reason: string) {
+    if (this.#exitNotified) return;
+    this.#exitNotified = true;
+    this.options.onExit?.(reason);
   }
   async #follow(): Promise<void> {
     for (;;) {
@@ -104,14 +151,30 @@ export class WatchHandle {
         })) {
           this.cursor = event.cursor ?? this.cursor;
           if (event.k === "events") {
-            if (this.options.onBatch) await this.options.onBatch(event.events);
-            if (this.onEvent) for (const item of event.events) await this.onEvent(item);
+            this.#delivering++;
+            try {
+              if (this.options.onBatch) await this.options.onBatch(event.events);
+              if (this.#stopped) return;
+              if (this.onEvent)
+                for (const item of event.events) {
+                  await this.onEvent(item);
+                  if (this.#stopped) return;
+                }
+            } finally {
+              this.#delivering--;
+            }
           } else if (event.k === "continue") next = "continue";
           else if (event.k === "end" || event.k === "paused") {
-            if (!this.#stopped)
-              this.options.onExit?.(event.k === "paused" ? "paused" : event.reason);
+            if (!this.#stopped) this.#notifyExit(event.k === "paused" ? "paused" : event.reason);
             return;
-          } else if (event.k === "failure") throw new Error(`${event.code}: ${event.message}`);
+          } else if (event.k === "failure")
+            throw new RuntimeError({
+              code: event.code,
+              status: event.status ?? 0,
+              message: event.message,
+              ...(event.hint ? { hint: event.hint } : {}),
+              ...(event.requestId ? { requestId: event.requestId } : {}),
+            });
           else this.options.onNotice?.(event);
         }
       } catch (error) {
@@ -123,6 +186,7 @@ export class WatchHandle {
   }
   /** @internal */
   begin() {
+    this.#exitNotified = false;
     this.#following = this.#follow();
     // An error surfaces through `done`; nothing is left unhandled meanwhile.
     this.#following.catch(() => undefined);
@@ -192,6 +256,22 @@ export function sandboxWatches(t: Transport, sandboxId: string) {
         query: { cursor, ...(input.waitMs !== undefined ? { waitMs: input.waitMs } : {}) },
         ...options,
       }),
+    /** Starts a watch whose changes Runtime sends to the account's webhooks
+     * as `sandbox.files.changed` events, with nothing reading it here:
+     *
+     *   await sbx.files.watches.webhook("/workspace/app", { recursive: true });
+     *
+     * Runs until stopped (timeoutMs 0) unless given a timeout. */
+    webhook: (path: string, input: WebhookWatchOptions = {}) => {
+      const { idempotencyKey, signal, timeoutMs, ...rest } = input;
+      return t.json<WatchInfo & { cursor: number }>({
+        method: "POST",
+        path: base,
+        body: { path, ...rest, timeoutMs: timeoutMs ?? WEBHOOK_WATCH_TIMEOUT_MS, webhook: true },
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...(signal ? { signal } : {}),
+      });
+    },
     stop: (id: string, options?: RequestOptions) =>
       t.json<{ stopped: boolean }>({
         method: "DELETE",

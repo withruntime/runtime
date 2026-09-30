@@ -7,13 +7,20 @@ and {{cost:cloudflare}} on Cloudflare**. At 100,000 runs a month that is {{cost:
 {{cost:cloudflare:100000}}, **{{=$0 less:cloudflare:100000}} a month saved**, with no Worker to deploy and no {{term:cloudflare:workers-paid}} plan to
 hold.
 
+Weighing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-sandbox-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **{{=n0 100 * ( 1 - cpu-rate / rate:cloudflare:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} a vCPU-hour on Runtime and {{rate:cloudflare:cpu}} on Cloudflare. Memory is cheaper too, {{memory-rate}} per GiB-hour
   against {{rate:cloudflare:memory}}.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
   sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
-  month until a request wakes it; the next command runs {{wake}} after that.
+  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+  Runtime's servers.
+- **Starts in milliseconds.** Cloudflare states container cold starts take
+  {{speed:cloudflare:create}}. On Runtime's servers a new sandbox is running
+  {{server-create}} after the create request, and {{server-create-template}} for a size with
+  no warm spare ([speed](./speed)).
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
@@ -110,8 +117,7 @@ merge.
 
 ### From the Sandbox SDK
 
-Cloudflare, inside a Worker (the stable `@cloudflare/sandbox` package; the 1.0
-preview returns a process handle from `exec` instead):
+Cloudflare, inside a Worker, with the 0.x `@cloudflare/sandbox` API:
 
 ```js
 import { getSandbox } from "@cloudflare/sandbox";
@@ -138,6 +144,13 @@ try {
   await box.stop();
 }
 ```
+
+Version 1.0 of `@cloudflare/sandbox` drops `getSandbox` and the `Sandbox`
+class: your own Durable Object starts the Container and runs
+`this.ctx.container.exec([...])`, and the package keeps only `Files`, `S3Mount`
+and `DirectoryBackup`. On Runtime, `container.exec(["sh", "task.sh"])` is
+`box.exec(["sh", "task.sh"])`, and `new Files(container).writeFile(path, data)`
+is `box.files.write(path, data)`.
 
 ### Calling Runtime from a Worker
 

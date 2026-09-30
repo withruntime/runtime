@@ -63,8 +63,30 @@ await sbx.stop();
 ```
 
 `timeoutSeconds` is how long the sandbox may run before its lease ends. At the
-end it pauses (the default) or stops, as `onLeaseEnd` says. `network` narrows
+end it pauses (the default) or stops, as `onLeaseEnd` says. A trial sandbox
+that is still working then gets its `timeoutSeconds` again, until the trial
+hours run out ([trial](./trial)); a paid one runs longer with `persistent` or
+`keepAlive`. `network` narrows
 what it can reach from its first start; see [the sandbox environment](./sandbox-environment).
+
+`env` sets variables for every command, background process, terminal, SSH
+session and image start command in the sandbox, for its whole life; a
+command's own `env` goes over them. Values are never shown again: `sbx.info`
+and every later answer carry only `envNames`. `update({ env })` changes them,
+a value setting a variable and `null` removing one, for commands started after
+it. At most {{sandbox-env-vars}} variables and {{sandbox-env-size}}; forks keep them
+([API](./api#sandboxes)).
+
+```ts check
+import { Sandbox } from "withruntime";
+
+const sbx = await Sandbox.create({
+  env: { QUEUE_URL: "https://queue.example.com", MODE: "worker" },
+});
+console.log(sbx.info.envNames); // ["MODE", "QUEUE_URL"]
+await sbx.update({ env: { MODE: "drain", QUEUE_URL: null } });
+await sbx.delete();
+```
 
 ## Run commands
 
@@ -92,8 +114,10 @@ if (run.exitCode !== 0) console.error(run.stderr);
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds, and 24 hours when the output streams
-  (`onStdout`, `onStderr` or `execStream`); the maximum is 24 hours. A timeout
+- The default timeout is 60 seconds, or what the sandbox's lease has left when
+  that is less, and 24 hours when the output streams (`onStdout`, `onStderr`
+  or `execStream`); the maximum is 24 hours. A command with no `timeoutMs` is
+  never refused for the lease. A timeout
   is a result (`timedOut: true`, with the output so far), not an exception.
 - `check: true` throws `CommandError` on a non-zero exit, with the result on it.
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
@@ -258,6 +282,13 @@ const stream = await sbx.files.readStream("/workspace/dataset.tar");
 await stream.pipeTo(Writable.toWeb(createWriteStream("dataset.tar")));
 ```
 
+`upload` and `download` of a directory move one tar archive through the API's
+folder routes, which pack and unpack it with `tar` inside the sandbox; from a
+language with no SDK the same routes take a plain PUT or GET
+([files in the API guide](./api#files)). A downloaded folder is unpacked as it
+arrives, so its size is bounded only by your disk, and it lands in place only
+once it has all arrived.
+
 A sandbox holds at most 4 uploads and 4 downloads at once; more wait for
 `transfer_limit` to clear. Each frees its slot when it ends, and a download
 left unread for a minute gives its slot to the next one.
@@ -292,6 +323,20 @@ Reading a watch never wakes a paused sandbox: delivery stops with
 `onExit("paused")`, and `watch.resume()` after it wakes carries on from the
 same place, with nothing lost.
 
+To have the changes pushed to you instead, start the watch for your
+account's [webhooks](./observability#events): Runtime reads it and sends
+`sandbox.files.changed` events, signed and retried, with nothing of yours
+running in the sandbox or reading here. It runs until stopped unless you give
+`timeoutMs`, and it never keeps a sandbox that pauses itself awake.
+
+```ts check
+import { Sandbox } from "withruntime";
+
+await using sbx = await Sandbox.create();
+const watch = await sbx.files.watches.webhook("/workspace/app", { recursive: true, id: "sync" });
+await sbx.files.watches.stop(watch.id);
+```
+
 ## Pause, wake, extend
 
 ```ts check
@@ -317,7 +362,7 @@ how long it is kept.
 
 A paused sandbox wakes by itself when a request needs it: an `exec`, a file,
 process, terminal, desktop or code-interpreter call, or a visit to one of its
-shared ports. The call waits while it wakes, about {{wake}}, and
+shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers, and
 then runs. A browser that visits a shared port sees a short "Waking up" page
 that reloads itself. The wake is billed like any wake, from the moment the
 sandbox runs again, and it gets a fresh lease of its own `timeoutSeconds`, or
@@ -358,7 +403,9 @@ Two ways, for two jobs:
 - **`persistent: true`** keeps a paid sandbox running for as long as the
   account has credit: its lease renews itself on the server, and after a stop
   its disk is kept, billed as reserved disk, so `sbx.restart()` starts it
-  again. Set a ceiling with `maxTotalCostMicros`.
+  again. Set a ceiling with `maxTotalCostMicros`. `update({ persistent: false })`
+  makes it an ordinary sandbox again: running, its disk stops being billed at
+  once; stopped, its disk is deleted. `delete()` removes it for good.
 - **`keepAlive`** extends the lease from your process while it runs, which
   suits a job or a notebook that owns the sandbox. It extends the lease so ten
   minutes remain, once a minute, and stops when you call `stop()` or the
@@ -416,7 +463,18 @@ for await (const sbx of page) console.log(sbx.id, sbx.info.name, sbx.state);
 Every list in every product returns a page: `page.data`, `page.hasMore`,
 `await page.next()` for the next page, `await page.toArray()`, and `for await`
 walks every item on every page. Filter by `name`, `labels`
-and `state`; stopped sandboxes are left out unless you pass `includeStopped: true`.
+and `state`; stopped sandboxes are left out unless you pass `includeStopped: true`,
+except a persistent one, which keeps its disk and is listed with the live ones.
+
+## Delete a sandbox
+
+`await sbx.delete()`, or `runtime.sandboxes.delete(id)` without reading it
+first, removes a sandbox for good in any state: it stops it, deletes its disk
+and paused memory, revokes its previews and ports, frees its name and takes it
+out of every list. Its snapshots, usage and audit entries stay. Deleting it
+again answers the same `{ id, status: "deleted", deletedAt }`; any other call
+to it then fails with `not_found`. `stop()` is the one to use when you may want
+a persistent sandbox's disk back.
 
 ## Errors and retries
 
@@ -571,6 +629,12 @@ for private images. A rebuild starts from the steps an earlier build shares. A
 stored image is charged on its whole file
 ([pricing](./pricing#snapshots-images-and-volumes)); building one is not.
 
+A new build leaves running sandboxes alone. `sbx.switchImage("data:v2", { keep: "workspace" })`
+moves one to it, keeping its id, `/workspace` (its home), volumes, environment
+and previews; its processes restart and the rest of its old disk is lost, so
+snapshot it first to keep everything. A switch that fails is undone
+(`switch_undone`). See [move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version).
+
 ## Volumes
 
 A volume is a disk that outlives sandboxes. Attach it read-write to one sandbox
@@ -591,9 +655,9 @@ A volume lives on one server, and a sandbox that uses it is placed on that
 server. It is backed up off that server every day and whenever you
 ask, and a backup restores as a new volume ([storage and backups](./storage)). It is charged on its full size from the
 moment it is created, written or not ([pricing](./pricing#snapshots-images-and-volumes)).
-Stopping a sandbox has it write out what it wrote to its volumes first. A
-sandbox whose lease runs out stops at once, so run `sync` after writes it must
-keep.
+Stopping a sandbox has it write out what it wrote to its volumes first, and so
+does a lease that runs out: the sandbox's programs are frozen just before the
+lease ends, and the write after that is not charged.
 
 `sbx.mounts.add({ provider, bucket, path, secret })` mounts your own S3, R2 or
 Google Cloud Storage bucket as a directory, and `sbx.mounts.list()` and
@@ -622,7 +686,7 @@ await runtime.snapshots.delete(snapshot.id);
 ```
 
 A running sandbox is paused while a snapshot or fork captures it, then woken before the call
-returns (a snapshot of a fresh sandbox is ready in {{snapshot-take}}, longer the more memory it holds); a paused one stays paused. Copies get the source's
+returns (a snapshot of a fresh sandbox is ready in {{server-snapshot}} on Runtime's servers, longer the more memory it holds); a paused one stays paused. Copies get the source's
 vCPUs, memory, disk and CPU (reserved CPU, or a raised floor), are billed as a
 create with those would be, and run on its host. A snapshot is kept on that
 host and copied off it, encrypted, as soon as it is taken, so it survives the
@@ -689,8 +753,8 @@ A preview gives one port of a sandbox an HTTPS address. It is private by default
 a request needs the token, sent as the `x-runtime-preview-token` header, or
 the `urlWithToken` link, which carries it. That link works as it is in a
 browser, `fetch`, `curl` or a WebSocket client until the token expires; a
-browser keeps the token for the site and drops it from the address bar.
-WebSockets work.
+browser keeps the token for the site and drops it from the address bar, also
+inside an iframe on your own site. WebSockets work.
 
 ```ts check
 import { Sandbox } from "withruntime";
@@ -708,6 +772,14 @@ Pass `{ visibility: "public" }` for an address anyone can open (paid sandboxes;
 a trial sandbox's previews stay private), `previews.rotate(port)`
 to refuse every token issued so far, and `previews.delete(port)` to stop sharing.
 
+- **When a change applies:** sharing, rotating, deleting and switching between
+  public and private are in force when the call returns. The next request with
+  an old token is refused, and Runtime has cut any WebSocket opened with one.
+- **Which sites may embed it:** `embedOrigins: ["https://app.example.com"]`
+  (up to {{embed-origins}}, `https://*.example.com` for subdomains) holds the
+  preview to those sites: any other site's iframe is refused, and the link's
+  token works in an iframe only on them. Left out, a shared port keeps its
+  list; `[]` allows any site again, the default.
 - **Token lifetime:** a day by default; `ttlSeconds` sets 60 seconds to 7 days.
   A token lasts at least that long and at most one step longer (an hour, or a
   24th of a shorter lifetime), so reads within a step return the same token. A
@@ -953,8 +1025,10 @@ const runtime = new Runtime({
 console.log((await runtime.me()).orgId);
 ```
 
-`RUNTIME_API_URL` points the client at another API origin. Connections are kept
-alive and reused across calls.
+`RUNTIME_API_URL` points the client at another API origin. Code inside a
+Runtime sandbox calls Runtime's API at `http://runtime.internal`
+([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
+Connections are kept alive and reused across calls.
 
 Before 0.3.0 the package was `@withruntime/cloud`. That name, and
 `runtime-cloud` and `withruntime-cloud`, stopped at 0.5.1 and get no new

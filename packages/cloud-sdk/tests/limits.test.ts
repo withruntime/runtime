@@ -13,10 +13,22 @@ const LIMITED = {
     remainingMicros: "21900000",
     window: "24h",
   },
+  trial: null,
 };
 const READ_ONLY = {
   access: "read",
   daily: { limitMicros: null, usedMicros: "0", remainingMicros: null, window: "24h" },
+  trial: null,
+};
+const ON_TRIAL = {
+  access: "full",
+  daily: { limitMicros: null, usedMicros: "0", remainingMicros: null, window: "24h" },
+  trial: {
+    totalMs: 180_000_000,
+    usedMs: 36_000_000,
+    reservedMs: 3_600_000,
+    availableMs: 140_400_000,
+  },
 };
 
 async function withStub(body: unknown, work: (seen: string[]) => Promise<void>) {
@@ -72,5 +84,20 @@ test("`runtime limits` prints the access, the daily limit and what is left, or t
     expect(text).toMatch(/access\s+read only/);
     expect(text).toMatch(/daily limit\s+none/);
     expect(text).not.toMatch(/left/);
+  });
+});
+
+test("`runtime limits` says the free trial's hours left of its total when the account has one", async () => {
+  await withStub(ON_TRIAL, async () => {
+    const { lines, out } = output();
+    expect(await run(["limits"], env, out)).toBe(0);
+    expect(lines.join("\n")).toMatch(
+      /free trial\s+39 of 50 hours left, 1 held by running sandboxes/,
+    );
+  });
+  await withStub(LIMITED, async () => {
+    const { lines, out } = output();
+    expect(await run(["limits"], env, out)).toBe(0);
+    expect(lines.join("\n")).not.toMatch(/free trial/);
   });
 });

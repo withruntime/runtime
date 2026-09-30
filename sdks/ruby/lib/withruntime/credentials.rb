@@ -12,22 +12,48 @@ module WithRuntime
   module Credentials
     KEY = /\Artcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}\z/
 
+    BAD_ORIGIN = "Use an HTTPS API origin (or http://runtime.internal inside a sandbox, http://localhost for tests)."
+    # Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
+    # own host sends each request on to the public API over HTTPS. The API runs
+    # on that host, whose addresses a sandbox cannot reach directly. Plain HTTP
+    # because the hop never leaves the machine: from the program to the guest's
+    # own proxy, then over the sandbox's private channel to its host.
+    SANDBOX_BASE_URL = "http://runtime.internal"
+    # A file every Runtime sandbox has; the guest keeps it current.
+    SANDBOX_MARKER = "/run/runtime/environment.json"
+
     module_function
 
-    # An HTTPS origin, or plain HTTP to localhost for tests, with nothing after the host.
+    def in_runtime_sandbox?(marker = SANDBOX_MARKER)
+      File.exist?(marker)
+    end
+
+    # The origin calls for +api_origin+ are sent to from here. In a sandbox the
+    # public API is its own host, which it cannot reach directly, so calls for
+    # it go to runtime.internal; every other origin is left as it is.
+    def reachable(api_origin, in_sandbox: -> { in_runtime_sandbox? })
+      api_origin == DEFAULT_BASE_URL && in_sandbox.call ? SANDBOX_BASE_URL : api_origin
+    end
+
+    # An HTTPS origin, plain HTTP to runtime.internal inside a sandbox, or plain
+    # HTTP to localhost for tests, with nothing after the host. runtime.internal
+    # is reserved and never resolves outside a sandbox, so a key sent there in
+    # plain HTTP never leaves the sandbox's host.
     def origin(value)
       uri = URI(value)
-      local = %w[localhost 127.0.0.1 [::1] ::1].include?(uri.host)
+      internal = uri.host == "runtime.internal"
+      local = %w[localhost 127.0.0.1 [::1] ::1].include?(uri.host) || internal
       unless uri.host && (uri.scheme == "https" || (local && uri.scheme == "http")) && uri.userinfo.nil? &&
-             uri.query.nil? && uri.fragment.nil? && ["", "/"].include?(uri.path.to_s)
-        raise ArgumentError, "Use an HTTPS API origin (or http://localhost for tests)."
+             uri.query.nil? && uri.fragment.nil? && ["", "/"].include?(uri.path.to_s) &&
+             !(internal && (uri.scheme != "http" || uri.port != 80))
+        raise ArgumentError, BAD_ORIGIN
       end
 
       default_port = uri.scheme == "https" ? 443 : 80
       host = uri.host.include?(":") && !uri.host.start_with?("[") ? "[#{uri.host}]" : uri.host
       "#{uri.scheme}://#{host}#{uri.port == default_port ? "" : ":#{uri.port}"}"
     rescue URI::InvalidURIError
-      raise ArgumentError, "Use an HTTPS API origin (or http://localhost for tests)."
+      raise ArgumentError, BAD_ORIGIN
     end
 
     # Where the CLI keeps this machine's connection for the two origins.

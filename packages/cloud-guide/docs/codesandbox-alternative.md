@@ -6,6 +6,8 @@ Runtime runs agent code in Firecracker microVMs, like the CodeSandbox SDK, and c
 Runtime and {{cost:codesandbox}} on CodeSandbox**. At 100,000 runs a month that is {{cost:runtime:100000}}
 against {{cost:codesandbox:100000}}, **{{=$0 less:codesandbox:100000}} a month saved**.
 
+Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** CodeSandbox bills a VM's size in credits for
@@ -13,8 +15,12 @@ against {{cost:codesandbox:100000}}, **{{=$0 less:codesandbox:100000}} a month s
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  and runs its next command {{server-wake-command}} after the request that
+  wakes it reaches Runtime. Paused, it
   pays {{paused-storage-rate}} per GB of saved state a month.
+- **Starts in milliseconds.** CodeSandbox's figure for a new VM is
+  {{speed:codesandbox:create}}. On Runtime's servers a new sandbox is running
+  {{server-create}} after the create request, and {{server-create-p95}} at p95 ([speed](./speed)).
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).

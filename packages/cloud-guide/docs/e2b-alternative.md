@@ -6,6 +6,8 @@ Runtime runs agent code in Firecracker microVMs, like E2B, **for {{saving:e2b}} 
 Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:e2b:100000}}, **{{=$0 less:e2b:100000}} a month saved**. Your E2B code keeps working: change one import.
 
+Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** E2B bills every vCPU for as long as the
@@ -13,7 +15,12 @@ Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtim
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
   sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
-  month until a request wakes it; the next command runs {{wake}} after that.
+  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+  Runtime's servers.
+- **Back from a pause in milliseconds.** E2B states a resume takes {{speed:e2b:wake}} and a
+  pause {{speed:e2b:pause}}. On Runtime's servers a wake takes {{server-wake}} and a pause
+  answers in {{server-pause}}, and a new sandbox is running {{server-create}} after the create
+  request, against E2B's {{speed:e2b:create}} ([speed](./speed)).
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).

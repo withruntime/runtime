@@ -462,6 +462,24 @@ final class Transport {
     }
   }
 
+  /** Reads a body as it arrives. */
+  interface BodyReader {
+    void read(InputStream body) throws IOException;
+  }
+
+  /** Sends a call and hands its body to {@code reader} as it arrives, holding a slot until done. */
+  void stream(Call call, BodyReader reader) throws IOException {
+    take(call);
+    try {
+      HttpResponse<InputStream> response = send(call);
+      try (InputStream body = response.body()) {
+        reader.read(body);
+      }
+    } finally {
+      slots.release();
+    }
+  }
+
   /** Newline-delimited JSON events as they arrive. Streams do not hold a connection slot. */
   <T> EventStream<T> events(Call call, Function<Map<String, Object>, T> make) {
     call.accept = "application/x-ndjson";

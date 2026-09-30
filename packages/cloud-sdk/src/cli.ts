@@ -10,6 +10,7 @@ import { Sandbox as SandboxHandle, type Sandbox } from "./sandbox.js";
 import { NotFoundError, RuntimeError } from "./errors.js";
 import { NETWORK_PRODUCTS, networkProductCommand, type NetworkProduct } from "./network-cli.js";
 import { billingCommand } from "./billing-cli.js";
+import { cliRefusal, describeRecord, newestCpu, topicHelp } from "./cli-words.js";
 import { envFetch } from "./proxy.js";
 import { VERSION } from "./transport.js";
 import type { CreateSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
@@ -52,7 +53,9 @@ Account
             [--allow '[GET,HEAD] /path/*']...  Store a secret sandboxes use without seeing it; the
                                                value is read from standard input, never an argument.
                                                --allow (paid): only these methods and paths get it
-  secrets ls | get <NAME>                      Names, hosts and placeholders, never values
+  secrets set <NAME> --jobs [--host ...]       A copy scheduled jobs put in their environment
+                                               (job create --secret NAME); with --host, both
+  secrets ls | get <NAME>                      Names, hosts, placeholders and jobs versions, never values
   secrets rotate <NAME>                        A new version of the jobs copy, from standard input
   secrets reveal <NAME> [--version N]          Print the jobs copy's value. The sandboxes' copy is
                                                never readable, by anyone
@@ -98,6 +101,7 @@ Products
   snapshot  Saved sandboxes, disk and memory, to start or fork from
   image     Custom images from a Dockerfile, any public or private image, or a package list
   volume    Persistent disks to attach to sandboxes
+  job       A command in a fresh sandbox, once or on a cron schedule, with its logs
   domain    Your own hostname for a sandbox's port, with HTTPS
   port      A public TCP port to a sandbox: databases, game servers
   address   A dedicated outbound address, for allow-lists
@@ -116,7 +120,7 @@ const SANDBOX_HELP = `runtime sandbox <command>
   run [--keep] [create options] -- <command>                  A fresh sandbox runs one command, then stops
   ssh <id|name> [-- <command...>] | ssh config [--install]    Log in over SSH, also from VS Code and JetBrains
   port-forward <id|name> <port|local:remote>...               Forward local ports to ports in it
-  create [--name n] [--label k=v]... [--vcpu 2] [--memory 4096] [--disk 4096]
+  create [--name n] [--label k=v]... [--env K=V]... [--vcpu 2] [--memory 4096] [--disk 4096]
          [--cpu shared|reserved] [--cpu-floor <thousandths>] [--max-cost <usd>] [--max-total-cost <usd>]
          [--timeout <seconds>] [--on-timeout pause|stop] [--trial|--paid] [--no-wait]
          [--no-internet] [--allow <host>]... [--deny <host>]... [--connect <host:port>]...
@@ -135,10 +139,15 @@ const SANDBOX_HELP = `runtime sandbox <command>
   cp <src> <dst>                              Copy files or directories; name a sandbox
                                               path as <id>:/path, e.g. cp ./app sbx:/workspace/app
   cat <id> <path>                             Print a file
-  files <id> [path] [--depth 2] [--glob '**/*.py']
+  files <id> [path] [--depth 1] [--glob '**/*.py']
   stop <id> | pause <id> | wake <id> | restart <id>
+  rm <id>                                     Delete it for good: stops it, deletes its disk and
+                                              paused memory, revokes its previews; snapshots stay
+  switch-image <id> <image> --keep-workspace  Move it to another image, keeping /workspace (your home),
+                                              volumes, env and previews; processes restart, the rest of
+                                              its disk is lost (snapshot it first to keep everything)
   extend <id> <seconds>                       More time before the lease ends
-  update <id> [--name n] [--label k=v]... [--idle-pause <seconds>] [--auto-wake on|off]
+  update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
                                               Change its settings; persistent keeps it running
   snapshot <id> [--name n] [--retention days] Keep its whole machine; prints the snapshot id
@@ -146,6 +155,9 @@ const SANDBOX_HELP = `runtime sandbox <command>
         [--endpoint https://...] [--account-id id] [--read-only]
                                               Your bucket as a directory; the proxy signs, the sandbox never sees the key
   mounts <id> | unmount <id> <path>           Its bucket mounts; unmount one
+  tailscale up <id> --auth-key-secret NAME [--hostname h] [--tag tag:x]...
+                                              Join your tailnet (paid); the key is a secret set with --jobs
+  tailscale status <id> | tailscale down <id> Its tailnet address; take it off the tailnet
   fork <id> [--count 3] [--name n] [--keep-snapshot] [--trial|--paid]
                                               Copies of it as it is now, running; prints their ids
   run-code <id> <file|-> [--lang python|javascript|typescript|r|java|bash|go] [--context c] [--out-dir .]
@@ -416,6 +428,9 @@ const SANDBOX_VERBS = [
   "ls",
   "get",
   "stop",
+  "rm",
+  "delete",
+  "switch-image",
   "pause",
   "wake",
   "restart",
@@ -423,6 +438,7 @@ const SANDBOX_VERBS = [
   "mount",
   "mounts",
   "unmount",
+  "tailscale",
   "fork",
   "extend",
   "update",
@@ -520,6 +536,12 @@ function describe(info: SandboxInfo): string {
     ["funding", info.funding],
     ["region", info.region],
     ["expires", info.expiresAt ?? "-"],
+    ["at lease end", info.onLeaseEnd ?? "-"],
+    // Why a sandbox is no longer running (troubleshooting.md, "A sandbox
+    // stopped on its own"); `get` left both out until 30 September 2026.
+    ...(info.pausedAt ? [["paused at", info.pausedAt]] : []),
+    ...(info.endedAt ? [["ended", info.endedAt]] : []),
+    ...(info.stopReason ? [["stop reason", info.stopReason]] : []),
     ["auto wake", info.autoWake === false ? "off" : "on"],
     [
       "idle pause",
@@ -570,6 +592,20 @@ export async function run(
   // `runtime sandbox create --help` is how an agent asks what a command takes:
   // answer with the product's help, never by running the command.
   const cut = remaining.indexOf("--");
+  const asked =
+    (cut < 0 ? remaining : remaining.slice(0, cut)).some(
+      (arg) => arg === "--help" || arg === "-h",
+    ) ||
+    (remaining.length === 1 && remaining[0] === "help");
+  // A command without a help of its own answers `help` with its lines of the
+  // top-level help, and never takes the word as its input.
+  if (first && first !== "help" && asked && !nested && !OWN_HELP.includes(first)) {
+    const lines = topicHelp(named(HELP), first);
+    if (lines) {
+      out.write(out.json ? JSON.stringify({ usage: lines }) : lines);
+      return 0;
+    }
+  }
   if (
     first &&
     (cut < 0 ? remaining : remaining.slice(0, cut)).some((arg) => arg === "--help" || arg === "-h")
@@ -743,8 +779,8 @@ export async function run(
   }
   if (command === "limits") {
     const l = await (await client(env)).limits.get();
-    const usd = (micros: string) =>
-      `$${(Number(BigInt(micros) / 10_000n) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // As `usage` shows money: $0.0014 of spend read $0.00 until 30 September 2026.
+    const usd = (micros: string) => dollars(micros);
     const access =
       l.access === "read"
         ? "read only: reads every product, cannot start, change or spend"
@@ -762,6 +798,7 @@ export async function run(
         ],
         ["used, last 24 hours", usd(l.daily.usedMicros)],
         ...(l.daily.remainingMicros === null ? [] : [["left", usd(l.daily.remainingMicros)]]),
+        ...(l.trial ? [["free trial", trialLeft(l.trial)]] : []),
       ]),
       l,
     );
@@ -1105,13 +1142,18 @@ export function usageCsv(u: Usage): string {
   return [head.join(","), ...rows].join("\n");
 }
 
+/** The free trial's time left, as `runtime usage` and `runtime limits` say it. */
+function trialLeft(trial: { totalMs: number; reservedMs: number; availableMs: number }): string {
+  const hours = (ms: number) =>
+    (ms / 3_600_000).toLocaleString("en-US", { maximumFractionDigits: 1 });
+  return `${hours(trial.availableMs)} of ${hours(trial.totalMs)} hours left${trial.reservedMs > 0 ? `, ${hours(trial.reservedMs)} held by running sandboxes` : ""}`;
+}
+
 function usageSummary(u: Usage): string {
   const micros = (value: unknown) =>
     typeof value === "string" || typeof value === "number" || typeof value === "bigint"
       ? BigInt(value)
       : 0n;
-  const hours = (ms: number) =>
-    (ms / 3_600_000).toLocaleString("en-US", { maximumFractionDigits: 1 });
   const takenBack = micros(u.takenBack);
   const rows: string[][] = [
     ["available", dollars(micros(u.available))],
@@ -1126,11 +1168,7 @@ function usageSummary(u: Usage): string {
     ["held for running sandboxes and this hour's storage", dollars(micros(u.held))],
   ];
   if (micros(u.expired) > 0n) rows.push(["expired or taken back", dollars(micros(u.expired))]);
-  if (u.trial)
-    rows.push([
-      "free trial",
-      `${hours(u.trial.availableMs)} of ${hours(u.trial.totalMs)} hours left${u.trial.reservedMs > 0 ? `, ${hours(u.trial.reservedMs)} held by running sandboxes` : ""}`,
-    ]);
+  if (u.trial) rows.push(["free trial", trialLeft(u.trial)]);
   if (u.outbound) {
     const gib = (bytes: number) =>
       `${(bytes / 1_073_741_824).toLocaleString("en-US", { maximumFractionDigits: 1 })} GiB`;
@@ -1534,8 +1572,12 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         ...(args.flags.has("state")
           ? { state: args.flags.get("state") as SandboxInfo["state"][] }
           : {}),
+        limit: 100,
       });
-      const all = await page.toArray(1000);
+      // Every page, oldest first, so the newest are last on the screen. Until
+      // 30 September 2026 this stopped at 1,000 and silently left out the
+      // newest sandboxes of a busy account.
+      const all = await page.toArray(Infinity);
       // Stopped sandboxes are hidden by default; say so, or an agent that
       // stopped everything reads "No sandboxes" as "never had any".
       const hidden =
@@ -1571,6 +1613,27 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     case "get": {
       const sbx = await get(rest[0]);
       print(describe(sbx.info), sbx.info);
+      return 0;
+    }
+    case "switch-image": {
+      const args = parse(rest, ["keep-workspace"], []);
+      const [id, image] = args.positional;
+      const sbx = await use(
+        need(id, `a sandbox, e.g. ${me} sandbox switch-image <id> app:v2 --keep-workspace`),
+      );
+      if (!args.flags.has("keep-workspace"))
+        throw usage(
+          `A switch keeps only /workspace (your home), volumes, env and previews; processes restart and everything else on its disk is lost. Add --keep-workspace to say so, or snapshot it first (${me} sandbox snapshot ${sbx.id}) to keep everything.`,
+        );
+      await sbx.switchImage(need(image, "an image, e.g. app:v2"), { keep: "workspace" });
+      print(describe(sbx.info), sbx.info);
+      return 0;
+    }
+    case "rm":
+    case "delete": {
+      const sbx = await use(need(rest[0], `a sandbox, e.g. ${me} sandbox rm <id>`));
+      const gone = await sbx.delete();
+      print(`${gone.id} deleted`, gone);
       return 0;
     }
     case "stop":
@@ -1631,6 +1694,46 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       print(`${gone.path} unmounted`, gone);
       return 0;
     }
+    case "tailscale": {
+      const action = rest[0];
+      if (action === "up") {
+        const args = parse(rest.slice(1), [], ["auth-key-secret", "hostname", "tag"]);
+        const sbx = await use(args.positional[0]);
+        const joined = await sbx.tailscale.up({
+          authKeySecret: need(
+            flag(args, "auth-key-secret"),
+            "--auth-key-secret, the name of a secret set with --jobs that holds your Tailscale auth key",
+          ),
+          ...(flag(args, "hostname") ? { hostname: flag(args, "hostname")! } : {}),
+          ...(args.flags.has("tag") ? { tags: args.flags.get("tag")! } : {}),
+        });
+        print(
+          `${joined.hostname} ${joined.addresses.join(" ")}${
+            joined.proxy ? ` (reach the tailnet through ${joined.proxy})` : ""
+          }`,
+          joined,
+        );
+        return 0;
+      }
+      if (action === "status") {
+        const sbx = await use(rest[1]);
+        const now = await sbx.tailscale.status();
+        print(
+          now.tailnet
+            ? `${now.tailnet.hostname} ${now.running ? now.addresses.join(" ") : (now.state ?? "not running")}`
+            : "Not on a tailnet.",
+          now,
+        );
+        return 0;
+      }
+      if (action === "down") {
+        const sbx = await use(rest[1]);
+        const gone = await sbx.tailscale.down();
+        print(gone.left ? "Left the tailnet." : "Not on a tailnet.", gone);
+        return 0;
+      }
+      throw usage("runtime sandbox tailscale up|status|down <id>");
+    }
     case "snapshot": {
       const args = parse(rest, [], ["name", "retention"]);
       const sbx = await get(args.positional[0]);
@@ -1664,7 +1767,16 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const args = parse(
         rest,
         [],
-        ["name", "label", "idle-pause", "auto-wake", "persistent", "max-total-cost"],
+        [
+          "name",
+          "label",
+          "env",
+          "unset-env",
+          "idle-pause",
+          "auto-wake",
+          "persistent",
+          "max-total-cost",
+        ],
       );
       const sbx = await get(args.positional[0]);
       const onOff = (name: string) => {
@@ -1676,9 +1788,14 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const cost = flag(args, "max-total-cost");
       if (cost !== undefined && cost !== "none" && !/^\d+(\.\d{1,6})?$/.test(cost))
         throw usage("--max-total-cost takes dollars, such as 25 or 2.50, or none.");
+      const env = {
+        ...(args.flags.has("env") ? pairs(args, "env") : {}),
+        ...Object.fromEntries((args.flags.get("unset-env") ?? []).map((name) => [name, null])),
+      };
       const settings = {
         ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
         ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
+        ...(Object.keys(env).length ? { env } : {}),
         ...(integer(args, "idle-pause") !== undefined
           ? { idlePauseSeconds: integer(args, "idle-pause")! }
           : {}),
@@ -1692,7 +1809,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       };
       if (!Object.keys(settings).length)
         throw usage(
-          "Say what to change: --name, --label, --idle-pause, --auto-wake, --persistent or --max-total-cost.",
+          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent or --max-total-cost.",
         );
       await sbx.update(settings);
       print(describe(sbx.info), sbx.info);
@@ -1771,8 +1888,26 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const args = parse(rest, [], ["signal"]);
       const sbx = await use(args.positional[0]);
       const proc = await sbx.processes.get(need(args.positional[1], "a process id"));
+      // A process that has ended has nothing to signal; "Signalled" said it
+      // had been until 30 September 2026.
+      if (
+        proc.info.state === "exited" ||
+        proc.info.state === "killed" ||
+        proc.info.state === "timed_out"
+      ) {
+        print(
+          `${proc.id} had already ${proc.info.state === "exited" ? "exited" : "ended"}${proc.info.exitCode == null ? "" : ` (exit code ${proc.info.exitCode})`}; nothing to signal.`,
+          {
+            processId: proc.id,
+            state: proc.info.state,
+            exitCode: proc.info.exitCode ?? null,
+            signalled: false,
+          },
+        );
+        return 0;
+      }
       await proc.kill((flag(args, "signal") ?? "SIGTERM") as "SIGTERM");
-      print(`Signalled ${proc.id}.`, { processId: proc.id });
+      print(`Signalled ${proc.id}.`, { processId: proc.id, signalled: true });
       return 0;
     }
     case "shell": {
@@ -2568,7 +2703,7 @@ async function snapshot(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promi
             : {}),
           ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
         })
-      ).toArray(1000);
+      ).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -2748,7 +2883,7 @@ export async function imageCommand(
     case "list":
     case "versions": {
       const name = verb === "versions" ? need(rest[0], "a name") : undefined;
-      const all = await (await api.list(name ? { name } : {})).toArray(1000);
+      const all = await (await api.list(name ? { name } : {})).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -2772,7 +2907,7 @@ export async function imageCommand(
     }
     case "get": {
       const found = await api.resolve(need(rest[0], "an image"));
-      print(JSON.stringify(found, null, 2), found);
+      print(describeRecord(found, table), found);
       return 0;
     }
     case "logs": {
@@ -3022,7 +3157,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
     }
     case "ls":
     case "list": {
-      const all = await (await api.list({ limit: 100 })).toArray(1000);
+      const all = await (await api.list({ limit: 100 })).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -3032,7 +3167,8 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
                 j.name,
                 j.state,
                 scheduleText(j),
-                when(j.nextRunAt),
+                // A canceled or finished job keeps its last nextRunAt, but runs no more.
+                j.state === "active" || j.state === "paused" ? when(j.nextRunAt) : "-",
                 j.blockedReason ?? "-",
               ]),
             ])
@@ -3048,7 +3184,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
     }
     case "runs": {
       const jobId = need(rest[0], "a job id");
-      const all = await (await api.runs(jobId, { limit: 100 })).toArray(1000);
+      const all = await (await api.runs(jobId, { limit: 100 })).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -3078,7 +3214,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
       } catch (error) {
         if (!(error instanceof NotFoundError)) throw error;
         // A job's id: its latest run.
-        const runs = await (await api.runs(id, { limit: 100 })).toArray(1000);
+        const runs = await (await api.runs(id, { limit: 100 })).toArray(Infinity);
         const latest = runs.at(-1);
         if (!latest) {
           const job = await api.get(id);
@@ -3182,7 +3318,7 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
     }
     case "ls":
     case "list": {
-      const all = await (await api.list()).toArray(1000);
+      const all = await (await api.list()).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -3203,7 +3339,7 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
     }
     case "get": {
       const found = await api.get(need(rest[0], "a volume id"));
-      print(JSON.stringify(found, null, 2), found);
+      print(describeRecord(found, table), found);
       return 0;
     }
     case "rm":
@@ -3228,7 +3364,7 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
     }
     case "backups": {
       const volumeId = rest[0];
-      const all = await (await api.backups(volumeId ? { volumeId } : {})).toArray(1000);
+      const all = await (await api.backups(volumeId ? { volumeId } : {})).toArray(Infinity);
       print(
         all.length
           ? table([
@@ -3341,6 +3477,7 @@ const CREATE_VALUES = [
   "image",
   "snapshot",
   "volume",
+  "env",
 ];
 /** Dollars from the command line as integer microdollars: 25, 2.50 or 0.000001. */
 function usdMicros(args: Args, name: string): number | undefined {
@@ -3366,6 +3503,7 @@ function createInput(args: Args): CreateSandbox & { wait?: boolean } {
       : {}),
     ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
     ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
+    ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
     ...(integer(args, "vcpu") ? { vcpu: integer(args, "vcpu")! } : {}),
     ...(integer(args, "memory") ? { memoryMiB: integer(args, "memory")! } : {}),
     ...(integer(args, "disk") ? { diskMiB: integer(args, "disk")! } : {}),
@@ -3447,7 +3585,11 @@ async function execute(
   // Never drop output silently: say so, and do not exit 0.
   const lost = extras.lostOutput(result, sbx.id);
   if (lost && !out.json) out.error(lost);
-  const code = result.timedOut ? 124 : Math.min(255, Math.max(0, result.exitCode ?? 1));
+  /* A command a signal ended comes back as minus the signal (-9 after the
+     out-of-memory killer's SIGKILL); a shell says 128 + the signal. Clamped
+     to 0 until 30 September 2026, a killed command exited 0. */
+  const exit = result.exitCode ?? 1;
+  const code = result.timedOut ? 124 : Math.min(255, exit < 0 ? 128 - exit : exit);
   return lost && code === 0 ? 1 : code;
 }
 
@@ -3497,7 +3639,9 @@ export function describeError(error: unknown, json: boolean): string {
           details: error.details,
         },
       });
-    return `Error [${error.code}]: ${error.message}${error.hint ? `\nHint: ${error.hint}` : ""}${
+    // In the command line's words: the option, not the request's field.
+    const { message, hint } = cliRefusal(error);
+    return `Error [${error.code}]: ${message}${hint ? `\nHint: ${hint}` : ""}${
       error.requestId
         ? // A refusal of what was sent is the caller's to fix; only a failure
           // of ours is worth a report.
@@ -3548,17 +3692,26 @@ function metricsText(m: SandboxMetrics): string {
   const cpu = m.points.map((p) => p.cpuPercent);
   const memory = m.points.map((p) => p.memoryBytes);
   const peak = Math.max(0, ...m.points.map((p) => p.cpuPeakPercent ?? p.cpuPercent ?? 0));
-  const latest = m.latest;
+  // `latest` is the newest reading of the last 15 minutes whatever the state,
+  // so a sandbox paused a minute ago still has one from before it slept. Only a
+  // running sandbox has a now.
+  const latest = m.state === "running" ? m.latest : null;
+  const still = m.state === "running" ? null : `none: it is ${m.state}`;
+  const cpuNow = newestCpu(m);
   return [
     table([
       ["state", m.state],
       [
         "cpu now",
-        latest?.cpuPercent == null
-          ? "no reading in the last 15 minutes"
-          : `${latest.cpuPercent}% of ${m.vcpu} vCPU (${latest.cpuCores} cores)`,
+        still ??
+          (cpuNow
+            ? `${cpuNow.percent}% of ${m.vcpu} vCPU${cpuNow.cores == null ? "" : ` (${cpuNow.cores} cores)`}${cpuNow.ago ? `, ${cpuNow.ago}` : ""}`
+            : "no reading in this range"),
       ],
-      ["memory now", latest ? `${mib(latest.memoryBytes)} of ${mib(m.memoryLimitBytes)}` : "-"],
+      [
+        "memory now",
+        still ?? (latest ? `${mib(latest.memoryBytes)} of ${mib(m.memoryLimitBytes)}` : "-"),
+      ],
       [`cpu, ${m.range}`, m.points.length ? `${spark(cpu)}  peak ${peak}%` : "no readings"],
       [
         `memory, ${m.range}`,

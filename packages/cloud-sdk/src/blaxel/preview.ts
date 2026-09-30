@@ -280,7 +280,7 @@ export class SandboxPreviews {
     return new SandboxPreview(modelOf(found, previewName, this.sandboxName), this.#ctx);
   }
 
-  /** Stops sharing the port; open connections close within seconds. */
+  /** Stops sharing the port; its open connections are closed before this returns. */
   async delete(previewName: string): Promise<Preview> {
     const port = this.#portOf(previewName);
     if (port === undefined) throw responseError(404, `preview ${previewName} not found`);

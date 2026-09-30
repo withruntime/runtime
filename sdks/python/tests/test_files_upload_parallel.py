@@ -37,7 +37,12 @@ class Transport:
         return {'uploadId': 'upload', 'chunkBytes': MIB} if path.endswith('/uploads') else {}
 
     def send(self, method, path, **kwargs):
+        # Each chunk is held until eight are in flight (or a second passes), so a
+        # loaded machine that starts the workers slowly cannot hide the eighth.
         self.count.enter()
+        until = time.monotonic() + 1
+        while self.count.now < 8 and time.monotonic() < until:
+            time.sleep(0.001)
         time.sleep(0.02)
         self.count.leave()
         return self
@@ -52,6 +57,9 @@ class AsyncTransport(Transport):
 
     async def send(self, method, path, **kwargs):
         self.count.enter()
+        until = time.monotonic() + 1
+        while self.count.now < 8 and time.monotonic() < until:
+            await asyncio.sleep(0.001)
         await asyncio.sleep(0.02)
         self.count.leave()
         return self

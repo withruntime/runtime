@@ -145,7 +145,7 @@ class FakeProcess:
         self.info = {"id": process_id, "state": "running", "command": command, "cwd": "/workspace",
                      "stdinOpen": stdin_open, "outputBytes": 0}
 
-    def output(self, cursor: int = 0) -> Any:
+    def output(self, cursor: int = 0, timeout_seconds: Optional[float] = None) -> Any:
         self._w.record("process.output", self.id, cursor)
         for event in self._events:
             yield event
@@ -170,6 +170,17 @@ class FakeFiles:
         if path not in self._s.file_map:
             raise not_found("file_not_found", f"{path} does not exist.")
         return self._s.file_map[path]
+
+    def _open_read(self, path: str):
+        data = self.read(path)
+        class Response:
+            headers = {"content-length": str(len(data))}
+            def chunks(self): yield data
+            def close(self): pass
+        return Response()
+
+    def read_stream(self, path: str):
+        yield self.read(path)
 
     def write(self, path: str, data: Any) -> Dict[str, Any]:
         self._w.record("files.write", path)
@@ -399,8 +410,18 @@ class Asyncified:
             return agen
         if callable(value) and not isinstance(value, type):
             async def call(*args: Any, **kwargs: Any) -> Any:
+                pending = []
+                if isinstance(self._target, FakeInterpreter) and name == "run":
+                    def capture(callback):
+                        def invoke(data):
+                            outcome = callback(data)
+                            if inspect.isawaitable(outcome): pending.append(outcome)
+                        return invoke
+                    kwargs = {key: capture(item) if key.startswith("on_") and item else item for key, item in kwargs.items()}
                 result = value(*args, **kwargs)
-                return Asyncified(result) if isinstance(result, _WRAPPED) else (
+                for outcome in pending:
+                    await outcome
+                return Asyncified(result) if isinstance(result, _WRAPPED) or (hasattr(result, "chunks") and hasattr(result, "headers")) else (
                     [Asyncified(one) if isinstance(one, _WRAPPED) else one for one in result]
                     if isinstance(result, list) else result)
             return call

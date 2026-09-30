@@ -18,6 +18,7 @@ from .billing import Billing
 from .secrets import Secrets
 from .sso import Sso
 from .switching import Switching
+from .tailscale import Tailscale
 from .volumes import Volumes
 
 CLIENT: dict[str, Any] = {}
@@ -46,5 +47,6 @@ SANDBOX["previews"] = Previews
 SANDBOX["network"] = Network
 SANDBOX["desktop"] = Desktop
 SANDBOX["mounts"] = Mounts
+SANDBOX["tailscale"] = Tailscale
 SANDBOX["metrics"] = Metrics
 SANDBOX["mcp"] = SandboxMcp

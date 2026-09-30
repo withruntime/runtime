@@ -20,11 +20,22 @@ Runtime uses Firecracker microVMs on Runtime-operated dedicated servers.
 - Never put a key in a public prompt, URL, browser bundle, repository,
   command-line argument or diagnostic log.
 - A framework adapter does not expand what the key is allowed to do.
+- If a key turns up in public, Runtime may revoke that one key. The account's
+  owners are emailed why, the audit log shows Runtime revoked it with the
+  reason, and every other key keeps working.
 
 Give a command its secrets through `env`, never in the command line. Runtime
 never echoes `env` values back, and its journals and request records keep only a
 hash of them. A command line is not protected that way: anything running in the
 sandbox can read it.
+
+**What Runtime keeps about a command is its program's name, never its
+arguments.** For each command run through the API, the SDKs, the CLI or MCP,
+Runtime records the program (`python3`, from `python3 train.py --token …`),
+its exit code, how long it ran, when it started, which key or person ran it and
+in which sandbox. Arguments, the rest of the command line and environment
+values are never stored, because arguments can carry a secret typed inline.
+The record is kept 14 days and shown on the sandbox's page in your account.
 
 ## Read-only keys and daily limits
 
@@ -85,18 +96,34 @@ nothing in the guest, root included, can go around it.
   on any port. A trial sandbox reaches ports 443 and 80.
 - A few ports are never reachable (telnet, Windows RPC, NetBIOS and SMB, IRC),
   and mail ports open only when support enables mail for your account.
-- Private and internal addresses are refused. A trial sandbox that tries them
-  five times in ten minutes loses its network, and its account is suspended.
+- Private and internal addresses are refused. Code that retries one, such as a
+  cloud SDK looking for credentials at the metadata address, is only refused.
+- The proxy watches every sandbox, trial or paid, for traffic that only abuse
+  makes: trying one internal address after another, a port scan or a sweep of
+  addresses that do not answer, a cryptocurrency mining pool, and mail sent
+  straight to many mail servers. The thresholds sit far above what test
+  suites, builds, package installs, crawlers within the limits, CI and load
+  tests against your own servers do. A sandbox that crosses one loses its
+  network and is paused, or stopped if it cannot pause; your inbox
+  (`GET /v1/notices`) says what was seen and what was done. An account that
+  has paid is never suspended for it; a trial account that probes internal
+  addresses is. Traffic that looks like a flood, repeated attempts on the
+  closed mail ports, or full CPU beside a mining pool's website is only
+  recorded for a person to look at.
 - Services that exist only to catch a security test's call-back, such as
   `oast.live`, `interact.sh` and Burp Collaborator, are refused to every
   sandbox and image build. To test Runtime itself, see
   [report a vulnerability](#report-a-vulnerability).
 - Each sandbox's rules can narrow this further, and they bind root inside the
   sandbox too. See [the sandbox environment](./sandbox-environment).
+- Code in a sandbox reaches Runtime's own API only at `http://runtime.internal`,
+  with an API key, like any other caller. The host sends each request on to
+  the public API over HTTPS and reaches nothing else of its own. See
+  [Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox).
 - Each sandbox has limits on concurrent connections, bandwidth and bytes per
-  day, so one sandbox cannot crowd out others. A paid sandbox gets 500 Mbit/s,
-  200 Mbit/s sustained after its first 10 GiB, and 500 GiB a day; a trial
-  sandbox 20 Mbit/s, with 5 GiB a day for the whole trial account
+  day, so one sandbox cannot crowd out others. A paid sandbox gets {{paid-bandwidth}},
+  {{paid-bandwidth-sustained}} sustained after its first {{paid-bandwidth-burst}}, and {{paid-daily-transfer}} a day; a trial
+  sandbox {{trial-bandwidth}}, with {{trial-daily-transfer}} a day for the whole trial account
   ([the sandbox environment](./sandbox-environment#the-network)).
 
 Inbound connections require a preview, a proved custom domain, an allocated
@@ -105,7 +132,12 @@ and account it was granted. A preview is private with an expiring token unless
 you make it public, which a paid sandbox can do; a trial sandbox's previews
 are always private. Preview addresses are under `runtimehost.com`, never under
 `withruntime.com`, so sandbox content never shares an origin with your account.
-Rotating a preview token refuses every token issued before it.
+Rotating a preview token refuses every token issued before it, and closes
+connections opened with one, before the call returns. Making a preview private
+or deleting it, removing a custom domain and closing a TCP port take effect the
+same way, and so does Runtime taking a site down or suspending an account.
+A suspension also pauses the account's running sandboxes, keeping their memory
+and disk, and none of them starts or wakes until the account is restored.
 
 Public ingress rate tracking fails closed when its bounded tracking table is
 full. Established connections and the separate operator SSH allowance keep
@@ -370,6 +402,11 @@ Anyone can sign up at https://withruntime.com/sign-in.
   can turn off a domain, a port, a tunnel or everything of an account at once.
 
 ## Two-step sign-in
+
+Customer sign-in uses Google, an email link, single sign-on or a passkey.
+Directory reviewers use a separate, pre-provisioned demo identity with a
+password. That login accepts only the configured review identity, grants no
+extra permissions, and follows the same second-step requirements.
 
 Turn it on under **Settings → Two-step sign-in** with a passkey, an
 authenticator app, or both, and keep the ten backup codes it gives you. From

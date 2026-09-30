@@ -22,10 +22,11 @@ import inspect
 import posixpath
 from typing import Any, Callable, Optional
 
+from ._api_defaults import TOOL_EXEC_TIMEOUT_SECONDS
 from ._errors import NotFoundError
 
 WORKSPACE = "/workspace"
-DEFAULT_TIMEOUT_SECONDS = 300
+DEFAULT_TIMEOUT_SECONDS = TOOL_EXEC_TIMEOUT_SECONDS
 DEFAULT_MAX_OUTPUT_CHARS = 20_000
 
 EXEC_DOC = """Run a shell command (bash) in the sandbox and return its exit code, stdout and stderr.

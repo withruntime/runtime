@@ -59,6 +59,8 @@ const metrics = {
     },
   ],
 };
+/** What the metrics route answers; a test may swap it for its own. */
+let served: typeof metrics = metrics;
 const webhook = {
   id: HOOK_ID,
   url: "https://example.com/hooks/runtime",
@@ -83,7 +85,7 @@ async function withStub(work: (seen: string[]) => Promise<void>) {
     const body = request.method === "POST" ? await request.text() : "";
     seen.push(`${request.method} ${url.pathname}${url.search}${body ? ` ${body}` : ""}`);
     if (url.pathname === `/v1/sandboxes/${SANDBOX_ID}`) return Response.json(sandbox);
-    if (url.pathname.endsWith("/metrics")) return Response.json(metrics);
+    if (url.pathname.endsWith("/metrics")) return Response.json(served);
     if (url.pathname === "/v1/webhooks" && request.method === "POST")
       return Response.json({ ...webhook, secret: `whsec_${"a".repeat(43)}` });
     if (url.pathname === "/v1/webhooks")
@@ -247,4 +249,28 @@ test("the CLI: sandbox metrics, webhooks and otel", async () => {
     expect(await run(["events", "--sandbox", SANDBOX_ID], env, out)).toBe(0);
     expect(seen.at(-1)).toBe(`GET /v1/events?resourceId=${SANDBOX_ID}`);
   });
+});
+
+test("the CLI's metrics say a paused sandbox has no now, though the reading from before it paused is still the latest", async () => {
+  const env = { RUNTIME_API_KEY: "rk_cli", RUNTIME_API_URL: "https://api.example.test" };
+  // The route's latest is the newest reading of the last 15 minutes, whatever
+  // the state: a minute after a pause it is the one from before.
+  served = { ...metrics, state: "paused" };
+  try {
+    await withStub(async () => {
+      const lines: string[] = [];
+      const out = {
+        json: false,
+        write: (t: string) => lines.push(t),
+        error: (t: string) => lines.push(t),
+      };
+      expect(await run(["sandbox", "metrics", SANDBOX_ID], env, out)).toBe(0);
+      const said = lines.join("\n");
+      expect(said).toMatch(/cpu now\s+none: it is paused/);
+      expect(said).toMatch(/memory now\s+none: it is paused/);
+      expect(said).not.toContain("25% of 2 vCPU");
+    });
+  } finally {
+    served = metrics;
+  }
 });

@@ -7,6 +7,8 @@ Runtime and {{cost:blaxel}} on Blaxel**. At 100,000 runs a month that is {{cost:
 {{cost:blaxel:100000}}, **{{=$0 less:blaxel:100000}} a month saved**. Your Blaxel sandbox code keeps working: change
 one import.
 
+Weighing more than two? [Blaxel alternatives](/compare/blaxel-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **Lower cost while running.** Blaxel bills {{=$7 rate:blaxel:memory / 3600}} per GB of memory per
@@ -155,7 +157,9 @@ names what to use instead. `BLAXEL.md` in the package lists every
 mapping. For MCP, Runtime runs servers from its catalog inside a sandbox
 ([MCP servers in a sandbox](./javascript#mcp-servers-in-a-sandbox)), and a
 bucket mounted in several sandboxes shares files between them
-([mount your own bucket](./storage#mount-your-own-bucket)).
+([mount your own bucket](./storage#mount-your-own-bucket)). A Blaxel schedule runs a command inside one sandbox; on Runtime a
+[scheduled job](./jobs) runs it on a cron schedule or at a time, in a fresh
+sandbox each run.
 
 ### Or port the calls
 
@@ -189,10 +193,11 @@ top-up, and that top-up is matched with credit, up to {{switching-max}}
 
 ## When Blaxel may fit better
 
-- **Back from idle in milliseconds.** Blaxel states a resume from standby in
-  about 25 ms. On Runtime's server a wake takes {{server-wake}}, and from a
-  laptop a paused sandbox runs its next command {{wake}} after the call that
-  wakes it ({{server-date}}).
+- **A shorter stated wake.** Blaxel states a resume from standby in
+  {{speed:blaxel:wake}} and does not say how it is timed. On Runtime's servers a
+  wake answers in {{server-wake}}, the host's part of it {{host-wake}}, and the
+  next command has run {{server-wake-command}} after the wake request
+  ({{server-date}}, [speed](./speed)).
 - **Very large fleets.** Blaxel's top tier runs over 100,000 sandboxes at once.
   A tier is the credit topped up over the last 30 days, which is then spent on
   usage: {{term:blaxel:tier-1}} unlocks 50 sandboxes and {{term:blaxel:tier-2}} unlocks 200.

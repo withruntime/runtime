@@ -57,7 +57,10 @@ public final class RuntimeClient {
     if (key == null || key.isEmpty()) throw RuntimeCloudException.missingKey();
     if (key.chars().anyMatch(Character::isWhitespace))
       throw new IllegalArgumentException("The Runtime API key contains whitespace.");
-    this.transport = new Transport(builder, key, origin);
+    // The saved key is found by the origin as given; the calls go where that origin is reachable
+    // from here.
+    this.transport =
+        new Transport(builder, key, Credentials.reachable(origin, Credentials::inRuntimeSandbox));
     this.sandboxes = new Sandboxes(transport);
     this.snapshots = new Snapshots(transport);
     this.images = new Images(transport);
@@ -108,7 +111,10 @@ public final class RuntimeClient {
       return this;
     }
 
-    /** Another API origin. Default: RUNTIME_API_URL, then https://api.withruntime.com. */
+    /**
+     * Another API origin. Default: RUNTIME_API_URL, then https://api.withruntime.com. Inside a
+     * Runtime sandbox, calls for https://api.withruntime.com go to http://runtime.internal.
+     */
     public Builder baseUrl(String url) {
       this.baseUrl = url;
       return this;

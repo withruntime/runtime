@@ -19,13 +19,15 @@ module WithRuntime
 
     # +api_key+: default RUNTIME_API_KEY, then this machine's saved connection.
     # +base_url+: default RUNTIME_API_URL, then https://api.withruntime.com.
+    # Inside a Runtime sandbox, calls for https://api.withruntime.com go to
+    # http://runtime.internal.
     # +timeout+: seconds for each call, retries included (300).
     # +max_retries+: of transport failures, 429, 502, 503 and 504 (4).
     # +max_connections+: calls in flight at once; streams do not count (32).
     # +wait_for_capacity+: seconds a sandbox create keeps retrying, with the
     # same key and input, when the trial, quota or region is full (120; 0 fails at once).
     def initialize(api_key: nil, base_url: nil, timeout: 300, max_retries: 4, max_connections: 32,
-                   wait_for_capacity: 120, env: ENV)
+                   wait_for_capacity: 120, env: ENV, in_sandbox: -> { Credentials.in_runtime_sandbox? })
       origin = Credentials.origin(base_url || env["RUNTIME_API_URL"].then { |url| url.nil? || url.empty? ? DEFAULT_BASE_URL : url })
       key = api_key
       key ||= env["RUNTIME_API_KEY"] unless env["RUNTIME_API_KEY"].to_s.empty?
@@ -34,7 +36,10 @@ module WithRuntime
       raise ArgumentError, "The Runtime API key contains whitespace." if key.match?(/\s/)
       raise ArgumentError, "max_retries cannot be negative." if max_retries.negative?
 
-      @transport = Transport.new(api_key: key, base_url: origin, timeout: timeout, max_retries: max_retries,
+      # The saved key is found by the origin as given; the calls go where that
+      # origin is reachable from here.
+      @transport = Transport.new(api_key: key, base_url: Credentials.reachable(origin, in_sandbox: in_sandbox),
+                                 timeout: timeout, max_retries: max_retries,
                                  max_connections: max_connections, wait_for_capacity: [0, wait_for_capacity].max)
       @sandboxes = Sandboxes.new(@transport)
       @snapshots = Snapshots.new(@transport)

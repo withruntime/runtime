@@ -5,7 +5,7 @@ Give a Claude Managed Agent Runtime's sandboxes through Runtime's remote MCP ser
 Claude Managed Agents runs the agent loop and a container for each session on
 Anthropic's side. Add Runtime's MCP server to the agent and it can also create
 Runtime sandboxes: Firecracker microVMs with their own kernel. They can run
-for days, pause with their memory and wake in about {{wake}}, share a
+for days, pause with their memory and wake in about {{server-wake-command}} on Runtime's servers, share a
 port at an HTTPS address, fork, run Docker, and start from your own images.
 Runtime bills them for the CPU they use. The Runtime key stays in an
 Anthropic vault and never enters the session's container.

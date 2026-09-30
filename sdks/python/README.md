@@ -47,15 +47,18 @@ asyncio.run(main())
 A sandbox has `exec`, `exec_stream`, `spawn`, `terminal`, `forward_port` (any
 TCP port in the sandbox on a local port), `files` (read, write,
 list, glob, stat, move, remove, upload and download directories), `pause`,
-`wake`, `extend`, `update`, `keep_alive`, `fork` and `snapshot`, and the
+`wake`, `extend`, `update` (its name, environment and settings), `keep_alive`,
+`fork`, `snapshot`, `switch_image` (move it to a new image keeping /workspace)
+and `delete` (remove it for good), and the
 `interpreter`, `network`, `previews`, `desktop`, `mounts` (your S3, R2 or Google
-Cloud Storage bucket as a folder), `metrics` and `mcp` (servers from the MCP
-catalog, run in the sandbox) products. A paused sandbox
+Cloud Storage bucket as a folder), `tailscale` (a paid sandbox on your own
+tailnet), `metrics` and `mcp` (servers from the MCP catalog, run in the
+sandbox) products. A paused sandbox
 also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
 the sandbox with that name or creates it. A sandbox pauses itself after 60 seconds
 with nothing happening in it, keeping its memory and processes, so an
 idle sandbox costs no compute; `idle_pause_seconds` sets 10 to 86,400, or 0 for
-never. The client has `sandboxes`, `images`, `volumes`, `snapshots`,
+never. The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
 `secrets`, `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and
 `audit` to watch the account; `domains`, `ports`, `addresses`, `tunnel` and
 `network` to connect sandboxes to your own world (paid accounts); and `mcp`,

@@ -76,6 +76,12 @@ A command that names no directory starts in
 the last `WORKDIR` when it is inside `/workspace`, and in `/workspace`
 otherwise.
 
+Names resolve through Runtime's resolver in every image: the image's own
+`/etc/resolv.conf` is replaced, in each `RUN` step and in the sandbox, as
+Docker replaces it when a container runs. An image built before 30 September
+2026 from a Debian or Ubuntu base, such as `python:3.12-slim`, may fail to look
+up names; build it again.
+
 ## Build from an image or a recipe
 
 ```ts check
@@ -112,6 +118,11 @@ runtime image registry ls
 | Any other                                               | a user name and a token or password                                                                                   |
 
 The same credentials cover `FROM`, `COPY --from=<image>` and a recipe's `base`.
+
+A pull refused without credentials may mean the image does not exist: Docker
+Hub answers a name it lacks as it answers a private one, so check the spelling
+before storing a credential. A tag the registry lacks fails the build with the
+tag named.
 In the SDKs: `runtime.images.registries.set(...)`, `.list()` and `.delete(...)`.
 
 ## Names, versions and tags
@@ -124,6 +135,19 @@ even if an earlier build finishes after it.
 Wherever an image is named, including `image` when you create a sandbox, it can
 be its id, `name` (its `latest` tag), `name:tag` or `name@version`.
 
+A sandbox starts only from an image of your account, so a public image is
+built first. Build it under its own name and tag, and the same words then name
+it:
+
+```bash no-run
+runtime image build --from python:3.12-slim -t python:3.12-slim
+runtime sandbox create --image python:3.12-slim
+```
+
+A reference that names nothing answers `image_not_found`. For a name you have
+built, it lists the name's tags and versions, and `details` carries them; for a
+name you never built, it gives the build command above.
+
 ```bash no-run
 runtime image build . -t web:v2 -t web:latest
 runtime image versions web
@@ -134,6 +158,40 @@ runtime image rm web@1
 
 Deleting a version removes its tags too. Sandboxes already started from it
 keep running.
+
+## Move a sandbox to a new version
+
+A new build leaves the sandboxes already running an image alone. To move one
+to the new version and keep its files, switch its image:
+
+```bash no-run
+runtime sandbox switch-image "${id}" web:v2 --keep-workspace
+```
+
+`sbx.switchImage("web:v2", { keep: "workspace" })` in JavaScript,
+`sbx.switch_image("web:v2", keep="workspace")` in Python, and
+`POST /v1/sandboxes/{id}:switch-image` with `{"image": "web:v2", "keep": "workspace"}`
+do the same ([API](./api#sandboxes)).
+
+- **What it keeps:** its id and name, `/workspace` (your home, with its
+  dotfiles and what `pip install` and `npm install -g` put there), its
+  volumes, environment, labels, previews and ports.
+- **What it loses:** its running processes, which start again with the new
+  image's start command, and everything else on its old disk: packages
+  installed with `sudo` or apt, and changes to `/etc`. `keep: "workspace"`
+  says you know; without it the switch is refused and nothing changes. To keep
+  everything, snapshot the sandbox first.
+- A running sandbox is paused for the switch; a paused one, or a stopped
+  persistent one, is switched as it is. It is charged as a wake.
+- If anything goes wrong the switch is undone: the answer is
+  `switch_undone`, and the sandbox is on its old image with its files and
+  memory as they were.
+- A switch of a {{switch-time-workspace}} `/workspace` in {{switch-time-files}}
+  files takes {{switch-time}} on its server, measured until the sandbox runs
+  the new image: it boots twice, and the copy runs between the boots.
+- The new image must be ready, stored on the sandbox's server
+  (`image_on_another_host` otherwise), and fit its disk. Copying `/workspace`
+  may take up to {{switch-copy-time}}; a larger one is refused and undone.
 
 ## Start and ready commands
 
@@ -148,8 +206,21 @@ import { Runtime } from "withruntime";
 const runtime = new Runtime();
 await runtime.images.build({
   name: "api",
-  recipe: { pip: ["fastapi", "uvicorn"] },
-  start: { command: "uvicorn main:app --port 8000", readyPort: 8000, readyTimeoutSeconds: 60 },
+  recipe: {
+    pip: ["fastapi", "uvicorn"],
+    files: [
+      {
+        path: "/workspace/main.py",
+        content:
+          'from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/")\ndef home():\n    return {"ok": True}\n',
+      },
+    ],
+  },
+  start: {
+    command: "uvicorn main:app --host 0.0.0.0 --port 8000",
+    readyPort: 8000,
+    readyTimeoutSeconds: 60,
+  },
 });
 const sbx = await runtime.sandboxes.create({ image: "api" });
 console.log(sbx.info.start); // { state: "ready", readyMs: ... }
@@ -161,6 +232,10 @@ call answers when the ready check passes: `readyPort` is being listened on, or
 `started` (no ready check), `timeout` (the check did not pass within
 `readyTimeoutSeconds`, 60 by default and at most 300, within the SDKs' own five-minute call deadline), or `exited` (the start
 command ended first). `start: null` drops what the Dockerfile said.
+
+Only the create's answer carries `start`, and the sandbox object it returned
+keeps it through later reads. The API keeps no record of it, so a sandbox read
+with `sandboxes.get` or `list` has none.
 
 ## Fast starts
 
@@ -174,16 +249,36 @@ image is deleted, and counts toward your image disk quota; it is not charged.
 
 ## Faster rebuilds
 
-A build keeps up to three checkpoints of its filesystem: after the base image
-is pulled, and after the last commands before later steps. A later build of your
-account that begins with the same steps starts from the latest matching
-checkpoint instead of from the beginning, so changing your code reruns only the
-steps after the `COPY` that brings it in. The build log says which image's
-checkpoint it started from, and `cache` on the image says what it keeps.
+A build keeps up to three checkpoints of its filesystem: where its image
+stage starts (after the base image is pulled, or after the earlier stage it is
+built `FROM`), and the latest two points after a command that more steps
+follow. A later build of your account that starts the same way begins at the
+latest matching checkpoint instead of from the beginning:
+
+- Every Dockerfile, recipe or image on the same base, such as
+  `python:3.12-slim`, skips the pull once one build on it has run.
+- Changing your code reruns only the steps after the `COPY` that brings it in.
+- Builds of different `--target` stages that are built `FROM` the same stage
+  share the checkpoint after that stage, so it is not built again.
+- An earlier stage that the image only reads with `COPY --from` is built again
+  whenever a step that reads it runs; its result is not kept.
+
+A build that fails keeps its checkpoints too, so fixing it is quick: change
+the failing step and build again, and the build starts after the last
+command that ran before the failure (or after the pull, when nothing had run)
+instead of from the beginning. Only the steps from there on run again. A
+failed build's checkpoints go when a build of your account started after the
+failure finishes, whether it succeeds or fails; one that fails keeps its own
+in their place. The build log says what a failed build kept and where the next one
+will start, which image's checkpoint a build started from, and `cache` on
+the image says what it keeps.
 
 Checkpoints stay on the server with the image that made them and go when it is
-deleted. They count toward your image disk quota and are not charged. Pass
-`cache: false` (`--no-cache`) to build every step from scratch and keep none.
+deleted. They count toward your image disk quota and are not charged. When a
+new build would go over that quota, the oldest checkpoints kept from failed
+builds are let go first, so they never stop a build. A checkpoint after the
+pull holds the base image as it was then; pass `cache: false` (`--no-cache`)
+to pull it again, build every step from scratch and keep no checkpoints.
 
 An identical build of your account, same plan and same files, built by the
 same builder version, is copied at once instead of built.
@@ -208,7 +303,8 @@ await runtime.images.build({
 
 In Python it is `build={"vcpu": 4, "memory_mib": 8192, "disk_mib": 16384}`;
 over HTTP, `build.diskMiB` in the body of `POST /v1/images`. The ranges are
-under [Limits](#limits). From the CLI, `--disk-mib`, `--max-image-mib` and
+under [Limits](#limits). The scratch disk must fit the builder image; smaller
+requests are refused before a build is queued. From the CLI, `--disk-mib`, `--max-image-mib` and
 `--timeout` set the build's scratch disk, the image size and the build time.
 
 ## Build logs
@@ -222,24 +318,31 @@ In your account, [Images](https://withruntime.com/account/images) lists each
 image, and its page shows every version with its tags and the build log, which
 follows a build while it runs.
 
+A build that fails in one of your steps ends with that step's output in the
+log. A build that fails on our side instead, because its build machine did not
+start or the server failed, says so in its error rather than blaming your
+Dockerfile, and we are alerted; build again in a few minutes.
+
 ## Limits
 
-| Limit                | Value                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------- |
-| Builds at once       | 1 until your account has bought credit, then 4                                                  |
-| Build machine        | 1 to 8 vCPUs (2 by default), 1 to 16 GiB of memory (4 GiB), 1 to 32 GiB of scratch disk (4 GiB) |
-| Build time           | 60 seconds to 1 hour (30 minutes by default)                                                    |
-| Image size           | 512 MiB to 20 GiB (8 GiB by default)                                                            |
-| Build context        | 100 MiB compressed, 20,000 files, 2 GiB unpacked                                                |
-| Context upload       | 1 MiB chunks, kept 24 hours after last use; 200 MiB held and 1 GiB uploaded a day per account   |
-| Inline `files`       | 256 files and 1 MiB in all                                                                      |
-| Dockerfile           | 256 KiB, 200 steps across all stages, 16 earlier stages                                         |
-| Registry credentials | 20 per account                                                                                  |
+| Limit                | Value                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Builds at once       | 1 until your account has bought credit, then 4                                                                                                    |
+| Build machine        | 1 to 8 vCPUs (2 by default), 1 to 16 GiB of memory (4 GiB), {{image-build-disk-min-gib}} to 32 GiB of scratch disk ({{image-build-disk-min-gib}}) |
+| Build time           | 60 seconds to 1 hour (30 minutes by default), counting starting the build machine and saving the image                                            |
+| Image size           | 512 MiB to 20 GiB (8 GiB by default)                                                                                                              |
+| Build context        | 100 MiB compressed, 20,000 files, 2 GiB unpacked                                                                                                  |
+| Context upload       | 1 MiB chunks, kept 24 hours after last use; 200 MiB held and 1 GiB uploaded a day per account                                                     |
+| Inline `files`       | 256 files and 1 MiB in all                                                                                                                        |
+| Dockerfile           | 256 KiB, 200 steps across all stages, 16 earlier stages                                                                                           |
+| Registry credentials | 20 per account                                                                                                                                    |
 
 ## Pricing
 
 A stored image is charged on its whole file
 ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
 with credit. On the free trial a build counts toward the {{trial-hours}} hours, only for
-the time it builds, and is at most 2 vCPU and 4 GiB, 20 minutes and 10 builds
-a day. A free trial keeps its first three images free.
+the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
+a day. A build that fails through a fault of ours, such as a build machine
+that does not start, uses none of the trial's hours. A free trial keeps its
+first three images free.

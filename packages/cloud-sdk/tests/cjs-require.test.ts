@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +41,12 @@ const expected: Record<string, string> = {
   "withruntime/daytona": "Daytona",
   "withruntime/vercel": "Sandbox",
   "withruntime/blaxel": "SandboxInstance",
+  "withruntime/runloop": "Runloop",
+  "withruntime/codesandbox": "CodeSandbox",
+  "withruntime/sprites": "SpritesClient",
+  "withruntime/freestyle": "Freestyle",
+  "withruntime/modal": "ModalClient",
+  "withruntime/cloudflare": "getSandbox",
 };
 
 test("engines asks for the Node that require(esm) needs", () => {
@@ -86,6 +100,39 @@ test(
           exports: expect.arrayContaining([expected[name] ?? "__missing_expectation__"]),
         });
       }
+      // Compile unchanged provider consumers through actual package exports and
+      // built declarations, with no source-path aliases.
+      writeFileSync(join(consumer, "package.json"), JSON.stringify({ type: "module" }));
+      writeFileSync(
+        join(consumer, "workflows.ts"),
+        readFileSync(join(here, "tests/compat/consumers/workflows.ts.txt"), "utf8")
+          .replaceAll('"@compat/e2b-interpreter"', '"withruntime/e2b/code-interpreter"')
+          .replaceAll('"@compat/', '"withruntime/'),
+      );
+      const declarations = spawnSync(
+        "bun",
+        [
+          "x",
+          "tsc",
+          "--noEmit",
+          "--strict",
+          "--skipLibCheck",
+          "--target",
+          "es2022",
+          "--module",
+          "nodenext",
+          "--moduleResolution",
+          "nodenext",
+          "--types",
+          "node",
+          "--typeRoots",
+          join(here, "node_modules/@types"),
+          join(consumer, "workflows.ts"),
+        ],
+        { cwd: here, encoding: "utf8" },
+      );
+      expect(declarations.status).toBe(0);
+      expect(declarations.stderr + declarations.stdout).toBe("");
       // import() of the same install still works.
       const esm = spawnSync(
         "node",

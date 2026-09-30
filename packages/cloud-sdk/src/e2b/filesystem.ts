@@ -1,7 +1,14 @@
 import type { FileEntry } from "../types.js";
+import type { WatchHandle } from "../products/watch.js";
 import { request } from "./client.js";
 import type { SandboxContext, Username } from "./commands.js";
-import { FileNotFoundError, guard, NotSupportedError } from "./errors.js";
+import {
+  FileNotFoundError,
+  guard,
+  InvalidArgumentError,
+  NotSupportedError,
+  TimeoutError,
+} from "./errors.js";
 
 export enum FileType {
   FILE = "file",
@@ -19,9 +26,9 @@ export interface EntryInfo extends WriteInfo {
   size: number;
   mode: number;
   permissions: string;
-  /** Runtime's listing does not say who owns a file: always "". */
+  /** File owner when returned by the native guest. */
   owner: string;
-  /** Runtime's listing does not say a file's group: always "". */
+  /** File group when returned by the native guest. */
   group: string;
   modifiedTime?: Date;
   symlinkTarget?: string;
@@ -37,11 +44,14 @@ export interface FilesystemEvent {
   /** Relative to the watched directory. */
   name: string;
   type: FilesystemEventType;
+  entry?: EntryInfo;
 }
 export interface WatchOpts extends FilesystemRequestOpts {
-  /** How long the watch runs; 0 is Runtime's maximum, 24 hours. Default 60000. */
+  /** How long the subscription runs; 0 has no subscription deadline. Default 60000. */
   timeoutMs?: number;
   recursive?: boolean;
+  includeEntry?: boolean;
+  allowNetworkMounts?: boolean;
 }
 export interface E2BWatchHandle {
   stop(): Promise<void>;
@@ -109,8 +119,9 @@ function entryInfo(entry: FileEntry): EntryInfo {
     mode,
     permissions:
       PERMISSIONS[(bits >> 6) & 7]! + PERMISSIONS[(bits >> 3) & 7]! + PERMISSIONS[bits & 7]!,
-    owner: "",
-    group: "",
+    owner: entry.owner ?? "",
+    group: entry.group ?? "",
+    ...(entry.symlinkTarget ? { symlinkTarget: entry.symlinkTarget } : {}),
     modifiedTime: new Date(entry.modifiedAt),
   };
 }
@@ -141,8 +152,10 @@ export class Filesystem {
     return this.#ctx.runtime.files;
   }
   async #path(path: string, opts: FilesystemRequestOpts & { metadata?: Record<string, string> }) {
+    opts.signal?.throwIfAborted();
     refuse(opts);
     await this.#ctx.ensureHome(path);
+    opts.signal?.throwIfAborted();
     return absolute(path);
   }
 
@@ -194,6 +207,7 @@ export class Filesystem {
   }
 
   async writeFiles(files: WriteEntry[], opts: FilesystemWriteOpts = {}): Promise<WriteInfo[]> {
+    opts.signal?.throwIfAborted();
     const written: WriteInfo[] = [];
     for (const file of files) written.push(await this.#writeOne(file.path, file.data, opts));
     return written;
@@ -214,7 +228,7 @@ export class Filesystem {
   async list(path: string, opts: FilesystemListOpts = {}): Promise<EntryInfo[]> {
     const dir = await this.#path(path, opts);
     const entries = await guard("file", () =>
-      this.#files.list(dir, { depth: opts.depth ?? 1, hidden: true }),
+      this.#files.list(dir, { depth: opts.depth ?? 1, hidden: true, ...request(opts) }),
     );
     return entries.map(entryInfo);
   }
@@ -222,8 +236,8 @@ export class Filesystem {
   /** Makes a directory and its parents. False when it already existed. */
   async makeDir(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     const dir = await this.#path(path, opts);
-    if (await guard("file", () => this.#files.exists(dir))) return false;
-    await guard("file", () => this.#files.mkdir(dir, { parents: true }));
+    if (await guard("file", () => this.#files.exists(dir, request(opts)))) return false;
+    await guard("file", () => this.#files.mkdir(dir, { parents: true, ...request(opts) }));
     return true;
   }
 
@@ -231,61 +245,159 @@ export class Filesystem {
   async rename(oldPath: string, newPath: string, opts: FilesystemRequestOpts = {}) {
     const from = await this.#path(oldPath, opts);
     const to = await this.#path(newPath, opts);
-    await guard("file", () => this.#files.rename(from, to, { overwrite: true }));
+    await guard("file", () => this.#files.rename(from, to, { overwrite: true, ...request(opts) }));
     return this.getInfo(to, opts);
   }
 
   /** Removes a file, or a directory with everything in it. */
   async remove(path: string, opts: FilesystemRequestOpts = {}): Promise<void> {
     const target = await this.#path(path, opts);
-    await guard("file", () => this.#files.remove(target, { recursive: true }));
+    await guard("file", () => this.#files.remove(target, { recursive: true, ...request(opts) }));
   }
 
   async exists(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     const target = await this.#path(path, opts);
-    return guard("file", () => this.#files.exists(target));
+    return guard("file", () => this.#files.exists(target, request(opts)));
   }
 
   async getInfo(path: string, opts: FilesystemRequestOpts = {}): Promise<EntryInfo> {
     const target = await this.#path(path, opts);
-    const stat = await guard("file", () => this.#files.stat(target));
+    const stat = await guard("file", () => this.#files.stat(target, request(opts)));
     if (!stat.exists) throw new FileNotFoundError(`${target} does not exist.`);
     return entryInfo(stat);
   }
 
-  /** E2B's watchDir on Runtime's file watch: the same events (CREATE, WRITE,
-   * REMOVE, RENAME, CHMOD) with names relative to the directory, stopped
-   * with `handle.stop()`. `timeoutMs` 0 is Runtime's 24-hour maximum. */
+  /** E2B's watchDir on Runtime's file watch. A local deadline preserves
+   * subsecond subscriptions; 0 runs until stopped or the sandbox ends. */
   async watchDir(
     path: string,
     onEvent: (event: FilesystemEvent) => void | Promise<void>,
     opts: WatchOpts & { onExit?: (err?: Error) => void | Promise<void> } = {},
   ): Promise<E2BWatchHandle> {
+    opts.signal?.throwIfAborted();
+    if (opts.allowNetworkMounts)
+      throw new NotSupportedError(
+        "Watching network mounts",
+        "Watch a local sandbox directory instead.",
+      );
+    const lifetime = opts.timeoutMs ?? 60000;
+    if (!Number.isFinite(lifetime) || lifetime < 0)
+      throw new InvalidArgumentError("timeoutMs must be a nonnegative finite number.");
     const target = await this.#path(path, opts);
     const prefix = target.endsWith("/") ? target : `${target}/`;
-    const lifetime = opts.timeoutMs === 0 ? 86_400_000 : (opts.timeoutMs ?? 60_000);
-    const watch = await guard("file", () =>
-      this.#files.watch(
-        target,
-        (event) =>
-          onEvent({
-            name: event.path.startsWith(prefix) ? event.path.slice(prefix.length) : event.path,
-            type: event.type as FilesystemEventType,
-          }),
-        {
-          recursive: opts.recursive === true,
-          timeoutMs: Math.max(1_000, Math.min(86_400_000, lifetime)),
-          onExit: (reason) => {
-            if (reason === "stopped") return;
-            void opts.onExit?.(
-              reason === "timeout" || reason === "paused"
-                ? undefined
-                : new Error(`The watch ended: ${reason}`),
-            );
+    let exited = false;
+    let native: WatchHandle | undefined;
+    let stopping: Promise<void> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const lifetimeAbort = new AbortController();
+    const signal = opts.signal
+      ? AbortSignal.any([opts.signal, lifetimeAbort.signal])
+      : lifetimeAbort.signal;
+    const exit = async (error?: Error) => {
+      if (exited) return;
+      exited = true;
+      if (timer !== undefined) clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      try {
+        await opts.onExit?.(error);
+      } catch {
+        /* Upstream treats a throwing terminal callback as handled. */
+      }
+    };
+    const stopRemote = () => {
+      if (!native) return Promise.resolve();
+      return (stopping ??= native.stop());
+    };
+    const close = async (error?: Error) => {
+      const callback = exit(error);
+      try {
+        await stopRemote();
+      } finally {
+        await callback;
+      }
+    };
+    const onAbort = () => {
+      const error =
+        opts.signal?.reason instanceof Error
+          ? opts.signal.reason
+          : new Error("The watch was aborted.");
+      void close(error).catch(() => undefined);
+    };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
+    if (lifetime > 0) {
+      const deadline = Date.now() + lifetime;
+      const schedule = () => {
+        timer = setTimeout(
+          () => {
+            if (exited) return;
+            if (Date.now() < deadline) {
+              schedule();
+              return;
+            }
+            const error = new TimeoutError("Filesystem watch timed out.");
+            // Mark the terminal result before native cancellation can report a
+            // clean end. The same signal also cancels creation still in flight.
+            void close(error).catch(() => undefined);
+            lifetimeAbort.abort(error);
           },
-        },
-      ),
-    );
-    return { stop: () => watch.stop() };
+          Math.min(2147483647, Math.max(0, deadline - Date.now())),
+        );
+        timer.unref?.();
+      };
+      schedule();
+    }
+    try {
+      const watch = await guard("file", () =>
+        this.#files.watch(
+          target,
+          async (event) => {
+            if (exited) return;
+            let entry: EntryInfo | undefined;
+            if (opts.includeEntry) {
+              try {
+                entry = await this.getInfo(event.path, { ...opts, signal });
+              } catch (error) {
+                if (!(error instanceof FileNotFoundError)) throw error;
+              }
+            }
+            if (!exited)
+              await onEvent({
+                name: event.path.startsWith(prefix) ? event.path.slice(prefix.length) : event.path,
+                type: event.type as FilesystemEventType,
+                ...(entry ? { entry } : {}),
+              });
+          },
+          {
+            recursive: opts.recursive === true,
+            timeoutMs: 0,
+            signal,
+            onExit: (reason) => {
+              void exit(
+                reason === "timeout" ? new TimeoutError("Filesystem watch timed out.") : undefined,
+              );
+            },
+            onNotice: (notice) => {
+              void close(
+                new Error(
+                  `Filesystem events were lost (${notice.k}); rescan the directory and start a new watch.`,
+                ),
+              ).catch(() => undefined);
+            },
+          },
+        ),
+      );
+      native = watch;
+      if (exited) await stopRemote();
+      void watch.done?.then(
+        () => exit(),
+        (error: unknown) =>
+          close(error instanceof Error ? error : new Error(String(error))).catch(() => undefined),
+      );
+      return { stop: () => close() };
+    } catch (error) {
+      await close(error instanceof Error ? error : new Error(String(error))).catch(() => undefined);
+      throw error;
+    }
   }
 }

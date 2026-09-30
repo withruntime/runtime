@@ -25,6 +25,7 @@ try:
 except ImportError as error:  # pragma: no cover - depends on the optional extra
     raise ImportError('withruntime.deepagents needs Deep Agents: pip install "withruntime[deepagents]"') from error
 
+from ._api_defaults import DEEPAGENTS_EXEC_TIMEOUT_SECONDS
 from ._errors import NotFoundError, PermissionDeniedError
 from ._errors import RuntimeError as RuntimeCloudError
 
@@ -43,7 +44,7 @@ class RuntimeSandbox(BaseSandbox):
     truncated, for every command, those included.
     """
 
-    def __init__(self, sandbox: Any, *, timeout_seconds: int = 1800,
+    def __init__(self, sandbox: Any, *, timeout_seconds: int = DEEPAGENTS_EXEC_TIMEOUT_SECONDS,
                  max_output_chars: Optional[int] = None) -> None:
         self.sandbox = sandbox
         self.timeout_seconds = timeout_seconds

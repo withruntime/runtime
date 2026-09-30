@@ -27,6 +27,37 @@ function stub(routes: (request: Request, body: unknown) => Response | Promise<Re
 }
 const json = (value: unknown) => Response.json(value);
 
+test("an interpreter cell without a deadline preserves zero and can still be cancelled", async () => {
+  const { runtime } = stub(async (request, body) => {
+    if (request.method === "GET")
+      return json({ id: SANDBOX, kind: "sandbox", state: "running", status: "active" });
+    expect(body).toMatchObject({ timeoutMs: 0 });
+    await Bun.sleep(30);
+    request.signal.throwIfAborted();
+    return json({ status: "ok" });
+  });
+  const sbx = await runtime.sandboxes.get(SANDBOX);
+  expect((await sbx.interpreter.run("1", { timeoutMs: 0 })).status).toBe("ok");
+  await expect(
+    sbx.interpreter.run("1", { timeoutMs: 0, signal: AbortSignal.timeout(5) }),
+  ).rejects.toMatchObject({ code: "timeout" });
+  await expect(
+    sbx.interpreter.run("1", { timeoutMs: 0, requestTimeoutMs: 5 }),
+  ).rejects.toMatchObject({ code: "timeout" });
+});
+
+test("snapshot pagination forwards cancellation after the first page", async () => {
+  const controller = new AbortController();
+  const { runtime } = stub((request) => {
+    request.signal.throwIfAborted();
+    return json({ data: [{ id: "first" }], nextCursor: "next" });
+  });
+  const first = await runtime.snapshots.list({}, { signal: controller.signal });
+  expect(first.data[0]?.id).toBe("first");
+  controller.abort();
+  await expect(first.next()).rejects.toMatchObject({ code: "timeout" });
+});
+
 test("images.build polls to ready and streams the build log", async () => {
   let polls = 0;
   const { runtime, seen } = stub((request, body) => {
@@ -126,4 +157,37 @@ test("sbx.interpreter.run returns the execution, and streams callbacks when aske
   expect(() => sbx.interpreter.result({ path: "/etc/passwd" })).toThrow(
     "Not an interpreter result path",
   );
+});
+
+test("a streamed cell's failure is a RuntimeError with its hint and request id", async () => {
+  // 28 September 2026: it was a plain Error, and the CLI printed
+  // "Error: forbidden: cloud forbidden" with nothing to act on or quote.
+  const { runtime } = stub((request) => {
+    const path = new URL(request.url).pathname;
+    if (path === `/v1/sandboxes/${SANDBOX}`)
+      return json({ id: SANDBOX, kind: "sandbox", state: "running", status: "active" });
+    return new Response(
+      `${JSON.stringify({
+        k: "failure",
+        code: "forbidden",
+        status: 403,
+        message: "This key's scopes do not include exec, which this needs.",
+        hint: "The message says what this key lacks.",
+        requestId: "req_cell",
+      })}\n`,
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  });
+  const sbx = await runtime.sandboxes.get(SANDBOX);
+  const error = await sbx.interpreter.run("1", { onStdout: () => {} }).then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(error).toMatchObject({
+    name: "RuntimeError",
+    code: "forbidden",
+    status: 403,
+    hint: "The message says what this key lacks.",
+    requestId: "req_cell",
+  });
 });

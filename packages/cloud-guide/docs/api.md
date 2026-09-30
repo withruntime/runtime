@@ -72,20 +72,30 @@ Every response carries `x-request-id`. Every error has one shape:
 Follow the `hint`. Quote the `requestId` when you report a problem. A 5xx never
 carries internal detail, only a fixed message and the request id.
 
-| Status | Codes you may see                                                                                                      | Safe next step                                                         |
-| ------ | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 400    | `invalid_request` (with `details.issues`), `invalid_region`, `invalid_trial`                                           | Fix the named fields                                                   |
-| 401    | `unauthorized`                                                                                                         | Check the key                                                          |
-| 402    | `trial_exhausted`, `insufficient_funds`, `spending_limit_reached`                                                      | Add credit, pay with `funding: "paid"`, or read `GET /v1/limits`       |
-| 402    | `account_blocked`                                                                                                      | A payment is disputed or under review; the message says what clears it |
-| 403    | `forbidden` (a read-only key asking to change something is one), `permission_denied`                                   | Do not work around a refusal                                           |
-| 404    | `not_found`, `route_not_found`, `file_not_found`                                                                       | Check the id or path                                                   |
-| 409    | `no_capacity`, `trial_busy`, `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory` | Resolve the state, then retry                                          |
-| 422    | `idempotency_key_reused`                                                                                               | Same key, same body; or a new key for new work                         |
-| 426    | `upgrade_required`                                                                                                     | Move to this API version                                               |
-| 429    | `rate_limited`                                                                                                         | Wait `Retry-After`, then retry with the same key                       |
-| 503    | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                            | Retry after `Retry-After` with the same key (the SDKs do)              |
-| 503    | `unavailable`, `fork_unavailable`, `previews_unavailable`                                                              | Switched off here on purpose; retrying will not help                   |
+**A 5xx says whose fault it is.** A message that says the fault is ours, not
+your request's, was reported to us automatically, with its `requestId`. Retry with the same key; write to us only if it keeps
+failing.
+
+| Status   | Codes you may see                                                                                                          | Safe next step                                                                                                                |
+| -------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `invalid_trial`, `disk_too_small`                             | Fix the named fields                                                                                                          |
+| 401      | `unauthorized`                                                                                                             | Check the key                                                                                                                 |
+| 402      | `trial_exhausted`, `insufficient_funds`, `spending_limit_reached`                                                          | Add credit, pay with `funding: "paid"`, or read `GET /v1/limits`                                                              |
+| 402      | `payment_required`, `trial_unavailable`                                                                                    | A paid-only feature, or no trial on this account: add credit ([pricing](./pricing#how-many-at-once) says what counts as paid) |
+| 402      | `account_blocked`                                                                                                          | A payment is disputed or under review; the message says what clears it                                                        |
+| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`                | Do not work around a refusal                                                                                                  |
+| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                  | Check the id, name or path                                                                                                    |
+| 405      | `method_not_allowed`                                                                                                       | Use the method this page lists for the path                                                                                   |
+| 409      | `no_capacity`, `trial_busy`, `trial_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing`               | Clears when something else ends or finishes: wait, then retry with the same key                                               |
+| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached` | Resolve the state, then retry                                                                                                 |
+| 409      | `lease_too_short`                                                                                                          | The command's timeout outlasts the lease: extend the sandbox, or give the command a shorter timeout                           |
+| 422      | `idempotency_key_reused`                                                                                                   | Same key, same body; or a new key for new work                                                                                |
+| 426      | `upgrade_required`                                                                                                         | Move to this API version                                                                                                      |
+| 429      | `rate_limited`, `trial_build_limit`                                                                                        | Wait `Retry-After`, then retry with the same key                                                                              |
+| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                                | Retry after `Retry-After` with the same key (the SDKs do)                                                                     |
+| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`                                                                  | Switched off here on purpose; retrying will not help                                                                          |
+| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                               | Something in your sandbox failed; the message says what                                                                       |
+| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                        | A fault on our side, reported to us; retry with the same key                                                                  |
 
 **Temporary refusals are safe to retry.** `no_capacity`, `busy`,
 `host_unavailable`, `rate_limited` and `trial_busy` clear on their own: retry
@@ -96,6 +106,9 @@ with the same key, a growing delay and a bounded deadline.
   `no_capacity`, for up to two minutes by default, then returns the refusal.
   The error's `retryable` is `true` for `trial_busy` and `no_capacity`, for a
   loop of your own.
+- `no_capacity` answers with a `Retry-After` header, the wait before a first
+  retry, for a client that reads only HTTP. The SDKs keep their own growing
+  delay.
 - `trial_busy` clears when one of the trial's eight running sandboxes stops or
   pauses. A fork asking for more copies than that never fits.
 
@@ -127,43 +140,47 @@ Over a limit you get 429 with `Retry-After`.
 
 ## Sandboxes
 
-| Method and path                     | What it does                                                                                  |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `POST /v1/sandboxes`                | Create. Every field optional.                                                                 |
-| `GET /v1/sandboxes`                 | List: `state`, `name`, `label=key:value` (repeat), `includeStopped`, `limit`, `cursor`        |
-| `GET /v1/sandboxes/{id}`            | Read; `waitFor` and `timeoutSeconds` wait for a state                                         |
-| `POST /v1/sandboxes/{id}:stop`      | Stop. Compute ends on confirmed shutdown.                                                     |
-| `POST /v1/sandboxes/{id}:pause`     | Answers once the processors stop, where compute billing ends; memory and files are then saved |
-| `POST /v1/sandboxes/{id}:wake`      | Restore a paused sandbox; `timeoutSeconds` sets its next lease                                |
-| `POST /v1/sandboxes/{id}:extend`    | `{"seconds": 600}` more before the lease ends                                                 |
-| `POST /v1/sandboxes/{id}:retention` | `{"days": 30}` to keep a paused sandbox, 1 to 365                                             |
-| `POST /v1/sandboxes/{id}:restart`   | Start a stopped persistent sandbox again from its disk                                        |
-| `POST /v1/sandboxes/{id}:update`    | Change `name`, `labels`, `autoWake`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`   |
+| Method and path                        | What it does                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/sandboxes`                   | Create. Every field optional.                                                                                                   |
+| `GET /v1/sandboxes`                    | List: `state`, `name`, `label=key:value` (repeat), `includeStopped`, `limit`, `cursor`                                          |
+| `GET /v1/sandboxes/{id}`               | Read; `waitFor` and `timeoutSeconds` wait for a state                                                                           |
+| `POST /v1/sandboxes/{id}:stop`         | Stop. Answers at once, where compute billing ends; a kept disk is written out after                                             |
+| `DELETE /v1/sandboxes/{id}`            | Delete for good, in any state (see "Deleting a sandbox" below)                                                                  |
+| `POST /v1/sandboxes/{id}:pause`        | Answers once the processors stop, where compute billing ends; memory and files are then saved                                   |
+| `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; `timeoutSeconds` sets its next lease                                                                  |
+| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before the lease ends                                                                                   |
+| `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` to keep a paused sandbox, 1 to 365                                                                               |
+| `POST /v1/sandboxes/{id}:restart`      | Start a stopped persistent sandbox again from its disk                                                                          |
+| `POST /v1/sandboxes/{id}:update`       | Change `name`, `labels`, `env`, `autoWake`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`, `tailscale` (`null` leaves) |
+| `POST /v1/sandboxes/{id}:switch-image` | Move it to another image, keeping `/workspace` (see "Switching its image" below)                                                |
 
 The create body:
 
 | Field                | Default                                      | Notes                                                                                                                                                                                                                                                                      |
 | -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`, `labels`     | none                                         | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                                             |
+| `env`                | none                                         | Environment variables for every command, process, terminal, SSH session and image start command in it (see "Its environment" below)                                                                                                                                        |
 | `funding`            | trial while it lasts, then paid              | `"trial"` never falls back to paid credit                                                                                                                                                                                                                                  |
 | `region`             | the default region                           | Use a region listed for your account                                                                                                                                                                                                                                       |
 | `vcpu`               | 2                                            | At most 16 on a paid sandbox, 2 on the trial                                                                                                                                                                                                                               |
-| `memoryMiB`          | 4096                                         | At most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a larger size is refused with `invalid_request` naming the field                                                                                                                                            |
-| `diskMiB`            | 4096                                         |                                                                                                                                                                                                                                                                            |
+| `memoryMiB`          | 4096                                         | At least 128; at most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a size outside that is refused with `invalid_request` naming the field                                                                                                                        |
+| `diskMiB`            | 4096                                         | At least 3,072; at most 10,240 on the trial. A paid sandbox may ask for up to 16,777,216, and is placed only on a server with that much free disk                                                                                                                          |
 | `cpu`                | `"shared"`                                   | `"reserved"` guarantees every vCPU                                                                                                                                                                                                                                         |
-| `cpuFloorMillis`     | 50                                           | Guaranteed CPU while shared, in thousandths of a vCPU                                                                                                                                                                                                                      |
-| `timeoutSeconds`     | 1800                                         | How long it may run before its lease ends, at most 3600                                                                                                                                                                                                                    |
-| `onLeaseEnd`         | `"pause"`                                    | Or `"stop"`                                                                                                                                                                                                                                                                |
+| `cpuFloorMillis`     | 50                                           | Guaranteed CPU while shared, in thousandths of a vCPU: at most `vcpu` x 1000 (16,000 at 16 vCPU), and 250 on the trial                                                                                                                                                     |
+| `timeoutSeconds`     | 1800                                         | How long it may run before its lease ends, 60 to 3600. On the trial, a sandbox still working at its end is extended until the trial hours run out                                                                                                                          |
+| `onLeaseEnd`         | `"pause"`                                    | `"pause"` keeps memory and files when `timeoutSeconds` runs out; wake it later. `"stop"` ends it, and an ordinary sandbox's disk with it. `"stop"` is the default with `pausable: false`                                                                                   |
 | `pausable`           | true                                         |                                                                                                                                                                                                                                                                            |
 | `idlePauseSeconds`   | {{idle-pause-seconds}}                       | Pause after this many seconds with nothing happening: no request, no command or terminal running, no open connection, no traffic and no CPU use. 0 is never, otherwise {{idle-pause-min}} to {{idle-pause-max}}. Not set on a sandbox that cannot pause or is `persistent` |
 | `autoWake`           | true                                         | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                                         |
-| `persistent`         | false                                        | Paid only: the lease renews itself while credit lasts, and a stopped sandbox keeps its disk for `:restart`                                                                                                                                                                 |
+| `persistent`         | false                                        | Paid only: the lease renews itself while credit lasts, and a stopped sandbox keeps its disk for `:restart`. Set to `false` with `:update` and a stopped one's disk is deleted                                                                                              |
 | `maxTotalCostMicros` | none                                         | The most the sandbox may cost over its whole life                                                                                                                                                                                                                          |
 | `getOrCreate`        | false                                        | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                                            |
 | `network`            | every public port (paid), 80 and 443 (trial) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                             |
 | `maxCostMicros`      | none                                         | Refuse the create if its first lease would cost more                                                                                                                                                                                                                       |
 | `image`, `volumes`   | none                                         | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`. An image with a start command answers once its ready check passes, in `start`                                                                                        |
 | `snapshot`           | none                                         | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                               |
+| `tailscale`          | none                                         | Paid only: `{authKeySecret, hostname?, tags?}` joins your Tailscale network once it runs (see "On your tailnet" below)                                                                                                                                                     |
 
 Sizes are limits you ask for. The server checks their combinations against
 account limits and the host's measured capacity.
@@ -189,8 +206,75 @@ stops for good gives its name up and keeps it in its own record.
 **Running for longer than a lease.** `persistent: true`, at create or with
 `:update`, renews the lease on the server while the account has credit, up to
 `maxTotalCostMicros`, and keeps the disk after a stop, billed as reserved disk.
-Without it, `:extend` moves the lease later, up to an hour ahead of now; the
-SDKs' `keepAlive` calls it for you.
+A stopped persistent sandbox is listed with the live ones. `:update` with
+`{"persistent": false}` makes it an ordinary sandbox again: a running one stops
+paying for its disk at once, and a stopped one has its disk deleted. It is
+refused while the sandbox is paused; wake or stop it first. To end one for
+good in any state, delete it. Without persistence, `:extend` moves the lease later, up to an hour ahead of now; the
+SDKs' `keepAlive` calls it for you. A trial sandbox that is still working when
+its lease is about to end (a command, terminal, SSH session or port forward
+open, CPU in use or traffic moving in the last ten seconds) is extended by its
+own `timeoutSeconds` each time, until the trial hours run out; then it pauses
+as any lease's end does. A paid sandbox's lease ends on time: use `persistent`
+or `keepAlive` to run longer.
+
+**Its environment.** `env` at create sets variables that every command,
+background process, terminal, SSH session and the image's start command in the
+sandbox is started with, for its whole life: through pauses, wakes and
+restarts. A command's own `env` is put over them. `:update` with `env` changes
+them: a value sets a variable, `null` removes it, and the rest stay; commands
+started after the change get it, and running ones keep what they started with.
+At most {{sandbox-env-vars}} variables and {{sandbox-env-size}} of names and values; past that the answer is
+`400 env_too_large`, and a name that is not a letter or underscore followed by
+letters, digits and underscores is `400 invalid_env`. A command whose own `env`
+and the sandbox's together pass what one command can carry is refused with
+`400 env_too_large` before it runs. Values are write-only: answers carry only `envNames`, and no
+list, log or audit entry holds a value. They are stored encrypted, and the
+request fingerprint an `Idempotency-Key` is checked against holds a keyed hash
+of them, never the values. Copies made by `:fork` keep them, because they are
+the same machine and its processes already hold them; a sandbox created from a
+snapshot takes only its own `env`. An SSH session gets every variable whose
+value has no double quote, backslash or line break. A deployment that cannot
+store them answers `503 env_unavailable` and creates nothing.
+
+**Deleting a sandbox.** `DELETE /v1/sandboxes/{id}` works in any state. It
+stops the sandbox if it runs or is paused, deletes its disk and its paused
+memory, revokes its previews and TCP ports, drops its environment, gives up its
+name at once, and removes it from every list. Compute billing ends as a stop's
+does; a disk kept for `:restart` is billed until its host confirms the
+deletion, usually seconds. Its snapshots are separate and stay until you delete
+them, and its usage, charges and audit entries stay. A custom domain pointed at
+it stays yours: point it at another sandbox or remove it. The answer is
+`{id, status: "deleted", state, deletedAt}`; afterwards the sandbox reads
+nowhere, and `GET` answers `not_found`. Deleting it again answers the same, with
+or without the same key. A read-only key cannot delete. A sandbox a job or a
+managed service runs in is ended by that job or service instead.
+
+**Switching its image.** `POST /v1/sandboxes/{id}:switch-image` with
+`{"image": "web:v2", "keep": "workspace"}` moves a sandbox to another image and
+keeps its id and name, `/workspace` (its home: dotfiles, `pip install` and
+`npm install -g`), volumes, environment, labels, previews and ports. Its
+processes restart, and the new image's start command runs as at create.
+Everything else on its old disk is lost (`sudo` and apt installs, `/etc`), so
+`keep` must be `"workspace"`; without it the answer is
+`400 switch_keeps_workspace_only` and nothing changes. Snapshot it first to
+keep everything. A running sandbox is paused first; a paused one, or a stopped
+persistent one, is switched as it is; a stopped ordinary one kept no disk
+(`409 switch_needs_disk`). It is charged as a wake. The answer comes once the
+sandbox runs the new image. If anything fails, the switch is undone and the
+answer is `409 switch_undone`: the sandbox is paused or stopped on its old image
+with its files and memory as they were. The image must be ready, on the
+sandbox's server (`409 image_on_another_host`), different from the one it runs
+(`409 image_unchanged`) and fit its disk (`409 disk_too_small`); copying
+`/workspace` may take up to {{switch-copy-time}}.
+
+**On your tailnet.** A paid sandbox can join your own Tailscale network.
+Store an auth key for jobs (`printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs`),
+then `POST /v1/sandboxes/{id}/tailscale` with `{"authKeySecret": "TS_AUTHKEY"}`,
+and optionally `hostname` and `tags`, or pass the same object as `tailscale` at
+create. The answer gives its tailnet `addresses`, `dnsName` and `mode`; `GET`
+reads them again and `DELETE` logs the machine out. The key is never answered,
+logged or written to the sandbox's disk. [Networking](./networking#your-tailscale-network) has the rest.
 
 ## Commands and processes
 
@@ -206,9 +290,11 @@ SDKs' `keepAlive` calls it for you.
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `timeoutMs` (default {{idle-pause-seconds}},000; at most 24 hours)
+fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or what the lease has left when that is less; at
+most 24 hours)
 and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
-values are never echoed and are stored only as hashes.
+is put over the sandbox's own environment; its values are never echoed and are
+stored only as hashes.
 
 **Streaming.** With `"stream": true` the answer is NDJSON, one event a line:
 `start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time
@@ -268,7 +354,7 @@ disconnected. Text frames from the server are JSON: `{"type":"ready"}` first,
 | Method and path                                                 | What it does                                                                                                                                                         |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /v1/sandboxes/{id}/files/content?path=`                    | The file's raw bytes, any size; `x-content-length` gives the length first (and `x-content-sha256` a small file's digest), so check it: a body that ends short failed |
-| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body; makes parents; `mode=755` sets its permissions (644 by default)                                                          |
+| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body, up to 1 MiB (larger answers 413: use `/uploads`); makes parents; `mode=755` sets its permissions (644 by default)        |
 | `GET /v1/sandboxes/{id}/files/list?path=`                       | Entries; `depth`, `glob`, `hidden`, `limit`                                                                                                                          |
 | `GET /v1/sandboxes/{id}/files/stat?path=`                       | Type, size, mode and times, or `{"exists": false}`                                                                                                                   |
 | `POST /v1/sandboxes/{id}/files:mkdir`                           | `{"path", "parents"}`                                                                                                                                                |
@@ -278,10 +364,15 @@ disconnected. Text frames from the server are JSON: `{"type":"ready"}` first,
 | `POST`, `GET /v1/sandboxes/{id}/files/watches`                  | Watch a directory: `{"path", "recursive", "events", "include", "exclude", "batchMs", "timeoutMs"}`; list the watches                                                 |
 | `GET /v1/sandboxes/{id}/files/watches/{watchId}/events?cursor=` | Its events after a cursor (`waitMs` up to 8000), or `follow=true` for a stream                                                                                       |
 | `DELETE /v1/sandboxes/{id}/files/watches/{watchId}`             | Stop a watch                                                                                                                                                         |
-| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload under `/workspace`: `{"path", "size", "sha256", "mode"}`                                                                                        |
+| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload: `{"path", "size", "sha256", "mode"}`; `path` must be under `/workspace` (move it with exec after the commit)                                   |
 | `PUT /v1/sandboxes/{id}/uploads/{uploadId}?offset=`             | One chunk of raw bytes; chunks may go in parallel                                                                                                                    |
 | `POST /v1/sandboxes/{id}/uploads/{uploadId}:commit`             | Check the digest and move the file into place atomically                                                                                                             |
 | `POST /v1/sandboxes/{id}/uploads/{uploadId}:abort`              | Give up                                                                                                                                                              |
+| `GET /v1/sandboxes/{id}/files/archive?path=`                    | A folder as a tar archive, streamed, any size; `gzip=true` compresses it. A folder that fails part way ends as an archive no tar reader accepts                      |
+| `PUT /v1/sandboxes/{id}/files/archive?path=`                    | Unpack a tar (gzipped or not) of up to 1 MiB from the raw body into the folder, making it; merges with what is there                                                 |
+| `POST /v1/sandboxes/{id}/files/archive/uploads`                 | Begin a larger one: `{"path", "gzip"}`; answers `uploadId`                                                                                                           |
+| `PUT …/files/archive/uploads/{uploadId}?offset=`                | The next part, up to 1 MiB, in order; a part sent twice is not written twice                                                                                         |
+| `POST …/files/archive/uploads/{uploadId}:commit`                | Answers once tar has unpacked it all (`:abort` stops it; what was unpacked stays)                                                                                    |
 
 Paths are absolute. File errors name the path: `file_not_found`,
 `is_a_directory`, `not_a_directory`, `permission_denied`.
@@ -294,7 +385,30 @@ than 1 MiB behind). A stream ends with `continue` and the cursor after 110
 seconds, and with `paused` when the sandbox pauses; reading never wakes a
 sandbox, and a read after it wakes carries on from the cursor with nothing lost.
 At most four watches run in a sandbox, each for `timeoutMs` (one hour by
-default, at most a day).
+default, at most a day, or `0` to run until stopped).
+
+A watch started with `"webhook": true` also sends its changes to your
+account's webhooks as `sandbox.files.changed` events (see
+[webhooks](./observability#webhooks)), so nothing in the sandbox or on your side
+has to read it. Runtime reads it without waking the sandbox, at most once every
+{{file-hook-window}}, and an account has at most {{file-hook-limit}} such
+watches. A sandbox session cannot start one.
+
+A folder moves as one tar archive, packed or unpacked by `tar` inside the
+sandbox as the sandbox user, so a folder download needs only the key's
+`read_file` permission and an upload `write_file`. The sandbox needs `sh`,
+`tar` and `base64` (and `gzip` for a compressed archive), which every image
+from Runtime's base has. At most four folders move in each direction in a
+sandbox at once. Like every file call, a folder call wakes a paused sandbox.
+The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandbox cp`
+use these routes.
+
+```bash no-run
+curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?path=/workspace/app&gzip=true" \
+  -H "Authorization: Bearer ${RUNTIME_API_KEY}" -o app.tar.gz
+curl -sS -X PUT "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?path=/workspace/site" \
+  -H "Authorization: Bearer ${RUNTIME_API_KEY}" --data-binary @site.tar.gz
+```
 
 ## Sessions
 
@@ -328,31 +442,41 @@ A replay of a create with the same `Idempotency-Key` answers the session with
 
 ## Other products
 
-| Method and path                                                                                                                                                | Product              |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `POST /v1/sandboxes/{id}/interpreter:run`, `…/interpreter/contexts` (`language`: python, javascript, typescript, r, java, bash, go)                            | Code interpreter     |
-| `POST`, `GET /v1/sandboxes/{id}/mounts`, `…/mounts:unmount`                                                                                                    | Bucket mounts        |
-| `POST`, `GET /v1/sandboxes/{id}/previews`, `…/previews/{port}`, `…/previews/{port}:rotate`                                                                     | Previews             |
-| `POST /v1/sandboxes/{id}/desktop:start`, `:stop`, `:act`, `GET …/desktop/screenshot`                                                                           | Desktop              |
-| `POST`, `GET /v1/sandboxes/{id}/desktop/recordings`, `GET …/recordings/{recordingId}`, `…/video`, `:stop`, `DELETE`                                            | Desktop recordings   |
-| `GET /v1/mcp/catalog`; `POST`, `GET`, `DELETE /v1/sandboxes/{id}/mcp`                                                                                          | MCP servers          |
-| `GET`, `PUT /v1/sandboxes/{id}/network`                                                                                                                        | Network rules        |
-| `GET /v1/egress-secrets`, `PUT`, `DELETE /v1/egress-secrets/{name}`                                                                                            | Secrets              |
-| `GET`, `PUT`, `DELETE /v1/network/upstream-proxy`                                                                                                              | Your own proxy       |
-| `POST`, `GET /v1/feedback`                                                                                                                                     | Feedback             |
-| `POST /v1/support/messages`, `GET /v1/support/conversations/{id}`                                                                                              | Support              |
-| `GET /v1/me`, `GET /v1/usage`, `GET /v1/limits`, `GET /v1/audit`                                                                                               | Account              |
-| `GET /v1/sso`                                                                                                                                                  | Single sign-on       |
-| `GET`, `POST /v1/identity/token?audience=` (from inside a sandbox, with its request token)                                                                     | Identity tokens      |
-| `GET /v1/usage/compare?provider=e2b&days=30`, `GET /v1/switching`, `POST /v1/switching`                                                                        | Switching            |
-| `POST`, `GET /v1/images`, `GET /v1/images/{id}`, `…/logs?follow=true`, `:tag`, `:untag`, `:delete`, `GET /v1/images/resolve?ref=`                              | Custom images        |
-| `POST /v1/images/context/missing`, `PUT /v1/images/context/{digest}`                                                                                           | Image build contexts |
-| `GET`, `POST /v1/images/registries`, `POST /v1/images/registries:delete`                                                                                       | Private registries   |
-| `POST`, `GET /v1/volumes`, `GET /v1/volumes/{id}`, `:delete`, `:backup`, `:backup-policy`; `GET /v1/volume-backups`, `…/{id}`, `:delete`                       | Volumes and backups  |
-| `POST /v1/sandboxes/{id}:fork`, `POST /v1/sandboxes/{id}:snapshot`, `GET /v1/snapshots`, `…/{id}`, `:extend`, `:delete`                                        | Forks and snapshots  |
-| `GET /v1/sandboxes/{id}/metrics?range=1h`, `GET /v1/events`                                                                                                    | Metrics and events   |
-| `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry` | Webhooks             |
-| `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                    | OpenTelemetry export |
+| Method and path                                                                                                                                                                                                                        | Product                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `POST /v1/sandboxes/{id}/interpreter:run`, `…/interpreter/contexts` (`language`: python, javascript, typescript, r, java, bash, go), `…/contexts/{context}:restart`, `:interrupt`, `DELETE`, `GET …/contexts/{context}/results/{file}` | Code interpreter       |
+| `POST`, `GET /v1/sandboxes/{id}/mounts`, `…/mounts:unmount`                                                                                                                                                                            | Bucket mounts          |
+| `POST`, `GET`, `DELETE /v1/sandboxes/{id}/tailscale`                                                                                                                                                                                   | Your Tailscale network |
+| `POST`, `GET /v1/sandboxes/{id}/previews`, `…/previews/{port}`, `…/previews/{port}:rotate`                                                                                                                                             | Previews               |
+| `POST /v1/sandboxes/{id}/desktop:start`, `:stop`, `:act`, `GET …/desktop/screenshot`                                                                                                                                                   | Desktop                |
+| `POST`, `GET /v1/sandboxes/{id}/desktop/recordings`, `GET …/recordings/{recordingId}`, `…/video`, `:stop`, `DELETE`                                                                                                                    | Desktop recordings     |
+| `GET /v1/mcp/catalog`; `POST`, `GET`, `DELETE /v1/sandboxes/{id}/mcp`                                                                                                                                                                  | MCP servers            |
+| `GET`, `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                | Network rules          |
+| `GET /v1/egress-secrets`, `PUT`, `DELETE /v1/egress-secrets/{name}`                                                                                                                                                                    | Secrets                |
+| `GET`, `PUT`, `DELETE /v1/network/upstream-proxy`                                                                                                                                                                                      | Your own proxy         |
+| `POST`, `GET /v1/feedback`                                                                                                                                                                                                             | Feedback               |
+| `POST /v1/support/messages`, `GET /v1/support/conversations/{id}`                                                                                                                                                                      | Support                |
+| `GET /v1/me`, `GET /v1/usage`, `GET /v1/limits`, `GET /v1/audit`                                                                                                                                                                       | Account                |
+| `GET /v1/sso`                                                                                                                                                                                                                          | Single sign-on         |
+| `GET`, `POST /v1/identity/token?audience=` (from inside a sandbox, with its request token)                                                                                                                                             | Identity tokens        |
+| `GET /v1/usage/compare?provider=e2b&days=30`, `GET /v1/switching`, `POST /v1/switching`                                                                                                                                                | Switching              |
+| `POST`, `GET /v1/images`, `GET /v1/images/{id}`, `…/logs?follow=true`, `:tag`, `:untag`, `:delete`, `GET /v1/images/resolve?ref=`                                                                                                      | Custom images          |
+| `POST /v1/images/context/missing`, `PUT /v1/images/context/{digest}`                                                                                                                                                                   | Image build contexts   |
+| `GET`, `POST /v1/images/registries`, `POST /v1/images/registries:delete`                                                                                                                                                               | Private registries     |
+| `POST`, `GET /v1/volumes`, `GET /v1/volumes/{id}`, `:delete`, `:backup`, `:backup-policy`; `GET /v1/volume-backups`, `…/{id}`, `:delete`                                                                                               | Volumes and backups    |
+| `POST /v1/sandboxes/{id}:fork`, `POST /v1/sandboxes/{id}:snapshot`, `GET /v1/snapshots`, `…/{id}`, `:update` (name, labels), `:extend`, `:delete`                                                                                      | Forks and snapshots    |
+| `GET /v1/sandboxes/{id}/metrics?range=1h`, `GET /v1/events`                                                                                                                                                                            | Metrics and events     |
+| `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry`                                                                         | Webhooks               |
+| `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                                                                                            | OpenTelemetry export   |
+
+Snapshots accept `mode: "memory"` (the default) or `mode: "disk"` in
+`POST /v1/sandboxes/{id}:snapshot`. Memory snapshots keep files and running
+processes. Disk snapshots keep only the root filesystem; a sandbox created
+from one boots fresh with no saved processes. Both require a paused source
+without attached volumes and keep the same source size, ownership, retention
+and storage pricing. The returned snapshot includes its `mode`. Keep the
+source paused until the snapshot's state is `ready` or `failed`; `Prefer: wait`
+can return while capture is still in progress.
 
 Forks:
 
@@ -409,7 +533,7 @@ traffic included. Divide it by `runningSeconds` for what a run cost a second.
 
 `outbound` is the account's outbound traffic this calendar month, UTC:
 `month` (`2026-09`), `sentBytes`, `freeBytes` (what the allowance covered),
-`billableBytes`, `allowanceBytes` (100 GiB), and `chargedMicros` and
+`billableBytes`, `allowanceBytes` ({{outbound-allowance}}), and `chargedMicros` and
 `writtenOffMicros` as strings. `writtenOffMicros` is traffic your balance or a
 spending limit could not cover; it is never charged later
 ([pricing](./pricing#network-products)).
@@ -424,7 +548,8 @@ spending limit could not cover; it is never charged later
     "usedMicros": "3100000",
     "remainingMicros": "21900000",
     "window": "24h"
-  }
+  },
+  "trial": null
 }
 ```
 
@@ -436,6 +561,11 @@ spending limit could not cover; it is never charged later
   money still on hold.
 - Past the limit, a create, wake, extension or renewal fails with 402
   `spending_limit_reached` and charges nothing.
+- `trial` is the account's free trial, the same figures as `GET /v1/usage`:
+  `{totalMs, usedMs, reservedMs, availableMs}` in milliseconds, or null when
+  the account has none, as here. `availableMs` is what a new trial sandbox can
+  still use. A trial sandbox that has not ended holds its whole lease in
+  `reservedMs`, and what it did not use comes back when it ends.
 
 A limit is set, changed or removed only on the website, at
 [API keys](https://withruntime.com/account/keys): by the member who made the key,
@@ -443,7 +573,9 @@ or by an owner or admin. No key can.
 
 `GET /v1/audit` is the account's audit log, newest first: member and role
 changes, keys, connections, limits, credit, network rules, secrets and
-deletions, each with `actor`, `at`, `ip`, `requestId` and `via`. Filter with
+deletions, each with `actor`, `at`, `ip`, `requestId`, `via` and `sandbox`
+(the sandbox the call came from, when code in it called
+`http://runtime.internal`; otherwise null). Filter with
 `action` (`key.created`, or a group such as `member.`), page with
 `before=<next>` and `limit` (1 to 200). It needs a key with full access or a
 read-only key, made by an owner or admin; see [teams](./teams).

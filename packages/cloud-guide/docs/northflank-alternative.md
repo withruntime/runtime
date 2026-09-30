@@ -6,6 +6,8 @@ Runtime is built for agent sandboxes and costs **{{saving:northflank}} less than
 Runtime and {{cost:northflank}} on Northflank**. At 100,000 runs a month that is {{cost:runtime:100000}}
 against {{cost:northflank:100000}}, **{{=$0 less:northflank:100000}} a month saved**.
 
+Weighing more than two? [Northflank alternatives](/compare/northflank-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Northflank bills the vCPUs and memory a
@@ -14,7 +16,8 @@ against {{cost:northflank:100000}}, **{{=$0 less:northflank:100000}} a month sav
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
   storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
-  processes still running and its next command done {{wake}} later.
+  processes still running and its next command done {{server-wake-command}}
+  after the request reaches Runtime.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).

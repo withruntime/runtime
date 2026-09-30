@@ -1,3 +1,8 @@
+import {
+  KEEP_ALIVE_MARGIN_SECONDS,
+  STREAMED_EXEC_TIMEOUT_MS,
+  WAIT_FOR_TIMEOUT_SECONDS,
+} from "./api-defaults.js";
 import { CommandError, ConnectionError, NotFoundError, RuntimeError } from "./errors.js";
 import { Page } from "./page.js";
 import {
@@ -10,9 +15,11 @@ import {
 import { Transport, type Query, type RequestOptions } from "./transport.js";
 import type {
   CommandResult,
+  DeletedSandbox,
   ExecOptions,
   FileEntry,
   OutputEvent,
+  BinaryOutputEvent,
   KeepAliveOptions,
   ProcessInfo,
   SandboxInfo,
@@ -30,6 +37,20 @@ const CHUNK = 1_048_576;
  * connections at once. */
 const PARALLEL = 8;
 const enc = (id: string) => encodeURIComponent(id);
+
+/** DELETE /v1/sandboxes/{id}, for `sandbox.delete()` and
+ * `runtime.sandboxes.delete(id)`. */
+export function deleteSandbox(
+  t: Transport,
+  id: string,
+  options: RequestOptions = {},
+): Promise<DeletedSandbox> {
+  return t.json<DeletedSandbox>({
+    method: "DELETE",
+    path: `/v1/sandboxes/${enc(id)}`,
+    ...options,
+  });
+}
 /* Web APIs only, so the sandbox's commands, processes and files work in a
    browser with a session token (Sandbox.fromSession): no Buffer, no
    node:crypto. */
@@ -120,6 +141,13 @@ export class Sandbox implements AsyncDisposable {
     });
     return new Sandbox(transport, { id: session.sandboxId } as SandboxInfo);
   }
+  /** The API's latest answer. `start`, the report of an image's start
+   * command, is the create's alone: the API keeps no record of it, so a
+   * later read of this sandbox keeps it here. */
+  #keep(info: SandboxInfo): void {
+    const start = this.#info?.start;
+    this.#info = info.start === undefined && start !== undefined ? { ...info, start } : info;
+  }
   /** What the API last said about this sandbox. `refresh()` asks again. */
   get info(): SandboxInfo {
     return this.#info;
@@ -128,11 +156,13 @@ export class Sandbox implements AsyncDisposable {
     return this.#info.state;
   }
   async refresh(options: RequestOptions = {}): Promise<this> {
-    this.#info = await this.#t.json<SandboxInfo>({
-      method: "GET",
-      path: `/v1/sandboxes/${enc(this.id)}`,
-      ...options,
-    });
+    this.#keep(
+      await this.#t.json<SandboxInfo>({
+        method: "GET",
+        path: `/v1/sandboxes/${enc(this.id)}`,
+        ...options,
+      }),
+    );
     return this;
   }
   /** Waits (server-side, no polling) until the sandbox reaches `state`. */
@@ -140,12 +170,17 @@ export class Sandbox implements AsyncDisposable {
     state: "running" | "paused" | "stopped",
     options: { timeoutSeconds?: number } & RequestOptions = {},
   ) {
-    this.#info = await this.#t.json<SandboxInfo>({
-      method: "GET",
-      path: `/v1/sandboxes/${enc(this.id)}`,
-      query: { waitFor: state, timeoutSeconds: options.timeoutSeconds ?? 60 },
-      ...options,
-    });
+    this.#keep(
+      await this.#t.json<SandboxInfo>({
+        method: "GET",
+        path: `/v1/sandboxes/${enc(this.id)}`,
+        query: {
+          waitFor: state,
+          timeoutSeconds: options.timeoutSeconds ?? WAIT_FOR_TIMEOUT_SECONDS,
+        },
+        ...options,
+      }),
+    );
     return this;
   }
 
@@ -176,7 +211,7 @@ export class Sandbox implements AsyncDisposable {
           if (event.type === "start") processId = event.processId;
           else if (event.type === "stdout" || event.type === "stderr") {
             out[event.type] += event.data;
-            (event.type === "stdout" ? options.onStdout : options.onStderr)?.(event.data);
+            await (event.type === "stdout" ? options.onStdout : options.onStderr)?.(event.data);
           } else if (event.type === "truncated") dropped = true;
           else if (event.type === "exit") exit = event;
         }
@@ -251,9 +286,13 @@ export class Sandbox implements AsyncDisposable {
     const events = this.#t.events<OutputEvent>({
       method: "POST",
       path: `/v1/sandboxes/${enc(this.id)}:exec`,
-      body: { ...commandBody(command, { timeoutMs: 86_400_000, ...options }), stream: true },
+      body: {
+        ...commandBody(command, { timeoutMs: STREAMED_EXEC_TIMEOUT_MS, ...options }),
+        stream: true,
+      },
       ...pick(options),
-      timeoutMs: options.timeoutMs === undefined ? 86_400_000 : options.timeoutMs + 60_000,
+      timeoutMs:
+        options.timeoutMs === undefined ? STREAMED_EXEC_TIMEOUT_MS : options.timeoutMs + 60_000,
     });
     try {
       for await (const event of events) {
@@ -292,9 +331,10 @@ export class Sandbox implements AsyncDisposable {
       /** "pipe" keeps input open for write(); any other text is given once, then closed. */
       stdin?: string;
       pty?: { cols?: number; rows?: number };
+      outputEncoding?: "utf8" | "base64";
     } = {},
   ): Promise<Process> {
-    const { stdin, pty, ...rest } = options;
+    const { stdin, pty, outputEncoding, ...rest } = options;
     const info = await this.#t.json<ProcessInfo>({
       method: "POST",
       path: `/v1/sandboxes/${enc(this.id)}/processes`,
@@ -302,6 +342,7 @@ export class Sandbox implements AsyncDisposable {
         ...commandBody(command, rest),
         ...(stdin === "pipe" ? { stdinMode: "pipe" } : stdin === undefined ? {} : { stdin }),
         ...(pty ? { pty } : {}),
+        ...(outputEncoding ? { outputEncoding } : {}),
       },
       ...pick(rest),
     });
@@ -369,6 +410,14 @@ export class Sandbox implements AsyncDisposable {
   async pause(options: RequestOptions & { wait?: boolean } = {}): Promise<this> {
     return this.#lifecycle("pause", options);
   }
+  /** Deletes it for good: stops it if it runs or is paused, deletes its disk
+   * and paused memory, revokes its previews and ports, and removes it from
+   * lists. Its snapshots, usage and audit entries stay. Deleting it again
+   * answers the same. */
+  async delete(options: RequestOptions = {}): Promise<DeletedSandbox> {
+    this.#keepAlive?.();
+    return deleteSandbox(this.#t, this.id, options);
+  }
   /** Carries on a paused sandbox; `timeoutSeconds` is its new lease. */
   async wake(
     options: RequestOptions & { wait?: boolean; timeoutSeconds?: number } = {},
@@ -400,6 +449,28 @@ export class Sandbox implements AsyncDisposable {
   async update(settings: SandboxSettings, options: RequestOptions = {}): Promise<this> {
     return this.#lifecycle("update", { ...options, wait: false }, { ...settings });
   }
+  /** Moves it to another image (id, name, name:tag or name@version), keeping
+   * its id, /workspace (its home: dotfiles, pip --user and npm -g installs),
+   * volumes, environment, name and previews. Its processes restart, and
+   * everything else on its old disk (sudo installs, apt packages, /etc) is
+   * lost, which `keep: "workspace"` says you know; snapshot it first to keep
+   * everything. A running sandbox is paused first. A switch that fails is
+   * undone (`switch_undone`), the sandbox on its old image with nothing lost.
+   * Charged as a wake. */
+  async switchImage(image: string, options: RequestOptions & { keep: "workspace" }): Promise<this> {
+    const { keep, ...rest } = options;
+    this.#keep(
+      await this.#t.json<SandboxInfo>({
+        method: "POST",
+        path: `/v1/sandboxes/${enc(this.id)}:switch-image`,
+        body: { image, keep },
+        // A pause, two boots and the copy between them.
+        wait: 120,
+        ...pick(rest),
+      }),
+    );
+    return this;
+  }
   /** Keeps a running sandbox's lease ahead of now, in the background, until
    * stop() or the returned function ends it: every `everySeconds` (60) it
    * extends the lease so that `marginSeconds` (600) remain, never more than
@@ -410,7 +481,7 @@ export class Sandbox implements AsyncDisposable {
   keepAlive(options: KeepAliveOptions = {}): () => void {
     this.#keepAlive?.();
     const every = Math.max(10, options.everySeconds ?? 60) * 1000;
-    const margin = Math.min(3600, Math.max(60, options.marginSeconds ?? 600));
+    const margin = Math.min(3600, Math.max(60, options.marginSeconds ?? KEEP_ALIVE_MARGIN_SECONDS));
     let ended = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const end = () => {
@@ -448,26 +519,75 @@ export class Sandbox implements AsyncDisposable {
    * the moment it takes, then woken; a paused one stays paused. */
   async snapshot(options: SnapshotOptions & RequestOptions = {}): Promise<Snapshot> {
     const { idempotencyKey, signal, timeoutMs, ...body } = options;
-    await this.refresh();
+    if (body.mode !== undefined && body.mode !== "memory" && body.mode !== "disk")
+      throw new TypeError("Snapshot mode must be memory or disk.");
+    signal?.throwIfAborted();
+    const until =
+      performance.now() + Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : 60_000, 60_000);
+    const request = (): RequestOptions => {
+      signal?.throwIfAborted();
+      const left = Math.ceil(until - performance.now());
+      if (left <= 0)
+        throw new RuntimeError({
+          code: "snapshot_timeout",
+          status: 0,
+          message: "Snapshot capture ran past its deadline.",
+        });
+      return { ...(signal ? { signal } : {}), timeoutMs: left };
+    };
+    await this.refresh(request());
     // Straight after a fork or a wake the sandbox is still `resuming`, and
     // after a pause still `pausing`: wait for where it is going, or a
     // snapshot of it is refused as not paused (user lane, 23 September 2026).
-    if (this.state === "resuming" || this.state === "starting") await this.waitFor("running");
-    else if (this.state === "pausing") await this.waitFor("paused");
+    if (this.state === "resuming" || this.state === "starting")
+      await this.waitFor("running", request());
+    else if (this.state === "pausing") await this.waitFor("paused", request());
     const running = this.state === "running";
-    if (running) await this.pause();
+    // Check before entering cleanup: an abort during refresh must not pause or wake.
+    const pauseOptions = running ? request() : undefined;
     try {
-      return await this.#t.json<Snapshot>({
+      if (running) await this.pause(pauseOptions);
+      let snapshot = await this.#t.json<Snapshot>({
         method: "POST",
         path: `/v1/sandboxes/${enc(this.id)}:snapshot`,
         body,
         wait: 10,
-        ...pick({
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-          ...(signal ? { signal } : {}),
-          ...(timeoutMs ? { timeoutMs } : {}),
-        }),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...request(),
       });
+      // Prefer: wait is bounded on the server. A capture still in progress
+      // must keep its source paused, or the worker refuses it after we wake.
+      while (snapshot.state === "capturing") {
+        signal?.throwIfAborted();
+        if (performance.now() >= until)
+          throw new RuntimeError({
+            code: "snapshot_timeout",
+            status: 0,
+            message: "Snapshot capture did not finish within one minute.",
+            details: { snapshotId: snapshot.id },
+          });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        snapshot = await this.#t.json<Snapshot>({
+          method: "GET",
+          path: `/v1/snapshots/${enc(snapshot.id)}`,
+          ...request(),
+        });
+      }
+      if (snapshot.state !== "ready")
+        throw new RuntimeError({
+          code: "snapshot_failed",
+          status: 409,
+          message: snapshot.error ?? `Snapshot capture ended in state ${snapshot.state}.`,
+          details: { snapshotId: snapshot.id },
+        });
+      if (body.mode === "disk" && snapshot.mode !== "disk")
+        throw new RuntimeError({
+          code: "snapshot_mode_mismatch",
+          status: 409,
+          message: "The server did not confirm a disk-only snapshot.",
+          details: { snapshotId: snapshot.id },
+        });
+      return snapshot;
     } finally {
       if (running) await this.wake();
     }
@@ -527,13 +647,15 @@ export class Sandbox implements AsyncDisposable {
     options: RequestOptions & { wait?: boolean },
     body: Record<string, unknown> = {},
   ): Promise<this> {
-    this.#info = await this.#t.json<SandboxInfo>({
-      method: "POST",
-      path: `/v1/sandboxes/${enc(this.id)}:${verb}`,
-      body,
-      wait: options.wait === false ? 0 : 60,
-      ...pick(options),
-    });
+    this.#keep(
+      await this.#t.json<SandboxInfo>({
+        method: "POST",
+        path: `/v1/sandboxes/${enc(this.id)}:${verb}`,
+        body,
+        wait: options.wait === false ? 0 : 60,
+        ...pick(options),
+      }),
+    );
     return this;
   }
   async [Symbol.asyncDispose](): Promise<void> {
@@ -568,9 +690,28 @@ class OutputCursor {
           droppedBytes: event.offset - this.cursor,
           resumeAt: event.offset,
         };
-      this.cursor = Math.max(this.cursor, event.offset + utf8(event.data).byteLength);
+      this.cursor = Math.max(
+        this.cursor,
+        event.offset +
+          (event.base64 === undefined
+            ? utf8(event.data).byteLength
+            : processBytes(event.base64).length),
+      );
     }
     yield event;
+  }
+}
+
+function processBytes(encoded: string): string {
+  try {
+    return atob(encoded);
+  } catch (cause) {
+    throw new RuntimeError({
+      code: "invalid_process_output",
+      status: 502,
+      message: "The process returned invalid base64 output.",
+      cause,
+    });
   }
 }
 
@@ -750,6 +891,7 @@ export class Processes {
 /** A background process: its output, its input, its end. */
 export class Process {
   #inputOffset: number;
+  #inputWrites: Promise<void> = Promise.resolve();
   constructor(
     private readonly t: Transport,
     readonly sandboxId: string,
@@ -763,6 +905,34 @@ export class Process {
   /** Every output event from the start (or `cursor`) until exit. */
   output(options: { cursor?: number; signal?: AbortSignal } = {}): AsyncGenerator<OutputEvent> {
     return new Processes(this.t, this.sandboxId).follow(this.id, options);
+  }
+  /** Lossless output for a process spawned with outputEncoding: "base64".
+   * Refuses text-only output rather than inventing bytes that were discarded. */
+  async *outputBytes(
+    options: { cursor?: number; signal?: AbortSignal } = {},
+  ): AsyncGenerator<BinaryOutputEvent> {
+    if (this.info.outputEncoding !== "base64")
+      throw new RuntimeError({
+        code: "binary_output_unavailable",
+        status: 409,
+        message: "Spawn the process with outputEncoding: base64 to read lossless bytes.",
+      });
+    for await (const event of this.output(options)) {
+      if (event.type === "stdout" || event.type === "stderr") {
+        if (event.base64 === undefined)
+          throw new RuntimeError({
+            code: "binary_output_unavailable",
+            status: 502,
+            message: "The process returned text without its original bytes.",
+          });
+        const raw = processBytes(event.base64);
+        yield {
+          type: event.type,
+          offset: event.offset,
+          data: Uint8Array.from(raw, (c) => c.charCodeAt(0)),
+        };
+      } else yield event as Exclude<OutputEvent, { type: "stdout" | "stderr" }>;
+    }
   }
   /** Waits for the process to end and returns its result. */
   async wait(options: { signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -783,22 +953,37 @@ export class Process {
     };
   }
   /** Sends input. Offsets are tracked for you, so a retried write is never typed twice. */
-  async write(data: string | Uint8Array, options: { eof?: boolean } = {}): Promise<void> {
-    const bytes = utf8(data);
-    let sent = 0;
-    do {
-      const reply = await this.t.json<{ offset: number }>({
-        method: "POST",
-        path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:write`,
-        body: {
-          base64: base64(bytes.subarray(sent)),
-          offset: this.#inputOffset,
-          ...(options.eof ? { eof: true } : {}),
-        },
-      });
-      sent += reply.offset - this.#inputOffset;
-      this.#inputOffset = reply.offset;
-    } while (sent < bytes.length);
+  write(data: string | Uint8Array, options: { eof?: boolean } = {}): Promise<void> {
+    // Copy before queuing: callers may reuse their buffer while a previous
+    // write waits for the guest to drain its pipe.
+    const bytes = new Uint8Array(utf8(data));
+    const eof = options.eof === true;
+    const write = this.#inputWrites.then(async () => {
+      let sent = 0;
+      do {
+        const chunk = bytes.subarray(sent, sent + 1_048_576);
+        const reply = await this.t.json<{ offset: number }>({
+          method: "POST",
+          path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:write`,
+          body: {
+            base64: base64(chunk),
+            offset: this.#inputOffset,
+            ...(eof && sent + chunk.length === bytes.length ? { eof: true } : {}),
+          },
+        });
+        const accepted = reply.offset - this.#inputOffset;
+        if (!Number.isSafeInteger(reply.offset) || accepted < 0 || accepted > chunk.length)
+          throw new ConnectionError({
+            message: "The process returned an invalid input offset.",
+            code: "connection_error",
+            status: 0,
+          });
+        sent += accepted;
+        this.#inputOffset = reply.offset;
+      } while (sent < bytes.length);
+    });
+    this.#inputWrites = write.catch(() => undefined);
+    return write;
   }
   async kill(
     signal:
@@ -1073,13 +1258,22 @@ export class Files {
   /** Directory entries; `depth` goes deeper, `glob` filters (e.g. "**\/*.py"). */
   async list(
     path = "/workspace",
-    options: { depth?: number; glob?: string; hidden?: boolean; limit?: number } = {},
+    options: {
+      depth?: number;
+      glob?: string;
+      hidden?: boolean;
+      limit?: number;
+    } & RequestOptions = {},
   ): Promise<FileEntry[]> {
+    const { signal, timeoutMs, idempotencyKey, ...query } = options;
     return (
       await this.t.json<{ data: FileEntry[] }>({
         method: "GET",
         path: this.#path("/files/list"),
-        query: { path, ...options },
+        query: { path, ...query },
+        signal,
+        timeoutMs,
+        idempotencyKey,
       })
     ).data;
   }
@@ -1088,37 +1282,61 @@ export class Files {
   }
   async stat(
     path: string,
+    options: RequestOptions = {},
   ): Promise<(FileEntry & { exists: true }) | { exists: false; path: string }> {
-    return this.t.json({ method: "GET", path: this.#path("/files/stat"), query: { path } });
+    return this.t.json({
+      method: "GET",
+      path: this.#path("/files/stat"),
+      query: { path },
+      ...options,
+    });
   }
-  async exists(path: string): Promise<boolean> {
-    return (await this.stat(path)).exists;
+  async exists(path: string, options: RequestOptions = {}): Promise<boolean> {
+    return (await this.stat(path, options)).exists;
   }
-  async mkdir(path: string, options: { parents?: boolean } = {}): Promise<void> {
+  async mkdir(path: string, options: { parents?: boolean } & RequestOptions = {}): Promise<void> {
+    const { parents, ...request } = options;
     await this.t.json({
       method: "POST",
       path: this.#path("/files:mkdir"),
-      body: { path, ...options },
+      body: { path, parents },
+      ...request,
     });
   }
-  async remove(path: string, options: { recursive?: boolean } = {}): Promise<boolean> {
+  async remove(
+    path: string,
+    options: { recursive?: boolean } & RequestOptions = {},
+  ): Promise<boolean> {
+    const { recursive, ...request } = options;
     return (
       await this.t.json<{ removed: boolean }>({
         method: "POST",
         path: this.#path("/files:remove"),
-        body: { path, ...options },
+        body: { path, recursive },
+        ...request,
       })
     ).removed;
   }
-  async rename(from: string, to: string, options: { overwrite?: boolean } = {}): Promise<void> {
+  async rename(
+    from: string,
+    to: string,
+    options: { overwrite?: boolean } & RequestOptions = {},
+  ): Promise<void> {
+    const { overwrite, ...request } = options;
     await this.t.json({
       method: "POST",
       path: this.#path("/files:rename"),
-      body: { from, to, ...options },
+      body: {
+        from,
+        to,
+        ...(overwrite === undefined ? {} : { overwrite }),
+      },
+      ...request,
     });
   }
   /** Copies a local file or directory into the sandbox. A directory travels as
-   * one gzipped tar and is unpacked in place. */
+   * one gzipped tar to the API's folder routes, and the sandbox's own `tar`
+   * unpacks it as it arrives, making the folder. */
   async upload(localPath: string, remotePath: string): Promise<void> {
     const { stat, readFile } = await import("node:fs/promises");
     const info = await stat(localPath);
@@ -1137,19 +1355,39 @@ export class Files {
     }
     const { packDirectory } = await import("./tar.js");
     const archive = await packDirectory(localPath);
-    // Large writes go only to /workspace (the server refuses others), so the
-    // archive is staged there and removed after unpacking.
-    const staging = `/workspace/.runtime-upload-${crypto.randomUUID()}.tar.gz`;
-    await this.write(staging, archive);
-    const result = await new Sandbox(this.t, { id: this.sandboxId } as SandboxInfo).exec([
-      "sh",
-      "-c",
-      'mkdir -p "$1" && tar -xpzf "$2" -C "$1"; code=$?; rm -f "$2"; exit $code',
-      "sh",
-      remotePath,
-      staging,
-    ]);
-    if (result.exitCode !== 0) throw new CommandError(result);
+    if (archive.length <= CHUNK) {
+      await this.t.bytes({
+        method: "PUT",
+        path: this.#path("/files/archive"),
+        query: { path: remotePath },
+        bytes: archive,
+      });
+      return;
+    }
+    // Larger: parts in order, each unpacked as it arrives; a part resent
+    // after a lost answer is not written twice.
+    const begin = await this.t.json<{ uploadId: string; chunkBytes: number }>({
+      method: "POST",
+      path: this.#path("/files/archive/uploads"),
+      body: { path: remotePath, gzip: true },
+    });
+    const upload = (suffix = "") =>
+      this.#path(`/files/archive/uploads/${enc(begin.uploadId)}${suffix}`);
+    try {
+      for (let offset = 0; offset < archive.length; offset += begin.chunkBytes)
+        await this.t.bytes({
+          method: "PUT",
+          path: upload(),
+          query: { offset },
+          bytes: archive.subarray(offset, offset + begin.chunkBytes),
+        });
+      await this.t.json({ method: "POST", path: upload(":commit"), body: {} });
+    } catch (error) {
+      await this.t
+        .json({ method: "POST", path: upload(":abort"), body: {} })
+        .catch(() => undefined);
+      throw error;
+    }
   }
   /** Streams a file to disk through a partial file beside the target, renamed
    * into place only once every byte has arrived: a failed copy never leaves
@@ -1184,7 +1422,8 @@ export class Files {
     }
   }
   /** Copies a file or directory out of the sandbox. A file streams to disk,
-   * any size, checked against its length. */
+   * any size, checked against its length; a directory comes as one tar from
+   * the API's folder route. */
   async download(remotePath: string, localPath: string): Promise<void> {
     const fs = await import("node:fs/promises");
     const paths = await import("node:path");
@@ -1200,16 +1439,16 @@ export class Files {
       await this.#streamTo(remotePath, localPath);
       return;
     }
-    const staging = `/tmp/.runtime-download-${crypto.randomUUID()}.tar.gz`;
-    const sandbox = new Sandbox(this.t, { id: this.sandboxId } as SandboxInfo);
-    const packed = await sandbox.exec(["tar", "-czf", staging, "-C", remotePath, "."]);
-    if (packed.exitCode !== 0) throw new CommandError(packed);
-    try {
-      const { unpackArchive } = await import("./tar.js");
-      await unpackArchive(await this.read(staging), localPath);
-    } finally {
-      await this.remove(staging).catch(() => undefined);
-    }
+    // The sandbox's own `tar` packs it as it streams, and it is unpacked as
+    // it arrives; one cut short is refused and nothing is put in place.
+    const archive = await this.t.fileStream({
+      method: "GET",
+      path: this.#path("/files/archive"),
+      query: { path: remotePath, gzip: true },
+      accept: "application/gzip",
+    });
+    const { unpackStream } = await import("./tar.js");
+    await unpackStream(archive as unknown as AsyncIterable<Uint8Array>, localPath);
   }
 }
 

@@ -48,6 +48,43 @@ class Unpack(unittest.TestCase):
             unpack_archive(data, self.target)
         self.assertEqual(caught.exception.code, "unsafe_archive")
 
+    def test_a_folder_streams_in_chunks_merges_and_a_cut_leaves_the_target_as_it_was(self):
+        from withruntime._unpack import Unpacker
+        os.mkdir(self.target)
+        for name, body in (("kept.txt", "mine"), ("a.txt", "old")):
+            with open(os.path.join(self.target, name), "w") as out:
+                out.write(body)
+        deep = "sub/" + "d" * 120 + "/b.txt"  # a pax header carries the long name
+        whole = archive(("a.txt", "file", "new"), (deep, "file", "b" * 5000))
+
+        def feed(chunks):
+            unpacker = Unpacker(self.target)
+            try:
+                for chunk in chunks:
+                    unpacker.feed(chunk)
+                unpacker.finish()
+            finally:
+                unpacker.discard()
+        with self.assertRaises(RuntimeError) as caught:
+            feed([whole[:40], whole[40:-12]])
+        self.assertEqual(caught.exception.code, "download_incomplete")
+        with open(os.path.join(self.target, "a.txt")) as got:
+            self.assertEqual(got.read(), "old")
+        self.assertEqual(sorted(os.listdir(self.base.name)), ["outside", "target"])
+        feed(whole[at:at + 1] for at in range(len(whole)))
+        for name, body in (("a.txt", "new"), ("kept.txt", "mine"), (deep, "b" * 5000)):
+            with open(os.path.join(self.target, name)) as got:
+                self.assertEqual(got.read(), body)
+        self.assertEqual(sorted(os.listdir(self.base.name)), ["outside", "target"])
+
+    def test_an_archive_cut_short_raises_download_incomplete_and_writes_nothing(self):
+        # A tar that fails part way in the sandbox ends its gzip stream short.
+        whole = archive(("a.txt", "file", "a"))
+        with self.assertRaises(RuntimeError) as caught:
+            unpack_archive(whole[:-12], self.target)
+        self.assertEqual(caught.exception.code, "download_incomplete")
+        self.assertFalse(os.path.exists(self.target))
+
     def test_a_link_then_a_file_through_it_cannot_write_outside(self):
         self.refused(archive(("x", "link", "../outside"), ("x/pwned.txt", "file", "owned")), "outside the target")
         self.assertFalse(os.path.exists(os.path.join(self.outside, "pwned.txt")))

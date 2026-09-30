@@ -81,7 +81,8 @@ func WithAPIKey(key string) Option {
 }
 
 // WithBaseURL points the client at another API origin. The default is
-// RUNTIME_API_URL, then https://api.withruntime.com.
+// RUNTIME_API_URL, then https://api.withruntime.com. Inside a Runtime sandbox,
+// calls for https://api.withruntime.com go to http://runtime.internal.
 func WithBaseURL(value string) Option {
 	return func(c *Client) error {
 		normalized, err := origin(value)
@@ -194,6 +195,9 @@ func New(options ...Option) (*Client, error) {
 			c.apiKey = key
 		}
 	}
+	// The saved key above is found by the origin as given; the calls go where
+	// that origin is reachable from here.
+	c.baseURL = reachable(c.baseURL, inRuntimeSandbox)
 	c.Sandboxes = &SandboxService{c: c}
 	c.Snapshots = &SnapshotService{c: c}
 	c.Images = &ImageService{c: c, Registries: &RegistryService{c: c}}

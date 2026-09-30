@@ -31,7 +31,8 @@ export function resolvePath(path: string): string {
   if (path === "~" || path === "") return HOME;
   if (path.startsWith("~/")) return `${HOME}/${path.slice(2)}`;
   if (path.startsWith("/")) return path;
-  return `${HOME}/${path.replace(/^\.\/?/, "")}`.replace(/\/+$/, "") || HOME;
+  // Only "." components are dropped: ".env" and "..x" keep their dots.
+  return `${HOME}/${path.replace(/^(?:\.(?:\/+|$))+/, "")}`.replace(/\/+$/, "") || HOME;
 }
 
 /** Quotes a word for bash. */

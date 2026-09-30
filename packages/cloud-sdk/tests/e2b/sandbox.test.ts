@@ -186,18 +186,21 @@ describe("keys", () => {
 
 describe("commands.run", () => {
   test("resolves with E2B's result and passes cwd, envs and timeout", async () => {
+    // The sandbox's envs are Runtime's to keep (its create's env); a command's
+    // own go with the command, and Runtime puts them over the sandbox's.
     const sbx = await create({ envs: { A: "1", B: "2" } });
+    expect(lastCreate().env).toEqual({ A: "1", B: "2" });
     const seen: string[] = [];
     const result = await sbx.commands.run("echo hi", {
       cwd: "/tmp",
       envs: { B: "3" },
       onStdout: (text) => void seen.push(text),
     });
-    expect(result).toEqual({ exitCode: 0, stdout: "ran echo hi\n", stderr: "" });
+    expect(result).toEqual({ exitCode: 0, error: "", stdout: "ran echo hi\n", stderr: "" });
     expect(seen).toEqual(["ran echo hi\n"]);
-    const [command, options] = world.called("sandbox.exec").at(-1)!;
+    const [command, options] = world.called("sandbox.spawn").at(-1)!;
     expect(command).toBe("echo hi");
-    expect(options).toMatchObject({ cwd: "/tmp", env: { A: "1", B: "3" }, timeoutMs: 60_000 });
+    expect(options).toMatchObject({ cwd: "/tmp", env: { B: "3" } });
   });
 
   test("returns the whole output, past the 64 KiB an exec result holds, as E2B does", async () => {
@@ -224,7 +227,13 @@ describe("commands.run", () => {
       world.exec = () => ({ exitCode: 0, stdout: "tail\n", lost: true });
       const sbx = await create();
       const result = await sbx.commands.run("big");
-      expect(result).toEqual({ exitCode: 0, stdout: "tail\n", stderr: "", truncated: true });
+      expect(result).toEqual({
+        exitCode: 0,
+        error: "",
+        stdout: "tail\n",
+        stderr: "",
+        truncated: true,
+      });
       world.exec = () => ({ exitCode: 1, stdout: "tail\n", lost: true });
       const error = (await sbx.commands.run("big").catch((e: unknown) => e)) as CommandExitError;
       expect(error.truncated).toBe(true);
@@ -250,7 +259,7 @@ describe("commands.run", () => {
       "boom\n",
       "exit status 3",
     ]);
-    expect(exit.message).toBe("Command exited with code 3 and error:\nboom\n");
+    expect(exit.message).toBe("exit status 3");
   });
 
   test("a timeout throws TimeoutError; 0 means no limit", async () => {
@@ -261,7 +270,7 @@ describe("commands.run", () => {
     ).toBeInstanceOf(TimeoutError);
     world.exec = () => ({ exitCode: 0 });
     await sbx.commands.run("true", { timeoutMs: 0 });
-    expect(world.called("sandbox.exec").at(-1)![1]).toMatchObject({ timeoutMs: 86_400_000 });
+    expect(world.called("sandbox.spawn").at(-1)![1]).not.toHaveProperty("timeoutMs");
   });
 
   test("a command killed by a signal exits -1", async () => {
@@ -284,11 +293,14 @@ describe("commands.run", () => {
   test("links /home/user to /workspace once, when something names it", async () => {
     const sbx = await create();
     await sbx.commands.run("ls");
-    expect(world.called("sandbox.exec").map(([command]) => command)).toEqual(["ls"]);
+    expect(world.called("sandbox.spawn").map(([command]) => command)).toEqual(["ls"]);
+    expect(world.called("sandbox.exec")).toHaveLength(0);
     await sbx.commands.run("cat /home/user/a.txt");
     await sbx.files.write("/home/user/b.txt", "b");
     await sbx.commands.run("ls", { cwd: "/home/user" });
-    const commands = world.called("sandbox.exec").map(([command]) => command);
+    const commands = world.calls
+      .filter(([method]) => method === "sandbox.exec" || method === "sandbox.spawn")
+      .map(([, command]) => command);
     expect(commands.filter((command) => String(command).includes("ln -s"))).toEqual([
       "[ -e /home/user ] || sudo ln -s /workspace /home/user",
     ]);
@@ -308,6 +320,7 @@ describe("background commands", () => {
     expect(handle.pid).toBe(pidOf(process.id));
     expect(await handle.wait()).toEqual({
       exitCode: 0,
+      error: "",
       stdout: "ran python3 server.py\n",
       stderr: "",
     });
@@ -325,6 +338,7 @@ describe("background commands", () => {
     const handle = await sbx.commands.run("big", { background: true });
     expect(await handle.wait()).toEqual({
       exitCode: 0,
+      error: "",
       stdout: "tail\n",
       stderr: "",
       truncated: true,
@@ -450,7 +464,7 @@ describe("files", () => {
     ]);
     expect(world.called("files.watch")[0]).toMatchObject([
       "/workspace/app",
-      { recursive: true, timeoutMs: 86_400_000 },
+      { recursive: true, timeoutMs: 0 },
     ]);
     await handle.stop();
     expect(world.called("files.watch.stop")).toEqual([["/workspace/app"]]);

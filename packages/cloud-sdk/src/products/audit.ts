@@ -24,6 +24,9 @@ export type AuditEvent = {
   ip: string | null;
   requestId: string | null;
   via: "web" | "api" | "mcp" | "runtime";
+  /** The sandbox the request came from, when code in it called the API at
+   * http://runtime.internal. */
+  sandbox: string | null;
 };
 export type AuditPage = { events: AuditEvent[]; next: string | null };
 

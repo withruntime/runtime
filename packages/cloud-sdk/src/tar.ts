@@ -2,15 +2,20 @@ import {
   chmod,
   lstat,
   mkdir,
+  mkdtemp,
+  open,
   readdir,
   readFile,
   realpath,
+  rename,
+  rm,
   symlink,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { Readable } from "node:stream";
+import { createGunzip, gzipSync } from "node:zlib";
+import { RuntimeError } from "./errors.js";
 
 /* A small ustar writer and reader for directory uploads and downloads, so the
    SDK needs no dependency. Regular files, directories and symbolic links;
@@ -129,57 +134,199 @@ async function linkStaysInside(root: string, directory: string, link: string) {
   return true;
 }
 
-/** Unpacks into `target`, refusing any entry that would land outside it. */
-export async function unpackArchive(archive: Uint8Array, target: string): Promise<void> {
-  const data = gunzipSync(archive);
-  await mkdir(resolve(target), { recursive: true });
-  const root = await realpath(resolve(target));
-  const text = (start: number, length: number) => {
-    const slice = data.subarray(start, start + length);
+/** A folder that did not arrive whole: tar in the sandbox stopped part way
+ * (a file it may not read, one that changed as it was read), which ends the
+ * gzip stream short, or the connection was lost (ARCHITECTURE.md section 10,
+ * "Folders over HTTP"). */
+function cutShort(cause?: unknown): RuntimeError {
+  return new RuntimeError({
+    message:
+      "The folder's archive arrived cut short: tar in the sandbox stopped part way, or the connection was lost. Nothing was written.",
+    hint: "Try again. If it fails the same way, a file in the folder cannot be read by the sandbox user or changes as it is read.",
+    code: "download_incomplete",
+    status: 0,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+/** The gzip stream's bytes, decompressed as they arrive. */
+function gunzipped(source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>): Readable {
+  const input = Readable.from(source, { objectMode: false });
+  const output = createGunzip();
+  input.on("error", (error) => output.destroy(error));
+  input.pipe(output);
+  output.on("close", () => input.destroy());
+  return output;
+}
+
+/** Exact byte counts from a stream of chunks, holding at most one chunk. */
+class Bytes {
+  #chunks: AsyncIterator<Uint8Array>;
+  #held: Uint8Array = new Uint8Array(0);
+  constructor(source: AsyncIterable<Uint8Array>) {
+    this.#chunks = source[Symbol.asyncIterator]();
+  }
+  async #more(): Promise<boolean> {
+    let next: IteratorResult<Uint8Array>;
+    try {
+      next = await this.#chunks.next();
+    } catch (error) {
+      throw error instanceof RuntimeError ? error : cutShort(error);
+    }
+    if (next.done) return false;
+    this.#held = this.#held.length ? Buffer.concat([this.#held, next.value]) : next.value;
+    return true;
+  }
+  /** `n` bytes, or undefined at a clean end before any of them. */
+  async exactly(n: number): Promise<Uint8Array | undefined> {
+    while (this.#held.length < n) {
+      if (await this.#more()) continue;
+      if (this.#held.length === 0) return undefined;
+      throw cutShort();
+    }
+    const out = this.#held.subarray(0, n);
+    this.#held = this.#held.subarray(n);
+    return out;
+  }
+  /** The next `n` bytes as they arrive. */
+  async *take(n: number): AsyncGenerator<Uint8Array> {
+    while (n > 0) {
+      if (this.#held.length === 0 && !(await this.#more())) throw cutShort();
+      const out = this.#held.subarray(0, n);
+      this.#held = this.#held.subarray(out.length);
+      n -= out.length;
+      yield out;
+    }
+  }
+  /** Reads to the end, so the gzip stream's own check has run. */
+  async drain(): Promise<void> {
+    this.#held = new Uint8Array(0);
+    while (await this.#more()) this.#held = new Uint8Array(0);
+  }
+}
+
+type Link = { destination: string; link: string; name: string };
+
+/** Unpacks a tar stream into `root`, a fresh folder: files and folders as they
+ * arrive, links noted to make at the end. Throws unless the archive's end
+ * arrived. */
+async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
+  const links: Link[] = [];
+  const decode = (slice: Uint8Array) => {
     const end = slice.indexOf(0);
     return new TextDecoder().decode(end < 0 ? slice : slice.subarray(0, end));
   };
-  const links: { destination: string; link: string; name: string }[] = [];
   let longName: string | undefined;
   let longLink: string | undefined;
-  for (let offset = 0; offset + 512 <= data.length;) {
-    if (data.subarray(offset, offset + 512).every((byte) => byte === 0)) break;
-    const size = parseInt(text(offset + 124, 12).trim() || "0", 8);
-    const type = String.fromCharCode(data[offset + 156] ?? 48);
-    const prefix = text(offset + 345, 155);
-    let name = longName ?? (prefix ? `${prefix}/${text(offset, 100)}` : text(offset, 100));
-    const link = longLink ?? text(offset + 157, 100);
+  for (;;) {
+    const header = await bytes.exactly(512);
+    if (!header) throw cutShort();
+    if (header.every((byte) => byte === 0)) {
+      await bytes.drain();
+      return links;
+    }
+    const text = (start: number, length: number) => decode(header.subarray(start, start + length));
+    const size = parseInt(text(124, 12).trim() || "0", 8);
+    const type = String.fromCharCode(header[156] ?? 48);
+    const prefix = text(345, 155);
+    let name = longName ?? (prefix ? `${prefix}/${text(0, 100)}` : text(0, 100));
+    const link = longLink ?? text(157, 100);
     longName = undefined;
     longLink = undefined;
-    const mode = parseInt(text(offset + 100, 8).trim() || "644", 8);
-    const body = data.subarray(offset + 512, offset + 512 + size);
-    offset += 512 + Math.ceil(size / 512) * 512;
+    const mode = parseInt(text(100, 8).trim() || "644", 8);
+    const padding = Math.ceil(size / 512) * 512 - size;
+    const skip = async () => {
+      for await (const _ of bytes.take(size + padding));
+    };
     if (type === "L" || type === "K") {
-      const value = new TextDecoder().decode(body).replace(/\0.*$/s, "");
+      const parts: Uint8Array[] = [];
+      for await (const part of bytes.take(size)) parts.push(Uint8Array.from(part));
+      for await (const _ of bytes.take(padding));
+      const value = new TextDecoder().decode(Buffer.concat(parts)).replace(/\0.*$/s, "");
       if (type === "L") longName = value;
       else longLink = value;
       continue;
     }
     name = name.replace(/^\.\//, "");
-    if (!name || name === "." || name === "./") continue;
+    if (!name || name === "." || name === "./") {
+      await skip();
+      continue;
+    }
     const destination = resolve(root, name);
     await assertPlain(root, destination, name);
-    if (type === "5") await mkdir(destination, { recursive: true });
-    else if (type === "2") links.push({ destination, link, name });
-    else if (type === "0" || type === "\0" || type === "7") {
+    if (type === "5") {
+      await mkdir(destination, { recursive: true });
+      await skip();
+    } else if (type === "2") {
+      links.push({ destination, link, name });
+      await skip();
+    } else if (type === "0" || type === "\0" || type === "7") {
       await mkdir(dirname(destination), { recursive: true });
-      await writeFile(destination, body);
+      const file = await open(destination, "w");
+      try {
+        for await (const part of bytes.take(size)) await file.write(part);
+      } finally {
+        await file.close();
+      }
       await chmod(destination, mode & 0o777);
+      for await (const _ of bytes.take(padding));
+    } else await skip();
+  }
+}
+
+/** Moves what was unpacked in `from` into `to`, merging with what is there
+ * and replacing files of the same name, never through a link in `to`. */
+async function merge(from: string, to: string, root: string): Promise<void> {
+  for (const name of await readdir(from)) {
+    const source = join(from, name);
+    const destination = join(to, name);
+    await assertPlain(root, destination, relative(root, destination));
+    const [kind, there] = await Promise.all([
+      lstat(source),
+      lstat(destination).catch(() => undefined),
+    ]);
+    if (kind.isDirectory() && there?.isDirectory()) await merge(source, destination, root);
+    else await rename(source, destination);
+  }
+}
+
+/** Unpacks a gzipped tar that arrives as a stream into `target`, refusing any
+ * entry that would land outside it, holding no more than a chunk at a time.
+ * It unpacks into a folder beside the target and moves it into place only
+ * once the whole archive arrived, so an archive cut short leaves nothing
+ * behind that could pass for the folder. A target that exists is merged
+ * into, files of the same name replaced. */
+export async function unpackStream(
+  source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  target: string,
+): Promise<void> {
+  const final = resolve(target);
+  await mkdir(dirname(final), { recursive: true });
+  const staging = await mkdtemp(`${final}.runtime-partial-`);
+  const stream = gunzipped(source);
+  try {
+    const root = await realpath(staging);
+    const links = await unpackEntries(new Bytes(stream), root);
+    for (const { destination, link, name } of links) {
+      await assertPlain(root, destination, name);
+      await mkdir(dirname(destination), { recursive: true });
+      await symlink(link, destination).catch(() => undefined);
     }
+    for (const { destination, link, name } of links) {
+      if (await linkStaysInside(root, dirname(destination), link)) continue;
+      await unlink(destination).catch(() => undefined);
+      throw new Error(`Refusing an archive link that leads outside the target: ${name} -> ${link}`);
+    }
+    const there = await lstat(final).catch(() => undefined);
+    if (!there) await rename(staging, final);
+    else await merge(root, await realpath(final), await realpath(final));
+  } finally {
+    stream.destroy();
+    await rm(staging, { recursive: true, force: true });
   }
-  for (const { destination, link, name } of links) {
-    await assertPlain(root, destination, name);
-    await mkdir(dirname(destination), { recursive: true });
-    await symlink(link, destination).catch(() => undefined);
-  }
-  for (const { destination, link, name } of links) {
-    if (await linkStaysInside(root, dirname(destination), link)) continue;
-    await unlink(destination).catch(() => undefined);
-    throw new Error(`Refusing an archive link that leads outside the target: ${name} -> ${link}`);
-  }
+}
+
+/** Unpacks a whole gzipped tar held in memory, by the same rules. */
+export function unpackArchive(archive: Uint8Array, target: string): Promise<void> {
+  return unpackStream([archive], target);
 }

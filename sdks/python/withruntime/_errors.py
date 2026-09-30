@@ -5,8 +5,13 @@ from __future__ import annotations
 from typing import Any, Optional
 
 
-# Switched off on purpose: retrying cannot change them.
-_DELIBERATE = frozenset({"fork_unavailable", "previews_unavailable", "unavailable"})
+# A product switched off on this deployment, or paused on purpose: the API
+# answers these 503s in fixed words (serverFault "off" in
+# packages/cloud/src/api/respond.ts) and retrying cannot change them.
+# host_unavailable and busy pass, and are retried.
+DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previews_unavailable",
+                        "network_unavailable", "network_rules_unavailable", "secrets_unavailable",
+                        "identity_unavailable", "env_unavailable"})
 # Refusals that pass on their own: a host frees room, a trial slot frees.
 _PASSING = frozenset({"no_capacity", "trial_busy"})
 # Refusals of a create that clear when a sandbox stops or pauses, or a host
@@ -39,7 +44,7 @@ class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0
         or a trial sandbox stops. sandboxes.create already waits for those (see
         wait_for_capacity), so seeing one from a create means the wait ran out
         or was switched off."""
-        if self.code in _DELIBERATE:
+        if self.code in DELIBERATE:
             return False
         if self.code in _PASSING:
             # A fork asking for more copies than the trial runs at once never fits.

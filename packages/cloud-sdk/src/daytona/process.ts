@@ -11,6 +11,7 @@ import {
 import {
   DaytonaCommandAlreadyCompletedError,
   DaytonaConflictError,
+  DaytonaConnectionError,
   DaytonaNotFoundError,
   DaytonaProcessExecutionTimeoutError,
   DaytonaSessionEndedError,
@@ -65,7 +66,7 @@ const MARK = "\x1e";
    shell's directory, variables and functions from one command to the next;
    the markers say where its output ends and what it exited with. */
 const PRELUDE =
-  '__rt_run() { eval "$(printf %s "$1" | base64 -d)"; __rt_c=$?; ' +
+  '__rt_eval() { eval "$(printf %s "$1" | base64 -d)"; }; __rt_run() { __rt_eval "$1"; __rt_c=$?; ' +
   'printf \'\\036RT%s:%s\\036\' "$2" "$__rt_c"; printf \'\\036RT%s\\036\' "$2" >&2; return $__rt_c; }\n';
 const TAG = "daytona-session:";
 
@@ -140,6 +141,13 @@ export class Process {
         ...WHOLE_OUTPUT,
       }),
     );
+    if (result.stdoutTruncated || result.stderrTruncated)
+      throw new DaytonaConnectionError(
+        "Some command output is no longer available.",
+        502,
+        undefined,
+        "output_truncated",
+      );
     if (result.timedOut)
       throw new DaytonaProcessExecutionTimeoutError(
         `Command timed out after ${timeout} s. Pass a larger timeout, or 0 for none.`,
@@ -173,6 +181,13 @@ export class Process {
         ...WHOLE_OUTPUT,
       }),
     );
+    if (result.stdoutTruncated || result.stderrTruncated)
+      throw new DaytonaConnectionError(
+        "Some command output is no longer available.",
+        502,
+        undefined,
+        "output_truncated",
+      );
     if (result.timedOut)
       throw new DaytonaProcessExecutionTimeoutError(`Code run timed out after ${timeout} s.`, 408);
     return {
@@ -250,7 +265,7 @@ export class Process {
   async executeSessionCommand(
     sessionId: string,
     req: SessionExecuteRequest,
-    _timeout?: number,
+    timeout?: number,
   ): Promise<SessionExecuteResponse> {
     const session = await this.#session(sessionId);
     await this.#ctx.ensureHome(req.command);
@@ -280,7 +295,28 @@ export class Process {
       command.done.catch(() => undefined);
       return { cmdId: command.id };
     }
-    await command.done;
+    if (timeout && timeout > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          command.done,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new DaytonaProcessExecutionTimeoutError(
+                    `Waiting for session command timed out after ${timeout} s. The command continues in the session.`,
+                    408,
+                  ),
+                ),
+              timeout * 1000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    } else await command.done;
     return {
       cmdId: command.id,
       output: command.output,
@@ -305,6 +341,15 @@ export class Process {
     };
     await guard("process", async () => {
       for await (const event of session.process.output({ cursor: session.cursor })) {
+        if (event.type === "truncated") {
+          session.ended = true;
+          throw new DaytonaConnectionError(
+            "Session command output was lost.",
+            502,
+            undefined,
+            "output_truncated",
+          );
+        }
         if (event.type === "exit") {
           session.ended = true;
           flush("stdout", buffer.stdout.length);

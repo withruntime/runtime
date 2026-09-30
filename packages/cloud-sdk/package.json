@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -59,6 +59,41 @@
       "types": "./dist/ai-harness/index.d.ts",
       "import": "./dist/ai-harness/index.js",
       "default": "./dist/ai-harness/index.js"
+    },
+    "./runloop": {
+      "types": "./dist/runloop/index.d.ts",
+      "import": "./dist/runloop/index.js",
+      "default": "./dist/runloop/index.js"
+    },
+    "./codesandbox": {
+      "types": "./dist/codesandbox/index.d.ts",
+      "import": "./dist/codesandbox/index.js",
+      "default": "./dist/codesandbox/index.js"
+    },
+    "./sprites": {
+      "types": "./dist/sprites/index.d.ts",
+      "import": "./dist/sprites/index.js",
+      "default": "./dist/sprites/index.js"
+    },
+    "./freestyle": {
+      "types": "./dist/freestyle/index.d.ts",
+      "import": "./dist/freestyle/index.js",
+      "default": "./dist/freestyle/index.js"
+    },
+    "./modal": {
+      "types": "./dist/modal/index.d.ts",
+      "import": "./dist/modal/index.js",
+      "default": "./dist/modal/index.js"
+    },
+    "./cloudflare": {
+      "workerd": {
+        "types": "./dist/cloudflare/worker.d.ts",
+        "import": "./dist/cloudflare/worker.js",
+        "default": "./dist/cloudflare/worker.js"
+      },
+      "types": "./dist/cloudflare/index.d.ts",
+      "import": "./dist/cloudflare/index.js",
+      "default": "./dist/cloudflare/index.js"
     }
   },
   "bin": {
@@ -72,7 +107,9 @@
     "DAYTONA.md",
     "VERCEL.md",
     "BLAXEL.md",
-    "LICENSE"
+    "LICENSE",
+    "COMPATIBILITY.md",
+    "compatibility-lock.json"
   ],
   "engines": {
     "node": ">=22.12"
@@ -87,6 +124,7 @@
     "@ai-sdk/harness": "1.0.124",
     "@anthropic-ai/claude-agent-sdk": "0.3.277",
     "@anthropic-ai/sdk": "0.128.0",
+    "@cloudflare/workers-types": "5.20260929.1",
     "@google/genai": "2.24.0",
     "@mastra/core": "1.71.0",
     "@mistralai/mistralai": "2.7.0",

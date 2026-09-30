@@ -14,7 +14,7 @@ The image is Ubuntu 24.04.5 LTS (noble) for amd64, on a 6.1 kernel.
 | ----------------- | -------------------------------------------------------------------------------------------------------------- |
 | Python            | Python 3.12 (`python3` and `python`), `pip` and `pip3`, `venv`, and uv 0.12.17 (`uv`, `uvx`)                   |
 | Python data tools | NumPy 1.26.4, pandas 2.1.4 and matplotlib 3.6.3, included in the current default image                         |
-| JavaScript        | Node.js 24.21.0 (`node`, `npm`, `npx`); Bun 1.4.0 (`bun`)                                                      |
+| JavaScript        | Node.js 24.21.0 (`node`, `npm`, `npx`), with `pnpm` and `yarn` through Corepack; Bun 1.4.0 (`bun`)             |
 | Build             | `gcc`, `g++`, `make` (build-essential)                                                                         |
 | Source and fetch  | `git`, `curl`, `wget`, `ssh`, `zip`, `unzip`, `xz`                                                             |
 | Search and data   | `rg` (ripgrep), `fd`, `jq`, `sqlite3`                                                                          |
@@ -51,6 +51,10 @@ npx playwright install chromium
   what it costs; those are enforced on the host, outside the sandbox.
 - `PATH` starts with `/workspace/.local/bin`, then `/usr/local/bin`, `/usr/bin`
   and `/bin`. `LANG` is `C.UTF-8`.
+- Variables you set with `env` at create (or change with `:update`) are in
+  every command, background process, terminal, SSH session and the image's
+  start command, for the sandbox's whole life, under each command's own `env`
+  ([API](./api#sandboxes)). Their values are never shown back.
 
 `pip install` works without a virtual environment. As `runtime` it installs to
 `/workspace/.local` (whose `bin` is first on `PATH`); under `sudo` it installs to
@@ -58,17 +62,23 @@ npx playwright install chromium
 Ubuntu rule against installing into the system Python (PEP 668) does not stop
 you. Use `python3 -m venv` or `uv` when you want isolation.
 
+`npm install -g` and `bun add -g` put their commands in `/workspace/.local/bin`
+too, so a tool such as `claude` or `codex` runs by name as soon as it is
+installed, with or without `sudo` for npm. `pnpm` and `yarn` fetch the version
+a project's `packageManager` names the first time they run.
+
 ## Disk, CPU and memory
 
 - **Disk:** `diskMiB` includes the system image and installed packages. The
   current default 4 GiB sandbox had about 2.5 GiB available in a measurement
   on 24 September 2026; ask for more when you install a lot. The smallest disk
   is 3072 MiB, the size of the image file.
-- **Disk speed:** a sandbox bursts to about 250 MB/s and 20,000 operations a
-  second for up to 30 seconds, then runs at about 40 MB/s and 2,000 operations
-  a second, and earns its burst back over five minutes. Up to two sandboxes on
-  a server burst at once. In a measurement on 24 September 2026 a sandbox wrote
-  at 200 MB/s while bursting and 38 MB/s after.
+- **Disk speed:** a sandbox shares its server's drives with the sandboxes
+  beside it, in proportion, with no fixed ceiling of its own. It gets at least
+  about {{disk-floor}} each way, and up to about {{disk-up-to}} when its
+  neighbours are quiet. One busy sandbox cannot starve the others, and a pause
+  writes its memory ahead of everyone's traffic, so it stays quick on a busy
+  server.
 - **CPU:** shared by default, with a guaranteed floor (`cpuFloorMillis`, 50
   thousandths of a vCPU unless you ask for more) and bursts up to `vcpu` cores.
   You pay for the CPU the sandbox uses. Up to 16 vCPUs on a paid sandbox, 2 on
@@ -109,10 +119,10 @@ paid sandbox also sends UDP to any public address and port
 ([outbound UDP](./networking#outbound-udp)); DNS is answered inside it.
 
 **Bandwidth.** A paid sandbox of an account that has made a purchase moves up
-to 500 Mbit/s in each direction. After its first 10 GiB at that speed it runs
-at 200 Mbit/s, and earns the burst back at that rate while it moves less. It
-can move 500 GiB a day, in and out together, in a 24-hour window that starts
-with its first byte. A trial sandbox gets 20 Mbit/s, and a trial account 5 GiB a
+to {{paid-bandwidth}} in each direction. After its first {{paid-bandwidth-burst}} at that speed it runs
+at {{paid-bandwidth-sustained}}, and earns the burst back at that rate while it moves less. It
+can move {{paid-daily-transfer}} a day, in and out together, in a 24-hour window that starts
+with its first byte. A trial sandbox gets {{trial-bandwidth}}, and a trial account {{trial-daily-transfer}} a
 day shared by all its sandboxes. Past the daily amount, open connections close
 and new requests get `429 Too Many Requests` with `X-Runtime-Egress:
 quota-exhausted` (`quota-exhausted:account` for a trial account's shared
@@ -148,6 +158,48 @@ To give code in a sandbox an API key it can use but never read, store it as a
 secret: see [Security](./security#secrets-sandboxes-never-see).
 
 The rules apply to root inside the sandbox too.
+
+### Runtime's API from inside a sandbox
+
+Code in a sandbox can call Runtime's API, so an agent in one sandbox can start,
+run and stop others. Inside a sandbox the API is at `http://runtime.internal`,
+and every Runtime SDK (JavaScript, Python, Go, Java and Ruby) uses it on its
+own: calls for
+`https://api.withruntime.com` go there, and an API origin you set yourself is
+left as it is. Give the sandbox a key as usual, as a secret or in `env`:
+
+```ts check
+import { Runtime } from "withruntime";
+
+// Inside a sandbox, with RUNTIME_API_KEY set.
+const runtime = new Runtime();
+await using child = await runtime.sandboxes.create();
+console.log((await child.exec("echo hello from a child")).stdout);
+```
+
+Any HTTP client works the same way, through the proxy settings above:
+
+```bash no-run
+curl -H "Authorization: Bearer $RUNTIME_API_KEY" http://runtime.internal/v1/me
+```
+
+- The sandbox's host sends each request on to `https://api.withruntime.com`
+  over HTTPS. The hop from your code to the host is plain HTTP, but it never
+  crosses a network: it runs over the sandbox's own private channel to its
+  host, which no other sandbox can reach.
+- It is the same API with the same key: your account's limits, roles and
+  rate limits apply, and errors carry the same request ids.
+- Paths under `/v1/` are served, and `/mcp` for
+  [Runtime's MCP server](./mcp).
+- In a Docker container inside the sandbox, set
+  `RUNTIME_API_URL=http://runtime.internal`.
+- A sandbox holds up to {{api-requests-per-sandbox}} API requests open at once.
+  Past that, a request gets `429` with `X-Runtime-Egress: api-busy`; retry it.
+  API requests count toward the sandbox's new-connection rate, bandwidth and
+  daily amount, and are never charged as outbound traffic.
+- The sandbox's own rules apply: with `internet: false`, or an `allow` list
+  that leaves out `api.withruntime.com`, requests are refused with
+  `X-Runtime-Egress: internet-off` or `rule-not-allowed`.
 
 Nothing on the internet can connect in to a sandbox. There are these ways in,
 all yours to open:
@@ -202,6 +254,12 @@ docker compose up -d
 - The clock is kept on the host's clock, and set again after every wake.
 - A sandbox runs until its lease ends (`timeoutSeconds`, at most an hour ahead,
   which `extend` moves as often as you need), then pauses or stops as
-  `onLeaseEnd` says. A pause keeps its memory and processes.
+  `onLeaseEnd` says. A pause keeps its memory and processes. A trial sandbox
+  still working at its lease's end (a command, terminal or SSH session open,
+  CPU in use or traffic moving) is given its `timeoutSeconds` again until the
+  trial hours run out ([trial](./trial)).
 - A host-side lease bounds execution even if management is unavailable.
 - A stopped sandbox is not a backup; copy out what you need to keep.
+- A deleted sandbox is gone: `DELETE /v1/sandboxes/{id}`, `sandbox.delete()` or
+  `runtime sandbox rm <id>` stops it and deletes its disk and paused memory in
+  any state. Its snapshots stay.

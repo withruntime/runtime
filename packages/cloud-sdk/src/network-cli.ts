@@ -50,7 +50,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
                                          Redis, a game server, anything that is not HTTP
                                          Prints address:port for your client
   ls [--sandbox <id>]                    Your open ports
-  close <portId>                         Close one; open connections end within seconds
+  close <portId>                         Close one, its open connections too
   Paid accounts only. TCP, carried as it is: use your service's own password and TLS.
 `,
   address: `runtime address <command>

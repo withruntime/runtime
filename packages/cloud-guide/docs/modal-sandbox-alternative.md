@@ -6,6 +6,8 @@ Runtime gives each agent sandbox its own microVM kernel and costs **{{saving:mod
 Runtime and {{cost:modal}} on Modal**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:modal:100000}}, **{{=$0 less:modal:100000}} a month saved**.
 
+Weighing more than two? [Modal Sandbox alternatives](/compare/modal-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Modal bills whichever is higher, the CPU a
@@ -13,7 +15,11 @@ Runtime and {{cost:modal}} on Modal**. At 100,000 runs a month that is {{cost:ru
   waits. Runtime measures the CPU your code actually uses, with a floor of {{cpu-floor-share}}. There is no request to size in advance.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
   sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
-  month until a request wakes it; the next command runs {{wake}} after that.
+  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+  Runtime's servers.
+- **Starts in milliseconds.** Modal states its sandboxes start in {{speed:modal:create}}.
+  On Runtime's servers a new sandbox is running {{server-create}} after the create request
+  and has run its first Python command {{server-first-command}} after it ([speed](./speed)).
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
@@ -126,8 +132,9 @@ with Sandbox.create(funding="trial") as box:
 ## When Modal may fit better
 
 - **GPUs.** Modal sandboxes can use GPUs. Runtime runs on CPUs.
-- **A wider platform today.** Functions, web endpoints and scheduled jobs sit
-  beside sandboxes in the same account and SDK.
+- **A wider platform today.** Functions and web endpoints sit beside sandboxes
+  in the same account and SDK. Runtime has [scheduled jobs](./jobs) beside its
+  sandboxes, but not functions or endpoints.
 
 ## Sources
 

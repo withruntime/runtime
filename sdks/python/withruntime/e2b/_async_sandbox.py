@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import dataclasses as _dataclasses
 import datetime as _dt
+import time as _time
+from functools import partial
 
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .._async_client import AsyncRuntime
+from .._request_scope import limits as request_limits, request_scope
 
 from . import _core as core
-from ._async_io import begin, call, finish, start, stop, stream, wrap
+from ._async_io import begin, call, finish, start, stop, stream, wrap, watch_directory, request, request_limited, close_stream, open_file, disconnect, opening_timeout
 from ._core import (CommandResult, EntryInfo, FileNotFoundException, FileType, InvalidArgumentException,
                     NotSupportedException, ProcessInfo, SandboxException, SandboxInfo, SandboxNotFoundException,
                     SandboxQuery, SnapshotInfo, WriteInfo, class_method_variant, translate)
@@ -30,9 +33,9 @@ def _client(api_key: Optional[str], client: Optional[AsyncRuntime], **connection
     return found
 
 
-async def _guard(subject: str, work: Callable[[], Any]) -> Any:
+async def _guard(subject: str, work: Callable[[], Any], request_timeout: Optional[float] = None) -> Any:
     try:
-        return await work()
+        return await request(work, request_timeout)
     except Exception as error:  # noqa: BLE001 - every Runtime error becomes E2B's
         raise translate(error, subject) from error
 
@@ -42,12 +45,16 @@ class AsyncCommandHandle:
 
     def __init__(self, process: Any, stdin: bool, timeout_ms: int, cursor: int = 0,
                  on_stdout: Optional[Callable[[str], Any]] = None,
-                 on_stderr: Optional[Callable[[str], Any]] = None) -> None:
+                 on_stderr: Optional[Callable[[str], Any]] = None, deadline: Optional[float] = None,
+                 on_pty: Optional[Callable[[bytes], Any]] = None, pty: bool = False) -> None:
         self._process = process
         self._stdin = stdin
+        self._request_timeout = 60
         self._timeout_ms = timeout_ms
+        self._deadline = deadline if deadline is not None else (_time.monotonic() + timeout_ms / 1000 if timeout_ms else None)
         self._cursor = cursor
         self._on_stdout, self._on_stderr = on_stdout, on_stderr
+        self._on_pty, self._pty = on_pty, pty
         self._stdout = ""
         self._stderr = ""
         self._exit: Optional[Dict[str, Any]] = None
@@ -58,19 +65,29 @@ class AsyncCommandHandle:
 
     async def _follow(self) -> None:
         try:
-            async for event in self._process.output(cursor=self._cursor):
-                if self._disconnected:
-                    return
-                if event["type"] == "stdout":
-                    self._stdout += event["data"]
-                    await call(self._on_stdout, event["data"])
-                elif event["type"] == "stderr":
-                    self._stderr += event["data"]
-                    await call(self._on_stderr, event["data"])
-                elif event["type"] == "truncated":
-                    self._truncated = True
-                elif event["type"] == "exit":
-                    self._exit = event
+            remaining = None if self._deadline is None else self._deadline - _time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise core.TimeoutException("The command connection timed out; the process may still be running. Reconnect with commands.connect(pid).")
+            source = self._process.output_bytes if self._pty else self._process.output
+            events = source(cursor=self._cursor, timeout_seconds=remaining)
+            try:
+                async for event in events:
+                    if self._disconnected:
+                        return
+                    if self._pty and event["type"] in ("stdout", "stderr"):
+                        await call(self._on_pty, event["data"])
+                    elif event["type"] == "stdout":
+                        self._stdout += event["data"]
+                        await call(self._on_stdout, event["data"])
+                    elif event["type"] == "stderr":
+                        self._stderr += event["data"]
+                        await call(self._on_stderr, event["data"])
+                    elif event["type"] == "truncated":
+                        self._truncated = True
+                    elif event["type"] == "exit":
+                        self._exit = event
+            finally:
+                await close_stream(events)
         except Exception as error:  # noqa: BLE001
             self._failure = translate(error, "sandbox")
 
@@ -118,8 +135,9 @@ class AsyncCommandHandle:
     async def disconnect(self) -> None:
         """Stops receiving output; the command keeps running."""
         self._disconnected = True
-        stop(self._task)
+        await disconnect(self._task)
 
+    @request_limited
     async def kill(self) -> bool:
         """Kills the command with SIGKILL. False when it had already ended."""
         if self._exit is not None:
@@ -127,14 +145,16 @@ class AsyncCommandHandle:
         await _guard("sandbox", lambda: self._process.kill("SIGKILL"))
         return True
 
+    @request_limited
     async def send_stdin(self, data: Union[str, bytes], request_timeout: Optional[float] = None) -> None:
         if not self._stdin:
-            raise InvalidArgumentException("The command was not started with stdin=True, so its input is closed.")
+            raise SandboxException("Sending stdin is not supported for this command handle.")
         await _guard("sandbox", lambda: self._process.write(data))
 
+    @request_limited
     async def close_stdin(self, request_timeout: Optional[float] = None) -> None:
         if not self._stdin:
-            raise InvalidArgumentException("The command was not started with stdin=True.")
+            raise SandboxException("Closing stdin is not supported for this command handle.")
         await _guard("sandbox", lambda: self._process.write(b"", eof=True))
 
 
@@ -145,8 +165,8 @@ class AsyncCommands:
         self._sandbox = sandbox
 
     def _env(self, envs: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
-        merged = {**self._sandbox._envs, **(envs or {})}
-        return merged or None
+        """A command's own envs; the sandbox's are Runtime's, added under them."""
+        return dict(envs) if envs else None
 
     async def run(self, cmd: str, background: Optional[bool] = None, envs: Optional[Dict[str, str]] = None,
                   user: Optional[str] = None, cwd: Optional[str] = None,
@@ -157,23 +177,22 @@ class AsyncCommands:
         CommandExitException on a non-zero exit and TimeoutException past
         ``timeout`` (seconds, 0 for none); ``background=True`` returns a handle."""
         core.refuse_user(user)
-        await self._sandbox._ensure_home(f"{cmd}\n{cwd or ''}")
         timeout_ms = core.command_timeout_ms(timeout)
-        if background or stdin:
-            handle = await self._start(cmd, envs, cwd, bool(stdin), timeout_ms, on_stdout, on_stderr)
-            return handle if background else await handle.wait()
-        result = await _guard("sandbox", lambda: self._sandbox.runtime.exec(
-            cmd, cwd=cwd, env=self._env(envs), timeout_ms=timeout_ms,
-            on_stdout=wrap(on_stdout) or core.whole_output, on_stderr=wrap(on_stderr)))
-        return core.settle(result.exit_code, result.stdout, result.stderr, result.timed_out, timeout_ms,
-                           result.stdout_truncated or result.stderr_truncated)
+        handle = await self._start(cmd, envs, cwd, bool(stdin), timeout_ms, on_stdout, on_stderr, request_timeout)
+        return handle if background else await handle.wait()
 
     async def _start(self, cmd: str, envs: Optional[Dict[str, str]], cwd: Optional[str], stdin: bool,
-                     timeout_ms: int, on_stdout: Any, on_stderr: Any) -> AsyncCommandHandle:
-        process = await _guard("sandbox", lambda: self._sandbox.runtime.spawn(
-            cmd, cwd=cwd, env=self._env(envs), stdin="pipe" if stdin else None, timeout_ms=timeout_ms))
-        return AsyncCommandHandle(process, stdin, timeout_ms, on_stdout=on_stdout, on_stderr=on_stderr)
+                     timeout_ms: int, on_stdout: Any, on_stderr: Any, request_timeout: Optional[float] = None) -> AsyncCommandHandle:
+        deadline = _time.monotonic() + timeout_ms / 1000 if timeout_ms else None
+        async def spawn():
+            await self._sandbox._ensure_home(f"{cmd}\n{cwd or ''}")
+            return await self._sandbox.runtime.spawn(cmd, cwd=cwd, env=self._env(envs), stdin="pipe" if stdin else None)
+        process = await _guard("sandbox", spawn, opening_timeout(deadline, core.request_seconds(self, request_timeout)))
+        handle = AsyncCommandHandle(process, stdin, timeout_ms, on_stdout=on_stdout, on_stderr=on_stderr, deadline=deadline)
+        handle._request_timeout = core.request_seconds(self, None)
+        return handle
 
+    @request_limited
     async def list(self, request_timeout: Optional[float] = None) -> List[ProcessInfo]:
         processes = await _guard("sandbox", lambda: self._sandbox.runtime.processes())
         return [core.describe_process(info) for info in processes if info.get("state") == "running"]
@@ -190,6 +209,7 @@ class AsyncCommands:
             raise SandboxException(f"No running command with pid {pid}.")
         return await _guard("sandbox", lambda: self._sandbox.runtime.process(info["id"]))
 
+    @request_limited
     async def kill(self, pid: int, request_timeout: Optional[float] = None) -> bool:
         """Kills a command with SIGKILL, as E2B does. False when there is none."""
         info = await self._find(pid)
@@ -199,12 +219,14 @@ class AsyncCommands:
         await _guard("sandbox", lambda: process.kill("SIGKILL"))
         return True
 
+    @request_limited
     async def send_stdin(self, pid: int, data: Union[str, bytes], request_timeout: Optional[float] = None) -> None:
         process = await self._process(pid)
         if not process.info.get("stdinOpen"):
             raise InvalidArgumentException(f"The command with pid {pid} was not started with stdin=True.")
         await _guard("sandbox", lambda: process.write(data))
 
+    @request_limited
     async def close_stdin(self, pid: int, request_timeout: Optional[float] = None) -> None:
         process = await self._process(pid)
         await _guard("sandbox", lambda: process.write(b"", eof=True))
@@ -213,10 +235,63 @@ class AsyncCommands:
                       on_stdout: Optional[Callable[[str], Any]] = None,
                       on_stderr: Optional[Callable[[str], Any]] = None) -> AsyncCommandHandle:
         """Attaches to a running command; output from now on reaches the handle."""
+        timeout_ms = core.command_timeout_ms(timeout)
+        deadline = _time.monotonic() + timeout_ms / 1000 if timeout_ms else None
+        process = await _guard("sandbox", lambda: self._process(pid), opening_timeout(deadline, core.request_seconds(self, request_timeout)))
+        handle = AsyncCommandHandle(process, bool(process.info.get("stdinOpen")), timeout_ms,
+                                    cursor=int(process.info.get("outputBytes") or 0), on_stdout=on_stdout,
+                                    on_stderr=on_stderr, deadline=deadline)
+        handle._request_timeout = core.request_seconds(self, None)
+        return handle
+
+
+class AsyncPty(AsyncCommands):
+    """E2B terminal sessions over native PTY processes and lossless byte output."""
+
+    async def create(self, size: core.PtySize, on_data: Callable[[bytes], Any],
+                     user: Optional[str] = None, cwd: Optional[str] = None,
+                     envs: Optional[Dict[str, str]] = None, timeout: Optional[float] = 60,
+                     request_timeout: Optional[float] = None) -> AsyncCommandHandle:
+        core.refuse_user(user)
+        dimensions = self._size(size)
+        timeout_ms = core.command_timeout_ms(timeout)
+        deadline = _time.monotonic() + timeout_ms / 1000 if timeout_ms else None
+        env = self._env(envs) or {}
+        for key, value in (("TERM", "xterm-256color"), ("LANG", "C.UTF-8"), ("LC_ALL", "C.UTF-8")):
+            env.setdefault(key, value)
+        async def spawn():
+            await self._sandbox._ensure_home(cwd)
+            return await self._sandbox.runtime.spawn(["/bin/bash", "-i", "-l"], cwd=cwd, env=env,
+                                                     stdin="pipe", pty=dimensions, output_encoding="base64")
+        process = await _guard("sandbox", spawn, opening_timeout(deadline, core.request_seconds(self, request_timeout)))
+        handle = AsyncCommandHandle(process, False, timeout_ms, deadline=deadline, on_pty=on_data, pty=True)
+        handle._request_timeout = core.request_seconds(self, None)
+        return handle
+
+    async def connect(self, pid: int, on_data: Callable[[bytes], Any], timeout: Optional[float] = 60,
+                      request_timeout: Optional[float] = None) -> AsyncCommandHandle:
+        timeout_ms = core.command_timeout_ms(timeout)
+        deadline = _time.monotonic() + timeout_ms / 1000 if timeout_ms else None
+        process = await _guard("sandbox", lambda: self._process(pid), opening_timeout(deadline, core.request_seconds(self, request_timeout)))
+        if process.info.get("outputEncoding") != "base64":
+            raise NotSupportedException("Connecting to a legacy text-output PTY", "Create the PTY through sandbox.pty.create first.")
+        handle = AsyncCommandHandle(process, False, timeout_ms, cursor=int(process.info.get("outputBytes") or 0),
+                                    deadline=deadline, on_pty=on_data, pty=True)
+        handle._request_timeout = core.request_seconds(self, None)
+        return handle
+
+    @request_limited
+    async def resize(self, pid: int, size: core.PtySize, request_timeout: Optional[float] = None) -> None:
+        dimensions = self._size(size)
         process = await self._process(pid)
-        return AsyncCommandHandle(process, bool(process.info.get("stdinOpen")), core.command_timeout_ms(timeout),
-                                  cursor=int(process.info.get("outputBytes") or 0), on_stdout=on_stdout,
-                                  on_stderr=on_stderr)
+        await _guard("sandbox", lambda: process.resize(**dimensions))
+
+    @staticmethod
+    def _size(size: core.PtySize) -> dict:
+        for value in (size.cols, size.rows):
+            if type(value) is not int or value <= 0:
+                raise InvalidArgumentException("PTY rows and columns must be positive integers")
+        return {"cols": size.cols, "rows": size.rows}
 
 
 class AsyncFilesystem:
@@ -239,22 +314,29 @@ class AsyncFilesystem:
                    request_timeout: Optional[float] = None, gzip: bool = False,
                    stream_idle_timeout: Optional[float] = None) -> Any:
         """The file as text (default), ``bytearray`` (format="bytes") or chunks (format="stream")."""
-        target = await self._path(path, user)
-        data = await _guard("file", lambda: self._files.read(target))
+        total = request_timeout if format == "stream" else core.request_seconds(self, request_timeout)
+        captured = request_limits(total, idle_timeout=60 if stream_idle_timeout is None else stream_idle_timeout)
+        with request_scope(captured=captured):
+            target = await _guard("file_http", lambda: self._path(path, user))
+            if format == "stream":
+                return await _guard("file_http", lambda: open_file(self._files, target, captured))
+            data = await _guard("file_http", lambda: self._files.read(target))
         if format == "bytes":
             return bytearray(data)
-        if format == "stream":
-            return stream(bytes(data))
-        return bytes(data).decode()
+        if format == "text":
+            return bytes(data).decode(errors="replace")
+        return None
 
+    @request_limited
     async def write(self, path: str, data: Any, user: Optional[str] = None, request_timeout: Optional[float] = None,
                     gzip: bool = False, use_octet_stream: Optional[bool] = None,
                     metadata: Optional[Dict[str, str]] = None) -> WriteInfo:
         """Writes a file, making its directories, and replaces one that exists."""
         target = await self._path(path, user, metadata)
-        await _guard("file", lambda: self._files.write(target, core.to_bytes(data)))
+        await _guard("file_http", lambda: self._files.write(target, core.to_bytes(data)))
         return WriteInfo(name=target.rstrip("/").rsplit("/", 1)[-1], type=FileType.FILE, path=target)
 
+    @request_limited
     async def write_files(self, files: List[Dict[str, Any]], user: Optional[str] = None,
                           request_timeout: Optional[float] = None, gzip: bool = False,
                           use_octet_stream: Optional[bool] = None,
@@ -264,6 +346,7 @@ class AsyncFilesystem:
             written.append(await self.write(entry["path"], entry["data"], user=user, metadata=metadata))
         return written
 
+    @request_limited
     async def list(self, path: str, depth: Optional[int] = 1, user: Optional[str] = None,
                    request_timeout: Optional[float] = None) -> List[EntryInfo]:
         """A directory's entries, hidden ones included; ``depth`` goes deeper."""
@@ -271,10 +354,12 @@ class AsyncFilesystem:
         entries = await _guard("file", lambda: self._files.list(target, depth=depth or 1, hidden=True))
         return [core.entry_info(entry) for entry in entries]
 
+    @request_limited
     async def exists(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> bool:
         target = await self._path(path, user)
         return bool(await _guard("file", lambda: self._files.exists(target)))
 
+    @request_limited
     async def get_info(self, path: str, user: Optional[str] = None,
                        request_timeout: Optional[float] = None) -> EntryInfo:
         target = await self._path(path, user)
@@ -283,11 +368,13 @@ class AsyncFilesystem:
             raise FileNotFoundException(f"{target} does not exist.")
         return core.entry_info(found)
 
+    @request_limited
     async def remove(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> None:
         """Removes a file, or a directory with everything in it."""
         target = await self._path(path, user)
         await _guard("file", lambda: self._files.remove(target, recursive=True))
 
+    @request_limited
     async def rename(self, old_path: str, new_path: str, user: Optional[str] = None,
                      request_timeout: Optional[float] = None) -> EntryInfo:
         """Moves a file or directory, replacing a file at the new path, as E2B does."""
@@ -296,6 +383,7 @@ class AsyncFilesystem:
         await _guard("file", lambda: self._files.rename(source, target, overwrite=True))
         return await self.get_info(target)
 
+    @request_limited
     async def make_dir(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> bool:
         """Makes a directory and its parents. False when it already existed."""
         target = await self._path(path, user)
@@ -304,9 +392,12 @@ class AsyncFilesystem:
         await _guard("file", lambda: self._files.mkdir(target, parents=True))
         return True
 
-    watch_dir = staticmethod(core.unsupported(
-        "Watching a directory (files.watch_dir)",
-        "Poll with files.list(path), or run your own watcher with commands.run(..., background=True)."))
+    @property
+    def watch_dir(self) -> Any:
+        # E2B's async interface takes callbacks; its sync twin polls events.
+        # The language-specific helper keeps those signatures distinct.
+        return partial(watch_directory, self)
+
 
 
 class AsyncSandboxPaginator:
@@ -344,12 +435,12 @@ class AsyncSandbox:
 
     default_template = "base"
 
-    def __init__(self, runtime: Any, client: AsyncRuntime, envs: Optional[Dict[str, str]] = None) -> None:
+    def __init__(self, runtime: Any, client: AsyncRuntime) -> None:
         """Use ``await AsyncSandbox.create()`` or ``await AsyncSandbox.connect(id)``."""
         self.runtime = runtime
         self._client = client
-        self._envs: Dict[str, str] = dict(envs or {})
         self._home_linked = False
+        self._request_timeout = 60
         self._shares: Dict[int, Any] = {}  # port -> the one public share asked for it
         self.files = AsyncFilesystem(self)
         self.commands = AsyncCommands(self)
@@ -388,24 +479,31 @@ class AsyncSandbox:
         Runtime fields (snake_case) over the adapter's."""
         core.refuse_create({"mcp": mcp, "network": network, "iam": iam, "volume_mounts": volume_mounts})
         runtime_client = _client(api_key, client, **connection)
-        fields: Dict[str, Any] = {
-            "timeout_seconds": core.lease_seconds(core.DEFAULT_TIMEOUT if timeout is None else timeout),
-            "on_lease_end": core.on_lease_end(lifecycle),
-        }
-        if lifecycle:
-            # E2B resumes on traffic only when asked; Runtime's automatic wake is the same (0093).
-            fields["auto_wake"] = bool(lifecycle.get("auto_resume"))
-        if metadata:
-            fields["labels"] = dict(metadata)
-        if allow_internet_access is False:
-            fields["network"] = {"internet": False}
-        source = await cls._resolve(runtime_client, template or cls.default_template)
-        if "snapshot" not in source:
-            fields = {"vcpu": core.DEFAULT_VCPU, "memory_mib": core.DEFAULT_MEMORY_MIB, **fields}
-        fields.update(source)
-        fields.update(runtime_create or {})
-        created = await _guard("sandbox", lambda: runtime_client.sandboxes.create(**fields))
-        return cls(created, runtime_client, envs)
+        with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
+            fields: Dict[str, Any] = {
+                "timeout_seconds": core.lease_seconds(core.DEFAULT_TIMEOUT if timeout is None else timeout),
+                "on_lease_end": core.on_lease_end(lifecycle),
+            }
+            if lifecycle:
+                # E2B resumes on traffic only when asked; Runtime's automatic wake is the same (0093).
+                fields["auto_wake"] = bool(lifecycle.get("auto_resume"))
+            if metadata:
+                fields["labels"] = dict(metadata)
+            if envs:
+                # Runtime keeps them with the sandbox: every command, terminal and
+                # interpreter in it gets them, from this client or any other.
+                fields["env"] = dict(envs)
+            if allow_internet_access is False:
+                fields["network"] = {"internet": False}
+            source = await _guard("sandbox", lambda: cls._resolve(runtime_client, template or cls.default_template))
+            if "snapshot" not in source:
+                fields = {"vcpu": core.DEFAULT_VCPU, "memory_mib": core.DEFAULT_MEMORY_MIB, **fields}
+            fields.update(source)
+            fields.update(runtime_create or {})
+            created = await _guard("sandbox", lambda: runtime_client.sandboxes.create(**fields))
+        result = cls(created, runtime_client)
+        result._request_timeout = connection.get("request_timeout") if connection.get("request_timeout") is not None else 60
+        return result
 
     @staticmethod
     async def _resolve(client: AsyncRuntime, template: str) -> Dict[str, Any]:
@@ -429,9 +527,12 @@ class AsyncSandbox:
                                    on_resume: str = "restore", api_key: Optional[str] = None,
                                    client: Optional[AsyncRuntime] = None, **connection: Any) -> Any:
         runtime_client = _client(api_key, client, **connection)
-        runtime = await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id))
-        await _resume(runtime, timeout, on_resume)
-        return cls(runtime, runtime_client)
+        with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
+            runtime = await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id))
+            await _resume(runtime, timeout, on_resume)
+        result = cls(runtime, runtime_client)
+        result._request_timeout = connection.get("request_timeout") if connection.get("request_timeout") is not None else 60
+        return result
 
     @class_method_variant("_cls_connect_sandbox")
     async def connect(self, timeout: Optional[int] = None, *, on_resume: str = "restore", **_: Any) -> Any:
@@ -493,6 +594,7 @@ class AsyncSandbox:
         await _guard("sandbox", lambda: self.runtime.refresh())
         return core.sandbox_info(self.runtime.info)
 
+    @request_limited
     async def is_running(self, request_timeout: Optional[float] = None) -> bool:
         try:
             await _guard("sandbox", lambda: self.runtime.refresh())
@@ -540,7 +642,8 @@ class AsyncSandbox:
             raise NotSupportedException("A timeout for forks (fork timeout)",
                                         "Fork without it, then call set_timeout(seconds) on each fork.")
         copies = await _guard("sandbox", lambda: self.runtime.fork(count or 1))
-        return [type(self)(copy, self._client, self._envs) for copy in copies]
+        # Copies keep the source's environment on Runtime's side.
+        return [type(self)(copy, self._client) for copy in copies]
 
     @classmethod
     async def _cls_create_snapshot(cls, sandbox_id: str, name: Optional[str] = None, **opts: Any) -> SnapshotInfo:
@@ -600,8 +703,7 @@ class AsyncSandbox:
 
     @property
     def pty(self) -> Any:
-        raise NotSupportedException("E2B's pty module",
-                                    "Use sandbox.runtime.terminal(cols=..., rows=...) for an interactive terminal.")
+        return AsyncPty(self)
 
     @property
     def git(self) -> Any:

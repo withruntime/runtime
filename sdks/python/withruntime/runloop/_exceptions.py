@@ -1,0 +1,2 @@
+class RunloopError(Exception):
+    pass

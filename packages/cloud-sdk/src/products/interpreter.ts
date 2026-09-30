@@ -1,5 +1,6 @@
 import type { Sandbox } from "../sandbox.js";
 import type { RequestOptions, Transport } from "../transport.js";
+import { RuntimeError } from "../errors.js";
 
 export type InterpreterLanguage =
   "python" | "javascript" | "typescript" | "r" | "java" | "bash" | "go";
@@ -39,11 +40,18 @@ export type RunOptions = RequestOptions & {
   /** A context id; each language's own name ("python", "typescript", "r"...) is
    * its default context, started on first use. */
   context?: string;
+  /** Cell deadline. 0 runs until completion, cancellation or the sandbox's lease ends. */
   timeoutMs?: number;
-  onStdout?: (text: string) => void;
-  onStderr?: (text: string) => void;
-  onResult?: (result: ExecutionResult) => void;
-  onError?: (error: { name: string; value: string; traceback: string }) => void;
+  /** Separate HTTP deadline, including retries. 0 disables it. */
+  requestTimeoutMs?: number;
+  /** false lets the cell continue if this reader disconnects. Default true. */
+  interruptOnDisconnect?: boolean;
+  /** @internal Compatibility protocols with separate header/body deadlines. */
+  onResponse?: (response: Response) => void;
+  onStdout?: (text: string) => unknown;
+  onStderr?: (text: string) => unknown;
+  onResult?: (result: ExecutionResult) => unknown;
+  onError?: (error: { name: string; value: string; traceback: string }) => unknown;
 };
 type Event =
   | { k: "start"; n: number }
@@ -52,7 +60,14 @@ type Event =
   | { k: "error"; name: string; value: string; traceback: string }
   | { k: "end" }
   | { k: "execution"; execution: Execution }
-  | { k: "failure"; code: string; message: string; hint: string | null };
+  | {
+      k: "failure";
+      code: string;
+      message: string;
+      hint: string | null;
+      status?: number;
+      requestId?: string;
+    };
 
 /** A stateful interpreter in the sandbox, in Python, JavaScript, TypeScript,
  * R, Java, Bash or Go:
@@ -63,29 +78,63 @@ export function sandboxInterpreter(t: Transport, sandbox: Sandbox) {
   return {
     /** Run a cell. With any of the on* callbacks, output streams as it happens. */
     async run(code: string, options: RunOptions = {}): Promise<Execution> {
-      const { language, context, timeoutMs, onStdout, onStderr, onResult, onError, ...request } =
-        options;
+      const {
+        language,
+        context,
+        timeoutMs,
+        requestTimeoutMs,
+        interruptOnDisconnect,
+        onStdout,
+        onStderr,
+        onResult,
+        onError,
+        ...request
+      } = options;
+      const transportOptions = {
+        ...request,
+        ...(requestTimeoutMs !== undefined
+          ? { timeoutMs: requestTimeoutMs }
+          : timeoutMs !== undefined
+            ? { timeoutMs: timeoutMs === 0 ? 0 : timeoutMs + 60_000 }
+            : {}),
+      };
       const body = {
         code,
         ...(language ? { language } : {}),
         ...(context ? { context } : {}),
-        ...(timeoutMs ? { timeoutMs } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(interruptOnDisconnect !== undefined ? { interruptOnDisconnect } : {}),
       };
       if (!onStdout && !onStderr && !onResult && !onError)
-        return t.json<Execution>({ method: "POST", path: `${base()}:run`, body, ...request });
+        return t.json<Execution>({
+          method: "POST",
+          path: `${base()}:run`,
+          body,
+          ...transportOptions,
+        });
       for await (const event of t.events<Event>({
         method: "POST",
         path: `${base()}:run`,
         body: { ...body, stream: true },
-        ...request,
+        ...transportOptions,
       })) {
-        if (event.k === "stdout") onStdout?.(event.text);
-        else if (event.k === "stderr") onStderr?.(event.text);
+        if (event.k === "stdout") await onStdout?.(event.text);
+        else if (event.k === "stderr") await onStderr?.(event.text);
         else if (event.k === "result")
-          onResult?.({ main: event.main, data: event.data, refs: event.refs });
-        else if (event.k === "error") onError?.(event);
+          await onResult?.({ main: event.main, data: event.data, refs: event.refs });
+        else if (event.k === "error") await onError?.(event);
         else if (event.k === "execution") return event.execution;
-        else if (event.k === "failure") throw new Error(`${event.code}: ${event.message}`);
+        else if (event.k === "failure")
+          // As every other refusal: its code, words, hint and request id,
+          // printed by the CLI as it prints the rest (28 September 2026:
+          // "Error: forbidden: cloud forbidden", with no hint and no id).
+          throw new RuntimeError({
+            code: event.code,
+            status: event.status ?? 0,
+            message: event.message,
+            ...(event.hint ? { hint: event.hint } : {}),
+            ...(event.requestId ? { requestId: event.requestId } : {}),
+          });
       }
       throw new Error("The interpreter stream ended without a result");
     },

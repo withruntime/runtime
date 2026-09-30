@@ -14,6 +14,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
 /**
@@ -26,24 +27,61 @@ final class Credentials {
 
   static final Pattern KEY = Pattern.compile("^rtcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$");
 
-  /** An HTTPS origin, or plain HTTP to localhost for tests, with nothing after the host. */
+  private static final String BAD_ORIGIN =
+      "Use an HTTPS API origin (or http://runtime.internal inside a sandbox, http://localhost for tests).";
+
+  /**
+   * Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's own host sends each
+   * request on to the public API over HTTPS. The API runs on that host, whose addresses a sandbox
+   * cannot reach directly. Plain HTTP because the hop never leaves the machine: from the program
+   * to the guest's own proxy, then over the sandbox's private channel to its host.
+   */
+  static final String SANDBOX_BASE_URL = "http://runtime.internal";
+
+  /** A file every Runtime sandbox has; the guest keeps it current. Tests move it. */
+  static Path sandboxMarker = Path.of("/run/runtime/environment.json");
+
+  static boolean inRuntimeSandbox() {
+    return Files.exists(sandboxMarker);
+  }
+
+  /**
+   * The origin calls for {@code apiOrigin} are sent to from here. In a sandbox the public API is
+   * its own host, which it cannot reach directly, so calls for it go to runtime.internal; every
+   * other origin is left as it is.
+   */
+  static String reachable(String apiOrigin, BooleanSupplier inSandbox) {
+    return RuntimeClient.DEFAULT_BASE_URL.equals(apiOrigin) && inSandbox.getAsBoolean()
+        ? SANDBOX_BASE_URL
+        : apiOrigin;
+  }
+
+  /**
+   * An HTTPS origin, plain HTTP to runtime.internal inside a sandbox, or plain HTTP to localhost
+   * for tests, with nothing after the host. runtime.internal is reserved and never resolves
+   * outside a sandbox, so a key sent there in plain HTTP never leaves the sandbox's host.
+   */
   static String origin(String value) {
     URI uri;
     try {
       uri = URI.create(value);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("Use an HTTPS API origin (or http://localhost for tests).");
+      throw new IllegalArgumentException(BAD_ORIGIN);
     }
     String host = uri.getHost();
-    boolean local = "localhost".equals(host) || "127.0.0.1".equals(host) || "[::1]".equals(host);
+    boolean internal = "runtime.internal".equals(host);
+    boolean local =
+        "localhost".equals(host) || "127.0.0.1".equals(host) || "[::1]".equals(host) || internal;
     String path = uri.getRawPath();
     if (host == null
         || !("https".equals(uri.getScheme()) || (local && "http".equals(uri.getScheme())))
+        || (internal && (!"http".equals(uri.getScheme()) || (uri.getPort() != -1 && uri.getPort() != 80)))
         || uri.getRawUserInfo() != null
         || uri.getRawQuery() != null
         || uri.getRawFragment() != null
         || !(path == null || path.isEmpty() || path.equals("/")))
-      throw new IllegalArgumentException("Use an HTTPS API origin (or http://localhost for tests).");
+      throw new IllegalArgumentException(BAD_ORIGIN);
+    if (internal) return SANDBOX_BASE_URL;
     return uri.getScheme() + "://" + uri.getRawAuthority();
   }
 

@@ -3,7 +3,7 @@ import { resolveCredential } from "./credentials.js";
 import { RuntimeError } from "./errors.js";
 import { beginDeviceLogin, type PendingLogin } from "./login.js";
 import { envFetch } from "./proxy.js";
-import { apiOrigin, VERSION } from "./transport.js";
+import { apiOrigin, defaultBaseUrl, VERSION } from "./transport.js";
 
 const CONNECT_INSTRUCTIONS =
   "Runtime is not connected on this machine yet. Call runtime_connect: it gives you a link and a code for the person you work for to approve in their browser (no key to copy). Once they have, call runtime_connect again; Runtime's tools then appear (sandboxes, commands, files and the rest).";
@@ -37,7 +37,7 @@ export async function serveMcp(
   } catch (error) {
     if (!(error instanceof RuntimeError && error.code === "missing_api_key")) throw error;
   }
-  const origin = apiOrigin(env.RUNTIME_API_URL ?? "https://api.withruntime.com");
+  const origin = apiOrigin(defaultBaseUrl(env));
   const endpoint = new URL("/mcp", origin).href;
   let protocolVersion: string | undefined;
   let session: string | undefined;

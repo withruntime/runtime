@@ -78,8 +78,9 @@ runtime volume backup-rm "${backup}"
   names the newest backup to restore it from.
 - **Stopping a sandbox** has it write out what it wrote to its volumes first,
   and a stop that waits answers once its volumes are free to attach again. A
-  sandbox whose lease runs out stops at once, so run `sync` after writes it
-  must keep.
+  sandbox whose lease runs out does the same: its programs are frozen just
+  before the lease ends, and what they wrote to its volumes, and to a
+  persistent sandbox's own disk, is written out after that at no charge.
 
 ## Snapshots survive their server
 
@@ -95,10 +96,13 @@ A snapshot is copied off its server, encrypted, as soon as it is ready.
 | `none`             | A fork's own snapshot, which is deleted when the fork ends and never copied |
 
 If a snapshot's server is lost, the snapshot is restored from its copy onto a
-server in its region and new sandboxes start from it there. While that happens, a create
-or fork from it answers `snapshot_restoring` (503); try again in a few minutes.
-A snapshot whose server was lost before it was copied is deleted, its `error`
-says why, and it is not charged after the moment the server was lost.
+server in its region with the same processor, where its memory loads, and new
+sandboxes start from it there. While that happens, a create or fork from it
+answers `snapshot_restoring` (503); try again in a few minutes. If no such
+server has room yet, the snapshot stays copied off the server and its `error`
+says it is waiting; it is restored as soon as one does. A snapshot whose server
+was lost before it was copied is deleted, its `error` says why, and it is not
+charged after the server's last sign of life.
 
 ## Updating the default image
 

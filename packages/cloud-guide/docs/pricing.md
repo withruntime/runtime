@@ -30,6 +30,14 @@ connection, no network traffic and no CPU use. From then it pays
 `idlePauseSeconds` from {{idle-pause-min}} to {{idle-pause-max}}, or 0 to keep it running; `onLeaseEnd`
 pauses or stops it when its lease ends.
 
+**A persistent sandbox also pays for its disk.** While a sandbox is
+`persistent`, its whole `diskMiB` is billed at the reserved disk rate,
+{{volume-rate-micros}} microdollars per GiB-hour (about {{volume-month}} per GiB per 30-day
+month), whether it runs, is paused or is stopped; paused, its memory is billed
+as [paused storage](#paused-storage) beside it. Turning persistence off ends
+the disk charge: at once for a running sandbox, and once the disk is deleted
+for a stopped one.
+
 **Start free.** Every new account gets the [{{trial-hours}}-hour free trial](./trial), no
 card. At these rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox would cost
 {{=$2 trial-hours * busy-hour}}.
@@ -50,19 +58,20 @@ per-unit rates; a trial sandbox up to 2 vCPU and 4 GiB. Fully busy, the largest
 costs {{=$2 cost:runtime:16x64x3600x57600x1}} an hour.
 
 A paid account runs **{{paid-sandboxes}} sandboxes at once**, running or paused, with up to
-**{{account-vcpus}} vCPUs and {{account-memory}} of memory** across the running ones and 400 GiB of
-disk. A new account earns the hundred: it runs **{{new-account-sandboxes}} sandboxes at once** until
+**{{account-vcpus}} vCPUs and {{account-memory}} of memory** across the running ones and {{account-disk}} of
+disk. A new account earns the full {{paid-sandboxes}}: it runs **{{new-account-sandboxes}} sandboxes at once** until
 {{new-account-days}} days after its first top-up clears, or until {{new-account-spend}} of paid use has settled,
 whichever comes first. Granted credit, such as referral credit, counts toward
 neither. A disputed payment, a suspension or an abuse report puts an account
-back to 50. A paused sandbox holds no CPU or memory. At a busy moment a create
+back to {{new-account-sandboxes}}. A paused sandbox holds no CPU or memory. At a busy moment a create
 can still answer `no_capacity`; the SDKs wait for room, up to two minutes by
 default.
 
 An account counts as paid while it holds a top-up that was not refunded or
 charged back in full, and no payment of it is in dispute. Once every top-up has
 gone back, the paid-only features close again: outbound ports beyond 80 and
-443, the network products, and four image builds at once.
+443, the network products, rules on a secret, your own upstream proxy, and
+four image builds at once. Granted credit alone does not make an account paid.
 
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
@@ -112,7 +121,7 @@ The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole
 size on its server from the moment you create it.
 
-Building an image is free (on the free trial it counts toward the {{trial-hours}} hours),
+Building an image is free (on the free trial it counts toward the {{trial-hours}} hours, unless it fails through a fault of ours),
 and so is the snapshot a fork takes for itself and deletes. A snapshot is kept 7 days unless you choose 1 to 365. A snapshot's copy
 off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**, charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
@@ -137,8 +146,9 @@ Inbound traffic is free. Each account's first **{{outbound-allowance}} of outbou
 month** is free, and after that it costs **{{outbound-rate}} per decimal GB**. Outbound
 traffic is what your sandboxes send over the connections they open to the
 internet, TCP and UDP. Everything a sandbox receives, replies it serves through
-previews, custom domains and TCP ports, and traffic to your own network over a
-WireGuard tunnel are not counted. A trial sandbox's traffic is free and uses
+previews, custom domains and TCP ports, traffic to your own network over a
+WireGuard tunnel, and your code's calls to Runtime's own API at
+`http://runtime.internal` are not counted. A trial sandbox's traffic is free and uses
 none of the allowance.
 
 The allowance is shared by all of an account's sandboxes and starts again on
@@ -150,8 +160,8 @@ fixed in each sandbox's quote, as `egress.outbound` in `rates`, and
 the allowance covered, and what the rest cost. At {{outbound-rate}}, 1 TB past the
 allowance costs {{=$0 1000 * outbound-rate}}.
 
-A paid sandbox moves up to 500 GiB a day, in and out together, and a trial
-account 5 GiB a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
+A paid sandbox moves up to {{paid-daily-transfer}} a day, in and out together, and a trial
+account {{trial-daily-transfer}} a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
 
 A dedicated IPv4 address costs **{{address-month}} per 30-day month**. A WireGuard tunnel
 costs **{{tunnel-month}} per 30-day month**, including up to 16 peers. These are prorated to
@@ -177,6 +187,16 @@ owe money. Nothing is lost straight away:
   uses is deleted once that sandbox lets it go.
 
 Paused sandboxes follow the same seven-day rule.
+
+## When a payment is under review
+
+If a card's bank reports a top-up as possibly not the cardholder's, or the card
+also paid for an account that was suspended or charged back, spending is held
+while we review it. A request that would spend answers `account_blocked` (402)
+with that reason, and Usage & billing says a payment is under review. Your
+balance, sandboxes, volumes and images are kept, nothing is refunded or taken,
+and spending returns when the review clears. Write to support@withruntime.com
+to speed it up. One card paying for two of your accounts is fine on its own.
 
 ## Per 1,000 runs
 
@@ -278,6 +298,11 @@ first week of the next month. Nobody has to ask: it is added automatically, the
 account's owners are emailed, and the billing page lists it. The full terms are
 the [Uptime Promise](/legal/sla).
 
+**A server that fails is not charged for.** If the server a sandbox runs on
+stops answering Runtime, the sandbox is charged only up to the last moment it
+answered. Time a server holds a sandbox frozen because it cannot reach
+Runtime is not charged either, for memory or CPU.
+
 ## Switching credit
 
 Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare, Fly or Blaxel? Say so
@@ -317,8 +342,8 @@ on paid credit, and the output says how many there were. Then it says
 what you save, and about how much that is a month. With no sandboxes yet it
 prices an example and says so. It compares compute only: storage, network,
 plan fees and free allowances are left out. The same figures come from
-`GET /v1/usage/compare` and the `runtime_usage_compare` MCP tool, in
-microdollars.
+`GET /v1/usage/compare` and the `runtime_account` MCP tool with action
+`compare`, in microdollars.
 
 To compare a workload you have not moved yet, ask your agent:
 

@@ -251,21 +251,26 @@ type SandboxSettings struct {
 // Usage is the account's money and trial time. Money is integer microdollars
 // in strings, exact past 2^53: Available = Credited - Spent - Expired - Held.
 type Usage struct {
-	OrgID     string `json:"orgId"`
-	Unit      string `json:"unit"`
-	Credited  string `json:"credited"`
-	Spent     string `json:"spent"`
-	Held      string `json:"held"`
-	Expired   string `json:"expired"`
-	Available string `json:"available"`
-	TakenBack string `json:"takenBack"`
-	Trial     *struct {
-		TotalMs     int64 `json:"totalMs"`
-		UsedMs      int64 `json:"usedMs"`
-		ReservedMs  int64 `json:"reservedMs"`
-		AvailableMs int64 `json:"availableMs"`
-	} `json:"trial"`
+	OrgID     string           `json:"orgId"`
+	Unit      string           `json:"unit"`
+	Credited  string           `json:"credited"`
+	Spent     string           `json:"spent"`
+	Held      string           `json:"held"`
+	Expired   string           `json:"expired"`
+	Available string           `json:"available"`
+	TakenBack string           `json:"takenBack"`
+	Trial     *TrialTime       `json:"trial"`
 	Resources []map[string]any `json:"resources"`
+}
+
+// TrialTime is the account's free trial in milliseconds. A trial sandbox
+// that has not ended holds its whole lease in ReservedMs;
+// AvailableMs = TotalMs - UsedMs - ReservedMs.
+type TrialTime struct {
+	TotalMs     int64 `json:"totalMs"`
+	UsedMs      int64 `json:"usedMs"`
+	ReservedMs  int64 `json:"reservedMs"`
+	AvailableMs int64 `json:"availableMs"`
 }
 
 // KeyLimits is whether a key is read-only and its agent's daily limit. Money
@@ -279,4 +284,6 @@ type KeyLimits struct {
 		RemainingMicros *string `json:"remainingMicros"`
 		Window          string  `json:"window"`
 	} `json:"daily"`
+	// Trial is the account's free trial time, nil when it has none.
+	Trial *TrialTime `json:"trial"`
 }

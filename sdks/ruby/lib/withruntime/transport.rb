@@ -77,6 +77,15 @@ module WithRuntime
       end
     end
 
+    # A GET's body to the block a chunk at a time as it arrives. A connection
+    # lost part way is raised, never retried, so no chunk is given twice.
+    def chunks(path, query: nil, accept: "application/octet-stream", &block)
+      with_connection({}) do |http|
+        send_call(http, "GET", path, query: query, accept: accept, no_retry: true, &block)
+      end
+      nil
+    end
+
     def bytes(method, path, query: nil, body: nil, **options)
       with_connection(options) do |http|
         send_call(http, method, path, query: query, body: body, **options).body.to_s.b

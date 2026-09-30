@@ -1,9 +1,19 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readlink, rm, stat, symlink } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { tarHeader, unpackArchive } from "../src/tar";
+import { tarHeader, unpackArchive, unpackStream } from "../src/tar";
 
 /* A directory download unpacks an archive the sandbox built, so its contents
    are the customer's untrusted code's to choose. These archives are the ones a
@@ -109,5 +119,55 @@ test("links that stay inside land intact, including GNU long link targets", asyn
     expect(await readlink(join(target, "node_modules/.bin/deep"))).toBe(`../${deep}`);
     expect(await readFile(join(target, "node_modules/.bin/deep"), "utf8")).toBe("deep()");
     expect(await readFile(join(target, "current/tool"), "utf8")).toBe("run()");
+  });
+});
+
+test("a folder archive that arrives cut short throws download_incomplete and writes nothing", async () => {
+  // A tar that fails part way in the sandbox ends its gzip stream short.
+  const whole = archive([{ name: "a.txt", body: "a" }]);
+  const base = await mkdtemp(join(tmpdir(), "runtime-unpack-"));
+  try {
+    const target = join(base, "target");
+    await expect(unpackArchive(whole.subarray(0, whole.length - 12), target)).rejects.toMatchObject(
+      {
+        code: "download_incomplete",
+      },
+    );
+    await expect(stat(target)).rejects.toThrow();
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test("a folder streams in chunks, merges into what is there, and a cut leaves the target as it was", async () => {
+  await scene(async (target) => {
+    await mkdir(target);
+    await writeFile(join(target, "kept.txt"), "mine");
+    await writeFile(join(target, "a.txt"), "old");
+    const whole = archive([
+      { name: "a.txt", body: "new" },
+      { name: "sub", dir: true },
+      { name: "sub/b.txt", body: "b".repeat(5_000) },
+    ]);
+    // A cut part way: nothing changes, and nothing is left beside it.
+    const cut = async function* () {
+      yield whole.subarray(0, 40);
+      yield whole.subarray(40, whole.length - 12);
+    };
+    await expect(unpackStream(cut(), target)).rejects.toMatchObject({
+      code: "download_incomplete",
+    });
+    expect(await readFile(join(target, "a.txt"), "utf8")).toBe("old");
+    expect(await exists(join(target, "sub"))).toBe(false);
+    expect((await readdir(join(target, ".."))).sort()).toEqual(["outside", "target"]);
+    // Whole, one byte at a time: merged, same names replaced, the rest kept.
+    const bytewise = async function* () {
+      for (let at = 0; at < whole.length; at++) yield whole.subarray(at, at + 1);
+    };
+    await unpackStream(bytewise(), target);
+    expect(await readFile(join(target, "a.txt"), "utf8")).toBe("new");
+    expect(await readFile(join(target, "kept.txt"), "utf8")).toBe("mine");
+    expect(await readFile(join(target, "sub/b.txt"), "utf8")).toBe("b".repeat(5_000));
+    expect((await readdir(join(target, ".."))).sort()).toEqual(["outside", "target"]);
   });
 });

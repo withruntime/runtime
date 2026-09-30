@@ -28,7 +28,9 @@ logger = logging.getLogger("withruntime")
 # images built from a public image (ARCHITECTURE.md section 10, "Root in images
 # built from a public image"); images tagged before it may have none.
 # runtime-builder/4 (26 September 2026) fixed that sudo's -s, -i and VAR=value.
-IMAGE_RECIPE = "runtime-builder/4"
+# runtime-builder/5 (30 September 2026): an image's own /etc/resolv.conf no
+# longer shadows the guest's resolver, so Debian and Ubuntu images look up names.
+IMAGE_RECIPE = "runtime-builder/5"
 
 
 def image_tag(key: str) -> str:

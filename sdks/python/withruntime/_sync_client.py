@@ -11,24 +11,26 @@ import uuid
 from typing import Any, Iterator, Callable, Optional, Union
 from urllib.parse import quote, urlencode
 
+from ._api_defaults import KEEP_ALIVE_MARGIN_SECONDS, STREAMED_EXEC_TIMEOUT_MS, WAIT_FOR_TIMEOUT_SECONDS
 from ._clock import sync_background as background
 from ._clock import sync_interrupts as interrupts
 from ._clock import sync_open_ws as open_ws
 from ._clock import sync_parallel as parallel
 from ._clock import sync_sleep as sleep
 from ._clock import sync_slots as slots
+from ._clock import sync_timeouts as timeouts
+from ._errors import DELIBERATE as _DELIBERATE
 from ._errors import WAITS_FOR_ROOM, CommandError, ConnectionError, RuntimeError, error_for
 from ._http import SyncHTTP as HTTP
-from ._http import Origin
+from ._http import Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
-from ._unpack import unpack_archive
+from ._unpack import Unpacker
 from ._ws import SyncWebSocket as WebSocket
 from ._tunnel import PortForward
 from ._tunnel import sync_open_forward as open_forward
 from ._version import VERSION
 from ._sync_products.watch import Watches, WatchHandle
 
-DEFAULT_BASE_URL = "https://api.withruntime.com"
 CHUNK = 1_048_576
 # Chunks of a large write in flight at once. Each chunk's reply waits on the
 # API and the guest, and the link idles while every chunk in flight waits: from
@@ -105,11 +107,6 @@ class CommandResult:
                 "durationMs": self.duration_ms, "processId": self.process_id}
 
 
-# 503s that are a deliberate state, not a passing one (a product switched off
-# here, or paused on purpose): retrying cannot change them, so they fail at
-# once. host_unavailable and busy are still retried.
-_DELIBERATE = frozenset({"fork_unavailable", "previews_unavailable", "unavailable"})
-
 
 def _missing_key() -> RuntimeError:
     """No key passed, none in RUNTIME_API_KEY, and none saved by `runtime login`."""
@@ -118,6 +115,13 @@ def _missing_key() -> RuntimeError:
         code="missing_api_key",
         hint="Run `npx -y withruntime login` (a browser approval; nothing to copy), set RUNTIME_API_KEY "
              "to a key from https://withruntime.com/account/keys, or pass api_key.")
+
+
+def _request_sleep(delay: float) -> None:
+    from ._request_scope import current
+    remaining = current().remaining()
+    sleep(delay if remaining is None else min(delay, remaining))
+    current().remaining()
 
 
 class _Transport:
@@ -133,7 +137,7 @@ class _Transport:
             raise _missing_key()
         # Empty: the key `runtime login` saved for this machine, found on first use.
         self._key: Optional[str] = api_key or None
-        self.origin = Origin(base_url)
+        self.origin = Origin(reachable(base_url))
         self.base_url = self.origin.base
         self._http = HTTP(self.origin)
         self._timeout = timeout
@@ -164,7 +168,7 @@ class _Transport:
     def send(self, method: str, path: str, *, query: Optional[dict[str, Any]] = None, body: Any = None,
                    raw: Optional[bytes] = None, idempotency_key: Optional[str] = None, wait: Optional[int] = None,
                    accept: str = "application/json", timeout: Optional[float] = None, retry: bool = True,
-                   wait_for_capacity: float = 0,
+                   wait_for_capacity: float = 0, deadline: Optional[float] = None,
                    on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None) -> Any:
         """Sends a call and returns the response once it succeeded. Retries
         transport failures, 429, 502, 503 and 504 with backoff, with the same
@@ -178,14 +182,22 @@ class _Transport:
         content = "application/octet-stream" if raw is not None else ("application/json" if body is not None else None)
         headers = self._headers(accept, key, content, wait)
         target = path + _query(query or {})
-        per_call = timeout if timeout is not None else self._timeout
+        from ._request_scope import current
+        scope = current()
+        if scope.deadline is not None:
+            deadline = scope.deadline if deadline is None else min(deadline, scope.deadline)
+        per_call = scope.timeout(timeout if timeout is not None else self._timeout)
         room_until = time.monotonic() + wait_for_capacity
         room_attempt = 0
         attempt = 0
         while True:
             try:
-                response = self._http.send(method, target, headers, data, per_call)
-            except (OSError, TimeoutError, ValueError) as error:
+                scope.remaining()
+                extra = {} if deadline is None else {"deadline": deadline}
+                response = self._http.send(method, target, headers, data, per_call, **extra)
+            except (OSError, ValueError, *timeouts()) as error:
+                if (deadline is not None and time.monotonic() >= deadline) or (scope.configured and isinstance(error, timeouts())):
+                    raise RuntimeError("The request deadline expired.", code="request_timeout") from error
                 if not retry or attempt >= self._max_retries:
                     via, hint = describe_route(self.origin.tls, self.origin.host, self.origin.port, error)
                     raise ConnectionError(
@@ -194,7 +206,7 @@ class _Transport:
                         else f"No answer from Runtime at {self.base_url}{via}.",
                         code="connection_error", idempotency_key=key,
                         hint=hint or "Check the network, and RUNTIME_API_URL if you set it.") from error
-                sleep(_backoff(attempt))
+                _request_sleep(_backoff(attempt))
                 attempt += 1
                 continue
             status = response.status
@@ -228,7 +240,7 @@ class _Transport:
                             else _room_backoff(room_attempt))
                 if on_capacity_wait is not None:
                     on_capacity_wait(error, pause)
-                sleep(pause)
+                _request_sleep(pause)
                 room_attempt += 1
                 continue
             if (not retry or status not in (429, 502, 503, 504) or error.code in _DELIBERATE
@@ -237,7 +249,7 @@ class _Transport:
             header = response.headers.get("retry-after")
             delay = (error.retry_after_ms / 1000 if error.retry_after_ms is not None
                      else float(header) if header and header.isdigit() else _backoff(attempt))
-            sleep(min(30.0, delay) * random.uniform(0.9, 1.1))
+            _request_sleep(min(30.0, delay) * random.uniform(0.9, 1.1))
             attempt += 1
 
     def json(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -268,7 +280,7 @@ class _Transport:
                 return data
             if attempt >= 2:
                 raise problem
-            sleep(_backoff(attempt))
+            _request_sleep(_backoff(attempt))
             attempt += 1
 
     def file_chunks(self, path: str, query: dict[str, Any]) -> Iterator[bytes]:
@@ -289,16 +301,23 @@ class _Transport:
         finally:
             response.close()
 
-    def events(self, method: str, path: str, **kwargs: Any) -> Iterator[dict[str, Any]]:
-        response = self.send(method, path, accept="application/x-ndjson", **kwargs)
+    def events(self, method: str, path: str, *, deadline: Optional[float] = None,
+                     **kwargs: Any) -> Iterator[dict[str, Any]]:
+        extra = {} if deadline is None else {"deadline": deadline}
+        response = self.send(method, path, accept="application/x-ndjson", **kwargs, **extra)
+        lines = None
         try:
-            for line in response.lines():
+            lines = response.lines() if deadline is None else response.lines(deadline=deadline)
+            for line in lines:
                 yield json.loads(line)
         finally:
-            # Closing this generator does not automatically close the nested
-            # lines generator. Own the response here, before returning to the
-            # caller or allowing a later pool close to race its finalizer.
-            response.close()
+            # The line reader owns its subscription timer. Stop/join it before
+            # releasing the response, even when someone retains the iterator.
+            try:
+                if lines is not None:
+                    _close_events(lines)
+            finally:
+                response.close()
 
     def websocket(self, path: str, query: dict[str, Any]) -> WebSocket:
         socket = WebSocket(self.origin, path + _query(query), {
@@ -317,6 +336,7 @@ _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
     "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "persistent", "max_total_cost_micros",
     "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "volumes",
+    "env", "tailscale",
 )
 
 
@@ -453,6 +473,14 @@ def _close_events(events: Any) -> None:
     close()
 
 
+def _process_bytes(encoded: str) -> bytes:
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("The process returned invalid base64 output.",
+                           code="invalid_process_output", status=502) from error
+
+
 class _OutputCursor:
     """Where a reader of a process's output is, in bytes of stdout and stderr
     together. Output it did not receive, named by the server or not, becomes a
@@ -474,7 +502,8 @@ class _OutputCursor:
             if event["offset"] > self.cursor:
                 out.append({"type": "truncated", "droppedBytes": event["offset"] - self.cursor,
                             "resumeAt": event["offset"]})
-            self.cursor = max(self.cursor, event["offset"] + len(event["data"].encode()))
+            self.cursor = max(self.cursor, event["offset"] + (len(_process_bytes(event["base64"]))
+                if "base64" in event else len(event["data"].encode())))
         out.append(event)
         return out
 
@@ -493,6 +522,7 @@ class Process:
     def __init__(self, t: _Transport, sandbox_id: str, info: dict[str, Any]) -> None:
         self._t, self.sandbox_id, self.info = t, sandbox_id, info
         self._input_offset = int(info.get("stdinOffset") or 0)
+        self._input_writes = slots(1)
 
     @property
     def id(self) -> str:
@@ -501,18 +531,28 @@ class Process:
     def _path(self, suffix: str = "") -> str:
         return f"/v1/sandboxes/{_enc(self.sandbox_id)}/processes/{_enc(self.id)}{suffix}"
 
-    def output(self, cursor: int = 0) -> Iterator[dict[str, Any]]:
+    def output(self, cursor: int = 0, *, timeout_seconds: Optional[float] = None) -> Iterator[dict[str, Any]]:
         """Every output event from ``cursor`` until the process exits. A
         connection that drops is followed again from the cursor; one that keeps
-        closing with nothing new is given up with ConnectionError."""
+        closing with nothing new is given up with ConnectionError. Optional
+        timeout_seconds bounds this subscription, never the process."""
+        if timeout_seconds is not None and (not math.isfinite(timeout_seconds) or timeout_seconds < 0):
+            raise ValueError("timeout_seconds must be a nonnegative finite number")
+        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
         read = _OutputCursor(cursor)
         idle = 0
         while True:
             before, resumed = read.cursor, False
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise RuntimeError("Process output deadline exceeded.", code="request_timeout")
+            extra = {} if deadline is None else {"deadline": deadline, "retry": False}
             events = self._t.events("GET", self._path("/output"), query={"cursor": read.cursor, "follow": True},
-                                    timeout=180)
+                                    timeout=180 if remaining is None else min(180, remaining), **extra)
             try:
                 for event in events:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RuntimeError("Process output deadline exceeded.", code="request_timeout")
                     if event["type"] == "continue":
                         read.cursor, resumed = max(read.cursor, event["cursor"]), True
                         break
@@ -527,6 +567,8 @@ class Process:
                     if event["type"] == "exit":
                         return
             except Exception as error:  # noqa: BLE001 - reconnect only when the network cut it
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise RuntimeError("Process output deadline exceeded.", code="request_timeout") from error
                 if not _cut_off(error):
                     raise
             finally:
@@ -537,6 +579,25 @@ class Process:
                     f"The output stream of process {self.id} keeps closing before it ends.",
                     code="connection_error", details={"sandboxId": self.sandbox_id, "processId": self.id},
                     hint=f"Read what it printed so far: runtime sandbox logs {self.sandbox_id} {self.id}")
+
+    def output_bytes(self, cursor: int = 0, *, timeout_seconds: Optional[float] = None) -> Iterator[dict[str, Any]]:
+        """Lossless bytes for a process spawned with output_encoding="base64"."""
+        if self.info.get("outputEncoding") != "base64":
+            raise RuntimeError("Spawn with output_encoding='base64' to read lossless bytes.",
+                               code="binary_output_unavailable")
+        events = self.output(cursor=cursor, timeout_seconds=timeout_seconds)
+        try:
+            for event in events:
+                if event["type"] in ("stdout", "stderr"):
+                    if "base64" not in event:
+                        raise RuntimeError("The process returned text without its original bytes.",
+                                           code="binary_output_unavailable")
+                    yield {"type": event["type"], "offset": event["offset"],
+                           "data": _process_bytes(event["base64"])}
+                else:
+                    yield event
+        finally:
+            _close_events(events)
 
     def wait(self) -> CommandResult:
         out = {"stdout": "", "stderr": ""}
@@ -555,15 +616,21 @@ class Process:
 
     def write(self, data: Union[str, bytes], eof: bool = False) -> None:
         """Sends input; offsets are tracked, so a retried write is never typed twice."""
-        payload = data.encode() if isinstance(data, str) else data
-        sent = 0
-        while True:
-            reply = self._t.json("POST", self._path(":write"), body={
-                "base64": base64.b64encode(payload[sent:]).decode(), "offset": self._input_offset, "eof": eof})
-            sent += reply["offset"] - self._input_offset
-            self._input_offset = reply["offset"]
-            if sent >= len(payload):
-                return
+        payload = data.encode() if isinstance(data, str) else bytes(data)
+        with self._input_writes:
+            sent = 0
+            while True:
+                chunk = payload[sent:sent + CHUNK]
+                reply = self._t.json("POST", self._path(":write"), body={
+                    "base64": base64.b64encode(chunk).decode(), "offset": self._input_offset,
+                    "eof": eof and sent + len(chunk) == len(payload)})
+                offset = reply.get("offset")
+                if type(offset) is not int or offset < self._input_offset or offset > self._input_offset + len(chunk):
+                    raise ConnectionError("The process returned an invalid input offset.", code="connection_error")
+                sent += offset - self._input_offset
+                self._input_offset = offset
+                if sent >= len(payload):
+                    return
 
     def kill(self, signal: str = "SIGTERM") -> None:
         self._t.json("POST", self._path(":signal"), body={"signal": signal})
@@ -633,6 +700,11 @@ class Files:
         file too big to hold in memory use ``read_stream`` or ``download``."""
         return self._t.file_bytes(self._path("/files/content"), {"path": path})
 
+    def _open_read(self, path: str):
+        """Open a response for adapters that expose an owned streaming reader."""
+        return self._t.send("GET", self._path("/files/content"), query={"path": path},
+                                  accept="application/octet-stream")
+
     def read_stream(self, path: str) -> Iterator[bytes]:
         """A file's bytes in pieces as they arrive, any size, without holding
         it in memory (Daytona's ``download_file_stream``). Raises
@@ -641,8 +713,12 @@ class Files:
             for piece in sbx.files.read_stream("/workspace/big.tar"):
                 out.write(piece)
         """
-        for piece in self._t.file_chunks(self._path("/files/content"), {"path": path}):
-            yield piece
+        chunks = self._t.file_chunks(self._path("/files/content"), {"path": path})
+        try:
+            for piece in chunks:
+                yield piece
+        finally:
+            _close_events(chunks)
 
     def read_text(self, path: str, encoding: str = "utf-8") -> str:
         return (self.read(path)).decode(encoding)
@@ -712,7 +788,8 @@ class Files:
         self._t.json("POST", self._path("/files:rename"), body={"from": source, "to": target, "overwrite": overwrite})
 
     def upload(self, local_path: str, remote_path: str) -> None:
-        """Copies a local file or directory in. A directory travels as one gzipped tar."""
+        """Copies a local file or directory in. A directory travels as one gzipped tar
+        to the API's folder routes, unpacked by the sandbox's own tar."""
         if os.path.isfile(local_path):
             with open(local_path, "rb") as source:
                 # Its permissions travel with it: an uploaded script stays runnable.
@@ -723,13 +800,26 @@ class Files:
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             archive.add(local_path, arcname=".")
-        # Large writes go only to /workspace (the server refuses others).
-        staging = f"/workspace/.runtime-upload-{uuid.uuid4().hex}.tar.gz"
-        self.write(staging, buffer.getvalue())
-        result = Sandbox(self._t, {"id": self._id}).exec(
-            ["sh", "-c", 'mkdir -p "$1" && tar -xpzf "$2" -C "$1"; code=$?; rm -f "$2"; exit $code', "sh", remote_path, staging])
-        if result.exit_code != 0:
-            raise CommandError(result.to_dict())
+        # The API's folder routes: the sandbox's own tar unpacks it as it arrives.
+        data = buffer.getvalue()
+        if len(data) <= CHUNK:
+            response = self._t.send("PUT", self._path("/files/archive"), query={"path": remote_path}, raw=data)
+            response.read()
+            return
+        # Larger: parts in order; a part resent after a lost answer is not written twice.
+        begin = self._t.json("POST", self._path("/files/archive/uploads"), body={"path": remote_path, "gzip": True})
+        upload, step = self._path(f"/files/archive/uploads/{_enc(begin['uploadId'])}"), begin["chunkBytes"]
+        try:
+            for offset in range(0, len(data), step):
+                response = self._t.send("PUT", upload, query={"offset": offset}, raw=data[offset:offset + step])
+                response.read()
+            self._t.json("POST", upload + ":commit", body={})
+        except BaseException:
+            try:
+                self._t.json("POST", upload + ":abort", body={})
+            except RuntimeError:
+                pass
+            raise
 
     def _stream_to(self, remote_path: str, local_path: str) -> None:
         """Streams a file to disk through a partial file beside the target,
@@ -764,17 +854,19 @@ class Files:
             os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
             self._stream_to(remote_path, local_path)
             return
-        staging = f"/tmp/.runtime-download-{uuid.uuid4().hex}.tar.gz"
-        packed = Sandbox(self._t, {"id": self._id}).exec(["tar", "-czf", staging, "-C", remote_path, "."])
-        if packed.exit_code != 0:
-            raise CommandError(packed.to_dict())
+        # The sandbox's own tar packs it as it streams, and it is unpacked as it
+        # arrives; one cut short is refused and nothing is put in place.
+        unpacker = Unpacker(local_path)
         try:
-            unpack_archive(self.read(staging), local_path)
-        finally:
+            chunks = self._t.file_chunks(self._path("/files/archive"), {"path": remote_path, "gzip": True})
             try:
-                self.remove(staging)
-            except RuntimeError:
-                pass
+                for piece in chunks:
+                    unpacker.feed(piece)
+            finally:
+                _close_events(chunks)
+            unpacker.finish()
+        finally:
+            unpacker.discard()
 
 
 class SandboxSessions:
@@ -844,6 +936,18 @@ class Sandbox:
             setattr(self, name, product(t, self))
 
     @property
+    def info(self) -> dict[str, Any]:
+        """What the API last said about this sandbox. ``start``, the report of
+        an image's start command, is the create's alone: the API keeps no
+        record of it, so a later read of this sandbox keeps it here."""
+        return self._info
+
+    @info.setter
+    def info(self, value: dict[str, Any]) -> None:
+        start = getattr(self, "_info", {}).get("start")
+        self._info = {**value, "start": start} if start is not None and "start" not in value else value
+
+    @property
     def id(self) -> str:
         return self.info["id"]
 
@@ -861,7 +965,7 @@ class Sandbox:
             raise RuntimeError("That is not a sandbox session token (they start rtsess_).",
                                code="invalid_request", status=0,
                                hint="Make one on your backend with sbx.sessions.create() and pass its token.")
-        t = _Transport(token, api_url or os.environ.get("RUNTIME_API_URL", DEFAULT_BASE_URL), timeout, 4)
+        t = _Transport(token, api_url or default_base_url(), timeout, 4)
         return Sandbox(t, {"id": sandbox_id})
 
     def _path(self, suffix: str = "") -> str:
@@ -871,7 +975,7 @@ class Sandbox:
         self.info = self._t.json("GET", self._path())
         return self
 
-    def wait_for(self, state: str, timeout_seconds: int = 60) -> "Sandbox":
+    def wait_for(self, state: str, timeout_seconds: int = WAIT_FOR_TIMEOUT_SECONDS) -> "Sandbox":
         """Waits (server-side, no polling) until the sandbox reaches ``state``."""
         self.info = self._t.json("GET", self._path(), query={"waitFor": state, "timeoutSeconds": timeout_seconds})
         return self
@@ -946,9 +1050,9 @@ class Sandbox:
         Resumes by itself when the server ends a long stream or the connection
         drops after the command started, and yields ``truncated`` for output it
         did not receive, so lost output never passes as whole."""
-        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else 86_400_000), "stream": True}
+        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS), "stream": True}
         events = self._t.events("POST", self._path(":exec"), body=body, idempotency_key=idempotency_key,
-                                timeout=((timeout_ms or 86_400_000) / 1000) + 60)
+                                timeout=((timeout_ms or STREAMED_EXEC_TIMEOUT_MS) / 1000) + 60)
         read = _OutputCursor()
         process_id: Optional[str] = None
         try:
@@ -984,10 +1088,15 @@ class Sandbox:
 
     def spawn(self, command: Union[str, list[str], tuple[str, ...]], *, cwd: Optional[str] = None,
                     env: Optional[dict[str, str]] = None, stdin: Optional[str] = None,
-                    pty: Optional[dict[str, int]] = None, timeout_ms: Optional[int] = None) -> Process:
+                    pty: Optional[dict[str, int]] = None, timeout_ms: Optional[int] = None,
+                    output_encoding: Optional[str] = None) -> Process:
         """Starts a background process and returns at once. ``stdin="pipe"``
         keeps input open for write(); ``pty={"cols": 120, "rows": 40}`` gives a terminal."""
         body = _command(command, cwd, env, None if stdin == "pipe" else stdin, timeout_ms)
+        if output_encoding is not None:
+            if output_encoding not in ("utf8", "base64"):
+                raise ValueError("output_encoding must be utf8 or base64")
+            body["outputEncoding"] = output_encoding
         if stdin == "pipe":
             body["stdinMode"] = "pipe"
         if pty is not None:
@@ -1035,6 +1144,29 @@ class Sandbox:
     def pause(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "Sandbox":
         return self._lifecycle("pause", wait, idempotency_key=idempotency_key)
 
+    def switch_image(self, image: str, *, keep: str,
+                           idempotency_key: Optional[str] = None) -> "Sandbox":
+        """Moves it to another image (id, name, name:tag or name@version),
+        keeping its id, /workspace (its home: dotfiles, pip --user and npm -g
+        installs), volumes, environment, name and previews. Its processes
+        restart, and everything else on its old disk (sudo installs, apt
+        packages, /etc) is lost, which ``keep="workspace"`` says you know;
+        snapshot it first to keep everything. A running sandbox is paused
+        first. A switch that fails is undone (``switch_undone``), the sandbox
+        on its old image with nothing lost. Charged as a wake."""
+        self.info = self._t.json("POST", self._path(":switch-image"), body={"image": image, "keep": keep},
+                                       wait=120, idempotency_key=idempotency_key)
+        return self
+
+    def delete(self, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Deletes it for good: stops it if it runs or is paused, deletes its
+        disk and paused memory, revokes its previews and ports, and removes it
+        from lists. Its snapshots, usage and audit entries stay. Deleting it
+        again answers the same. Answers ``{"id", "status": "deleted",
+        "deletedAt", ...}``."""
+        self.stop_keep_alive()
+        return self._t.json("DELETE", self._path(), idempotency_key=idempotency_key)
+
     def wake(self, wait: bool = True, timeout_seconds: Optional[int] = None,
                    idempotency_key: Optional[str] = None) -> "Sandbox":
         """Carries on a paused sandbox; ``timeout_seconds`` is its new lease.
@@ -1057,7 +1189,8 @@ class Sandbox:
 
     def update(self, idempotency_key: Optional[str] = None, **settings: Any) -> "Sandbox":
         """Changes its settings; what you leave out stays as it is: ``name``,
-        ``labels``, ``auto_wake`` (a request wakes it when paused),
+        ``labels``, ``env`` (a value sets a variable, None removes it; commands
+        started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
         from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
         ``persistent`` (keep it running while credit lasts
@@ -1065,7 +1198,7 @@ class Sandbox:
         ``max_total_cost_micros`` (None removes the cap)."""
         return self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
 
-    def keep_alive(self, every_seconds: float = 60, margin_seconds: int = 600) -> Callable[[], None]:
+    def keep_alive(self, every_seconds: float = 60, margin_seconds: int = KEEP_ALIVE_MARGIN_SECONDS) -> Callable[[], None]:
         """Keeps a running sandbox's lease ahead of now, in the background,
         until ``stop()`` or the function it returns ends it: every
         ``every_seconds`` it extends the lease so that ``margin_seconds``
@@ -1116,29 +1249,51 @@ class Sandbox:
         return self._lifecycle("retention", False, {"days": days}, idempotency_key)
 
     def snapshot(self, *, name: Optional[str] = None, labels: Optional[dict[str, str]] = None,
-                       retention_days: Optional[int] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
-        """Keeps this sandbox's whole machine (files, memory, running processes)
-        as a snapshot to start new sandboxes from. A running sandbox is paused
-        for the moment it takes, then woken; a paused one stays paused."""
-        body = {"name": name, "labels": labels, "retentionDays": retention_days}
+                       retention_days: Optional[int] = None, mode: Optional[str] = None,
+                       idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Keep a whole-machine snapshot, or a disk-only snapshot with mode='disk'.
+        A running source stays paused until capture finishes, then wakes; an
+        already paused source stays paused. Capture waits at most 60 seconds;
+        restoring the original running state may take additional time."""
+        if mode is not None and mode not in ("memory", "disk"):
+            raise ValueError("Snapshot mode must be memory or disk")
+        from ._request_scope import Limits, request_scope
+        body = {"name": name, "labels": labels, "retentionDays": retention_days, "mode": mode}
         self.refresh()
-        # Straight after a fork or a wake it is still "resuming", and after a
-        # pause still "pausing": wait for where it is going, or the snapshot is
-        # refused as not paused.
         if self.state in ("resuming", "starting"):
             self.wait_for("running")
         elif self.state == "pausing":
             self.wait_for("paused")
         running = self.state == "running"
-        if running:
-            self.pause()
+        snapshot = None
         try:
-            return self._t.json("POST", self._path(":snapshot"),
-                                      body={k: v for k, v in body.items() if v is not None},
-                                      wait=10, idempotency_key=idempotency_key)
+            if running:
+                self.pause()
+            try:
+                with request_scope(60):
+                    snapshot = self._t.json("POST", self._path(":snapshot"),
+                                                  body={k: v for k, v in body.items() if v is not None},
+                                                  wait=10, idempotency_key=idempotency_key)
+                    while snapshot["state"] == "capturing":
+                        _request_sleep(.2)
+                        snapshot = self._t.json("GET", f"/v1/snapshots/{_enc(snapshot['id'])}")
+            except (RuntimeError, *timeouts()) as error:
+                if isinstance(error, RuntimeError) and error.code != "request_timeout":
+                    raise
+                raise RuntimeError("Snapshot capture did not finish within one minute.", code="snapshot_timeout",
+                                   details={"snapshotId": snapshot["id"]} if snapshot else None) from error
+            if snapshot["state"] != "ready":
+                raise RuntimeError(snapshot.get("error") or f"Snapshot capture ended in state {snapshot['state']}.",
+                                   code="snapshot_failed", status=409, details={"snapshotId": snapshot["id"]})
+            if mode == "disk" and snapshot.get("mode") != "disk":
+                raise RuntimeError("The server did not confirm a disk-only snapshot.", code="snapshot_mode_mismatch",
+                                   status=409, details={"snapshotId": snapshot["id"]})
+            return snapshot
         finally:
             if running:
-                self.wake()
+                # Capture's deadline must never prevent restoring the source.
+                with request_scope(captured=Limits()):
+                    self.wake()
 
     def fork(self, count: Optional[int] = None, *, name: Optional[str] = None,
                    labels: Optional[dict[str, str]] = None, keep_snapshot: Optional[bool] = None,
@@ -1182,7 +1337,8 @@ class Sandboxes:
                      on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
                      **fields: Any) -> Sandbox:
         """Creates a sandbox and waits until it is running. Every field is
-        optional (name, labels, funding, region, vcpu, memory_mib, disk_mib,
+        optional (name, labels, env (variables for every command, terminal
+        and SSH session in it; values are never shown again), funding, region, vcpu, memory_mib, disk_mib,
         cpu, cpu_floor_millis, timeout_seconds, pausable, on_lease_end,
         max_cost_micros, network={"internet": True, "deny": [...]}, and
         image, snapshot, volumes and the rest of _CREATE_FIELDS; a misspelled one
@@ -1203,7 +1359,7 @@ class Sandboxes:
                                   on_capacity_wait=on_capacity_wait)
         sandbox = Sandbox(self._t, info)
         if wait and sandbox.state != "running":
-            sandbox.wait_for("running", 60)
+            sandbox.wait_for("running", WAIT_FOR_TIMEOUT_SECONDS)
             if sandbox.state != "running":
                 raise RuntimeError(f"Sandbox {sandbox.id} is {sandbox.state}, not running.", code="start_failed",
                                    hint="Read it with runtime.sandboxes.get(id); stopReason says why.")
@@ -1220,6 +1376,11 @@ class Sandboxes:
 
     def get(self, sandbox_id: str) -> Sandbox:
         return Sandbox(self._t, self._t.json("GET", f"/v1/sandboxes/{_enc(sandbox_id)}"))
+
+    def delete(self, sandbox_id: str, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Deletes a sandbox for good, by id, without reading it first: see
+        ``Sandbox.delete``."""
+        return self._t.json("DELETE", f"/v1/sandboxes/{_enc(sandbox_id)}", idempotency_key=idempotency_key)
 
     def list(self, *, state: Optional[list[str]] = None, include_stopped: bool = False,
                    labels: Optional[dict[str, str]] = None, name: Optional[str] = None,
@@ -1257,6 +1418,15 @@ class Snapshots:
             body = self._t.json("GET", "/v1/snapshots", query={**query, "cursor": cursor})
             return Page(body["data"], body.get("nextCursor"), fetch)
         return fetch(None)
+
+    def update(self, snapshot_id: str, *, idempotency_key: Optional[str] = None, **fields: Any) -> dict[str, Any]:
+        """Replace supplied name/labels; omission preserves and name=None clears.
+        if_labels optionally fences concurrent metadata replacement."""
+        unknown = fields.keys() - {"name", "labels", "if_labels"}
+        if unknown:
+            raise TypeError(f"Unknown snapshot fields: {', '.join(sorted(unknown))}")
+        return self._t.json("POST", f"/v1/snapshots/{_enc(snapshot_id)}:update",
+                                  body={_camel(k): v for k, v in fields.items()}, idempotency_key=idempotency_key)
 
     def delete(self, snapshot_id: str) -> None:
         self._t.json("POST", f"/v1/snapshots/{_enc(snapshot_id)}:delete", body={})
@@ -1334,7 +1504,7 @@ class Runtime:
         quota or the region is full (trial_busy, quota_exceeded, no_capacity
         and the like). 0 fails at once."""
         self._t = _Transport(api_key or os.environ.get("RUNTIME_API_KEY", ""),
-                             base_url or os.environ.get("RUNTIME_API_URL", DEFAULT_BASE_URL), timeout, max_retries,
+                             base_url or default_base_url(), timeout, max_retries,
                              max_connections, wait_for_capacity)
         self.base_url = self._t.base_url
         self.sandboxes = Sandboxes(self._t)

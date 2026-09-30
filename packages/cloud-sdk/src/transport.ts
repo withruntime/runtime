@@ -1,8 +1,51 @@
-import { ConnectionError, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
+import { ConnectionError, DELIBERATE, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.8.4";
+export const VERSION = "0.9.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
+/** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
+ * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
+ * on that host, whose addresses a sandbox cannot reach directly. Plain HTTP
+ * because the hop never leaves the machine: it goes from the program to the
+ * guest's own proxy and over the sandbox's private channel to its host. */
+export const SANDBOX_BASE_URL = "http://runtime.internal";
+/** Every Runtime sandbox has this file; guest-net.py keeps it current. */
+const SANDBOX_MARKER = "/run/runtime/environment.json";
+
+/** True in a Runtime sandbox. Node and Bun only; a browser is never one. */
+export function inRuntimeSandbox(marker = SANDBOX_MARKER): boolean {
+  try {
+    const host = (
+      globalThis as {
+        process?: { getBuiltinModule?: (id: string) => { existsSync?(path: string): boolean } };
+      }
+    ).process;
+    return host?.getBuiltinModule?.("node:fs")?.existsSync?.(marker) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Where calls go when no base URL is given: RUNTIME_API_URL, then Runtime's
+ * public API, which `reachable` turns into runtime.internal in a sandbox. */
+export function defaultBaseUrl(
+  env: Record<string, string | undefined> = processEnv(),
+  inSandbox = inRuntimeSandbox,
+): string {
+  return reachable(env.RUNTIME_API_URL || DEFAULT_BASE_URL, inSandbox);
+}
+
+/** The origin calls for `origin` are sent to from here. In a sandbox the
+ * public API is its own host, which it cannot reach directly, so calls for it
+ * go to runtime.internal; every other origin is left as it is. */
+export function reachable(origin: string, inSandbox = inRuntimeSandbox): string {
+  return apiOrigin(origin) === DEFAULT_BASE_URL && inSandbox() ? SANDBOX_BASE_URL : origin;
+}
+function processEnv(): Record<string, string | undefined> {
+  return (
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
+  );
+}
 
 export type RequestOptions = {
   /** Sent as Idempotency-Key. Omit it: the SDK makes one per call and keeps
@@ -10,13 +53,16 @@ export type RequestOptions = {
    * your own only to retry a call yourself after the process restarted. */
   idempotencyKey?: string;
   signal?: AbortSignal;
-  /** Deadline for this call, retries included. */
+  /** Deadline for this call, retries included. 0 disables this deadline;
+   * an explicit signal can still cancel the call. */
   timeoutMs?: number;
 };
 
 export type Query = Record<string, string | number | boolean | readonly string[] | undefined>;
 
 export type Call = RequestOptions & {
+  /** Internal protocol hook: successful headers arrived, before reading the body. */
+  onResponse?: (response: Response) => void;
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query?: Query;
@@ -42,16 +88,21 @@ export type Call = RequestOptions & {
 
 export function apiOrigin(value: string): string {
   const url = new URL(value);
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  // runtime.internal is reserved and never resolves outside a sandbox, so a
+  // key sent there in plain HTTP never leaves the sandbox's host.
+  const local = ["localhost", "127.0.0.1", "[::1]", "runtime.internal"].includes(url.hostname);
   if (
     (url.protocol !== "https:" && !(local && url.protocol === "http:")) ||
+    (url.hostname === "runtime.internal" && (url.protocol !== "http:" || url.port !== "")) ||
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
     url.pathname !== "/"
   )
-    throw new Error("Use an HTTPS API origin (or http://localhost for tests).");
+    throw new Error(
+      "Use an HTTPS API origin (or http://runtime.internal inside a sandbox, http://localhost for tests).",
+    );
   return url.origin;
 }
 
@@ -67,11 +118,6 @@ export function encodeQuery(query: Query | undefined): string {
   const text = params.toString();
   return text ? `?${text}` : "";
 }
-
-/** 503s that are a deliberate state, not a passing one: a product switched
- * off here, or paused on purpose. Retrying cannot change them, so they fail
- * at once with their own words. host_unavailable and busy are still retried. */
-const DELIBERATE = new Set(["fork_unavailable", "previews_unavailable", "unavailable"]);
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -146,7 +192,7 @@ export class Transport {
     if (typeof options.apiKey === "function") this.#findKey = options.apiKey;
     else if (!options.apiKey || /\s/.test(options.apiKey)) throw missingKey();
     else this.#apiKey = options.apiKey;
-    this.baseUrl = apiOrigin(options.baseUrl ?? DEFAULT_BASE_URL);
+    this.baseUrl = apiOrigin(options.baseUrl ? reachable(options.baseUrl) : defaultBaseUrl());
     // The environment's proxy (HTTPS_PROXY, NO_PROXY) on Node and Bun alike;
     // a fetch passed in is used as it is.
     this.#fetch = options.fetch ?? envFetch;
@@ -196,7 +242,9 @@ export class Transport {
     const roomMs = Math.max(0, call.waitForCapacityMs ?? 0);
     const roomUntil = performance.now() + roomMs;
     let roomAttempt = 0;
-    const deadline = AbortSignal.timeout((call.timeoutMs ?? this.#timeoutMs) + roomMs);
+    const timeoutMs = call.timeoutMs ?? this.#timeoutMs;
+    const deadline =
+      timeoutMs === 0 ? new AbortController().signal : AbortSignal.timeout(timeoutMs + roomMs);
     const signal = call.signal ? AbortSignal.any([call.signal, deadline]) : deadline;
     const url = `${this.baseUrl}${call.path}${encodeQuery(call.query)}`;
     const body = call.bytes ?? (call.body === undefined ? undefined : JSON.stringify(call.body));
@@ -258,7 +306,10 @@ export class Transport {
         const failed = lateFailure(text);
         if (failed === undefined) return new Response(text, { headers: response.headers });
         late = { status: failed, text };
-      } else if (response.ok) return response;
+      } else if (response.ok) {
+        call.onResponse?.(response);
+        return response;
+      }
       const status = late?.status ?? response.status;
       // Runtime never answers 407: it is a proxy refusing the tunnel, which
       // Bun's fetch hands back as a response rather than an error.
@@ -382,17 +433,20 @@ export class Transport {
     let buffer = "";
     try {
       for (;;) {
+        call.signal?.throwIfAborted();
         const { value, done } = await reader.read();
         if (done) break;
         buffer += value;
         let newline = buffer.indexOf("\n");
         while (newline >= 0) {
+          call.signal?.throwIfAborted();
           const line = buffer.slice(0, newline).trim();
           buffer = buffer.slice(newline + 1);
           if (line) yield JSON.parse(line) as T;
           newline = buffer.indexOf("\n");
         }
       }
+      call.signal?.throwIfAborted();
       if (buffer.trim()) yield JSON.parse(buffer) as T;
     } finally {
       // Returning early from the iterator must close the HTTP stream too.

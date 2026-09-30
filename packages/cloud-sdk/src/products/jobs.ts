@@ -1,3 +1,4 @@
+import { JOB_START_SECONDS, JOB_TIMEOUT_SECONDS } from "../api-defaults.js";
 import { Page } from "../page.js";
 import { RuntimeError, ServiceUnavailableError } from "../errors.js";
 import type { RequestOptions, Transport } from "../transport.js";
@@ -120,9 +121,9 @@ export const JOB_DEFAULTS = {
   cpuFloorMillis: 50,
   memoryMiB: 4096,
   diskMiB: 4096,
-  timeoutSeconds: 1800,
+  timeoutSeconds: JOB_TIMEOUT_SECONDS,
   /** Added to the timeout for the sandbox to start, within the hour. */
-  startSeconds: 60,
+  startSeconds: JOB_START_SECONDS,
 };
 /** A run is one sandbox: at most 16 vCPU and 64 GiB, a disk no smaller than
  * the system image, and paid for at most an hour. */

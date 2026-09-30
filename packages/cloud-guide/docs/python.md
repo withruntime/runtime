@@ -58,6 +58,29 @@ print(sbx.id, sbx.info["funding"], sbx.info["expiresAt"])
 sbx.stop()
 ```
 
+`timeout_seconds` is how long the sandbox may run before its lease ends; then
+it pauses or stops, as `on_lease_end` says. A trial sandbox that is still
+working then gets its `timeout_seconds` again, until the trial hours run out
+([trial](./trial)); a paid one runs longer with `persistent` or `keep_alive`.
+
+`env` sets variables for every command, background process, terminal, SSH
+session and image start command in the sandbox, for its whole life; a
+command's own `env` goes over them. Values are never shown again: `sbx.info`
+and every later answer carry only `envNames`. `update(env=...)` changes them, a
+value setting a variable and `None` removing one, for commands started after
+it. At most {{sandbox-env-vars}} variables and {{sandbox-env-size}}; forks keep them
+([API](./api#sandboxes)).
+
+```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+sbx = runtime.sandboxes.create(env={"QUEUE_URL": "https://queue.example.com", "MODE": "worker"})
+print(sbx.info["envNames"])  # ['MODE', 'QUEUE_URL']
+sbx.update(env={"MODE": "drain", "QUEUE_URL": None})
+sbx.delete()
+```
+
 The async client is the same with `await`:
 
 ```python
@@ -104,8 +127,10 @@ with Sandbox.create() as sbx:
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds, and 24 hours when the output streams
-  (`on_stdout`, `on_stderr` or `exec_stream`); the maximum is 24 hours. A
+- The default timeout is 60 seconds, or what the sandbox's lease has left when
+  that is less, and 24 hours when the output streams (`on_stdout`,
+  `on_stderr` or `exec_stream`); the maximum is 24 hours. A command with no
+  `timeout_ms` is never refused for the lease. A
   timeout is a result (`timed_out=True`, with the output so far), not an
   exception.
 - `check=True` raises `CommandError` on a non-zero exit.
@@ -239,6 +264,12 @@ with open("dataset.tar", "wb") as out:
         out.write(piece)
 ```
 
+`upload` and `download` of a directory move one tar archive through the API's
+folder routes, which pack and unpack it with `tar` inside the sandbox; any
+language can call them with a plain PUT or GET ([files in the API guide](./api#files)).
+A downloaded folder is unpacked as it arrives, so its size is bounded only by
+your disk, and it lands in place only once it has all arrived.
+
 A sandbox holds at most 4 uploads and 4 downloads at once; more wait for
 `transfer_limit` to clear. Each frees its slot when it ends, and a download
 left unread for a minute gives its slot to the next one.
@@ -266,6 +297,19 @@ A sandbox runs at most four watches; each ends after `timeout_ms` (one hour by
 default). A flood of changes is capped at 5,000 events a second and reported
 as an `overflow` notice in `watch.notices`, never dropped silently.
 
+`webhook=True` has Runtime read the watch and send its changes to your
+account's [webhooks](./observability#events) as `sandbox.files.changed`
+events, so nothing has to read it here; `timeout_ms=0` keeps it running until
+stopped. It never keeps a sandbox that pauses itself awake.
+
+```python check
+from withruntime import Sandbox
+
+with Sandbox.create() as sbx:
+    watch = sbx.files.watches.start("/workspace/app", recursive=True, webhook=True, timeout_ms=0, id="sync")
+    sbx.files.watches.stop("sync")
+```
+
 ## Pause, wake, extend
 
 ```python check
@@ -286,7 +330,7 @@ snapshot asked for meanwhile waits for that write.
 
 A paused sandbox also wakes by itself when a request needs it: an `exec`, a
 file, process, terminal, desktop or code-interpreter call, or a visit to one of
-its shared ports. The call waits while it wakes, about {{wake}}.
+its shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers.
 The wake is billed like any wake, from the moment it runs again, with a fresh
 lease of its own `timeout_seconds`, or the lease it paused with when that ends
 later. Turn it off with `auto_wake=False` at create
@@ -313,7 +357,9 @@ sbx.stop()
 `persistent=True` keeps a paid sandbox running for as long as the account has
 credit: its lease renews itself on the server, and after a stop its disk is
 kept, billed as reserved disk, so `sbx.restart()` starts it again.
-`keep_alive()` extends the lease from your process instead, so ten minutes
+`update(persistent=False)` makes it an ordinary sandbox again: running, its
+disk stops being billed at once; stopped, its disk is deleted, which is how you
+delete it. `keep_alive()` extends the lease from your process instead, so ten minutes
 remain, once a minute, until `stop()` or the function it returns.
 
 ```python check
@@ -355,6 +401,16 @@ for sbx in runtime.sandboxes.list(labels={"team": "search"}, state=["running"]):
 
 Every list returns a page: `page.data`, `page.has_more`, `page.next_page()`,
 `page.to_list()`, and a `for` loop walks every item on every page.
+
+## Delete a sandbox
+
+`sbx.delete()`, or `runtime.sandboxes.delete(sandbox_id)` without reading it
+first, removes a sandbox for good in any state: it stops it, deletes its disk
+and paused memory, revokes its previews and ports, frees its name and takes it
+out of every list. Its snapshots, usage and audit entries stay. Deleting it
+again answers the same `{"id", "status": "deleted", "deletedAt"}`; any other
+call to it then raises `NotFoundError`. `stop()` is the one to use when you may
+want a persistent sandbox's disk back.
 
 ## Errors and retries
 
@@ -524,7 +580,10 @@ sandbox from the image runs and when its create answers
 `images.resolve(ref)`, `images.tag(ref, tag)`, `images.untag(ref, tag)`,
 `images.follow_logs(id, on_log)` and `images.registries.set(registry,
 username=..., password=...)` for private images do the rest; see
-[custom images](./images). A volume lives on one server and is backed up off it
+[custom images](./images). `sbx.switch_image("data:v2", keep="workspace")` moves
+a running sandbox to a new build, keeping its id, `/workspace` (its home),
+volumes, environment and previews; its processes restart and the rest of its
+old disk is lost ([move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version)). A volume lives on one server and is backed up off it
 daily; `volumes.backup(id)` and `volumes.restore(backup_id)` make and restore a
 backup ([storage and backups](./storage)). `sbx.mounts.add(provider="s3", bucket=..., path=..., secret=...)`,
 `list()` and `remove(path)` mount your own bucket without the sandbox holding
@@ -601,8 +660,10 @@ with Sandbox.create() as sbx:
         file.write(sbx.desktop.recordings.download(recording["id"]))
 ```
 
-`sbx.previews.rotate(3000)` refuses every token issued for the port so far and
-returns a new one; `sbx.previews.delete(3000)` stops sharing it. A preview's
+`embed_origins=["https://app.example.com"]` on `create` names the sites that
+may show the preview in an iframe (up to {{embed-origins}}); any other site's
+iframe is refused. `sbx.previews.rotate(3000)` refuses every token issued for
+the port so far and returns a new one; `sbx.previews.delete(3000)` stops sharing it. A preview's
 address is under `runtimehost.com`, the domain for everything sandboxes serve,
 kept apart from Runtime's own site.
 See [JavaScript](./javascript#share-a-port) for what each does.
@@ -733,7 +794,9 @@ with Runtime(max_retries=4, timeout=120) as runtime:
     print(runtime.me()["orgId"])
 ```
 
-`RUNTIME_API_URL` points the client at another API origin.
+`RUNTIME_API_URL` points the client at another API origin. Code inside a
+Runtime sandbox calls Runtime's API at `http://runtime.internal`
+([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
 
 Before 0.3.0 the package was `withruntime-cloud`, imported as `runtime_cloud`.
 That name stopped at 0.5.1 and gets no new releases: install `withruntime` and

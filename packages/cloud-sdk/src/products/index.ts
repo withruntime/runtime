@@ -15,6 +15,7 @@ import { limits } from "./limits.js";
 import { volumes } from "./volumes.js";
 import { jobs } from "./jobs.js";
 import { sandboxMounts } from "./mounts.js";
+import { sandboxTailscale } from "./tailscale.js";
 import { secrets } from "./secrets.js";
 import { mcp, sandboxMcp } from "./mcp.js";
 import { events, otel, sandboxMetrics, webhooks } from "./observability.js";
@@ -62,6 +63,7 @@ export const sandboxExtensions = {
   network: sandboxNetwork,
   desktop: sandboxDesktop,
   mounts: sandboxMounts,
+  tailscale: sandboxTailscale,
   metrics: sandboxMetrics,
   mcp: sandboxMcp,
 } satisfies Record<string, (t: Transport, sandbox: Sandbox) => unknown>;

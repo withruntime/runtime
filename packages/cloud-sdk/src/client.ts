@@ -1,10 +1,11 @@
+import { WAIT_FOR_TIMEOUT_SECONDS } from "./api-defaults.js";
 import { RuntimeError } from "./errors.js";
 import type { Page } from "./page.js";
 import { clientFactories, type ClientExtensions } from "./products/index.js";
-import { Sandbox, sandboxPage } from "./sandbox.js";
+import { Sandbox, deleteSandbox, sandboxPage } from "./sandbox.js";
 import { Snapshots } from "./snapshots.js";
 import { Transport, missingKey, type RequestOptions } from "./transport.js";
-import type { CreateSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
+import type { CreateSandbox, DeletedSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
 
 export type RuntimeOptions = {
   /** Default: the RUNTIME_API_KEY environment variable. */
@@ -133,7 +134,7 @@ export class Sandboxes {
     });
     const sandbox = new Sandbox(this.t, info);
     if (wait !== false && info.state !== "running") {
-      await sandbox.waitFor("running", { timeoutSeconds: 60 });
+      await sandbox.waitFor("running", { timeoutSeconds: WAIT_FOR_TIMEOUT_SECONDS });
       if (sandbox.state !== "running")
         throw new RuntimeError({
           message: `Sandbox ${info.id} is ${sandbox.state}, not running.`,
@@ -164,6 +165,11 @@ export class Sandboxes {
         ...options,
       }),
     );
+  }
+  /** Deletes a sandbox for good, by id, without reading it first: see
+   * `sandbox.delete()`. Deleting it again answers the same. */
+  delete(id: string, options: RequestOptions = {}): Promise<DeletedSandbox> {
+    return deleteSandbox(this.t, id, options);
   }
   /** Live sandboxes, oldest first. Await for a page, or `for await` over all. */
   async list(

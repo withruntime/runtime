@@ -253,9 +253,9 @@ public final class Sandbox implements AutoCloseable {
     refresh();
     // Straight after a fork or a wake the sandbox is still resuming, and after a pause still
     // pausing: wait for where it is going, or a snapshot of it is refused as not paused.
-    if ("resuming".equals(state()) || "starting".equals(state()))
-      waitFor("running", Duration.ofMinutes(1));
-    else if ("pausing".equals(state())) waitFor("paused", Duration.ofMinutes(1));
+    Duration settle = Duration.ofSeconds(ApiDefaults.WAIT_FOR_TIMEOUT_SECONDS);
+    if ("resuming".equals(state()) || "starting".equals(state())) waitFor("running", settle);
+    else if ("pausing".equals(state())) waitFor("paused", settle);
     boolean running = "running".equals(state());
     if (running) pause();
     try {
@@ -366,10 +366,10 @@ public final class Sandbox implements AutoCloseable {
   }
 
   private EventStream<OutputEvent> stream(Object command, ExecOptions options) {
-    Map<String, Object> body = commandBody(command, options, Duration.ofHours(24));
+    Duration longest = Duration.ofMillis(ApiDefaults.STREAMED_EXEC_TIMEOUT_MS);
+    Map<String, Object> body = commandBody(command, options, longest);
     body.put("stream", true);
-    Duration timeout =
-        options.timeout != null ? options.timeout.plusMinutes(1) : Duration.ofHours(24);
+    Duration timeout = options.timeout != null ? options.timeout.plusMinutes(1) : longest;
     EventStream<OutputEvent> first =
         t.events(
             new Transport.Call("POST", path(":exec"))

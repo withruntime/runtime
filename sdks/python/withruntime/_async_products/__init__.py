@@ -32,6 +32,7 @@ from .billing import AsyncBilling
 from .secrets import AsyncSecrets
 from .sso import AsyncSso
 from .switching import AsyncSwitching
+from .tailscale import AsyncTailscale
 from .volumes import AsyncVolumes
 
 CLIENT: dict[str, Any] = {}
@@ -60,5 +61,6 @@ SANDBOX["previews"] = AsyncPreviews
 SANDBOX["network"] = AsyncNetwork
 SANDBOX["desktop"] = AsyncDesktop
 SANDBOX["mounts"] = AsyncMounts
+SANDBOX["tailscale"] = AsyncTailscale
 SANDBOX["metrics"] = AsyncMetrics
 SANDBOX["mcp"] = AsyncSandboxMcp

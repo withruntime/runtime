@@ -3,9 +3,9 @@
  *   import { Sandbox } from "withruntime/e2b/code-interpreter";
  *
  * runCode runs in Runtime's interpreter (sandbox.runtime.interpreter):
- * stateful Python and JavaScript contexts, as in E2B. Other languages throw
- * NotSupportedError. */
+ * stateful contexts in every E2B interpreter language. */
 import type { Runtime } from "../client.js";
+import type { InterpreterLanguage } from "../products/interpreter.js";
 import type { ConnectionOpts } from "./client.js";
 import { guard, NotSupportedError, SandboxError, TimeoutError } from "./errors.js";
 import { bind } from "./index.js";
@@ -24,7 +24,7 @@ export type RunCodeLanguage =
 export class OutputMessage {
   constructor(
     readonly line: string,
-    /** Unix epoch in nanoseconds (from the client's clock). */
+    /** Unix epoch in microseconds (from the client's clock), as in E2B. */
     readonly timestamp: number,
     readonly error: boolean,
   ) {}
@@ -153,7 +153,7 @@ export interface RunCodeOpts {
   envs?: Record<string, string>;
   /** Default 60 000, as in E2B. */
   timeoutMs?: number;
-  /** Accepted and ignored: Runtime's SDK allows the run its timeout plus a minute. */
+  /** Deadline for receiving response headers; 0 disables it. */
   requestTimeoutMs?: number;
 }
 export interface CreateCodeContextOpts {
@@ -169,14 +169,13 @@ function lines(text: string): string[] {
   return text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 }
 
-function language(requested: RunCodeLanguage | undefined): "python" | "javascript" {
-  if (requested === undefined || requested === "python") return "python";
-  if (requested === "javascript" || requested === "js") return "javascript";
+function language(requested: RunCodeLanguage | undefined): InterpreterLanguage {
+  const selected = requested === "js" ? "javascript" : (requested ?? "python");
+  if (["python", "javascript", "typescript", "r", "java", "bash", "go"].includes(selected))
+    return selected as InterpreterLanguage;
   throw new NotSupportedError(
     `Running ${requested} code in the interpreter`,
-    requested === "bash"
-      ? "Use sandbox.commands.run(code)."
-      : "Runtime's interpreter runs Python and JavaScript; install the language and run it with sandbox.commands.run(...).",
+    "Use Python, JavaScript, TypeScript, R, Java, Bash or Go.",
   );
 }
 
@@ -184,38 +183,8 @@ function language(requested: RunCodeLanguage | undefined): "python" | "javascrip
  * and code contexts. */
 export class Sandbox extends BaseSandbox {
   protected static override readonly defaultTemplate: string = "code-interpreter-v1";
-  /** Contexts made to carry the sandbox's envs, one per language. */
-  readonly #envContexts = new Map<string, Promise<string>>();
-
   get #interpreter(): RuntimeInterpreter {
     return this.runtime.interpreter;
-  }
-
-  /** The context a run goes to: the one asked for; else, when the sandbox has
-   * envs, a context made once with them; else Runtime's default one. */
-  async #contextFor(lang: "python" | "javascript", context: Context | undefined) {
-    if (context) return context.id;
-    if (!Object.keys(this.envs).length) return undefined;
-    let id = this.#envContexts.get(lang);
-    if (!id) {
-      id = guard("sandbox", async () => {
-        const made = await this.#interpreter.contexts.create({
-          id: `e2b-${lang}`,
-          language: lang,
-          env: this.envs,
-        });
-        return made.id;
-      }).catch(async (error: unknown) => {
-        // Made already, by another object connected to this sandbox.
-        const existing = (await this.#interpreter.contexts.list()).find(
-          (one) => one.id === `e2b-${lang}`,
-        );
-        if (existing) return existing.id;
-        throw error;
-      });
-      this.#envContexts.set(lang, id);
-    }
-    return id;
   }
 
   async #inline(result: RuntimeResult): Promise<RawData> {
@@ -244,35 +213,68 @@ export class Sandbox extends BaseSandbox {
         "Make a context with them: sandbox.runtime.interpreter.contexts.create({ env }), then runCode(code, { context: { id } }).",
       );
     const lang = language(opts.context?.language ?? opts.language);
-    const context = await this.#contextFor(lang, opts.context);
-    const now = () => Date.now() * 1_000_000;
-    const streaming = opts.onStdout || opts.onStderr || opts.onResult || opts.onError;
-    const execution = await guard("sandbox", () =>
-      this.#interpreter.run(code, {
-        ...(context ? { context } : { language: lang }),
-        timeoutMs: opts.timeoutMs ?? 60_000,
-        ...(streaming
-          ? {
-              onStdout: (text: string) =>
-                void opts.onStdout?.(new OutputMessage(text, now(), false)),
-              onStderr: (text: string) =>
-                void opts.onStderr?.(new OutputMessage(text, now(), true)),
-              onError: (error: { name: string; value: string; traceback: string }) =>
-                void opts.onError?.(new ExecutionError(error.name, error.value, error.traceback)),
-            }
-          : {}),
-      }),
-    );
+    const context = opts.context?.id;
+    const now = () => Date.now() * 1_000;
+    const streamedResults: Result[] = [];
+    const controller = new AbortController();
+    const requestTimeout = opts.requestTimeoutMs ?? this.requestTimeoutMs;
+    const timeout = opts.timeoutMs ?? 60_000;
+    let stage = "Request";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (milliseconds: number) => {
+      clearTimeout(timer);
+      if (milliseconds) timer = setTimeout(() => controller.abort(), milliseconds);
+    };
+    arm(requestTimeout);
+    let execution: RuntimeExecution;
+    try {
+      execution = await guard("sandbox", () =>
+        this.#interpreter.run(code, {
+          ...(context ? { context } : { language: lang }),
+          // E2B times out its reader; it does not send a kernel deadline.
+          timeoutMs: 0,
+          requestTimeoutMs: 0,
+          interruptOnDisconnect: false,
+          signal: controller.signal,
+          onResponse: () => {
+            stage = "Execution";
+            arm(timeout);
+          },
+          // Stream even without callbacks: the header/body deadlines are separate.
+          onStdout: (text: string) => opts.onStdout?.(new OutputMessage(text, now(), false)),
+          onStderr: (text: string) => opts.onStderr?.(new OutputMessage(text, now(), true)),
+          onError: (error: { name: string; value: string; traceback: string }) =>
+            opts.onError?.(new ExecutionError(error.name, error.value, error.traceback)),
+          onResult: async (result: RuntimeResult) => {
+            const mapped = new Result(await this.#inline(result), result.main);
+            streamedResults.push(mapped);
+            await opts.onResult?.(mapped);
+          },
+        }),
+      );
+    } catch (error) {
+      if (controller.signal.aborted)
+        throw new TimeoutError(
+          `${stage} timed out — the '${stage === "Request" ? "requestTimeoutMs" : "timeoutMs"}' option can be used to increase this timeout`,
+        );
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
     if (execution.status === "timeout")
       throw new TimeoutError(
         `Execution timed out after ${opts.timeoutMs ?? 60_000} ms: pass a larger 'timeoutMs'.`,
       );
     if (execution.status === "lost")
       throw new SandboxError("The interpreter lost this run (its context stopped); run it again.");
-    const results = await Promise.all(
-      execution.results.map(async (result) => new Result(await this.#inline(result), result.main)),
-    );
-    if (opts.onResult) for (const result of results) await opts.onResult(result);
+    const results =
+      streamedResults.length === execution.results.length
+        ? streamedResults
+        : await Promise.all(
+            execution.results.map(
+              async (result) => new Result(await this.#inline(result), result.main),
+            ),
+          );
     return new Execution(
       results,
       { stdout: lines(execution.stdout), stderr: lines(execution.stderr) },
@@ -289,7 +291,6 @@ export class Sandbox extends BaseSandbox {
       this.#interpreter.contexts.create({
         language: lang,
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
-        ...(Object.keys(this.envs).length ? { env: this.envs } : {}),
       }),
     );
     return { id: made.id, language: made.language, cwd: made.cwd };

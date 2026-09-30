@@ -31,6 +31,22 @@ def transform(source: str, origin: str) -> str:
     for old, new in REPLACEMENTS:
         body = body.replace(old, new)
     body = re.sub(r"\bAsync([A-Z]\w*)", r"\1", body)
+    if origin == "_async_sandbox.py":
+        # Pinned E2B sync PTY uses iteration/wait(on_pty), not async callbacks.
+        body = body.replace("open_file, disconnect, opening_timeout", "open_file, disconnect, opening_timeout, command_events")
+        first = body.index("    def _follow(self)")
+        last = body.index("    @property\n    def pid", first)
+        body = body[:first] + "    def __iter__(self):\n        return command_events(self)\n\n    def _follow(self):\n        for _ in self:\n            pass\n\n" + body[last:]
+        body = body.replace("def wait(self, on_stdout:", "def wait(self, on_pty: Optional[Callable[[bytes], Any]] = None, on_stdout:")
+        body = body.replace("        if on_stdout is not None:\n            self._on_stdout = on_stdout", "        if on_pty is not None:\n            self._on_pty = on_pty\n        if on_stdout is not None:\n            self._on_stdout = on_stdout")
+        body = body.replace("        disconnect(self._task)\n", "        disconnect(self._task)\n        if hasattr(self, '_events'):\n            close_stream(self._events)\n")
+        first = body.index("class Pty(")
+        last = body.index("\nclass ", first + 1)
+        pty = body[first:last]
+        pty = pty.replace("size: core.PtySize, on_data: Callable[[bytes], Any],", "size: core.PtySize,")
+        pty = pty.replace("pid: int, on_data: Callable[[bytes], Any], timeout:", "pid: int, timeout:")
+        pty = pty.replace("on_pty=on_data", "on_pty=None")
+        body = body[:first] + pty + body[last:]
     return f'"""GENERATED from {origin} by scripts/generate_e2b_sync.py. Do not edit."""\n' + body
 
 

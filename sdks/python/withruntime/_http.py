@@ -6,8 +6,11 @@ response is read to its end, so a client pays TLS once, not per call (0.1.0
 opened a new connection for every request)."""
 from __future__ import annotations
 
+import os
 import queue
 import threading
+import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, AsyncIterator, Iterator, Optional
 
 if TYPE_CHECKING:
@@ -17,6 +20,33 @@ if TYPE_CHECKING:
 from urllib.parse import urlsplit
 
 MAX_BODY = 64 * 1024 * 1024
+DEFAULT_BASE_URL = "https://api.withruntime.com"
+#: Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's own
+#: host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs on
+#: that host, whose addresses a sandbox cannot reach directly. Plain HTTP
+#: because the hop never leaves the machine: from the program to the guest's own
+#: proxy, then over the sandbox's private channel to its host.
+SANDBOX_BASE_URL = "http://runtime.internal"
+#: Every Runtime sandbox has this file; the guest keeps it current.
+SANDBOX_MARKER = "/run/runtime/environment.json"
+
+
+def in_runtime_sandbox(marker: str = SANDBOX_MARKER) -> bool:
+    return os.path.exists(marker)
+
+
+def default_base_url(env=None, in_sandbox=in_runtime_sandbox) -> str:
+    """Where calls go when no base URL is given: RUNTIME_API_URL, then Runtime's
+    public API, which ``reachable`` turns into runtime.internal in a sandbox."""
+    env = os.environ if env is None else env
+    return reachable(env.get("RUNTIME_API_URL") or DEFAULT_BASE_URL, in_sandbox)
+
+
+def reachable(origin: str, in_sandbox=in_runtime_sandbox) -> str:
+    """The origin calls for ``origin`` are sent to from here. In a sandbox the
+    public API is its own host, which it cannot reach directly, so calls for it
+    go to runtime.internal; every other origin is left as it is."""
+    return SANDBOX_BASE_URL if origin.rstrip("/") == DEFAULT_BASE_URL and in_sandbox() else origin
 _CONTEXT: "Optional[ssl.SSLContext]" = None
 
 
@@ -43,6 +73,9 @@ async def within(awaitable, timeout: float):
         done, _ = await asyncio.wait({task}, timeout=timeout)
     except BaseException:
         task.cancel()
+        # Do not return cancellation while a child still owns the checked-out
+        # stream. Its finally block must close the socket before reuse/shutdown.
+        await asyncio.wait({task})
         raise
     if task not in done:
         task.cancel()
@@ -70,10 +103,15 @@ async def open_stream(origin: "Origin", timeout: float) -> "tuple[asyncio.Stream
 class Origin:
     def __init__(self, base_url: str) -> None:
         url = urlsplit(base_url)
-        local = url.hostname in ("localhost", "127.0.0.1", "::1")
+        # runtime.internal is reserved and never resolves outside a sandbox, so
+        # a key sent there in plain HTTP never leaves the sandbox's host.
+        internal = url.hostname == "runtime.internal"
+        local = url.hostname in ("localhost", "127.0.0.1", "::1") or internal
         if ((url.scheme != "https" and not (local and url.scheme == "http")) or not url.hostname
+                or (internal and (url.scheme != "http" or url.port not in (None, 80)))
                 or url.username or url.password or url.query or url.fragment or url.path not in ("", "/")):
-            raise ValueError("Use an HTTPS API origin (or http://localhost for tests)")
+            raise ValueError("Use an HTTPS API origin (or http://runtime.internal inside a sandbox, "
+                             "http://localhost for tests)")
         self.tls = url.scheme == "https"
         self.host = url.hostname
         self.port = url.port or (443 if self.tls else 80)
@@ -81,20 +119,62 @@ class Origin:
         self.netloc = url.netloc
 
 
+@contextmanager
+def _socket_deadline(stream, deadline):
+    """Bound a blocking read, joining its timer before socket ownership moves."""
+    if deadline is None:
+        yield
+        return
+    import socket
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("The request deadline expired")
+    expired = threading.Event()
+    def expire():
+        expired.set()
+        if stream is not None:
+            try:
+                stream.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+    timer = threading.Timer(remaining, expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        try:
+            yield
+        except Exception as error:
+            if expired.is_set():
+                raise TimeoutError("The request deadline expired") from error
+            raise
+        if expired.is_set() or time.monotonic() >= deadline:
+            raise TimeoutError("The request deadline expired")
+    finally:
+        timer.cancel()
+        timer.join()
+
+
 class SyncResponse:
     def __init__(self, pool: "SyncHTTP", connection: "http.client.HTTPConnection",
-                 response: "http.client.HTTPResponse") -> None:
+                 response: "http.client.HTTPResponse", socket=None) -> None:
+        self._socket = socket
         self._pool, self._connection, self._response = pool, connection, response
         self.status = response.status
         self.headers = {k.lower(): v for k, v in response.getheaders()}
+        from ._request_scope import current
+        self._deadline = current().deadline
 
     def read(self, limit: Optional[int] = MAX_BODY) -> bytes:
         """The whole body; ``limit=None`` for a file's bytes, which have no cap."""
         try:
-            data = self._response.read() if limit is None else self._response.read(limit + 1)
+            with _socket_deadline(self._socket, self._deadline):
+                data = self._response.read() if limit is None else self._response.read(limit + 1)
             if limit is not None and len(data) > limit:
                 raise ValueError("Response exceeds 64 MiB")
             return data
+        except TimeoutError:
+            self._response.will_close = True
+            raise
         finally:
             self.close()
 
@@ -102,22 +182,60 @@ class SyncResponse:
         """The body in pieces as it arrives, for a file too big to hold."""
         try:
             while True:
-                data = self._response.read1(65536)
+                with _socket_deadline(self._socket, self._deadline):
+                    data = self._response.read1(65536)
                 if not data:
                     return
                 yield data
+        except TimeoutError:
+            self._response.will_close = True
+            raise
         finally:
             self.close()
 
-    def lines(self) -> Iterator[bytes]:
+    def lines(self, deadline: Optional[float] = None) -> Iterator[bytes]:
+        # Socket timeouts reset on each received fragment. Bound the complete
+        # subscription even when one line arrives byte by byte. The lock keeps
+        # the timer from shutting down a connection returned to the pool.
+        timer = None
+        lock = threading.Lock()
+        finished = False
+        expired = False
+        def expire():
+            nonlocal expired
+            import socket
+            with lock:
+                if finished:
+                    return
+                expired = True
+                self._response.will_close = True
+                if self._socket is not None:
+                    try:
+                        self._socket.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
         try:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Process output deadline exceeded")
+                timer = threading.Timer(remaining, expire)
+                timer.daemon = True
+                timer.start()
             while True:
                 line = self._response.readline(4 * 1024 * 1024)
+                if expired or (deadline is not None and time.monotonic() >= deadline):
+                    raise TimeoutError("Process output deadline exceeded")
                 if not line:
                     return
                 if line.strip():
                     yield line.strip()
         finally:
+            with lock:
+                finished = True
+            if timer is not None:
+                timer.cancel()
+                timer.join()
             self.close()
 
     def close(self) -> None:
@@ -127,7 +245,13 @@ class SyncResponse:
         if self._response.isclosed() and not self._response.will_close:
             self._pool.release(connection)
         else:
-            connection.close()
+            # HTTPResponse owns a separate buffered socket file. In particular,
+            # Connection: close detaches connection.sock before returning its
+            # headers, so connection.close() alone cannot release that file.
+            try:
+                self._response.close()
+            finally:
+                connection.close()
 
 
 class SyncHTTP:
@@ -162,7 +286,7 @@ class SyncHTTP:
         connection.close()
 
     def send(self, method: str, target: str, headers: dict[str, str], body: Optional[bytes],
-             timeout: float) -> SyncResponse:
+             timeout: float, *, deadline: Optional[float] = None) -> SyncResponse:
         import http.client
         reused = True
         with self._lock:
@@ -174,11 +298,20 @@ class SyncHTTP:
                 connection, reused = self._new(timeout), False
         for attempt in (0, 1):
             try:
-                connection.timeout = timeout
+                remaining = timeout if deadline is None else (deadline - time.monotonic() if timeout is None else min(timeout, deadline - time.monotonic()))
+                if remaining is not None and remaining <= 0:
+                    raise TimeoutError("Process output deadline exceeded")
+                if connection.sock is None:
+                    from ._request_scope import connection_timeout
+                    connection.timeout = connection_timeout(remaining)
+                    connection.connect()
+                connection.timeout = remaining
                 if connection.sock is not None:
-                    connection.sock.settimeout(timeout)
+                    connection.sock.settimeout(remaining)
                 connection.request(method, target, body=body, headers=headers)
-                return SyncResponse(self, connection, connection.getresponse())
+                socket = connection.sock
+                response = self._response(connection, socket, deadline)
+                return SyncResponse(self, connection, response, socket)
             except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
                 connection.close()
                 # A kept-alive connection the server had already closed: one
@@ -191,6 +324,52 @@ class SyncHTTP:
                 connection.close()
                 raise
         raise OSError("unreachable")
+
+    @staticmethod
+    def _response(connection, stream, deadline):
+        if deadline is None:
+            return connection.getresponse()
+        # http.client parses headers through repeated socket reads, whose
+        # individual timeouts reset for every fragment. Interrupt only this
+        # checked-out socket, and join the timer before ownership can move to
+        # a response or another pooled request.
+        import socket
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Process output deadline exceeded")
+        lock = threading.Lock()
+        finished = False
+        expired = False
+        def expire():
+            nonlocal expired
+            with lock:
+                if finished:
+                    return
+                expired = True
+                if stream is not None:
+                    try:
+                        stream.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+        timer = threading.Timer(remaining, expire)
+        timer.daemon = True
+        timer.start()
+        try:
+            try:
+                response = connection.getresponse()
+            except BaseException as error:
+                if expired or time.monotonic() >= deadline:
+                    raise TimeoutError("Process output deadline exceeded") from error
+                raise
+            if expired or time.monotonic() >= deadline:
+                response.close()
+                raise TimeoutError("Process output deadline exceeded")
+            return response
+        finally:
+            with lock:
+                finished = True
+            timer.cancel()
+            timer.join()
 
     def close(self) -> None:
         with self._lock:
@@ -216,8 +395,18 @@ class AsyncResponse:
         self._done = False
         self._keep = headers.get("connection", "").lower() != "close"
         self._chunk_left = 0
+        from ._request_scope import current
+        self._deadline = current().deadline
 
     async def _read_some(self) -> bytes:
+        if self._deadline is None:
+            return await self._read_piece()
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("The request deadline expired")
+        return await within(self._read_piece(), remaining)
+
+    async def _read_piece(self) -> bytes:
         if self._done:
             return b""
         if self._chunked:
@@ -279,11 +468,17 @@ class AsyncResponse:
         finally:
             await self.close()
 
-    async def lines(self) -> AsyncIterator[bytes]:
+    async def lines(self, deadline: Optional[float] = None) -> AsyncIterator[bytes]:
         buffer = b""
         try:
             while True:
-                data = await self._read_some()
+                if deadline is None:
+                    data = await self._read_some()
+                else:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Process output deadline exceeded")
+                    data = await within(self._read_some(), remaining)
                 if not data:
                     if buffer.strip():
                         yield buffer.strip()
@@ -291,6 +486,8 @@ class AsyncResponse:
                 buffer += data
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError("Process output deadline exceeded")
                     if line.strip():
                         yield line.strip()
         finally:
@@ -339,10 +536,35 @@ class AsyncHTTP:
         await self.discard(writer)
 
     async def _open(self, timeout: float) -> "tuple[asyncio.StreamReader, asyncio.StreamWriter]":
-        return await open_stream(self.origin, timeout)
+        from ._request_scope import connection_timeout
+        return await open_stream(self.origin, connection_timeout(timeout))
 
     async def send(self, method: str, target: str, headers: dict[str, str], body: Optional[bytes],
-                   timeout: float) -> AsyncResponse:
+                   timeout: float, *, deadline: Optional[float] = None) -> AsyncResponse:
+        if deadline is None:
+            return await self._send(method, target, headers, body, timeout)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Process output deadline exceeded")
+        # One timeout includes connection setup, request writing, status and
+        # every header, including a single header received a byte at a time.
+        response = None
+        async def start():
+            nonlocal response
+            response = await self._send(method, target, headers, body, timeout)
+            return response
+        try:
+            return await within(start(), remaining)
+        except BaseException:
+            # On Python 3.10 the child can finish in the same loop turn that
+            # cancels its caller. The response then belongs to neither caller;
+            # explicitly discard it instead of leaking a checked-out socket.
+            if response is not None:
+                await response.close()
+            raise
+
+    async def _send(self, method: str, target: str, headers: dict[str, str], body: Optional[bytes],
+                    timeout: float) -> AsyncResponse:
         import asyncio
         with self._lock:
             if self._closed:

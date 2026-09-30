@@ -15,15 +15,31 @@ from e2b_fake import Result, World  # noqa: E402
 import withruntime.e2b as e2b  # noqa: E402
 from withruntime.e2b import (AsyncSandbox, AuthenticationException, CommandExitException, FileNotFoundException,  # noqa: E402
                              FileType, InvalidArgumentException, NotSupportedException, Sandbox, SandboxQuery,
-                             SandboxNotFoundException, TemplateException, TimeoutException)
+                             SandboxException, SandboxNotFoundException, TemplateException, TimeoutException)
 from withruntime.e2b._core import pick_key, pid_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def output_events(result):
+    """The native process API streams the same command result without its cap."""
+    events = []
+    offset = 0
+    if result.stdout_truncated or result.stderr_truncated:
+        events.append({"type": "truncated", "droppedBytes": 1, "resumeAt": 1})
+    for kind in ("stdout", "stderr"):
+        data = getattr(result, kind)
+        if data:
+            events.append({"type": kind, "data": data, "offset": offset})
+            offset += len(data.encode())
+    events.append({"type": "exit", "exitCode": result.exit_code, "timedOut": result.timed_out})
+    return events
+
+
 class Base(unittest.TestCase):
     def setUp(self) -> None:
         self.world = World()
+        self.world.output = lambda command: output_events(self.world.exec(command, {}))
 
     def create(self, *args, **kwargs):
         return Sandbox.create(*args, client=self.world.client(), **kwargs)
@@ -130,13 +146,16 @@ class Keys(unittest.TestCase):
 
 class Commands(Base):
     def test_result_cwd_envs_and_timeout(self):
+        # The sandbox's envs are Runtime's to keep (its create's env); a
+        # command's own go with the command, and Runtime puts them over the sandbox's.
         sbx = self.create(envs={"A": "1", "B": "2"})
+        self.assertEqual(self.last_create()["env"], {"A": "1", "B": "2"})
         seen = []
         result = sbx.commands.run("echo hi", cwd="/tmp", envs={"B": "3"}, on_stdout=seen.append)
         self.assertEqual((result.exit_code, result.stdout, result.stderr, result.error), (0, "ran echo hi\n", "", None))
         self.assertEqual(seen, ["ran echo hi\n"])
-        self.assertEqual(self.world.called("sandbox.exec")[-1],
-                         ("echo hi", {"cwd": "/tmp", "env": {"A": "1", "B": "3"}, "timeout_ms": 60_000}))
+        self.assertEqual(self.world.called("sandbox.spawn")[-1],
+                         ("echo hi", {"cwd": "/tmp", "env": {"B": "3"}, "stdin": None}))
 
     def test_whole_output_past_the_64_kib_an_exec_result_holds(self):
         # The judge panel's reproduction: python3 -c 'print("x"*70000)'.
@@ -185,7 +204,7 @@ class Commands(Base):
             sbx.commands.run("sleep 9", timeout=1)
         self.world.exec = lambda *_: Result(0)
         sbx.commands.run("true", timeout=0)
-        self.assertEqual(self.world.called("sandbox.exec")[-1][1]["timeout_ms"], 86_400_000)
+        self.assertNotIn("timeout_ms", self.world.called("sandbox.spawn")[-1][1])
         self.world.exec = lambda *_: Result(None)
         with self.assertRaises(CommandExitException) as caught:
             sbx.commands.run("kill -9 $$")
@@ -222,7 +241,7 @@ class Commands(Base):
         self.world.output = lambda _: [{"type": "stdout", "data": "ready\n", "offset": 0}]
         sbx = self.create()
         closed = sbx.commands.run("cat", background=True)
-        with self.assertRaises(InvalidArgumentException):
+        with self.assertRaisesRegex(SandboxException, "Sending stdin is not supported"):
             closed.send_stdin("x")
         opened = sbx.commands.run("cat", background=True, stdin=True)
         opened.send_stdin("hello\n")
@@ -273,7 +292,7 @@ class Files(Base):
         self.assertEqual((caught.exception.code, caught.exception.request_id), ("file_not_found", "req_1"))
         with self.assertRaises(FileNotFoundException):
             sbx.files.get_info("/workspace/none")
-        for call in (lambda: sbx.files.watch_dir("/workspace"), lambda: sbx.files.read("/etc/x", user="root"),
+        for call in (lambda: sbx.files.read("/etc/x", user="root"),
                      lambda: sbx.files.write("/workspace/a", "a", metadata={"k": "v"})):
             with self.assertRaises(NotSupportedException):
                 call()
@@ -375,7 +394,7 @@ class ForksPortsAndGaps(Base):
 
     def test_gaps(self):
         sbx = self.create()
-        for call in (lambda: sbx.pty, lambda: sbx.git, sbx.update_network, sbx.upload_url,
+        for call in (lambda: sbx.git, sbx.update_network, sbx.upload_url,
                      sbx.download_url, sbx.get_mcp_token, e2b.Template, lambda: e2b.Volume.create("v"),
                      lambda: e2b.Secret.create("s"), lambda: e2b.wait_for_port(3000)):
             with self.assertRaises(NotSupportedException):
@@ -399,6 +418,7 @@ class Async(unittest.TestCase):
 
     def test_async_sandbox_end_to_end(self):
         world = World()
+        world.output = lambda command: output_events(world.exec(command, {}))
 
         async def scenario():
             seen = []
@@ -426,7 +446,9 @@ class Async(unittest.TestCase):
                 await AsyncSandbox.connect(sbx.sandbox_id, client=world.async_client())
             self.assertEqual(seen, ["ran echo hi\n", "ran serve\n"])
             self.assertEqual(world.called("sandbox.stop")[0][0], sbx.sandbox_id)
-            self.assertEqual(world.called("sandbox.exec")[0][1]["env"], {"A": "1"})
+            # The sandbox's envs went with its create, not with each command.
+            self.assertEqual(world.called("sandboxes.create")[0][0]["env"], {"A": "1"})
+            self.assertIsNone(world.called("sandbox.spawn")[0][1]["env"])
 
         asyncio.run(scenario())
 

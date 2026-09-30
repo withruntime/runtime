@@ -20,30 +20,29 @@ function reach(entry: string): string[] {
 const inside = (files: string[], dir: string) =>
   files.filter((file) => file.startsWith(join(src, dir)));
 
-test("importing withruntime alone loads none of the Daytona, Vercel or Blaxel layers", () => {
+const adapters = [
+  "e2b",
+  "daytona",
+  "vercel",
+  "blaxel",
+  "runloop",
+  "codesandbox",
+  "sprites",
+  "freestyle",
+  "modal",
+  "cloudflare",
+];
+
+test("importing withruntime alone loads none of the compatibility adapters", () => {
   const files = reach("index.ts");
-  expect(inside(files, "daytona")).toEqual([]);
-  expect(inside(files, "vercel")).toEqual([]);
-  expect(inside(files, "blaxel")).toEqual([]);
+  for (const adapter of adapters) expect(inside(files, adapter)).toEqual([]);
 });
 
-test("the Daytona, Vercel and Blaxel layers load no other drop-in", () => {
-  const daytona = reach("daytona/index.ts");
-  const vercel = reach("vercel/index.ts");
-  const blaxel = reach("blaxel/index.ts");
-  expect([
-    ...inside(daytona, "vercel"),
-    ...inside(daytona, "e2b"),
-    ...inside(daytona, "blaxel"),
-  ]).toEqual([]);
-  expect([
-    ...inside(vercel, "daytona"),
-    ...inside(vercel, "e2b"),
-    ...inside(vercel, "blaxel"),
-  ]).toEqual([]);
-  expect([
-    ...inside(blaxel, "daytona"),
-    ...inside(blaxel, "e2b"),
-    ...inside(blaxel, "vercel"),
-  ]).toEqual([]);
-});
+for (const adapter of adapters) {
+  test(`${adapter} loads no other compatibility adapter`, () => {
+    const files = reach(`${adapter}/index.ts`);
+    for (const other of adapters) {
+      if (adapter !== other) expect(inside(files, other)).toEqual([]);
+    }
+  });
+}

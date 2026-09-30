@@ -22,7 +22,8 @@ from withruntime.e2b.code_interpreter import Sandbox  # was: from e2b_code_inter
 
 The mapping was written against `e2b` 2.51.0 and `@e2b/code-interpreter`
 2.8.0 (Python: `e2b` 2.51.0, `e2b-code-interpreter` 2.10.0), checked
-23 September 2026.
+29 September 2026. The exact package releases and artifact hashes are kept in
+`compatibility-lock.json`.
 
 ## Keys
 
@@ -58,14 +59,14 @@ machine. An E2B key (`e2b_...`) is never sent anywhere. If one is passed as
 | `envs`                                                                                   | Given to every command and code run through this object.                                                                                                                                                                                                    |
 | `allowInternetAccess: false`                                                             | `network: { internet: false }`.                                                                                                                                                                                                                             |
 | `lifecycle.onTimeout`                                                                    | `onLeaseEnd`: `kill` is `stop`, `pause` is `pause`.                                                                                                                                                                                                         |
-| `commands.run(cmd, { cwd, envs, timeoutMs, onStdout, onStderr })`                        | `exec`, streamed, so the whole output comes back however large; output lost before it was read sets `truncated` and warns. Default timeout 60 s. `0` means no limit (Runtime's longest, 24 hours).                                                          |
+| `commands.run(cmd, { cwd, envs, timeoutMs, onStdout, onStderr })`                        | A native process with streamed output; output lost before it was read sets `truncated` and warns. The default command connection deadline is 60 s; `0` disables it. The sandbox lease still bounds the process.                                             |
 | Non-zero exit                                                                            | Throws `CommandExitError` with `exitCode`, `stdout`, `stderr` and `error` (`exit status N`). A command killed by a signal has `exitCode` -1.                                                                                                                |
-| Command past its timeout                                                                 | Throws `TimeoutError`.                                                                                                                                                                                                                                      |
+| Command past its timeout                                                                 | Disconnects with `TimeoutError` (Python: `TimeoutException`) without killing the command; reconnect by pid to keep reading.                                                                                                                                 |
 | `commands.run(cmd, { background: true })`                                                | `spawn`. Returns a `CommandHandle` with `pid`, `wait()`, `kill()` (SIGKILL), `sendStdin`, `closeStdin`, `disconnect`, `stdout`, `stderr`, `exitCode`.                                                                                                       |
 | `commands.list`, `kill(pid)`, `sendStdin(pid)`, `closeStdin(pid)`, `connect(pid)`        | Runtime's processes. A pid is a number derived from Runtime's process id, not the Linux pid.                                                                                                                                                                |
 | `files.read(path, { format })`                                                           | `files.read`. `text`, `bytes`, `blob` and `stream` (Python: `text`, `bytes`, `stream`).                                                                                                                                                                     |
 | `files.write(path, data)`, `write([...])`, `writeFiles`                                  | `files.write`. Parent directories are made, and a file that exists is replaced.                                                                                                                                                                             |
-| `files.list(path, { depth })`                                                            | `files.list`, hidden files included. `owner` and `group` are always `""`.                                                                                                                                                                                   |
+| `files.list(path, { depth })`                                                            | `files.list`, hidden files included. `owner` and `group` come from native metadata, with `""` for older guests that omit them.                                                                                                                              |
 | `files.makeDir`, `exists`, `getInfo`, `rename`, `remove`                                 | `files.stat`, `mkdir`, `rename` (replacing a file that exists) and `remove` (recursive). A missing file throws `FileNotFoundError`.                                                                                                                         |
 | Relative paths                                                                           | Resolved against the home directory, `/workspace` on Runtime.                                                                                                                                                                                               |
 | `/home/user` (E2B's home)                                                                | The first time a path, `cwd` or command names it, it becomes a link to `/workspace`, unless something is already there.                                                                                                                                     |
@@ -77,7 +78,7 @@ machine. An E2B key (`e2b_...`) is never sent anywhere. If one is passed as
 | `Sandbox.list({ query: { metadata, state }, limit })`                                    | `sandboxes.list` by labels and state, oldest first, with E2B's paginator (`hasNext`, `nextItems()`).                                                                                                                                                        |
 | `fork`, `createSnapshot`, `deleteSnapshot`                                               | Runtime's forks and snapshots. While Runtime has them switched off, they throw `NotSupportedError` with Runtime's own message.                                                                                                                              |
 | `getHost(port)`                                                                          | `<port>-<id>.runtimehost.com` at once, as E2B answers it, and the port is shared as a public Runtime preview beside the caller (the sync Python sandbox shares it before returning). `await sandbox.getPublicHost(port)` returns once the share has landed. |
-| `runCode(code, { language, context, onStdout, onStderr, onResult, onError, timeoutMs })` | Runtime's interpreter, Python and JavaScript. The sandbox's `envs` reach code through a context made once for them. `onResult` is called after the run ends.                                                                                                |
+| `runCode(code, { language, context, onStdout, onStderr, onResult, onError, timeoutMs })` | Runtime's interpreter: Python, JavaScript, TypeScript, R, Java and Bash, plus Go. The sandbox's `envs` reach code through a context made once for them. `onResult` streams each result and waits for asynchronous callbacks.                                |
 | `Execution`, `Result`, `Logs`, `ExecutionError`, `OutputMessage`                         | The same shapes. Results that are too large to send inline are fetched and inlined. `logs.stdout` has one entry per line.                                                                                                                                   |
 | `createCodeContext`, `listCodeContexts`, `restartCodeContext`, `removeCodeContext`       | Runtime's interpreter contexts.                                                                                                                                                                                                                             |
 | `getMetrics({ start, end })`, `Sandbox.getMetrics(id)`                                   | Runtime's measured CPU and memory, one entry per host reading (every minute by default). `diskUsed` is null: Runtime does not read disk use inside the sandbox.                                                                                             |
@@ -105,26 +106,35 @@ before anything happens. The error's `feature` names the gap and its
 | `volumeMounts`, `Volume`                                                                     | Runtime volumes: `runtime: { create: { volumes: [{ volumeId, path }] } }`.                                          |
 | `pty`                                                                                        | `sandbox.runtime.terminal(...)`.                                                                                    |
 | `git`                                                                                        | `commands.run("git ...")`. E2B has deprecated its git module too.                                                   |
-| `files.watchDir`                                                                             | Poll with `files.list`.                                                                                             |
 | File `metadata`                                                                              | Keep it in a file beside the data.                                                                                  |
 | `uploadUrl`, `downloadUrl`                                                                   | `files.write` and `files.read`.                                                                                     |
 | `Sandbox.list` by `template` or `startedAfter`, `order: "desc"`, or from a saved `nextToken` | Filter by metadata, and keep the paginator.                                                                         |
-| `runCode` in `bash`, `r`, `java` or `typescript`                                             | `commands.run(...)`.                                                                                                |
 | `runCode(code, { envs })`                                                                    | A context made with them: `sandbox.runtime.interpreter.contexts.create({ env })`.                                   |
 | `domain`, `apiUrl`, `sandboxUrl`, `headers`, `proxy`, `debug`                                | Remove them. `RUNTIME_API_URL` sets Runtime's origin, and `HTTPS_PROXY` sets a proxy.                               |
+
+Directory watches use Runtime's native watch stream. JavaScript uses
+`files.watchDir(path, onEvent, options)`. Python's synchronous `watch_dir(path)`
+returns a handle with `get_new_events()` and `stop()`; asynchronous
+`watch_dir(path, on_event, on_exit=...)` delivers callbacks. Stop is safe inside
+a callback. Stream failures and lost events are reported, never treated as a
+successful empty watch. A positive watch timeout bounds the client subscription and stops its owned watch;
+zero leaves the subscription unlimited. The sandbox lease still applies. Both languages refuse watching network mounts.
 
 Some differences are not refusals, so code that depends on them should check:
 
 - Sandbox-level `envs` live in the object that created the sandbox.
   `Sandbox.connect(id)` from another process does not know them.
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun.
-  E2B's code interpreter template preinstalls data libraries such as pandas and
-  matplotlib, and Runtime's image does not. Install them with `pip install`, or
-  build them into an image. Results never carry `chart`. A DataFrame arrives in
+  The current stock image includes NumPy, pandas and matplotlib; build an image
+  for additional dependencies. Results never carry `chart`. A DataFrame arrives in
   `extra` under `application/vnd.runtime.table+json`, not in E2B's `data`.
-- `requestTimeoutMs`, `retries`, `logger`, `secure` and `validateApiKey` are
-  accepted and ignored. Runtime's SDK sets its own request deadlines and
-  retries.
+- JavaScript file operations and command creation honor `requestTimeoutMs`.
+  Python file `request_timeout` bounds the request, including streamed reads. `retries`, `logger`, `secure` and `validateApiKey` are
+  accepted without changing the native transport settings.
+- Interpreter deadlines follow the pinned packages: JavaScript defaults to
+  sixty seconds and Python to five minutes; zero disables the read deadline.
+  A client timeout detaches the reader without interrupting the cell. The
+  sandbox lease still applies.
 
 ## Tests
 

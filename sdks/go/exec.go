@@ -160,9 +160,9 @@ func (s *Sandbox) ExecStream(ctx context.Context, cmd string, opts *ExecOptions)
 
 func (s *Sandbox) stream(ctx context.Context, cmd command, opts *ExecOptions) iter.Seq2[OutputEvent, error] {
 	return func(yield func(OutputEvent, error) bool) {
-		body := commandBody(cmd, opts, 24*time.Hour)
+		body := commandBody(cmd, opts, streamedExecTimeoutMs*time.Millisecond)
 		body["stream"] = true
-		timeout := 24 * time.Hour
+		timeout := streamedExecTimeoutMs * time.Millisecond
 		if opts.Timeout > 0 {
 			timeout = opts.Timeout + time.Minute
 		}

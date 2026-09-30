@@ -7,6 +7,8 @@ Runtime and {{cost:lambda-microvms}} on Lambda MicroVMs**. At 100,000 runs a mon
 against {{cost:lambda-microvms:100000}}, **{{=$0 less:lambda-microvms:100000}} a month saved**, with no AWS account, IAM role or VPC to
 set up first.
 
+Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-microvms-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Lambda MicroVMs bill the baseline vCPUs and
@@ -15,7 +17,8 @@ set up first.
   floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  and runs its next command {{server-wake-command}} after the request that
+  wakes it reaches Runtime. Paused, it
   pays {{paused-storage-rate}} per GB of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that

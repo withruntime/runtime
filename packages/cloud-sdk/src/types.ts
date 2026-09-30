@@ -39,8 +39,14 @@ export type SandboxInfo = {
   heldMicros: number;
   simulated?: boolean;
   replayed?: boolean;
+  /** The names of its own environment variables (`env`), on a create, an
+   * update and a read of one sandbox. Values are never shown. */
+  envNames?: string[];
   /** On a create from an image with a start command: whether it started,
-   * became ready (readyMs), timed out, or exited first. */
+   * became ready (readyMs), timed out, or exited first. The create's answer
+   * alone carries it, and the Sandbox that create returned keeps it through
+   * later reads; `sandboxes.get` and `list` have none, because the API keeps
+   * no record of it. */
   start?: {
     state: "started" | "ready" | "timeout" | "exited" | "not_running";
     processId?: string;
@@ -55,6 +61,11 @@ export type SandboxInfo = {
 export type CreateSandbox = {
   name?: string;
   labels?: Record<string, string>;
+  /** Environment variables for every command, process, terminal, SSH session
+   * and the image's start command in this sandbox, under each command's own
+   * `env`. At most 32 variables and 32 KiB. Values are never shown again;
+   * answers list only `envNames`. Copies made by fork() keep them. */
+  env?: Record<string, string>;
   /** Omit to use the free trial while it lasts, then prepaid credit. */
   funding?: "trial" | "paid";
   region?: string;
@@ -95,6 +106,9 @@ export type CreateSandbox = {
   /** Up to four volumes: read-write ("rw", one sandbox at a time) or a
    * read-only "snapshot" copy. */
   volumes?: { volumeId: string; path: string; mode?: "rw" | "snapshot" }[];
+  /** Paid only: join your Tailscale network once running. `authKeySecret`
+   * names a job secret holding the auth key. */
+  tailscale?: { authKeySecret: string; hostname?: string; tags?: string[] };
 };
 
 export type CommandResult = {
@@ -118,8 +132,8 @@ export type ExecOptions = {
   /** Default 60 000, or 24 hours when the output streams (onStdout, onStderr or
    * execStream); up to 24 hours. A timeout is a result (timedOut), not an error. */
   timeoutMs?: number;
-  onStdout?: (text: string) => void;
-  onStderr?: (text: string) => void;
+  onStdout?: (text: string) => unknown;
+  onStderr?: (text: string) => unknown;
   /** Throw CommandError when the exit code is not 0. */
   check?: boolean;
   signal?: AbortSignal;
@@ -136,6 +150,7 @@ export type ProcessInfo = {
   pty: boolean;
   stdinOpen: boolean;
   stdinOffset: number;
+  outputEncoding?: "utf8" | "base64";
   startedAt: string;
   endedAt: string | null;
   timeoutMs: number | null;
@@ -145,11 +160,15 @@ export type ProcessInfo = {
 
 export type OutputEvent =
   | { type: "start"; processId: string; replayed?: boolean }
-  | { type: "stdout" | "stderr"; data: string; offset: number }
+  | { type: "stdout" | "stderr"; data: string; offset: number; base64?: string }
   | { type: "exit"; exitCode: number | null; state: string; timedOut: boolean; durationMs?: number }
   | { type: "truncated"; droppedBytes: number; resumeAt: number }
   | { type: "continue"; processId: string; cursor: number }
   | { type: "error"; error: { code: string; message: string; requestId?: string } };
+
+export type BinaryOutputEvent =
+  | Exclude<OutputEvent, { type: "stdout" | "stderr" }>
+  | { type: "stdout" | "stderr"; data: Uint8Array; offset: number };
 
 export type FileEntry = {
   name: string;
@@ -158,6 +177,11 @@ export type FileEntry = {
   size: number;
   mode: string;
   modifiedAt: string;
+  uid?: number;
+  gid?: number;
+  owner?: string;
+  group?: string;
+  symlinkTarget?: string;
 };
 
 /** GET /v1/usage. Money is integer microdollars in strings (1,000,000 = $1),
@@ -206,6 +230,9 @@ export type FeedbackKind =
 export type SandboxSettings = {
   name?: string;
   labels?: Record<string, string>;
+  /** Changes its environment: a value sets a variable, null removes it, and
+   * the rest stay. Commands started afterwards get the change. */
+  env?: Record<string, string | null>;
   /** A request to a paused sandbox wakes it. */
   autoWake?: boolean;
   /** Pause after this many seconds with no activity, counted from now; 0
@@ -215,6 +242,21 @@ export type SandboxSettings = {
   persistent?: boolean;
   /** Lifetime cap in microdollars; null removes it. */
   maxTotalCostMicros?: number | null;
+};
+
+/** A deleted sandbox, as `delete()` answers it the first time and every time
+ * after. It reads nowhere else afterwards. */
+export type DeletedSandbox = {
+  id: string;
+  kind: "sandbox";
+  name: string | null;
+  labels: Record<string, string>;
+  status: "deleted";
+  /** "stopping" until its machine has stopped, usually well under a second. */
+  state: string;
+  deletedAt: string;
+  endedAt: string | null;
+  replayed?: boolean;
 };
 
 /** How `sandbox.keepAlive()` extends the lease. */

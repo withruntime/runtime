@@ -88,7 +88,7 @@ export interface CommandResult {
 export class CommandExitError extends SandboxError implements CommandResult {
   readonly #result: CommandResult;
   constructor(result: CommandResult) {
-    super(`Command exited with code ${result.exitCode} and error:\n${result.stderr}`);
+    super(result.error);
     this.#result = result;
   }
   get exitCode(): number {

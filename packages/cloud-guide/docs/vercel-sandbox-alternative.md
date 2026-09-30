@@ -7,6 +7,8 @@ on Runtime and {{cost:vercel}} on Vercel**. At 100,000 runs a month that is {{co
 {{cost:vercel:100000}}, **{{=$0 less:vercel:100000}} a month saved**. Your Vercel Sandbox code keeps working: change one
 import.
 
+Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **{{=n0 100 * ( 1 - cpu-rate / rate:vercel:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} an hour on Runtime and {{rate:vercel:cpu}} on Vercel; memory costs {{=n0 100 * ( 1 - memory-rate / rate:vercel:memory )}}% less. Busier jobs save
@@ -15,7 +17,11 @@ import.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
   storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
-  processes still running and its next command done {{wake}} later.
+  processes still running and its next command done {{server-wake-command}}
+  after the request reaches Runtime.
+- **Faster from a snapshot.** Vercel states its snapshot restores take
+  {{speed:vercel:restore}}. On Runtime's servers a create from a snapshot is
+  running in {{server-restore}}, and {{server-restore-p95}} at p95 ([speed](./speed)).
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -272,6 +273,34 @@ func (c *Client) bytes(ctx context.Context, cl *call) ([]byte, error) {
 		return nil, c.connectionError(ctx, cl.method != http.MethodGet, cl.key, err)
 	}
 	return body, nil
+}
+
+// stream sends a call and returns its body to read as it arrives. It holds a
+// connection slot until the body is closed.
+func (c *Client) stream(ctx context.Context, cl *call) (io.ReadCloser, error) {
+	select {
+	case c.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, c.connectionError(ctx, cl.method != http.MethodGet, cl.key, ctx.Err())
+	}
+	response, cancel, err := c.send(ctx, cl)
+	if err != nil {
+		<-c.slots
+		return nil, err
+	}
+	return &streamBody{ReadCloser: response.Body, done: func() { cancel(); <-c.slots }}, nil
+}
+
+type streamBody struct {
+	io.ReadCloser
+	once sync.Once
+	done func()
+}
+
+func (s *streamBody) Close() error {
+	err := s.ReadCloser.Close()
+	s.once.Do(s.done)
+	return err
 }
 
 // events streams newline-delimited JSON as it arrives. Streams do not hold a

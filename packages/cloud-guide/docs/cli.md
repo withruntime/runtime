@@ -42,6 +42,7 @@ runtime login                 # opens your browser; approve Connect agent
 runtime login --no-browser    # prints a link and a code for another device, and exits
 runtime login --wait          # waits for an approval already asked for
 runtime login --with-key      # or paste a key from withruntime.com/account/keys
+runtime login --agent-name "CI deploy bot"   # the name the approval page and the account show
 runtime whoami
 ```
 
@@ -96,6 +97,7 @@ id=$(runtime sandbox create --name demo --label team=search)
 runtime sandbox exec "${id}" -- python3 -c 'print(6 * 7)'
 runtime sandbox exec "${id}" --cwd /workspace --env API_TOKEN="${API_TOKEN}" -- env
 runtime sandbox ls
+runtime sandbox ls --state running --label team=search
 runtime sandbox get "${id}"
 runtime sandbox stop "${id}"
 ```
@@ -109,6 +111,8 @@ sandbox is running (`--no-wait` returns at once). Its options:
   guaranteed CPU; `--max-cost <usd>` refuses the create if its first lease
   could cost more, and `--max-total-cost <usd>` caps its whole life
 - `--trial` or `--paid`, `--name`, `--label k=v` (repeatable)
+- `--env K=V` (repeatable) sets a variable for every command, terminal and SSH
+  session in it, for its whole life; values are never shown again
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
   `--connect <host:port>`
 - `--idle-pause <seconds>` pauses it after that long with nothing happening in
@@ -122,6 +126,14 @@ From withruntime 0.7.0, every command refuses an option it does not take,
 before it sends anything, and names the one you likely meant: `--memory-mib`
 gets "Did you mean --memory?". `--help` after any command prints its product's
 help and runs nothing.
+
+`ls` lists the live sandboxes; `ls --all` adds the stopped ones and lists every
+sandbox the account has had, oldest first, so the newest are last. `get`
+shows what happens at the end of the lease (`pause` or `stop`) and, once a
+sandbox has paused or ended, when, with its stop reason
+([troubleshooting](./troubleshooting#a-sandbox-stopped-on-its-own) says what
+each means). A refused option is named as the option you typed, such as
+`--timeout`, not as the API's field (`timeoutSeconds`).
 
 `exec` streams all of the output as it happens and exits with the command's own
 exit code (124 when it timed out), so `set -e` scripts behave. Without
@@ -161,13 +173,16 @@ runtime sandbox stop "${id}"
 
 ```bash no-run
 runtime sandbox shell "${id}"               # an interactive terminal, like ssh
+runtime sandbox shell "${id}" --command zsh # another program than the default bash -l
 echo "ls" | runtime sandbox shell "${id}"   # piped input runs, then the shell exits
+runtime sandbox spawn "${id}" --pty -- htop # in a terminal, for programs that need one
 runtime sandbox logs "${id}" "${pid}" -f      # follow until the process exits
 ```
 
 Files. Name a sandbox path as `<id>:/path`; directories copy whole, and a
 file keeps its permissions, so a script stays runnable. `files` marks a
-directory `d` and a symbolic link `l`:
+directory `d` and a symbolic link `l`, one level deep unless `--depth` says
+more:
 
 ```bash
 id=$(runtime sandbox create)
@@ -206,12 +221,27 @@ stays as it is:
 runtime sandbox update "${id}" --idle-pause 0 --auto-wake off
 runtime sandbox update "${id}" --persistent on --max-total-cost 50   # dollars
 runtime sandbox update "${id}" --name dev-2 --label team=search
+runtime sandbox update "${id}" --env MODE=drain --unset-env QUEUE_URL
 ```
+
+`runtime sandbox switch-image <id> web:v2 --keep-workspace` moves a sandbox to
+another image, keeping its id, `/workspace` (your home), volumes, environment
+and previews. Its processes restart and the rest of its old disk is lost, so
+the flag is required; snapshot it first to keep everything
+([images](./images#move-a-sandbox-to-a-new-version)).
+
+`runtime sandbox rm <id>` (or `delete`) removes a sandbox for good, in any
+state: it stops it, deletes its disk and paused memory, revokes its previews
+and ports, and takes it out of every list. Its snapshots stay. Running it again
+prints the same.
 
 `--persistent on` renews the lease on the server while credit lasts, up to
 `--max-total-cost`, and keeps the disk after a stop, billed as reserved disk, so
-`restart` starts it again. `get` shows the automatic wake, idle pause and
-persistence settings.
+`restart` starts it again. A stopped persistent sandbox stays in `runtime ls`
+and `runtime sandbox ls`. `--persistent off` makes it an ordinary sandbox
+again: a running one stops paying for its disk at once, and a stopped one has
+its disk deleted; `rm` removes it for good. `get` shows the automatic wake,
+idle pause and persistence settings.
 
 Watch a directory. `watch` prints each change as it happens (create, write,
 remove, rename, chmod) until Ctrl-C:
@@ -227,6 +257,7 @@ runtime sandbox watch "${id}" /workspace/src --events create,write --include '**
 runtime sandbox run-code "${id}" analysis.py --out-dir charts   # a notebook cell; charts saved as PNG
 runtime sandbox run-code "${id}" model.R                        # R, by the file's extension
 runtime sandbox run-code "${id}" - --lang go < main.go          # Python, JavaScript, TypeScript, R, Java, Bash or Go
+runtime sandbox run-code "${id}" step2.py --context "${ctx}"   # a context you made, not the language's default
 runtime sandbox preview "${id}" 3000 --public                  # an HTTPS address for a port
 runtime sandbox previews "${id}"
 runtime sandbox preview rotate "${id}" 3000                   # withruntime 0.7.0: refuse every token so far
@@ -237,10 +268,11 @@ runtime sandbox session revoke "${id}" "${session}"
 runtime sandbox network "${id}"                                # show its rules
 runtime sandbox network "${id}" --allow pypi.org --allow '*.pythonhosted.org'
 runtime sandbox network "${id}" --no-internet
+runtime sandbox network "${id}" --internet                     # the internet back on
 runtime sandbox desktop "${id}" start                          # prints a link to watch it
 runtime sandbox desktop "${id}" open https://example.com
 runtime sandbox desktop "${id}" screenshot screen.png
-runtime sandbox desktop "${id}" record start --fps 10 --max-mib 256   # prints the recording id
+runtime sandbox desktop "${id}" record start --fps 10 --max-mib 256 --max-seconds 600   # prints the recording id
 runtime sandbox desktop "${id}" record stop "${rec}"
 runtime sandbox desktop "${id}" record fetch "${rec}" demo.mp4
 ```
@@ -254,7 +286,7 @@ The first `desktop start` in a sandbox installs the desktop, which took about
 follows in the background (about a minute and 0.5 GB more), and an `open`
 before it is ready waits for it. The first recording
 installs ffmpeg. A recording is an MP4 on the sandbox's own disk: it never
-grows past `--max-mib`, stops before the disk fills, and a sandbox keeps at
+grows past `--max-mib` or runs past `--max-seconds`, stops before the disk fills, and a sandbox keeps at
 most 8 GiB of them.
 
 ## MCP servers in a sandbox
@@ -267,6 +299,8 @@ the value:
 runtime sandbox mcp catalog                                       # what can run: licence, settings, hosts
 runtime secrets set GITHUB_TOKEN --host api.github.com < token.txt
 runtime sandbox mcp "${id}" start github fetch --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
+runtime sandbox mcp "${id}" start github --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN \
+  --option github.toolsets=repos,issues --replace                 # a catalog option; --replace stops the running set first
 runtime sandbox mcp "${id}"                                       # state, URLs and the header to send
 runtime sandbox mcp "${id}" stop
 ```
@@ -284,7 +318,10 @@ sandboxes serve, kept apart from Runtime's own site.
 printf %s "$OPENAI_API_KEY" | runtime secrets set OPENAI_API_KEY --host api.openai.com
 runtime secrets set GITHUB_TOKEN --host api.github.com --header Authorization --format 'token {value}' < token.txt
 runtime secrets set GITHUB_TOKEN --host api.github.com --allow 'GET,HEAD /repos/acme/*' < token.txt
+printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
 runtime secrets ls
+runtime secrets rotate DB_PASSWORD < new-password.txt
+runtime secrets reveal DB_PASSWORD
 runtime secrets rm OPENAI_API_KEY
 ```
 
@@ -296,6 +333,33 @@ HTTPS requests to the hosts you named. On paid accounts, from `withruntime`
 per rule: `--allow /v1/chat/completions` for every method,
 `--allow 'GET,HEAD /repos/acme/*'` for two. `ls` shows names, hosts,
 placeholders and rules, never values. See [Security](./security#secrets-sandboxes-never-see).
+
+`--jobs` keeps a copy that [scheduled jobs](./jobs#secrets-in-a-job) put into
+their run's environment, bound with `runtime job create --secret NAME`; give
+`--host` too and the secret goes to both. Only the jobs copy has versions
+(`rotate`) and can be read back (`reveal`, with a key allowed to reveal); the
+sandboxes' copy is never readable. `rm` deletes every copy.
+
+## Scheduled jobs
+
+```bash no-run
+runtime job create nightly --cron "0 3 * * *" --timezone Europe/Berlin -- python3 /workspace/report.py
+runtime job create once --at 2026-10-01T03:00:00Z --timeout 600 --attempts 3 -- bash -lc 'make report'
+runtime job ls
+runtime job runs "${job}"
+runtime job logs "${job}" -f
+runtime job pause "${job}"; runtime job resume "${job}"; runtime job cancel "${job}"
+```
+
+A job runs its command in a fresh sandbox each time, once (`--at`, an ISO time
+or `now`) or on five cron fields (`--cron`, in `--timezone`, UTC unless set).
+A schedule it cannot read is refused naming the field or the timezone, such as
+`The minute field "61" is not a minute`.
+It takes the sandbox's size flags (`--vcpu`, `--memory`, `--disk`, `--cpu`),
+`--timeout` up to {{job-max-run}}, `--attempts` up to {{job-max-attempts}}
+for a run that exits non-zero, `--secret NAME[=ENV_NAME]` for a secret stored
+with `--jobs`, and `--max-cost` and `--max-total-cost` in dollars. Runs are
+paid sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
 
 ## SSH and port forwarding
 
@@ -334,6 +398,9 @@ runtime sandbox fork "${base}" --count 3              # three running copies of 
 snap=$(runtime sandbox snapshot "${base}" --name ready)
 runtime sandbox create --snapshot "${snap}"           # a copy, any time later
 runtime image ls; runtime volume ls; runtime snapshot ls
+runtime image get data; runtime volume get "${vol}"; runtime snapshot get "${snap}"
+runtime snapshot extend "${snap}" <days>              # keep it longer
+runtime snapshot rm "${snap}"; runtime volume rm "${vol}"; runtime image rm data
 ```
 
 `runtime image build <folder>` builds the folder's Dockerfile (or `-f <file>`)
@@ -342,8 +409,8 @@ applies, the context may be 100 MiB compressed, and a rebuild uploads only what
 changed. `-t app:v2` names it and tags it (each build of a name is its next
 version, tagged `latest` when no tag is given), `--target`, `--build-arg K=V`
 and `--no-cache` work as in Docker, and `--start <command>` with
-`--ready-port <port>` sets what a sandbox from it runs and when its create
-answers. `runtime image versions <name>`, `tag`, `untag`, `logs --follow` and
+`--ready-port <port>` (or `--ready-command <command>`, which must exit 0) sets
+what a sandbox from it runs and when its create answers. `runtime image versions <name>`, `tag`, `untag`, `logs --follow` and
 `rm` take an id, `name`, `name:tag` or `name@version`, and so does
 `sandbox create --image`. `runtime image registry set <registry> --username <u>`
 reads a token from standard input and stores it for private images. See
@@ -351,10 +418,13 @@ reads a token from standard input and stores it for private images. See
 storage ([pricing](./pricing#snapshots-images-and-volumes)). A volume lives on
 one server. It is backed up off that server every day and whenever you
 ask, and a backup restores as a new volume ([storage and backups](./storage)). `runtime sandbox stop` has the sandbox
-write out what it wrote to its volumes first; one whose lease runs out stops at
-once, so `sync` after writes it must keep. `runtime sandbox mount <id>
+write out what it wrote to its volumes first, and so does a lease that runs
+out: the sandbox's programs are frozen just before the lease ends, and the
+write after that is not charged. `runtime sandbox mount <id>
 s3://bucket/prefix /data --secret NAME`, `mounts` and `unmount` mount your own
 S3, R2 or Google Cloud Storage bucket without the sandbox holding its key
+(`--account-id` names an R2 bucket's Cloudflare account, `--endpoint` any other
+S3-compatible store)
 ([mount your own bucket](./storage#mount-your-own-bucket)).
 
 Forks and snapshots:
@@ -425,7 +495,8 @@ runtime ls
   It covers the newest 100 resources.
 - `runtime limits` says whether this machine's key is read-only and what its
   daily spending limit is, with what was used in the last 24 hours and what is
-  left (0.3.1 and later). The member who made the key, or an owner or admin,
+  left (0.3.1 and later), and, in versions after 0.8.4, the free-trial hours
+  left, as `runtime usage` does. The member who made the key, or an owner or admin,
   sets or changes the limit at [API keys](https://withruntime.com/account/keys);
   see [security](./security).
 - `runtime ls` lists everything the account runs, every product.
@@ -466,7 +537,7 @@ runtime ls
   events, newest first.
 - `runtime webhooks create <url> [--events a,b]` sends signed lifecycle events
   to your URL and prints its secret once; `ls`, `test <id>`, `deliveries <id>`,
-  `update <id> [--disable|--enable]`, `rotate-secret <id>`, `retry <deliveryId>`
+  `update <id> [--url <url>] [--events a,b] [--disable|--enable]`, `rotate-secret <id>`, `retry <deliveryId>`
   and `rm <id>` manage them.
 - `runtime otel create <endpoint> [--header K=V]... [--signals logs,metrics]`
   pushes events and metrics to an OpenTelemetry endpoint; `ls`, `flush <id>` and
@@ -479,7 +550,7 @@ When something is broken, missing or confusing, say so; it goes straight to the
 people building Runtime:
 
 ```bash no-run
-runtime feedback "exec output lost its colours" --kind bug
+runtime feedback "exec output lost its colours" --kind bug --detail "runtime sandbox exec ... -- ls --color"
 ```
 
 ```bash no-run
@@ -509,6 +580,9 @@ runtime tunnel create
 runtime tunnel peer add office --route 10.0.0.0/16  # writes runtime.conf
 sudo wg-quick up ./runtime.conf
 runtime network upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
+runtime domain ls; runtime domain get app.example.com; runtime address ls
+runtime tunnel get                                  # its peers and each sandbox's address
+runtime tunnel rm                                   # the tunnel and every peer
 ```
 
 `runtime network upstream-proxy` arrived in 0.7.0. Each has

@@ -11,8 +11,8 @@ every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), n
   {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
 - **Idle time costs almost nothing:** a sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it.
-- **Fast:** a new sandbox runs its first command {{first-command}} after the
+  and runs its next command {{server-wake-command}} server-side after the request that wakes it.
+- **Fast:** a new sandbox runs its first command {{server-first-command}} server-side after the
   create request ([speed](./speed)).
 - **Pause keeps memory**, and a fork copies a running sandbox with its memory
   and processes.

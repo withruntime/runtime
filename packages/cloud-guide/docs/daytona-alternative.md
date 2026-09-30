@@ -6,6 +6,8 @@ Runtime gives every agent sandbox its own microVM kernel and costs **{{saving:da
 Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:daytona:100000}}, **{{=$0 less:daytona:100000}} a month saved**. Your Daytona code keeps working: change one import.
 
+Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Daytona bills every vCPU for as long as the
@@ -14,7 +16,11 @@ Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cos
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
   storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
-  processes still running and its next command done {{wake}} later.
+  processes still running and its next command done {{server-wake-command}}
+  after the request reaches Runtime.
+- **Back from a pause in milliseconds.** Daytona states a paused VM resumes in
+  {{speed:daytona:wake}}. On Runtime's servers a wake takes {{server-wake}}, on every sandbox
+  ([speed](./speed)).
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).

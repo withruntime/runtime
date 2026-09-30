@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional, Union
 from urllib.parse import quote
 
 from .._errors import RuntimeError
+from .._request_scope import request_scope
 
 _RESULT = re.compile(r"^/workspace/\.runtime/interpreter/([a-z0-9][a-z0-9-]*)/out/([A-Za-z0-9][A-Za-z0-9_.-]*)$")
 Callback = Optional[Callable[[Any], Any]]
@@ -16,6 +17,13 @@ Callback = Optional[Callable[[Any], Any]]
 
 def _enc(value: str) -> str:
     return quote(value, safe="")
+
+
+async def _notify(handler, value):
+    import inspect  # on the first callback, not on every import of the SDK
+    outcome = handler(value)
+    if inspect.isawaitable(outcome):
+        await outcome
 
 
 class AsyncInterpreterContexts:
@@ -61,35 +69,44 @@ class AsyncInterpreter:
     async def run(self, code: str, *, language: Optional[str] = None, context: Optional[str] = None,
                   timeout_ms: Optional[int] = None, on_stdout: Callback = None, on_stderr: Callback = None,
                   on_result: Callback = None, on_error: Callback = None,
-                  idempotency_key: Optional[str] = None) -> dict[str, Any]:
+                  idempotency_key: Optional[str] = None, interrupt_on_disconnect: Optional[bool] = None) -> dict[str, Any]:
         """Runs a cell and returns the execution: status, stdout, stderr,
         results (MIME bundles: text/plain, text/html, image/png as base64,
         application/json, application/vnd.runtime.table+json) and error. With
         any ``on_*`` callback, output streams to it as it happens."""
         body: dict[str, Any] = {"code": code}
-        for name, value in (("language", language), ("context", context), ("timeoutMs", timeout_ms)):
-            if value:
+        for name, value in (("language", language), ("context", context), ("timeoutMs", timeout_ms),
+                            ("interruptOnDisconnect", interrupt_on_disconnect)):
+            if value is not None:
                 body[name] = value
-        timeout = (timeout_ms or 60_000) / 1000 + 60
-        if not (on_stdout or on_stderr or on_result or on_error):
-            return await self._t.json("POST", f"{self._base()}:run", body=body, timeout=timeout,
-                                      idempotency_key=idempotency_key)
-        async for event in self._t.events("POST", f"{self._base()}:run", body={**body, "stream": True},
-                                          timeout=timeout, idempotency_key=idempotency_key):
-            kind = event.get("k")
-            if kind in ("stdout", "stderr"):
-                handler = on_stdout if kind == "stdout" else on_stderr
-                if handler:
-                    handler(event["text"])
-            elif kind == "result" and on_result:
-                on_result({"main": event["main"], "data": event["data"], "refs": event["refs"]})
-            elif kind == "error" and on_error:
-                on_error({"name": event["name"], "value": event["value"], "traceback": event["traceback"]})
-            elif kind == "execution":
-                return event["execution"]
-            elif kind == "failure":
-                raise RuntimeError(event["message"], code=event["code"], hint=event.get("hint"))
-        raise RuntimeError("The interpreter stream ended without a result.", code="stream_ended")
+        # An unlimited cell does not override an enclosing request deadline.
+        with request_scope(**({"idle_timeout": 0} if timeout_ms == 0 else {})):
+            timeout = None if timeout_ms == 0 else (timeout_ms or 60_000) / 1000 + 60
+            if not (on_stdout or on_stderr or on_result or on_error):
+                return await self._t.json("POST", f"{self._base()}:run", body=body, timeout=timeout,
+                                          idempotency_key=idempotency_key)
+            from .._async_client import _close_events
+            events = self._t.events("POST", f"{self._base()}:run", body={**body, "stream": True},
+                                    timeout=timeout, idempotency_key=idempotency_key)
+            try:
+                async for event in events:
+                    kind = event.get("k")
+                    if kind in ("stdout", "stderr"):
+                        handler = on_stdout if kind == "stdout" else on_stderr
+                        if handler:
+                            await _notify(handler, event["text"])
+                    elif kind == "result" and on_result:
+                        await _notify(on_result, {"main": event["main"], "data": event["data"], "refs": event["refs"]})
+                    elif kind == "error" and on_error:
+                        await _notify(on_error, {"name": event["name"], "value": event["value"], "traceback": event["traceback"]})
+                    elif kind == "execution":
+                        return event["execution"]
+                    elif kind == "failure":
+                        raise RuntimeError(event["message"], code=event["code"], status=event.get("status") or 0,
+                                           hint=event.get("hint"), request_id=event.get("requestId"))
+            finally:
+                await _close_events(events)
+            raise RuntimeError("The interpreter stream ended without a result.", code="stream_ended")
 
     async def result(self, ref: Union[dict[str, Any], str]) -> bytes:
         """The bytes of a result too large to travel inline (a ``refs`` entry)."""

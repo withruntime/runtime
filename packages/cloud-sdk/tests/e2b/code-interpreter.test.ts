@@ -29,9 +29,9 @@ describe("runCode", () => {
     expect(execution.logs).toEqual({ stdout: ["out 1 + 1\n"], stderr: [] });
     expect(execution.executionCount).toBe(1);
     expect(execution.error).toBeUndefined();
-    expect(world.called("interpreter.run")[0]).toEqual([
+    expect(world.called("interpreter.run")[0]).toMatchObject([
       "1 + 1",
-      { language: "python", timeoutMs: 60_000 },
+      { language: "python", timeoutMs: 0, requestTimeoutMs: 0, interruptOnDisconnect: false },
     ]);
   });
 
@@ -122,36 +122,36 @@ describe("runCode", () => {
     expect(results.map((one) => one.text)).toEqual(["2"]);
   });
 
-  test("JavaScript runs; other languages and per-run envs are refused", async () => {
+  test("all interpreter languages reach native contexts; unknown languages and per-run envs are refused", async () => {
     const sbx = await create();
     await sbx.runCode("1", { language: "js" });
     expect(world.called("interpreter.run")[0]![1]).toMatchObject({ language: "javascript" });
-    for (const language of ["bash", "r", "typescript", "java"])
-      expect(await sbx.runCode("1", { language }).catch((e: unknown) => e)).toBeInstanceOf(
-        NotSupportedError,
-      );
+    for (const language of ["bash", "r", "typescript", "java", "go"]) {
+      await sbx.runCode("1", { language });
+      expect(world.called("interpreter.run").at(-1)![1]).toMatchObject({ language });
+      const context = await sbx.createCodeContext({ language });
+      expect(context.language).toBe(language);
+    }
+    expect(await sbx.runCode("1", { language: "cobol" }).catch((e: unknown) => e)).toBeInstanceOf(
+      NotSupportedError,
+    );
     expect(await sbx.runCode("1", { envs: { A: "1" } }).catch((e: unknown) => e)).toBeInstanceOf(
       NotSupportedError,
     );
   });
 
-  test("the sandbox's envs reach code through a context made once", async () => {
+  test("the sandbox's envs are Runtime's, so code in any context, from any client, has them", async () => {
     const sbx = await create({ TOKEN: "t" });
+    expect(world.called("sandboxes.create").at(-1)![0]).toMatchObject({ env: { TOKEN: "t" } });
     await sbx.runCode("import os");
-    await sbx.runCode("os.environ['TOKEN']");
-    expect(world.called("contexts.create")).toEqual([
-      [{ id: "e2b-python", language: "python", env: { TOKEN: "t" } }],
-    ]);
-    expect(world.called("interpreter.run").map(([, options]) => options)).toEqual([
-      { context: "e2b-python", timeoutMs: 60_000 },
-      { context: "e2b-python", timeoutMs: 60_000 },
-    ]);
     const again = await Sandbox.connect(sbx.sandboxId, { runtime: { client: world.client() } });
-    await again.runCode("1");
-    expect(world.called("interpreter.run").at(-1)![1]).toEqual({
-      language: "python",
-      timeoutMs: 60_000,
-    });
+    await again.runCode("os.environ['TOKEN']");
+    // No context is made to carry them: the default one already has them.
+    expect(world.called("contexts.create")).toEqual([]);
+    expect(world.called("interpreter.run").map(([, options]) => options)).toMatchObject([
+      { language: "python", timeoutMs: 0 },
+      { language: "python", timeoutMs: 0 },
+    ]);
   });
 });
 
@@ -162,13 +162,16 @@ describe("code contexts", () => {
     expect(context).toEqual({ id: "ctx-1", language: "javascript", cwd: "/tmp" });
     expect(await sbx.listCodeContexts()).toEqual([context]);
     await sbx.runCode("x", { context });
-    expect(world.called("interpreter.run")[0]![1]).toEqual({ context: "ctx-1", timeoutMs: 60_000 });
+    expect(world.called("interpreter.run")[0]![1]).toMatchObject({
+      context: "ctx-1",
+      timeoutMs: 0,
+    });
     await sbx.restartCodeContext(context);
     await sbx.removeCodeContext("ctx-1");
     expect(world.called("contexts.remove")).toEqual([["ctx-1"]]);
-    expect(await sbx.createCodeContext({ language: "r" }).catch((e: unknown) => e)).toBeInstanceOf(
-      NotSupportedError,
-    );
+    expect(
+      await sbx.createCodeContext({ language: "cobol" }).catch((e: unknown) => e),
+    ).toBeInstanceOf(NotSupportedError);
   });
 
   test("defaults to the code interpreter template, which is Runtime's stock image", async () => {

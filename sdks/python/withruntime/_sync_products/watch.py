@@ -69,7 +69,9 @@ class WatchHandle:
                     self.exit_reason = "paused" if kind == "paused" else line.get("reason")
                     return
                 elif kind == "failure":
-                    raise RuntimeError(str(line.get("message")), code=str(line.get("code")))
+                    raise RuntimeError(str(line.get("message")), code=str(line.get("code")),
+                                       status=line.get("status") or 0, hint=line.get("hint"),
+                                       request_id=line.get("requestId"))
                 else:
                     self.notices.append(line)
             if not again:
@@ -92,10 +94,15 @@ class Watches:
                     include: Optional[list[str]] = None, exclude: Optional[list[str]] = None,
                     batch_ms: Optional[int] = None, timeout_ms: Optional[int] = None,
                     max_watches: Optional[int] = None, id: Optional[str] = None,  # noqa: A002
+                    webhook: bool = False,
                     idempotency_key: Optional[str] = None) -> WatchHandle:
+        """Starts a watch. ``webhook=True`` also has Runtime send its changes to the
+        account's webhooks as ``sandbox.files.changed`` events, with nothing reading
+        it here; pass ``timeout_ms=0`` for one that runs until stopped."""
         body = {k: v for k, v in {"path": path, "recursive": recursive, "events": events, "include": include,
                                   "exclude": exclude, "batchMs": batch_ms, "timeoutMs": timeout_ms,
-                                  "maxWatches": max_watches, "id": id}.items() if v is not None}
+                                  "maxWatches": max_watches, "id": id,
+                                  "webhook": True if webhook else None}.items() if v is not None}
         info = self._t.json("POST", self._base, body=body, idempotency_key=idempotency_key)
         return WatchHandle(self._t, self._base, info)
 

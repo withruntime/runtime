@@ -6,6 +6,8 @@ Runtime runs each agent sandbox in its own microVM and costs **{{saving:morph}} 
 Runtime and {{cost:morph}} on Morph**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:morph:100000}}, **{{=$0 less:morph:100000}} a month saved**.
 
+Weighing more than two? [Morph Cloud alternatives](/compare/morph-alternatives) ranks the other providers by the cost of the same job.
+
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Morph bills a machine's full size in MCUs for
@@ -13,7 +15,8 @@ Runtime and {{cost:morph}} on Morph**. At 100,000 runs a month that is {{cost:ru
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{wake}} after the request that wakes it. Paused, it
+  and runs its next command {{server-wake-command}} after the request that
+  wakes it reaches Runtime. Paused, it
   pays {{paused-storage-rate}} per GB of saved state a month.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit

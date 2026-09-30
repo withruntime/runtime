@@ -19,6 +19,7 @@ REPLACEMENTS = [
     ("from ._clock import async_parallel as parallel", "from ._clock import sync_parallel as parallel"),
     ("from ._clock import async_sleep as sleep", "from ._clock import sync_sleep as sleep"),
     ("from ._clock import async_slots as slots", "from ._clock import sync_slots as slots"),
+    ("from ._clock import async_timeouts as timeouts", "from ._clock import sync_timeouts as timeouts"),
     ("from ._http import AsyncHTTP as HTTP", "from ._http import SyncHTTP as HTTP"),
     ("from ._ws import AsyncWebSocket as WebSocket", "from ._ws import SyncWebSocket as WebSocket"),
     ("from ._tunnel import async_open_forward as open_forward",

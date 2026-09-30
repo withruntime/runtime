@@ -1,6 +1,5 @@
 import type { Process } from "../sandbox.js";
 import type { ProcessInfo as RuntimeProcessInfo } from "../types.js";
-import { request } from "./client.js";
 import type { RuntimeSandbox } from "./client.js";
 import {
   CommandExitError,
@@ -31,7 +30,7 @@ export interface CommandStartOpts extends CommandRequestOpts {
   onStdout?: (data: string) => void | Promise<void>;
   onStderr?: (data: string) => void | Promise<void>;
   stdin?: boolean;
-  /** Default 60 000, as in E2B. 0 is no limit (Runtime's longest, 24 hours). */
+  /** Stream connection deadline, 60 000 by default. Zero waits without a deadline. */
   timeoutMs?: number;
 }
 export type CommandConnectOpts = Pick<CommandStartOpts, "onStderr" | "onStdout" | "timeoutMs"> &
@@ -48,18 +47,17 @@ export interface ProcessInfo {
   cwd?: string;
 }
 
-/** The shared state a sandbox's modules need: the Runtime sandbox, the
- * environment given at create, and the one-time /home/user link. */
+/** The shared state a sandbox's modules need: the Runtime sandbox and the
+ * one-time /home/user link. The environment given at create is Runtime's to
+ * keep: it is the sandbox's own `env`, added to every command there. */
 export interface SandboxContext {
   readonly runtime: RuntimeSandbox;
-  readonly envs: Record<string, string>;
   /** Makes /home/user (E2B's home) lead to /workspace (Runtime's), once, when
    * something names it. */
   ensureHome(text: string | undefined): Promise<void>;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const LONGEST_MS = 86_400_000;
 
 /** E2B's pids are numbers; Runtime's process ids are strings. The number is a
  * 31-bit FNV-1a hash of the id, so every client derives the same one. */
@@ -82,8 +80,9 @@ function refuseUser(user: Username | undefined) {
 
 function timeoutFor(timeoutMs: number | undefined) {
   if (timeoutMs === undefined) return DEFAULT_TIMEOUT_MS;
-  if (timeoutMs === 0) return LONGEST_MS;
-  return Math.min(timeoutMs, LONGEST_MS);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0)
+    throw new InvalidArgumentError("timeoutMs must be a nonnegative whole number.");
+  return timeoutMs;
 }
 
 function timedOut(timeoutMs: number) {
@@ -108,7 +107,7 @@ function toResult(result: {
     stdout: result.stdout,
     stderr: result.stderr,
     ...(exitCode === 0
-      ? {}
+      ? { error: "" }
       : {
           error: result.exitCode === null ? "terminated by a signal" : `exit status ${exitCode}`,
         }),
@@ -145,8 +144,7 @@ export class Commands {
   }
 
   #env(envs: Record<string, string> | undefined) {
-    const merged = { ...this.#ctx.envs, ...envs };
-    return Object.keys(merged).length ? { env: merged } : {};
+    return envs && Object.keys(envs).length ? { env: envs } : {};
   }
 
   /** Runs a command. In the foreground it resolves with the result and throws
@@ -159,46 +157,34 @@ export class Commands {
     opts?: CommandStartOpts & { background?: boolean },
   ): Promise<CommandHandle | CommandResult>;
   async run(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle | CommandResult> {
+    opts.signal?.throwIfAborted();
     refuseUser(opts.user);
     await this.#ctx.ensureHome(`${cmd}\n${opts.cwd ?? ""}`);
     const timeoutMs = timeoutFor(opts.timeoutMs);
-    if (opts.background || opts.stdin) {
-      const handle = await this.#start(cmd, opts, timeoutMs);
-      return opts.background ? handle : handle.wait();
-    }
-    /* Always streamed, so the result holds the whole output as E2B's does: an
-       exec with no output callback returns at most 64 KiB of each stream. */
-    const onStdout = opts.onStdout;
-    const onStderr = opts.onStderr;
-    const result = await guard("sandbox", () =>
-      this.#ctx.runtime.exec(cmd, {
-        ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
-        ...this.#env(opts.envs),
-        timeoutMs,
-        onStdout: (text: string) => void onStdout?.(text),
-        ...(onStderr ? { onStderr: (text: string) => void onStderr(text) } : {}),
-        ...(opts.signal ? { signal: opts.signal } : {}),
-      }),
-    );
-    return settle(
-      { ...result, truncated: result.stdoutTruncated === true || result.stderrTruncated === true },
-      timeoutMs,
-    );
+    const handle = await this.#start(cmd, opts, timeoutMs);
+    return opts.background ? handle : handle.wait();
   }
 
   async #start(cmd: string, opts: CommandStartOpts, timeoutMs: number) {
+    opts.signal?.throwIfAborted();
+    const requestDeadline = opts.requestTimeoutMs
+      ? AbortSignal.timeout(opts.requestTimeoutMs)
+      : undefined;
+    const signals = [opts.signal, requestDeadline].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
     const process = await guard("sandbox", () =>
       this.#ctx.runtime.spawn(cmd, {
         ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
         ...this.#env(opts.envs),
-        timeoutMs,
         ...(opts.stdin ? { stdin: "pipe" } : {}),
-        ...request(opts),
+        ...(signals.length ? { signal: AbortSignal.any(signals) } : {}),
       }),
     );
     return new CommandHandle(process, {
       stdin: opts.stdin === true,
       timeoutMs,
+      signal: opts.signal,
       ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
       ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
     });
@@ -251,6 +237,7 @@ export class Commands {
     return new CommandHandle(process, {
       stdin: process.info.stdinOpen,
       timeoutMs: timeoutFor(opts.timeoutMs),
+      signal: opts.signal,
       cursor: process.info.outputBytes,
       ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
       ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
@@ -284,6 +271,7 @@ export class CommandHandle {
   #truncated = false;
   #failure: Error | undefined;
   #disconnected = false;
+  #deadline: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     process: Process,
@@ -291,6 +279,7 @@ export class CommandHandle {
       stdin: boolean;
       timeoutMs: number;
       cursor?: number;
+      signal?: AbortSignal;
       onStdout?: (data: string) => void | Promise<void>;
       onStderr?: (data: string) => void | Promise<void>;
     },
@@ -299,19 +288,33 @@ export class CommandHandle {
     this.pid = pidOf(process.id);
     this.#stdin = options.stdin;
     this.#timeoutMs = options.timeoutMs;
+    // E2B's timeout limits the subscription. It never asks us to kill the
+    // process: the sandbox lease still bounds the workload after disconnect.
+    if (options.timeoutMs > 0) {
+      this.#deadline = setTimeout(() => {
+        this.#failure = timedOut(options.timeoutMs);
+        this.#abort.abort();
+      }, options.timeoutMs);
+      this.#deadline.unref?.();
+    }
     this.#done = this.#follow(options);
   }
 
   async #follow(options: {
     cursor?: number;
+    signal?: AbortSignal;
     onStdout?: (data: string) => void | Promise<void>;
     onStderr?: (data: string) => void | Promise<void>;
   }) {
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, this.#abort.signal])
+      : this.#abort.signal;
     try {
       for await (const event of this.#process.output({
         ...(options.cursor ? { cursor: options.cursor } : {}),
-        signal: this.#abort.signal,
+        signal,
       })) {
+        if (this.#disconnected || signal.aborted) break;
         if (event.type === "stdout") {
           this.#stdout += event.data;
           await options.onStdout?.(event.data);
@@ -325,11 +328,13 @@ export class CommandHandle {
         }
       }
     } catch (error) {
-      if (!this.#disconnected) {
+      if (!this.#disconnected && !this.#failure) {
         const translated = translate(error, "sandbox");
         this.#failure =
           translated instanceof Error ? translated : new SandboxError(String(translated));
       }
+    } finally {
+      if (this.#deadline !== undefined) clearTimeout(this.#deadline);
     }
   }
 

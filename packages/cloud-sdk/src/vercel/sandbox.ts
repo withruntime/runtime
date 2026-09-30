@@ -228,15 +228,15 @@ function statusOf(state: string) {
 /** Runtime's `/workspace` stands for Vercel's `/vercel/sandbox`: relative
  * paths resolve against it, and paths under /vercel/sandbox are rewritten. */
 export function toRuntimePath(path: string, cwd?: string): string {
-  const base = cwd === undefined ? HOME : toVercelPath(cwd);
-  const absolute = path.startsWith("/") ? path : `${base}/${path.replace(/^\.\/?/, "")}`;
+  const base = cwd === undefined ? HOME : toVercelPath(cwd).replace(/\/+$/, "");
+  const absolute = path.startsWith("/") ? path : `${base}/${path.replace(/^(?:\.(?:\/+|$))+/, "")}`;
   const normal = absolute.replace(/\/+$/, "") || "/";
   if (normal === HOME || normal.startsWith(`${HOME}/`))
     return RUNTIME_HOME + normal.slice(HOME.length);
   return normal;
 }
 function toVercelPath(path: string): string {
-  return path.startsWith("/") ? path : `${HOME}/${path.replace(/^\.\/?/, "")}`;
+  return path.startsWith("/") ? path : `${HOME}/${path.replace(/^(?:\.(?:\/+|$))+/, "")}`;
 }
 
 type Resolved = { runtime: RuntimeSandbox; client: Runtime; params: CreateSandboxParams };
@@ -264,9 +264,9 @@ export class Sandbox {
     this.fs = new FileSystem({
       name: this.name,
       files: async () => (await this.#live()).files,
-      run: async (argv) => {
+      run: async (argv, options) => {
         const live = await this.#live();
-        return live.exec(argv);
+        return live.exec(argv, options);
       },
       resolve: (path, cwd) => toRuntimePath(path, cwd),
     });

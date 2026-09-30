@@ -157,6 +157,9 @@ type AuditEvent struct {
 	IP        *string        `json:"ip"`
 	RequestID *string        `json:"requestId"`
 	Via       string         `json:"via"`
+	// Sandbox is the sandbox the request came from, when code in it called
+	// the API at http://runtime.internal.
+	Sandbox *string `json:"sandbox"`
 }
 
 // AuditPage is one page of the audit log; pass Next as Before for the next.

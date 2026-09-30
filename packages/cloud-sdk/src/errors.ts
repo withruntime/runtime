@@ -1,8 +1,21 @@
 /** Every failure the SDK raises. `code` is stable and machine-readable,
  * `hint` says what to do next, and `requestId` is what to quote in a report
  * (runtime.feedback.submit, `runtime feedback`, or support). */
-/** Switched off on purpose: retrying cannot change them. */
-const DELIBERATE = new Set(["fork_unavailable", "previews_unavailable", "unavailable"]);
+/** A product switched off on this deployment, or paused on purpose: the API
+ * answers these 503s in fixed words (`serverFault` "off" in
+ * packages/cloud/src/api/respond.ts) and retrying cannot change them.
+ * host_unavailable and busy pass, and are retried. */
+export const DELIBERATE: ReadonlySet<string> = new Set([
+  "unavailable",
+  "unsupported",
+  "fork_unavailable",
+  "previews_unavailable",
+  "network_unavailable",
+  "network_rules_unavailable",
+  "secrets_unavailable",
+  "identity_unavailable",
+  "env_unavailable",
+]);
 /** Refusals that pass on their own: a host frees room, a trial slot frees. */
 const PASSING = new Set(["no_capacity", "trial_busy"]);
 /** Refusals of a create that clear when a sandbox stops or pauses, or a host

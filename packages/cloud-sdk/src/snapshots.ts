@@ -7,6 +7,8 @@ import type { Query, RequestOptions, Transport } from "./transport.js";
 export type Snapshot = {
   id: string;
   kind: "snapshot";
+  /** Absent on older servers means memory. */
+  mode?: "memory" | "disk";
   status: string;
   state: "capturing" | "ready" | "failed" | "deleting" | "deleted";
   name: string | null;
@@ -32,6 +34,8 @@ export type Snapshot = {
   [key: string]: unknown;
 };
 export type SnapshotOptions = {
+  /** Save files for a fresh boot, or the whole machine (default). */
+  mode?: "memory" | "disk";
   name?: string;
   labels?: Record<string, string>;
   retentionDays?: number;
@@ -65,6 +69,7 @@ export class Snapshots {
       state?: "capturing" | "ready" | "failed" | "deleting";
       limit?: number;
     } = {},
+    options: RequestOptions = {},
   ): Promise<Page<Snapshot>> {
     const query: Query = {
       sandboxId: filter.sandboxId,
@@ -77,10 +82,28 @@ export class Snapshots {
         method: "GET",
         path: "/v1/snapshots",
         query: { ...query, cursor },
+        ...options,
       });
       return new Page(body.data, body.nextCursor, (next) => fetchPage(next));
     };
     return fetchPage();
+  }
+  /** Replace supplied labels or name; omitted fields are preserved. Null clears the name. */
+  update(
+    id: string,
+    input: {
+      name?: string | null;
+      labels?: Record<string, string>;
+      ifLabels?: Record<string, string>;
+    },
+    options: RequestOptions = {},
+  ): Promise<Snapshot> {
+    return this.t.json({
+      method: "POST",
+      path: `/v1/snapshots/${enc(id)}:update`,
+      body: input,
+      ...options,
+    });
   }
   async delete(id: string, options: RequestOptions = {}): Promise<void> {
     await this.t.json({
