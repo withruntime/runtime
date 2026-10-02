@@ -8,7 +8,8 @@ module WithRuntime
   #
   #   runtime = WithRuntime::Client.new # RUNTIME_API_KEY, or this machine's saved connection
   #   sbx = runtime.sandboxes.create(funding: "trial")
-  #   puts sbx.exec("python3 -c 'print(6 * 7)'", check: true).stdout
+  #   sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+  #   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
   #   sbx.stop
   #
   # Every product is +runtime.<product>.<verb>+. Money is integer microdollars

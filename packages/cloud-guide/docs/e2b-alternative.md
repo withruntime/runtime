@@ -156,7 +156,7 @@ E2B:
 ```js
 import { Sandbox } from "e2b";
 const sbx = await Sandbox.create();
-const result = await sbx.commands.run("python3 -c 'print(6 * 7)'");
+const result = await sbx.commands.run("python3 -c 'print(sum([125, 250, 375]))'");
 await sbx.kill();
 ```
 
@@ -166,7 +166,8 @@ Runtime:
 import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "trial" });
 try {
-  console.log((await box.exec("python3 -c 'print(6 * 7)'", { check: true })).stdout);
+  await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);
 } finally {
   await box.stop();
 }

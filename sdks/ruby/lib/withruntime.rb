@@ -7,7 +7,8 @@
 #
 #   runtime = WithRuntime::Client.new # RUNTIME_API_KEY, or this machine's saved connection
 #   sbx = runtime.sandboxes.create(funding: "trial")
-#   puts sbx.exec("python3 -c 'print(6 * 7)'", check: true).stdout
+#   sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+#   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
 #   sbx.stop
 #
 # The guide is at https://withruntime.com/docs/ruby.

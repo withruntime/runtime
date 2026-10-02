@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 from typing import Any, Callable, List, Optional
 
 from .._http import Origin, SyncHTTP
+
+
+def preview_token_expiration(preview_token: Any) -> datetime:
+    """Blaxel's sync token parses the stored expiry text into a datetime."""
+    text = preview_token.spec.expires_at if preview_token.spec else None
+    if not text:
+        return datetime.now()
+    return datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
 
 
 class _Thread:

@@ -96,7 +96,9 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
         out = SandboxPathNotFoundError(message)
     else:
         out = SandboxApiError(message, status_code=error.status, code=code,
-                              data={"error": {"code": code, "message": error.message}})
+                              data={**(error.details or {}),
+                                    "error": {"code": code, "message": error.message,
+                                              **({"details": error.details} if error.details else {})}})
     out.hint, out.request_id = error.hint, error.request_id
     out.__cause__ = error
     return out
@@ -293,6 +295,8 @@ def lease_seconds(value: Any) -> int:
 
 def retention_days(value: Any) -> int:
     total = seconds(value) or 0
+    if not math.isfinite(total) or total < 0:
+        raise ValueError("snapshot expiration must be a nonnegative finite number of seconds.")
     if total == 0:
         return 365
     return int(min(365, max(1, math.ceil(total / 86_400))))
@@ -435,4 +439,3 @@ class LinePump:
 def route(port: int, url: str) -> SandboxRoute:
     host = url.split("://", 1)[-1].split("/", 1)[0]
     return SandboxRoute(url=url.rstrip("/"), port=port, subdomain=host.split(".")[0])
-

@@ -50,10 +50,6 @@ export interface PreviewContext {
   setLabels(changes: Record<string, string | undefined>): Promise<void>;
 }
 
-/** Runtime's shortest and longest token, in seconds. */
-const TOKEN_MIN = 60;
-const TOKEN_MAX = 7 * 86_400;
-
 function checkName(name: string) {
   if (!/^[A-Za-z0-9._-]{1,48}$/.test(name))
     throw new NotSupportedError(
@@ -118,24 +114,32 @@ export class SandboxPreviewTokens {
   get resourceName(): string {
     return this.#ctx.sandboxName;
   }
-  /** A token that lasts until `expiresAt` (at least a minute, at most a week). */
+  /** A token bounded by `expiresAt`; native signing floors milliseconds and
+   * caps it to the caller's session. Older servers refuse without a TTL fallback. */
   async create(expiresAt: Date): Promise<SandboxPreviewToken> {
-    const seconds = Math.ceil((expiresAt.getTime() - Date.now()) / 1000);
-    if (seconds > TOKEN_MAX)
+    const requested = expiresAt.getTime();
+    if (!Number.isFinite(requested))
+      throw responseError(400, "A preview token needs a valid expiration date.");
+    const remaining = requested - Date.now();
+    if (remaining < 60_000 || remaining > 7 * 86_400_000)
       throw new NotSupportedError(
-        "A preview token lasting more than a week",
-        "Create one for at most seven days, and a new one when it runs out.",
+        "A preview token lasting less than a minute or more than a week",
+        "Request an expiration at least one minute and at most seven days away.",
       );
-    const port = this.#preview.spec.port!;
     const got = await this.#ctx.run((runtime) =>
-      runtime.previews.get(port, Math.max(TOKEN_MIN, seconds)),
+      runtime.previews.get(this.#preview.spec.port!, undefined, {
+        expiresAt: expiresAt.toISOString(),
+      }),
     );
+    const actual = got.tokenExpiresAt === null ? Number.NaN : Date.parse(got.tokenExpiresAt);
+    if (!got.token || !Number.isFinite(actual) || actual > requested)
+      throw new NotSupportedError(
+        "A preview token with the requested expiration",
+        "The server must issue a token that never outlives the requested expiration; no duration-based fallback was requested.",
+      );
     return new SandboxPreviewToken({
       metadata: { name: `token-${Date.now()}`, previewName: this.previewName },
-      spec: {
-        ...(got.token ? { token: got.token } : {}),
-        ...(got.tokenExpiresAt ? { expiresAt: got.tokenExpiresAt } : {}),
-      },
+      spec: { token: got.token, expiresAt: got.tokenExpiresAt! },
     });
   }
   list(): Promise<never> {

@@ -308,7 +308,7 @@ describe("Runtime's words in Blaxel's", () => {
       [
         "public_preview_not_allowed",
         403,
-        "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt). A public preview needs a paid sandbox, which is the account owner's decision.",
+        "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
       ],
       ["busy", 409, "Try again in a moment."],
       ["guest_busy", 429, "Try again in a moment."],

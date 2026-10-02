@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { me, named } from "./cli-name.js";
 import { Runtime } from "./client.js";
-import { connectionOrigins, connectionStore } from "./credentials.js";
+import { checkBrowserOrigins, connectionOrigins, connectionStore } from "./credentials.js";
 import { describeRoute, envFetch } from "./proxy.js";
 
 class ConnectionError extends Error {
@@ -116,7 +116,17 @@ function connection(env: NodeJS.ProcessEnv, options: LoginOptions) {
             ? "Too many connection attempts. Try again later."
             : "Runtime could not complete this connection. Try again.",
       );
-    return (await response.json()) as Record<string, unknown>;
+    try {
+      return (await response.json()) as Record<string, unknown>;
+    } catch (error) {
+      // A complete malformed answer remains terminal. A failed body read can
+      // hide an issued token, so keep its private key and retry the same request.
+      if (error instanceof SyntaxError) throw error;
+      throw new ConnectionError(
+        503,
+        "Runtime's connection response was interrupted. Retry the connection.",
+      );
+    }
   }
   return { origins, store, request, fetcher };
 }
@@ -141,7 +151,7 @@ export async function authenticationCommand(
     // A pasted key belongs to the website's key list: forget it here, and
     // revoke it there if it should stop working everywhere.
     if (saved.connectionId === PASTED) {
-      await store.remove();
+      await store.remove(saved.key);
       return { disconnected: true };
     }
     try {
@@ -149,7 +159,7 @@ export async function authenticationCommand(
     } catch (error) {
       if (!(error instanceof ConnectionError && error.status === 401)) throw error;
     }
-    await store.remove();
+    await store.remove(saved.key);
     return { disconnected: true };
   }
   if (command !== "login")
@@ -181,16 +191,7 @@ export async function authenticationCommand(
     [...agentName].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   )
     throw new Error("Give the agent a name of up to 80 characters.");
-  // Never obtain a production key and then direct it at an unrelated API.
-  const local = (origin: string) =>
-    ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
-  if (!(
-    (origins.auth === "https://withruntime.com" && origins.api === "https://api.withruntime.com") ||
-    (local(origins.auth) && local(origins.api))
-  ))
-    throw new Error(
-      "Browser login supports Runtime's production endpoints or local test endpoints. Check RUNTIME_AUTH_URL and RUNTIME_API_URL.",
-    );
+  checkBrowserOrigins(origins);
   if (withKey) {
     // The fallback to a browser approval: a key from the website, read from
     // standard input so it never sits in a command line or shell history.
@@ -226,7 +227,7 @@ export async function authenticationCommand(
       return { connected: true, agentName: saved.agentName, orgId: saved.orgId };
     } catch (error) {
       if (!(error instanceof ConnectionError && error.status === 401)) throw error;
-      await store.remove();
+      await store.remove(saved.key);
     }
   }
   const pending = await beginDeviceLogin(env, agentName, options);
@@ -293,6 +294,7 @@ export async function beginDeviceLogin(
   options: LoginOptions = {},
 ): Promise<PendingLogin> {
   const { origins, store, request } = connection(env, options);
+  checkBrowserOrigins(origins);
   // A request this machine already started and nobody has answered yet: pick
   // it up, so a command stopped while it waited (an agent's tool timing out)
   // shows the same link and code again rather than a new one to approve.

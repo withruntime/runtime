@@ -98,6 +98,13 @@ whose `WWW-Authenticate` header points at
 names `https://withruntime.com` as the authorization server. It supports OAuth
 2.1 with PKCE, dynamic client registration and client metadata documents.
 
+For ChatGPT, use `https://api.withruntime.com/mcp?profile=chatgpt`. Its tools
+keep persistent credentials out of the conversation. Starting or reading a
+sandbox MCP server returns safe state and scoped preview links; retrieve its
+gateway token or authorization headers through the website or a local CLI
+when another client needs them. The ordinary MCP connection keeps its usual
+credential behavior.
+
 ## Tools
 
 The server answers `initialize` with instructions: the quick start, safe retries,
@@ -121,16 +128,17 @@ capability is enabled. Check the [products page](./products) for availability.
 | `runtime_sandbox_files_watch`                                                                           | Watch a directory for file changes: start, read events after a cursor, list, stop                                                                                                                                                                                                                            |
 | `runtime_image_build`, `runtime_image_registries`                                                       | Custom images from a recipe, any public or private image, or a Dockerfile, with versions and tags; registry credentials                                                                                                                                                                                      |
 | `runtime_image`                                                                                         | `list`, `get`, `tag` and `delete` image versions                                                                                                                                                                                                                                                             |
-| `runtime_volume`                                                                                        | Persistent disks to attach at create: `create` (with `fromBackup` to restore a backup), `list`, `get`, `delete`                                                                                                                                                                                              |
+| `runtime_volume`                                                                                        | Persistent disks: `create` (with `fromBackup` to restore a backup), `list`, `get`, `delete`; `attach` and `detach` require shared-volume availability, and `resize` requires volume growth to be enabled                                                                                                     |
 | `runtime_volume_backup`                                                                                 | Back a volume up off its server: `create`, `list`, `get`, `policy` for daily backups, `delete`                                                                                                                                                                                                               |
-| `runtime_sandbox_fork`                                                                                  | Copies of a sandbox as it is now, with its memory and processes, on the same server                                                                                                                                                                                                                          |
-| `runtime_snapshot`                                                                                      | `create` keeps a paused sandbox to start copies from later, copied off its server (not with volumes); `list`, `get`, `delete`                                                                                                                                                                                |
+| `runtime_sandbox_fork`                                                                                  | Copies of a sandbox as it is now, with its memory and processes; same-server by default, cross-server only where qualified transfers are enabled                                                                                                                                                             |
+| `runtime_snapshot`                                                                                      | `create` keeps a paused sandbox, copied off its server (not with volumes), with `mode: "memory"` or `"disk"`; `list`, `get`, `update` (name, labels), `delete`                                                                                                                                               |
 | `runtime_sandbox_mounts`                                                                                | Your S3, R2 or Google Cloud Storage bucket as a directory: `mount`, `list`, `unmount`; the proxy signs, the sandbox never holds the key                                                                                                                                                                      |
-| `runtime_sandbox_previews`                                                                              | Share a port at an HTTPS address at `runtimehost.com`, private with a token by default: `create`, `list`, `rotate` (refuses every old token), `delete`                                                                                                                                                       |
+| `runtime_sandbox_previews`                                                                              | Share a port at `runtimehost.com`, private by default: `create`, `list`, `rotate`, `delete`; browser access to one sandbox: `session_create`, `session_list`, `session_revoke`                                                                                                                               |
+| `runtime_sandbox_tailscale`                                                                             | Join a paid sandbox to your tailnet: `up`, `status`, `down`                                                                                                                                                                                                                                                  |
 | `runtime_sandbox_network`                                                                               | `get` or `set` a sandbox's network rules                                                                                                                                                                                                                                                                     |
 | `runtime_sandbox_desktop_act`, `runtime_sandbox_desktop_screenshot`                                     | Drive a desktop in the sandbox                                                                                                                                                                                                                                                                               |
 | `runtime_sandbox_desktop_record`                                                                        | Record the desktop to MP4: start, stop, list, delete                                                                                                                                                                                                                                                         |
-| `runtime_sandbox_mcp`                                                                                   | The MCP catalog (`catalog`), and running its servers in a sandbox at URLs your agent connects to                                                                                                                                                                                                             |
+| `runtime_sandbox_mcp`                                                                                   | Browse the MCP catalog with `action: "catalog"`, no sandbox id needed; `start`, `get`, `stop` run its servers in a sandbox at URLs your agent connects to                                                                                                                                                    |
 | `runtime_sandbox_metrics`, `runtime_events_list`                                                        | A sandbox's CPU and memory over time; lifecycle events                                                                                                                                                                                                                                                       |
 | `runtime_webhooks_manage`, `runtime_otel_manage`                                                        | Webhooks for lifecycle events, and OpenTelemetry export                                                                                                                                                                                                                                                      |
 | `runtime_domain`, `runtime_port`, `runtime_address`, `runtime_tunnel`, `runtime_network_upstream_proxy` | Custom domains, public TCP ports, dedicated outbound addresses, the WireGuard tunnel and your own upstream proxy; see below                                                                                                                                                                                  |
@@ -144,12 +152,19 @@ capability is enabled. Check the [products page](./products) for availability.
 | `runtime_notices`                                                                                       | Account notices: pause expiry, unpaid storage and deletion deadlines                                                                                                                                                                                                                                         |
 | `runtime_docs_read`                                                                                     | Read any page of these docs                                                                                                                                                                                                                                                                                  |
 
+Shared-volume attachment and ordinary-volume growth are guarded features,
+currently disabled by default. They do not appear in the server's tool list
+until enabled; use that list as the authority for the actions you can call.
+
 Tool names read `runtime_<product>_<verb>`, or `runtime_<product>` for a tool
 that takes an `action`, the product spelled as the CLI spells it. The verbs an
 agent needs in its first session each have a tool of their own; a product's
 rarer verbs share one, and its `action` names the verb: `runtime_volume` with
 `"action": "get"` reads a volume. Everything that
-acts on one sandbox is `runtime_sandbox_*` and takes the sandbox as `id`;
+acts on one sandbox is `runtime_sandbox_*` and takes the sandbox as `id`
+(the MCP catalog needs none); `runtime_sandbox_mcp` with `action: "catalog"`
+needs no `id`, while `start`, `get` and `stop` require it and name the missing
+field in an `invalid_request` error;
 images, volumes and snapshots are `runtime_image*`, `runtime_volume*` and
 `runtime_snapshot`; what spans products, such as the account, usage, secrets,
 events, feedback and docs, names no product. Results come back as both text and
@@ -159,9 +174,12 @@ and a `requestId`.
 ## Renamed tools
 
 On 26 September 2026, 52 tools became 16 that take an `action`, which cut what
-the tool list costs an agent's context by nearly a quarter. The old names still answer
-until the next release, unlisted: each answer adds a line naming the call that
-replaces it. Change any permission rule, prompt or script that names one.
+the tool list costs an agent's context by nearly a quarter. The old names now
+fail with `not_found`, before any operation runs, and the hint names the grouped
+tool and its `action`. Change any permission rule, prompt or script that names
+one, then refresh the tool list. `runtime_sandbox_mounts` and
+`runtime_volume_backup` keep their grouped names and require an `action`; an
+old call that omits it is refused.
 
 | Before                                                                                          | Now                                                              |
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -202,9 +220,16 @@ one of those names fails, and its error names the call that replaces it.
    `runtime_sandbox_exec` returns at most 64 KiB of `stdout` and of `stderr` for a
    command up to 60 seconds, 1 MiB for a longer one; `stdoutTruncated` or
    `stderrTruncated` is `true` when more was dropped. Over MCP, output over
-   16,000 characters in all keeps each stream's first line and its end, and
-   `outputCut` says how many characters of each were cut. For all of it, write
-   the output to a file and read it in parts with `runtime_sandbox_files_read`.
+   16,000 characters in all keeps each stream's beginning and end within its
+   share of the output budget; even a long first line may be shortened.
+   Quotes, backslashes and control characters can shorten it further, because
+   escaped output must also fit the complete serialized response budget.
+   `outputCut` says how many characters of each were cut. When the result
+   includes `processId`, read the existing process with `runtime_sandbox_process`
+   and `"action": "read"`, using its output cursors. For a future command whose
+   full output you need, save it to a file and read it in parts with
+   `runtime_sandbox_files_read`. Do not run a command again just to recover
+   output: its changes may already have happened.
 3. For a server or a long job, `runtime_sandbox_exec` with `"background": true`, then
    `runtime_sandbox_process` with `"action": "read"` to follow its output.
 4. `runtime_sandbox_manage` with `"action": "stop"` when done, even if a step
@@ -234,7 +259,7 @@ calls.
 ## Pause and wake
 
 `runtime_sandbox_manage` with `"action": "pause"` saves files and memory, and
-`"wake"` restores them on the same host. Each sandbox keeps only its latest
+`"wake"` restores them on the same host by default; [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled) can select a compatible server when enabled. Each sandbox keeps only its latest
 state, not a history of billed snapshots.
 
 A wake never silently substitutes a fresh boot: missing memory images refuse

@@ -8,8 +8,55 @@ Each day also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 1 October 2026
+
+- **Build images and manage volumes in the console.** Build from a Dockerfile,
+  a registry image or a package recipe, start a sandbox from an image version,
+  manage tags, and create, back up or restore volumes. Spending and deletion
+  ask first. See [images](./images) and [storage](./storage).
+- **See API calls, CPU waiting and memory stalls in the console.** Usage &
+  billing shows the account's API calls and errors by operation and exports
+  settled usage as a CSV file; a sandbox's Activity tab charts CPU wait and
+  memory stalls. See [observability](./observability#account-api-calls).
+- **Export settled usage for a chosen period.** `runtime usage export` and
+  `/v1/usage/export` cover every visible product and resource with exact
+  charges in the server's CSV. The CLI follows every page; API callers can
+  follow the returned cursor. Pending holds stay separate.
+  See [the API](./api#export-settled-usage).
+- **SDK names keep existing code working.** JavaScript and Python add singular
+  names for sandbox, snapshot, image, volume, job, domain, port and address,
+  preserving their existing plural product clients. Python adds `RuntimeAPIError`,
+  `RuntimeConnectionError` and snake_case command-stream fields while keeping
+  previous names. See [JavaScript](./javascript) and [Python](./python).
+- **Archive bytes and root-owned folders.** Native SDK archive helpers return
+  or unpack tar bytes, support relative exclusions and explicitly requested
+  root access through passwordless guest sudo. JavaScript request cancellation reaches
+  transfers and local extraction. See [files](./api#files).
+- **Recover a saved snapshot after a failed wake.** A snapshot error retains
+  its captured id and the source's wake failure, so you can inspect the saved
+  capture and recover the source before trying again. See
+  [snapshots](./javascript#snapshots-and-forks).
+- **More supported provider calls.** The E2B adapter supports byte-preserving
+  PTY sessions; Daytona label replacement preserves its language and download
+  timeouts reach the complete transfer. Both remain partial adapters. See
+  [migration](./migrate).
+- **Current MCP groups give the replacement call.** Retired aliases fail with
+  the canonical group and action before doing work. ChatGPT connections get
+  scoped preview links without a persistent gateway credential. See [MCP](./mcp).
+
 ## 30 September 2026
 
+- **Claim 100 hours free goes straight to Google again.** For a few hours the
+  button opened the sign-in page instead; it now passes the human check itself.
+- **A new Runtime Cloud page for sandboxes.** [/sandbox](https://withruntime.com/sandbox)
+  shows what 1,000 sandbox hours cost as stacks of cash beside the claim, and
+  each comparison page says how many times cheaper Runtime is, such as
+  "4× cheaper", instead of a percentage.
+- **/sandbox names 19 integrations and shows pausing in one picture.** The
+  strip under the hero adds Claude Code, Cursor, Gemini CLI, Windsurf, Docker,
+  JetBrains, Tailscale, OpenTelemetry, Datadog, Grafana and Okta, each linked
+  to its guide, and no longer runs empty on wide screens. The pause section
+  shows a sandbox working, idle a minute, paused and awake again.
 - **Environment variables for a whole sandbox.** Pass `env` at create, or
   change it later with an update, and every command, background process,
   terminal, SSH session and image start command gets those variables. Values
@@ -21,8 +68,8 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   sandbox's id, name, `/workspace`, volumes, environment, previews and ports;
   processes restart. See [images](./images).
 - **Folders over plain HTTP.** Upload or download a whole folder of any size
-  as a tar stream; the SDKs unpack a download as it arrives and put it in
-  place only once it is whole.
+  as a tar stream. The SDKs verify a downloaded archive before merging its
+  folder contents; ordinary file downloads publish only complete files.
 - **File changes to your webhooks.** A watch started with `webhook: true`
   sends `sandbox.files.changed` events, signed and retried like every webhook,
   without keeping the sandbox awake. See [observability](./observability).
@@ -364,8 +411,8 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   its first call. A product's rarer verbs share one tool that takes an
   `action`: `runtime_volume_get` is now `runtime_volume` with
   `"action": "get"`. The first-session tools keep their names. The old names
-  answer until the next release and say what replaces them; see
-  [renamed tools](./mcp#renamed-tools).
+  answered until the next release and said what replaced them; they were
+  retired on 30 September 2026. See [renamed tools](./mcp#renamed-tools).
 
 ## 25 September 2026
 

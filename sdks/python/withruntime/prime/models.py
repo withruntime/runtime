@@ -1,7 +1,45 @@
-"""Sandbox request/value surface pinned to prime-sandboxes 0.4.0."""
+"""Sandbox request/value surface pinned to prime-sandboxes 0.4.1."""
 from dataclasses import dataclass, field
 from typing import Optional
 from .._compat import Model
+
+
+def _validate_egress_lists(allowlist, denylist):
+    """Reject the same malformed host/IPv4 rules as prime-sandboxes 0.4.1."""
+    import ipaddress
+    if allowlist is not None and denylist is not None:
+        raise ValueError("network_allowlist and network_denylist are mutually exclusive")
+    for name, entries in (("network_allowlist", allowlist), ("network_denylist", denylist)):
+        if entries is None:
+            continue
+        if not isinstance(entries, list) or any(not isinstance(entry, str) for entry in entries):
+            raise ValueError(f"{name} must be a list of strings")
+        if len(entries) > 256:
+            raise ValueError(f"{name} supports at most 256 entries")
+        for entry in entries:
+            value = entry.strip()
+            if not value:
+                raise ValueError(f"{name}: empty entry")
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError:
+                address = None
+            if address is not None:
+                if address.version != 4:
+                    raise ValueError(f"{name}: IPv6 is not supported")
+                continue
+            if "/" in value:
+                try:
+                    network = ipaddress.ip_network(value, strict=False)
+                except ValueError as error:
+                    raise ValueError(f"{name}: invalid IPv4 CIDR") from error
+                if network.version != 4:
+                    raise ValueError(f"{name}: IPv6 is not supported")
+                continue
+            domain = value[2:] if value.startswith("*.") else value
+            domain = domain.rstrip(".")
+            if any(marker in value for marker in ("://", "@", ":", "?")) or not domain or "*" in domain or any(not label for label in domain.split(".")):
+                raise ValueError(f"{name}: expected a hostname, leftmost wildcard, or IPv4 rule")
 
 
 @dataclass
@@ -39,15 +77,18 @@ class CreateSandboxRequest:
     idempotency_key: Optional[str] = None
 
     def __post_init__(self):
+        if isinstance(self.start_command, dict):
+            try:
+                self.start_command = StartCommand(**self.start_command)
+            except TypeError as error:
+                raise ValueError("start_command accepts only executable and args") from error
+        if self.start_command is not None and not isinstance(self.start_command, StartCommand):
+            raise ValueError("start_command must be a StartCommand or mapping")
         if self.gpu_count > 0 and not self.gpu_type:
             raise ValueError("gpu_type is required when gpu_count is greater than 0")
         if self.gpu_count == 0 and self.gpu_type is not None:
             raise ValueError("gpu_type requires gpu_count greater than 0")
-        if self.network_allowlist is not None and self.network_denylist is not None:
-            raise ValueError("network_allowlist and network_denylist are mutually exclusive")
-        for entries in (self.network_allowlist, self.network_denylist):
-            if entries is not None and len(entries) > 256:
-                raise ValueError("Network rules support at most 256 entries")
+        _validate_egress_lists(self.network_allowlist, self.network_denylist)
         if self.idle_timeout_minutes is not None and (self.idle_timeout_minutes < 1 or
                 self.timeout_minutes > 0 and self.idle_timeout_minutes > self.timeout_minutes):
             raise ValueError("idle_timeout_minutes must be positive and no greater than timeout_minutes")
@@ -63,6 +104,8 @@ class _Value(Model):
     _defaults = {}
     _aliases = {}
     _dates = ()
+    _nested = {}
+    _allow_extra = False
 
     def __init__(self, **data):
         import copy
@@ -74,8 +117,16 @@ class _Value(Model):
         if missing:
             raise ValueError("Missing required fields: " + ", ".join(missing))
         allowed = {*self._required, *self._defaults}
-        super().__init__({**copy.deepcopy(self._defaults), **{k: v for k, v in data.items() if k in allowed}})
+        super().__init__({**copy.deepcopy(self._defaults), **{k: v for k, v in data.items() if self._allow_extra or k in allowed}})
         object.__setattr__(self, "_provided", set(data))
+        for name, (kind, many) in self._nested.items():
+            value = self.get(name)
+            if value is None:
+                continue
+            model = globals()[kind]
+            def convert(item):
+                return item if isinstance(item, model) else model(**item)
+            self[name] = [convert(item) for item in value] if many else convert(value)
         for name in self._dates:
             if isinstance(self.get(name), str):
                 self[name] = datetime.fromisoformat(self[name].replace("Z", "+00:00"))
@@ -96,6 +147,9 @@ class _Value(Model):
         def convert(value):
             if isinstance(value, _Value):
                 return value.model_dump(by_alias=by_alias, exclude_none=exclude_none, mode=mode)
+            if isinstance(value, StartCommand):
+                from dataclasses import asdict
+                return asdict(value)
             if isinstance(value, (list, tuple)):
                 return [convert(item) for item in value]
             if isinstance(value, dict):
@@ -141,6 +195,7 @@ class EgressPolicyStatus(_Value):
     _defaults = {}
     _aliases = {}
     _dates = ()
+    _nested = {'policy': ('SandboxEgressPolicy', False)}
 
 
 class SSHSession(_Value):
@@ -155,6 +210,7 @@ class AdvancedConfigs(_Value):
     _defaults = {}
     _aliases = {}
     _dates = ()
+    _allow_extra = True
 
 
 class Sandbox(_Value):
@@ -162,6 +218,7 @@ class Sandbox(_Value):
     _defaults = {'start_command': None, 'gpu_type': None, 'vm': False, 'network_allowlist': None, 'network_denylist': None, 'idle_timeout_minutes': None, 'termination_reason': None, 'environment_vars': None, 'secrets': None, 'advanced_configs': None, 'labels': [], 'started_at': None, 'terminated_at': None, 'exit_code': None, 'error_type': None, 'error_message': None, 'user_id': None, 'team_id': None, 'region': None, 'pending_image_build_id': None}
     _aliases = {'docker_image': 'dockerImage', 'start_command': 'startCommand', 'cpu_cores': 'cpuCores', 'memory_gb': 'memoryGB', 'disk_size_gb': 'diskSizeGB', 'disk_mount_path': 'diskMountPath', 'gpu_count': 'gpuCount', 'gpu_type': 'gpuType', 'network_allowlist': 'networkAllowlist', 'network_denylist': 'networkDenylist', 'timeout_minutes': 'timeoutMinutes', 'idle_timeout_minutes': 'idleTimeoutMinutes', 'termination_reason': 'terminationReason', 'environment_vars': 'environmentVars', 'secrets': 'secrets', 'advanced_configs': 'advancedConfigs', 'created_at': 'createdAt', 'updated_at': 'updatedAt', 'started_at': 'startedAt', 'terminated_at': 'terminatedAt', 'exit_code': 'exitCode', 'error_type': 'errorType', 'error_message': 'errorMessage', 'user_id': 'userId', 'team_id': 'teamId', 'pending_image_build_id': 'pendingImageBuildId'}
     _dates = ('created_at', 'updated_at', 'started_at', 'terminated_at')
+    _nested = {'start_command': ('StartCommand', False), 'advanced_configs': ('AdvancedConfigs', False)}
 
 
 class SandboxListResponse(_Value):
@@ -169,6 +226,7 @@ class SandboxListResponse(_Value):
     _defaults = {}
     _aliases = {'per_page': 'perPage', 'has_next': 'hasNext'}
     _dates = ()
+    _nested = {'sandboxes': ('Sandbox', True)}
 
 
 class SandboxStatusSnapshot(_Value):
@@ -177,6 +235,10 @@ class SandboxStatusSnapshot(_Value):
     _aliases = {}
     _dates = ()
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        self['status'] = SandboxStatus(self['status'])
+
 
 class SandboxStatusLookupError(_Value):
     _required = ('sandbox_id', 'code', 'message')
@@ -184,12 +246,18 @@ class SandboxStatusLookupError(_Value):
     _aliases = {}
     _dates = ()
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self['code'] not in ('NOT_FOUND', 'FORBIDDEN', 'MANAGED'):
+            raise ValueError("Invalid sandbox lookup error code")
+
 
 class BatchSandboxStatusResponse(_Value):
     _required = ('statuses', 'errors')
     _defaults = {}
     _aliases = {}
     _dates = ()
+    _nested = {'statuses': ('SandboxStatusSnapshot', True), 'errors': ('SandboxStatusLookupError', True)}
 
 
 class CommandResponse(_Value):
@@ -261,9 +329,15 @@ class BackgroundJobStatusLookupError(_Value):
     _aliases = {}
     _dates = ()
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self['code'] not in ('NOT_FOUND', 'FORBIDDEN', 'MANAGED', 'NOT_VM', 'NOT_RUNNING', 'RUNTIME_ERROR'):
+            raise ValueError("Invalid background job lookup error code")
+
 
 class BatchBackgroundJobStatusResponse(_Value):
     _required = ('statuses', 'errors')
     _defaults = {}
     _aliases = {}
     _dates = ()
+    _nested = {'statuses': ('BackgroundJobStatusSnapshot', True), 'errors': ('BackgroundJobStatusLookupError', True)}

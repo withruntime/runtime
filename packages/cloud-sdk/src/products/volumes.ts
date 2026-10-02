@@ -11,6 +11,16 @@ export type Volume = {
   labels: Record<string, string>;
   region: string;
   sizeMiB: number;
+  /** Fixed at creation; shared disks support concurrent writers. */
+  shared?: boolean;
+  resize?: {
+    id: string;
+    operationId: string;
+    sizeMiB: number;
+    state: "pending" | "running" | "completed" | "failed";
+    generation: number;
+    error: string | null;
+  } | null;
   filesystem: "ext4";
   usedMiB: number | null;
   measuredAt: string | null;
@@ -20,12 +30,21 @@ export type Volume = {
   backups: { daily: boolean; retentionDays: number; lastReadyAt: string | null };
   /** The backup this volume was restored from, if any. */
   restoredFrom: string | null;
-  attachments: { sandboxId: string; mode: "rw" | "snapshot"; path: string; attachedAt: string }[];
+  attachments: {
+    id?: string;
+    state?: VolumeAttachment["state"];
+    sandboxId: string;
+    mode: "rw" | "snapshot";
+    path: string;
+    attachedAt: string;
+  }[];
   error: string | null;
   createdAt: string;
   readyAt: string | null;
 };
 export type CreateVolume = {
+  /** Available where shared disks are enabled. Fixed at creation. */
+  shared?: boolean;
   /** Required unless restoring: a restore is the backup's size. */
   sizeMiB?: number;
   /** A ready backup to restore into the new volume, on any host in its region. */
@@ -33,6 +52,18 @@ export type CreateVolume = {
   name?: string;
   labels?: Record<string, string>;
   region?: string;
+};
+export type VolumeAttachment = {
+  id: string;
+  volumeId: string;
+  sandboxId: string;
+  path: string;
+  mode: "rw";
+  state: "attaching" | "active" | "detaching" | "detached";
+  generation: number;
+  error: string | null;
+  attachedAt: string;
+  changedAt: string;
 };
 export type VolumeBackupState = "pending" | "ready" | "failed" | "deleting" | "deleted";
 /** A point-in-time copy of a volume, kept off its host. */
@@ -101,6 +132,55 @@ export function volumes(t: Transport) {
       t.json<Volume>({ method: "POST", path: "/v1/volumes", body: input, wait: 10, ...options }),
     get,
     list,
+    /** Grow a detached ordinary disk; wait up to 10 s for the operation. */
+    resize: (
+      id: string,
+      input: { sizeMiB: number },
+      options: RequestOptions & { wait?: number } = {},
+    ) => {
+      const { wait = 10, ...rest } = options;
+      return t.json<Volume>({
+        method: "POST",
+        path: `/v1/volumes/${enc(id)}:resize`,
+        body: input,
+        wait,
+        ...rest,
+      });
+    },
+    attach: (
+      id: string,
+      input: { sandboxId: string; path: string },
+      options: RequestOptions & { wait?: number } = {},
+    ) => {
+      const { wait = 10, ...rest } = options;
+      return t.json<VolumeAttachment>({
+        method: "POST",
+        path: `/v1/volumes/${enc(id)}:attach`,
+        body: input,
+        wait,
+        ...rest,
+      });
+    },
+    detach: (
+      id: string,
+      attachmentId: string,
+      options: RequestOptions & { wait?: number } = {},
+    ) => {
+      const { wait = 10, ...rest } = options;
+      return t.json<VolumeAttachment>({
+        method: "POST",
+        path: `/v1/volumes/${enc(id)}/attachments/${enc(attachmentId)}:detach`,
+        body: {},
+        wait,
+        ...rest,
+      });
+    },
+    getAttachment: (id: string, attachmentId: string, options?: RequestOptions) =>
+      t.json<VolumeAttachment>({
+        method: "GET",
+        path: `/v1/volumes/${enc(id)}/attachments/${enc(attachmentId)}`,
+        ...options,
+      }),
     delete: (id: string, options?: RequestOptions) =>
       t.json<Volume>({
         method: "POST",

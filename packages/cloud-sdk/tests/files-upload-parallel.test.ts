@@ -25,6 +25,7 @@ test("a large write sends eight chunks at once", async () => {
         most = Math.max(most, ++inFlight);
         await new Promise((resolve) => setTimeout(resolve, 20));
         inFlight--;
+        return Response.json({ received: chunks * 1048576 });
       }
       return Response.json({ ok: true });
     }) as typeof fetch,

@@ -35,7 +35,10 @@ def saved_key(base_url: str) -> Optional[str]:
         folder = os.lstat(directory)
         if not stat.S_ISDIR(folder.st_mode) or not _private(folder):
             return None
-        descriptor = os.open(os.path.join(directory, name), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        # Validate the opened file before reading it, without blocking first
+        # if a malformed login happens to be a named pipe rather than a file.
+        descriptor = os.open(os.path.join(directory, name), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                             | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return None
     try:
@@ -48,6 +51,6 @@ def saved_key(base_url: str) -> Optional[str]:
     finally:
         os.close(descriptor)
     key = saved.get("key") if isinstance(saved, dict) else None
-    if saved.get("apiOrigin") != api or not isinstance(key, str) or not _KEY.fullmatch(key):
+    if not isinstance(saved, dict) or saved.get("apiOrigin") != api or not isinstance(key, str) or not _KEY.fullmatch(key):
         return None
     return key

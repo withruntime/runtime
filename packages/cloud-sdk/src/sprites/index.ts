@@ -58,6 +58,18 @@ export interface ExecResult {
   stderr: string | Buffer;
   exitCode: number;
 }
+function validateURLSettings(settings: { auth?: string; privateAccess?: string }) {
+  only("Sprites URL settings", settings, ["auth"]);
+  if (settings.auth !== "public" && settings.auth !== "sprite")
+    throw new TypeError("auth must be public or sprite");
+}
+function validateLabels(labels: string[] | undefined) {
+  if (
+    labels !== undefined &&
+    (!Array.isArray(labels) || Array.from(labels).some((label) => typeof label !== "string"))
+  )
+    throw new TypeError("labels must be an array of strings");
+}
 export type FilesystemErrorCode =
   | "ENOENT"
   | "EEXIST"
@@ -175,8 +187,8 @@ export class SpritesClient {
         "Sprites",
         `vendor runtime image ${o.runtime}; import it into Runtime first`,
       );
-    if (o.urlSettings?.privateAccess)
-      throw new CompatibilityError("Sprites", "privateAccess roles");
+    if (o.urlSettings !== undefined) validateURLSettings(o.urlSettings);
+    validateLabels(o.labels);
     const c = o.config ?? {};
     only("Sprites config", c, ["ramMB", "cpus", "region", "storageGB"]);
     const s = await create(
@@ -192,6 +204,8 @@ export class SpritesClient {
         labels: { "compat.labels": JSON.stringify(o.labels ?? []) },
       },
       o.environment,
+      undefined,
+      o.waitForCapacity === false ? { waitForCapacityMs: 0 } : {},
     );
     const sprite = new Sprite(name, this);
     sprite.hydrate(s);
@@ -306,6 +320,8 @@ export class Sprite {
     options: ExecOptions = {},
   ): Promise<ExecResult> {
     options.signal?.throwIfAborted();
+    if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 0))
+      throw new TypeError("timeout must be a non-negative finite number");
     if (
       options.encoding &&
       options.encoding !== ("buffer" as string) &&
@@ -330,26 +346,42 @@ export class Sprite {
     const cmd = this.spawn(file, args, options);
     const out: Buffer[] = [],
       err: Buffer[] = [];
-    let bytes = 0;
+    const maxBuffer = options.maxBuffer || 10 * 1024 * 1024;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let failure: Error | undefined;
-    const capture = (target: Buffer[]) => (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > (options.maxBuffer ?? 10 * 1024 * 1024)) {
-        failure = new Error("maxBuffer exceeded");
-        cmd.kill("SIGKILL");
-      } else target.push(chunk);
-    };
-    cmd.stdout.on("data", capture(out));
-    cmd.stderr.on("data", capture(err));
-    const abort = () => {
-      failure = new Error("Command aborted");
+    let rejectFailure: (error: Error) => void = () => undefined;
+    const failed = new Promise<never>((_resolve, reject) => {
+      rejectFailure = reject;
+    });
+    const cancel = (error: Error) => {
+      if (failure) return;
+      failure = error;
       cmd.kill("SIGTERM");
+      cmd.close();
+      rejectFailure(error);
     };
+    const capture = (channel: "stdout" | "stderr", target: Buffer[]) => (chunk: Buffer) => {
+      if (failure) return;
+      if (channel === "stdout") stdoutBytes += chunk.length;
+      else stderrBytes += chunk.length;
+      if ((channel === "stdout" ? stdoutBytes : stderrBytes) > maxBuffer)
+        cancel(new Error(`${channel} maxBuffer exceeded`));
+      else target.push(chunk);
+    };
+    cmd.stdout.on("data", capture("stdout", out));
+    cmd.stderr.on("data", capture("stderr", err));
+    const abort = () => cancel(new Error("Command aborted"));
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) abort();
-    const timer = options.timeout ? setTimeout(abort, options.timeout) : undefined;
+    const timer = options.timeout
+      ? setTimeout(
+          () => cancel(new Error(`Command timed out after ${options.timeout} ms`)),
+          options.timeout,
+        )
+      : undefined;
     try {
-      const exitCode = await cmd.wait();
+      const exitCode = await Promise.race([cmd.wait(), failed]);
       if (failure) throw failure;
       const stdout = Buffer.concat(out),
         stderr = Buffer.concat(err);
@@ -376,7 +408,9 @@ export class Sprite {
     return this.execFile(file, args, options);
   }
   createSession(command: string, args: string[] = [], options: SpawnOptions = {}) {
-    return this.spawn(command, args, { ...options, detachable: true });
+    // The pinned SDK's session wrapper forces a terminal, even when a caller
+    // supplies tty:false. Attaching an existing session detects its own PTY.
+    return this.spawn(command, args, { ...options, detachable: true, tty: true });
   }
   attachSession(sessionId: string, options: SpawnOptions = {}) {
     return this.spawn("", [], { ...options, sessionId });
@@ -419,9 +453,7 @@ export class Sprite {
   }
 
   async updateURLSettings(settings: { auth?: string; privateAccess?: string }) {
-    only("Sprites URL settings", settings, ["auth"]);
-    if (settings.auth !== "public" && settings.auth !== "sprite")
-      throw new TypeError("auth must be public or sprite");
+    validateURLSettings(settings);
     const p = await (
       await this.native()
     ).previews.create(8080, { visibility: settings.auth === "public" ? "public" : "private" });
@@ -432,6 +464,10 @@ export class Sprite {
     urlSettings?: { auth?: string; privateAccess?: string };
   }) {
     only("Sprites update", options, ["labels", "urlSettings"]);
+    if (options.labels === undefined && options.urlSettings === undefined)
+      throw new TypeError("urlSettings or labels is required");
+    if (options.urlSettings !== undefined) validateURLSettings(options.urlSettings);
+    validateLabels(options.labels);
     const s = await this.native();
     if (options.labels)
       await s.update({
@@ -575,18 +611,20 @@ export class SpriteFilesystem {
     only("Sprites readdir", options, ["withFileTypes", "recursive", "pattern", "encoding"]);
     if (options.encoding && options.encoding !== "utf8")
       throw new CompatibilityError("Sprites", "directory name encodings other than utf8");
-    const s = await this.get();
-    const entries = await s.files.list(this.files.path(path), {
-      hidden: true,
-      glob: options.pattern,
+    if (options.recursive && options.pattern)
+      throw new CompatibilityError("Sprites", "recursive listing with a glob pattern");
+    const entries = await fileOperation(path, "readdir", async () => {
+      const s = await this.get();
+      const entries = await s.files.list(this.files.path(path), {
+        hidden: true,
+        glob: options.pattern,
+      });
+      if (options.recursive)
+        for (let i = 0; i < entries.length; i++)
+          if (entries[i]!.type === "directory")
+            entries.push(...(await s.files.list(entries[i]!.path, { hidden: true })));
+      return entries;
     });
-    if (options.recursive) {
-      if (options.pattern)
-        throw new CompatibilityError("Sprites", "recursive listing with a glob pattern");
-      for (let i = 0; i < entries.length; i++)
-        if (entries[i]!.type === "directory")
-          entries.push(...(await s.files.list(entries[i]!.path, { hidden: true })));
-    }
     return entries.map((e) =>
       options.withFileTypes
         ? {

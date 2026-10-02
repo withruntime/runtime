@@ -21,6 +21,7 @@ class Previews:
 
     def create(self, port: int, *, visibility: Optional[str] = None,
                      ttl_seconds: Optional[int] = None,
+                     expires_at: Optional[str] = None,
                      embed_origins: Optional[list[str]] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Shares ``port``, or changes its visibility and embed origins if it is shared
@@ -28,12 +29,15 @@ class Previews:
         ``embed_origins`` names the sites that may show it in an iframe
         (``["https://app.example.com", "https://*.example.com"]``, up to 16); any other
         site's iframe is refused. Omitted, a shared port keeps its list; ``[]`` is any
-        site, the default."""
+        site, the default. ``expires_at`` caps the token using an ISO timestamp;
+        when a relative lifetime is also supplied, the earlier bound applies."""
         body: dict[str, Any] = {"port": port}
         if visibility is not None:
             body["visibility"] = visibility
         if ttl_seconds is not None:
             body["ttlSeconds"] = ttl_seconds
+        if expires_at is not None:
+            body["expiresAt"] = expires_at
         if embed_origins is not None:
             body["embedOrigins"] = list(embed_origins)
         return self._t.json("POST", self._base(), body=body, idempotency_key=idempotency_key)
@@ -42,9 +46,15 @@ class Previews:
         """Every shared port, each private one with a fresh token."""
         return (self._t.json("GET", self._base()))["data"]
 
-    def get(self, port: int, *, ttl_seconds: Optional[int] = None) -> dict[str, Any]:
-        query = {"ttlSeconds": ttl_seconds} if ttl_seconds is not None else None
-        return self._t.json("GET", f"{self._base()}/{int(port)}", query=query)
+    def get(self, port: int, *, ttl_seconds: Optional[int] = None,
+                  expires_at: Optional[str] = None) -> dict[str, Any]:
+        """Returns a token capped by ``expires_at`` when supplied as an ISO timestamp."""
+        query: dict[str, Any] = {}
+        if ttl_seconds is not None:
+            query["ttlSeconds"] = ttl_seconds
+        if expires_at is not None:
+            query["expiresAt"] = expires_at
+        return self._t.json("GET", f"{self._base()}/{int(port)}", query=query or None)
 
     def rotate(self, port: int) -> dict[str, Any]:
         """Refuses every token issued for this port so far and returns a new one."""

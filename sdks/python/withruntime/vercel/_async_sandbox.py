@@ -20,6 +20,16 @@ from ._core import (CompletedProcess, DirectoryEntry, NotSupportedError, Process
 _clients: Dict[str, Any] = {}
 
 
+def _validated_ports(ports: Optional[List[int]]) -> Optional[List[int]]:
+    if ports is None:
+        return None
+    result = list(ports)
+    if any(isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+           for port in result):
+        raise ValueError("ports must contain whole numbers from 1 to 65535.")
+    return result
+
+
 def _client(token: Optional[str] = None, client: Optional[AsyncRuntime] = None) -> AsyncRuntime:
     if client is not None:
         return client
@@ -313,8 +323,8 @@ class AsyncSandboxFilesystem:
 
 
 class AsyncSnapshot:
-    """A saved sandbox, over a Runtime snapshot: files, memory and running
-    processes."""
+    """A saved filesystem over a Runtime disk snapshot. Restoring it starts
+    fresh processes."""
 
     def __init__(self, info: Dict[str, Any], client: AsyncRuntime) -> None:
         self._info, self._client = info, client
@@ -332,6 +342,10 @@ class AsyncSnapshot:
         return "iad1"
 
     @property
+    def regions(self) -> Tuple[str, ...]:
+        return (self.region,)
+
+    @property
     def status(self) -> str:
         state = self._info.get("state", "ready")
         return "failed" if state == "failed" else "deleted" if state in ("deleting", "deleted") else "created"
@@ -342,19 +356,51 @@ class AsyncSnapshot:
 
     @property
     def created_at(self) -> int:
-        return int(core_date(self._info.get("createdAt")))
+        return core_millis(self._info.get("createdAt"))
+
+    @property
+    def updated_at(self) -> int:
+        return core_millis(self._info.get("updatedAt") or self._info.get("readyAt") or self._info.get("createdAt"))
 
     @property
     def expires_at(self) -> Optional[int]:
         value = self._info.get("expiresAt")
-        return int(core_date(value)) if value else None
+        return core_millis(value) if value else None
 
-    async def delete(self) -> None:
+    @property
+    def last_used_at(self) -> Optional[int]:
+        value = self._info.get("lastUsedAt")
+        return core_millis(value) if value else None
+
+    @property
+    def creation_method(self) -> Optional[str]:
+        return self._info.get("creationMethod")
+
+    @property
+    def parent_id(self) -> Optional[str]:
+        return self._info.get("parentId")
+
+    async def delete(self) -> "AsyncSnapshot":
         try:
             await _guard("other", lambda: self._client.snapshots.delete(self.id))
+            self._info = await _guard("other", lambda: self._client.snapshots.get(self.id))
         except SandboxApiError as error:
             if error.status_code != 404:
                 raise
+            self._info = {**self._info, "state": "deleted"}
+        return self
+
+
+def core_millis(value: Any) -> int:
+    """Vercel's integer epoch milliseconds, without float rounding of fractions."""
+    if not isinstance(value, str) or not value:
+        return 0
+    from datetime import datetime, timezone
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    elapsed = moment - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return elapsed.days * 86_400_000 + elapsed.seconds * 1000 + elapsed.microseconds // 1000
 
 
 def core_date(value: Any) -> float:
@@ -641,7 +687,12 @@ class AsyncSandbox:
             raise NotSupportedError(f"Changing {given[0]} on an existing sandbox",
                                     "Create a new sandbox with it (Runtime cannot change a sandbox's machine, "
                                     "persistence, tags or region after creation).")
+        # Validate every option before applying the first requested change.
+        ports = _validated_ports(ports)
+        rules = core.network_rules(network_policy) if network_policy is not None else None
+        retention = core.retention_days(snapshot_expiration) if snapshot_expiration is not None else None
         if execution_time_limit is not None:
+            core.lease_seconds(execution_time_limit)
             wanted = core.seconds(execution_time_limit) or 0
             current = int(self.withruntime.info.get("timeoutSeconds") or 0)
             if wanted < current:
@@ -649,10 +700,10 @@ class AsyncSandbox:
                                         "Runtime leases only move later. Call stop() when the work is done.")
             if wanted > current:
                 await self.extend_execution_time_limit(wanted - current)
-        if network_policy is not None:
-            await self.update_network_policy(network_policy)
-        if snapshot_expiration is not None:
-            await _guard("sandbox", lambda: self.withruntime.set_retention(core.retention_days(snapshot_expiration)))
+        if rules is not None:
+            await self._resuming(lambda box: box.network.set(**rules))
+        if retention is not None:
+            await _guard("sandbox", lambda: self.withruntime.set_retention(retention))
         if ports is not None:
             for port in [one for one in self._routes if one not in ports]:
                 await _guard("sandbox", lambda: self.withruntime.previews.delete(port))
@@ -663,11 +714,27 @@ class AsyncSandbox:
         return self
 
     async def snapshot(self, *, expiration: Any = None) -> AsyncSnapshot:
-        """Keeps the whole machine as a Runtime snapshot (files, memory,
-        processes), then stops the sandbox, as Vercel does."""
+        """Keeps the filesystem as a disk-only snapshot, then stops the source.
+        Restoring it starts fresh processes, as Vercel does."""
         days = None if expiration is None else core.retention_days(expiration)
-        taken = await self._resuming(lambda box: box.snapshot(retention_days=days))
-        await _guard("sandbox", lambda: self.withruntime.stop(wait=False))
+        taken = await self._resuming(lambda box: box.snapshot(retention_days=days, mode="disk"))
+        try:
+            await _guard("sandbox", lambda: self.withruntime.stop())
+            if self.withruntime.state != "stopped":
+                await _guard("sandbox", lambda: self.withruntime.wait_for("stopped"))
+        except BaseException as error:  # Cancellation keeps its original type and saved IDs.
+            recovery = {"snapshotId": taken["id"], "sourceSandboxId": self.withruntime.id}
+            if isinstance(error, SandboxApiError):
+                error.data = {**error.data, **recovery}
+            else:
+                error.snapshotId = taken["id"]
+                error.sourceSandboxId = self.withruntime.id
+            raise
+        if self.withruntime.state != "stopped":
+            raise SandboxApiError(
+                f"Snapshot {taken['id']} was saved, but sandbox {self.name} did not finish stopping.",
+                status_code=409, code="snapshot_source_stop_timeout",
+                data={"snapshotId": taken["id"], "sourceSandboxId": self.withruntime.id})
         return AsyncSnapshot(taken, self._client)
 
     list_sessions = staticmethod(core.unsupported("Listing a sandbox's sessions",
@@ -723,8 +790,11 @@ async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[
     box = AsyncSandbox(runtime, client, env, keep)
     try:
         await box._setup(source, ports, snapshot_expiration)
-    except Exception:
-        await runtime.stop(wait=False)
+    except BaseException as original:
+        try:
+            await runtime.stop(wait=False)
+        except BaseException as cleanup:
+            raise original from cleanup
         raise
     return box
 
@@ -745,6 +815,15 @@ def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, s
     trial while the account has trial time, then prepaid credit.
     ``runtime_create`` passes Runtime fields (snake_case)."""
     core.refuse_create(mounts, network_id, region, failover_regions)
+    if snapshot_retention is not None:
+        raise NotSupportedError("Automatic snapshot count and eviction policy (snapshot_retention)",
+                                "Manage snapshots explicitly; Runtime does not implement this policy.")
+    ports = _validated_ports(ports)
+    if snapshot_expiration is not None:
+        core.retention_days(snapshot_expiration)
+    core.lease_seconds(execution_time_limit)
+    if network_policy is not None:
+        core.network_rules(network_policy)
     runtime_client = _client(token, client)
     return operation(lambda: _create(
         runtime_client, name=name, image=image, source=source, ports=ports, execution_time_limit=execution_time_limit,

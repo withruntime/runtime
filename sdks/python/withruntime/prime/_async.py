@@ -1,4 +1,4 @@
-"""Native asynchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.0."""
+"""Native asynchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.1."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -16,9 +16,30 @@ from .models import (CreateSandboxRequest, Sandbox, SandboxListResponse, Command
 
 from .exceptions import CommandTimeoutError
 
+def _validate_guest_user(user):
+    if user == "":
+        raise ValueError("user must be a non-empty guest username")
+    if user is not None:
+        raise CompatibilityError("Prime named guest users are not yet supported on Runtime")
+
+def _validate_background_output_limits(concurrency, queue_size, cache_bytes):
+    if concurrency <= 0:
+        raise ValueError("background_job_output_concurrency must be positive")
+    if queue_size <= 0:
+        raise ValueError("background_job_output_queue_size must be positive")
+    if cache_bytes < 0:
+        raise ValueError("background_job_output_cache_bytes must be non-negative")
+    if (concurrency, queue_size, cache_bytes) != (20, 200, 64 * 1024 * 1024):
+        raise CompatibilityError("Custom background output limits require the background-job adapter")
+
+
 class AsyncSandboxClient:
-    def __init__(self, api_client=None, *, api_key=None, base_url=None):
-        self._runtime = api_client or AsyncRuntime(api_key=runtime_key(api_key))
+    def __init__(self, api_client=None, *, api_key=None, base_url=None,
+                 background_job_output_concurrency=20, background_job_output_queue_size=200,
+                 background_job_output_cache_bytes=64 * 1024 * 1024):
+        _validate_background_output_limits(background_job_output_concurrency,
+                                          background_job_output_queue_size, background_job_output_cache_bytes)
+        self._runtime = api_client if api_client is not None else AsyncRuntime(api_key=runtime_key(api_key), base_url=base_url)
 
     async def create(self, request: CreateSandboxRequest):
         p = values(request)
@@ -61,7 +82,7 @@ class AsyncSandboxClient:
 
     def _view(self, sb):
         i = sb.info
-        state = {"running": "RUNNING", "starting": "PENDING", "stopped": "TERMINATED", "paused": "STOPPED"}.get(sb.state, sb.state.upper())
+        state = {"running": "RUNNING", "starting": "PENDING", "stopped": "TERMINATED", "paused": "PAUSED"}.get(sb.state, sb.state.upper())
         labels = i.get("labels") or {}
         return Sandbox(id=sb.id, name=i.get("name", ""), status=state,
             docker_image=labels.get("compat.image", i.get("image", "")),
@@ -114,7 +135,8 @@ class AsyncSandboxClient:
             data = b"{}"
         return environment(data, extra)
 
-    async def execute_command(self, sandbox_id, command, working_dir=None, env=None, timeout=None):
+    async def execute_command(self, sandbox_id, command, working_dir=None, env=None, timeout=None, user=None):
+        _validate_guest_user(user)
         sb = await self._runtime.sandboxes.get(sandbox_id)
         result = await sb.exec(command, cwd=working_dir, env=await self._environment(sb, env),
             timeout_ms=None if timeout is None else int(positive(timeout, "timeout") * 1000), on_stdout=lambda chunk: None)
@@ -204,7 +226,8 @@ class AsyncSandboxClient:
         if len(set(keys)) != len(keys):
             raise ValueError("jobs must be unique")
 
-    async def start_background_job(self, sandbox_id, command, working_dir=None, env=None):
+    async def start_background_job(self, sandbox_id, command, working_dir=None, env=None, user=None):
+        _validate_guest_user(user)
         if not isinstance(command, str) or not command or "\x00" in command:
             raise ValueError("command must be a nonempty string without NUL")
         job_id = uuid.uuid4().hex[:8]

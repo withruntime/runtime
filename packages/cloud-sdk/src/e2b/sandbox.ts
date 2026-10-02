@@ -1,4 +1,5 @@
 import type { Runtime } from "../client.js";
+import type { RequestOptions } from "../transport.js";
 import {
   clientFor,
   request,
@@ -17,6 +18,7 @@ import {
   TemplateError,
 } from "./errors.js";
 import { Filesystem } from "./filesystem.js";
+import { Pty } from "./pty.js";
 
 /* E2B's Sandbox over Runtime's. Every call is one or a few calls of the
    withruntime SDK; nothing here speaks HTTP. What Runtime cannot do the same
@@ -168,18 +170,23 @@ function refuseCreate(opts: SandboxOpts) {
 
 /** Where a template sends the create: the stock image, a Runtime image by
  * name or id, or a Runtime snapshot by id. */
-async function resolveTemplate(client: Runtime, template: string): Promise<Partial<RuntimeCreate>> {
+async function resolveTemplate(
+  client: Runtime,
+  template: string,
+  options: RequestOptions,
+): Promise<Partial<RuntimeCreate>> {
+  options.signal?.throwIfAborted();
   if (STOCK_TEMPLATES.has(template)) return {};
   if (UUID.test(template)) {
     try {
-      await client.images.get(template);
+      await client.images.get(template, options);
       return { image: template };
     } catch (error) {
       if ((error as { status?: number }).status !== 404) throw error;
     }
     return { snapshot: template };
   }
-  const page = await client.images.list({ name: template, state: "ready", limit: 1 });
+  const page = await client.images.list({ name: template, state: "ready", limit: 1 }, options);
   const image = page.data[0];
   if (image) return { image: image.id };
   const error = new TemplateError(
@@ -240,6 +247,7 @@ export class Sandbox {
 
   readonly files: Filesystem;
   readonly commands: Commands;
+  readonly pty: Pty;
   readonly #client: Runtime;
   #runtime: RuntimeSandbox;
   #home: Promise<void> | undefined;
@@ -255,12 +263,15 @@ export class Sandbox {
     this.#runtime = runtime;
     this.#client = client;
     const ctx = {
-      ensureHome: (text: string | undefined) => this.#ensureHome(text),
+      ensureHome: (text: string | undefined, options?: RequestOptions) =>
+        this.#ensureHome(text, options),
+      requestTimeoutMs: this.requestTimeoutMs,
     } as unknown as SandboxContext;
     // A getter, so the modules see the sandbox as it is after each refresh.
     Object.defineProperty(ctx, "runtime", { get: () => this.#runtime });
     this.files = new Filesystem(ctx);
     this.commands = new Commands(ctx);
+    this.pty = new Pty(ctx);
   }
 
   get sandboxId(): string {
@@ -278,18 +289,43 @@ export class Sandbox {
   /** E2B's home is /home/user and Runtime's is /workspace. The first time a
    * path or command names /home/user, it is made a link to /workspace (unless
    * something is already there), so paths written for E2B work. */
-  #ensureHome(text: string | undefined): Promise<void> {
-    if (this.#home || !text?.includes("/home/user")) return this.#home ?? Promise.resolve();
-    this.#home = (async () => {
+  #ensureHome(text: string | undefined, options: RequestOptions = {}): Promise<void> {
+    const signal = options.signal;
+    signal?.throwIfAborted();
+    const wait = (pending: Promise<void>): Promise<void> => {
+      if (!signal) return pending;
+      return new Promise((resolve, reject) => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+        const abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        pending.then(
+          () => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+          },
+          (error: unknown) => {
+            signal.removeEventListener("abort", abort);
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- passes the pending call's own failure through unchanged
+            reject(error);
+          },
+        );
+      });
+    };
+    if (this.#home || !text?.includes("/home/user")) return wait(this.#home ?? Promise.resolve());
+    const pending = (async () => {
       const result = await guard("sandbox", () =>
-        this.#runtime.exec("[ -e /home/user ] || sudo ln -s /workspace /home/user"),
+        this.#runtime.exec("[ -e /home/user ] || sudo ln -s /workspace /home/user", { signal }),
       );
       if (result.exitCode !== 0 && typeof process !== "undefined")
         process.emitWarning(`Could not link /home/user to /workspace: ${result.stderr.trim()}`, {
           code: "RUNTIME_E2B_HOME",
         });
     })();
-    return this.#home;
+    this.#home = pending;
+    pending.catch(() => {
+      if (this.#home === pending) this.#home = undefined;
+    });
+    return wait(pending);
   }
 
   // ---- create, connect, list -------------------------------------------
@@ -312,6 +348,8 @@ export class Sandbox {
     const opts = (typeof templateOrOpts === "string" ? maybeOpts : templateOrOpts) ?? {};
     const template =
       (typeof templateOrOpts === "string" ? templateOrOpts : opts.template) ?? this.defaultTemplate;
+    const options = request(opts);
+    options.signal?.throwIfAborted();
     refuseCreate(opts);
     const client = clientFor(opts);
     const input: RuntimeCreate = {
@@ -326,7 +364,8 @@ export class Sandbox {
       ...(opts.envs && Object.keys(opts.envs).length ? { env: opts.envs } : {}),
       ...(opts.allowInternetAccess === false ? { network: { internet: false } } : {}),
     };
-    const source = await guard("other", () => resolveTemplate(client, template));
+    const source = await guard("other", () => resolveTemplate(client, template, options));
+    options.signal?.throwIfAborted();
     const create: RuntimeCreate = {
       // A snapshot carries its own machine; everything else gets E2B's shape.
       ...(source.snapshot ? {} : DEFAULT_SHAPE),
@@ -334,7 +373,7 @@ export class Sandbox {
       ...source,
       ...opts.runtime?.create,
     };
-    const runtime = await guard("sandbox", () => client.sandboxes.create(create, request(opts)));
+    const runtime = await guard("sandbox", () => client.sandboxes.create(create, options));
     return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
@@ -541,12 +580,6 @@ export class Sandbox {
 
   // ---- what Runtime does differently -----------------------------------
 
-  get pty(): never {
-    throw new NotSupportedError(
-      "E2B's pty module",
-      "Use `await sandbox.runtime.terminal({ cols, rows, onData })` for an interactive terminal, or runtime.spawn(cmd, { pty: {} }).",
-    );
-  }
   get git(): never {
     throw new NotSupportedError(
       "E2B's git module (deprecated by E2B too)",
@@ -661,12 +694,14 @@ const PAUSED = ["pausing", "paused"] as const;
 /** E2B's paginator: `while (p.hasNext) items.push(...(await p.nextItems()))`. */
 export class SandboxPaginator {
   readonly #client: Runtime;
+  readonly #request: RequestOptions;
   readonly #filter: Parameters<Runtime["sandboxes"]["list"]>[0];
   #page: Awaited<ReturnType<Runtime["sandboxes"]["list"]>> | undefined;
   #hasNext = true;
 
   constructor(client: Runtime, opts: SandboxListOpts) {
     this.#client = client;
+    this.#request = request(opts);
     const query = opts.query ?? {};
     if (query.template !== undefined && !STOCK_TEMPLATES.has(query.template))
       throw new NotSupportedError(
@@ -702,10 +737,13 @@ export class SandboxPaginator {
     return this.#page?.nextCursor ?? undefined;
   }
   async nextItems(): Promise<SandboxInfo[]> {
+    this.#request.signal?.throwIfAborted();
     if (!this.#hasNext) throw new SandboxError("No more items to fetch.");
     const previous = this.#page;
     const page = await guard("other", async () =>
-      previous ? await previous.next() : await this.#client.sandboxes.list(this.#filter),
+      previous
+        ? await previous.next()
+        : await this.#client.sandboxes.list(this.#filter, this.#request),
     );
     this.#page = page ?? undefined;
     this.#hasNext = Boolean(page?.hasMore);

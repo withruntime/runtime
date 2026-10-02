@@ -692,33 +692,13 @@ export class RuntimeCloudSandboxSession implements SandboxSession<RuntimeCloudSa
 
   async persistWorkspace(): Promise<Uint8Array> {
     const root = this.state.manifest.root;
-    const staging = `${STAGING}/${crypto.randomUUID()}.tar`;
-    const skip = root === FILES_HOME ? ["--exclude=./.openai-agents-staging"] : [];
-    try {
-      const packed = await this.#call((sbx) =>
-        sbx.exec(
-          [
-            "sh",
-            "-c",
-            `mkdir -p -- ${STAGING} && tar ${skip.join(" ")} -C "$1" -cf - . > "$2"`,
-            "sh",
-            root,
-            staging,
-          ],
-          {
-            cwd: "/",
-            timeoutMs: this.state.execTimeoutMs,
-          },
-        ),
-      );
-      if (packed.exitCode !== 0)
-        throw new SandboxProviderError(`${PROVIDER} could not archive the workspace.`, {
-          stderr: packed.stderr,
-        });
-      return await this.#call((sbx) => sbx.files.read(staging));
-    } finally {
-      await this.#call((sbx) => sbx.files.remove(staging)).catch(() => undefined);
-    }
+    return this.#call((sbx) =>
+      sbx.files.archive(root, {
+        gzip: false,
+        ...(root === FILES_HOME ? { exclude: [".openai-agents-staging"] } : {}),
+        timeoutMs: this.state.execTimeoutMs,
+      }),
+    );
   }
 
   async hydrateWorkspace(data: WorkspaceArchiveData): Promise<void> {
@@ -728,32 +708,12 @@ export class RuntimeCloudSandboxSession implements SandboxSession<RuntimeCloudSa
         : data instanceof Uint8Array
           ? data
           : new Uint8Array(data);
-    const staging = `${STAGING}/${crypto.randomUUID()}.tar`;
-    try {
-      await this.#call((sbx) => sbx.files.write(staging, bytes));
-      const unpacked = await this.#call((sbx) =>
-        sbx.exec(
-          [
-            "sh",
-            "-c",
-            'mkdir -p -- "$1" && tar -C "$1" -xf "$2"',
-            "sh",
-            this.state.manifest.root,
-            staging,
-          ],
-          {
-            cwd: "/",
-            timeoutMs: this.state.execTimeoutMs,
-          },
-        ),
-      );
-      if (unpacked.exitCode !== 0)
-        throw new SandboxProviderError(`${PROVIDER} could not restore the workspace.`, {
-          stderr: unpacked.stderr,
-        });
-    } finally {
-      await this.#call((sbx) => sbx.files.remove(staging)).catch(() => undefined);
-    }
+    await this.#call((sbx) =>
+      sbx.files.unarchive(this.state.manifest.root, bytes, {
+        gzip: false,
+        timeoutMs: this.state.execTimeoutMs,
+      }),
+    );
   }
 
   // Lifecycle.

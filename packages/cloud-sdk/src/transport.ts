@@ -1,7 +1,7 @@
 import { ConnectionError, DELIBERATE, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.9.0";
+export const VERSION = "0.10.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -134,18 +134,58 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     else signal?.addEventListener("abort", abort, { once: true });
   });
 
+/** A credential lookup can finish independently, but must not keep its
+ * caller waiting after cancellation or hold that caller's queue slot. */
+function untilAborted<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return pending;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(abortReason(signal));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(cause instanceof Error ? cause : new Error("Credential lookup failed.", { cause }));
+      },
+    );
+  });
+}
+
+function abortReason(signal?: AbortSignal): Error {
+  return signal?.reason instanceof Error
+    ? signal.reason
+    : new Error("Aborted", { cause: signal?.reason });
+}
+
 /** At most `maximum` holders at once; the rest wait their turn, first come
  * first served. */
 function slots(maximum: number) {
   let active = 0;
   const waiting: Array<() => void> = [];
   return {
-    async take(): Promise<void> {
+    async take(signal?: AbortSignal): Promise<void> {
+      signal?.throwIfAborted();
       if (active < maximum) {
         active++;
         return;
       }
-      await new Promise<void>((resolve) => waiting.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const ready = () => {
+          signal?.removeEventListener("abort", abort);
+          resolve();
+        };
+        const abort = () => {
+          const at = waiting.indexOf(ready);
+          if (at >= 0) waiting.splice(at, 1);
+          reject(abortReason(signal));
+        };
+        waiting.push(ready);
+        signal?.addEventListener("abort", abort, { once: true });
+      });
     },
     give(): void {
       const next = waiting.shift();
@@ -234,23 +274,73 @@ export class Transport {
    * the same key every time, and waits out a full house for a call that sets
    * waitForCapacityMs. */
   async send(call: Call): Promise<Response> {
-    const apiKey = await this.#key();
-    const write = call.method !== "GET";
-    const key = write ? (call.idempotencyKey ?? crypto.randomUUID()) : undefined;
-    // Time spent waiting for room is added to the call's deadline, not taken
-    // from it: once admitted, a create still has its whole timeoutMs.
+    return this.#send(this.#prepare(call), async (response) => response);
+  }
+
+  /** Start the deadline before waiting for a connection; keep one key and
+   * signal through every retry and the complete response body. */
+  #prepare(call: Call): Call {
+    const timeoutMs = call.timeoutMs ?? this.#timeoutMs;
+    const roomMs = Math.max(0, call.waitForCapacityMs ?? 0);
+    const deadline = timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs + roomMs);
+    const signal = deadline
+      ? call.signal
+        ? AbortSignal.any([call.signal, deadline])
+        : deadline
+      : call.signal;
+    return {
+      ...call,
+      timeoutMs: 0,
+      ...(signal ? { signal } : {}),
+      ...(call.method !== "GET"
+        ? { idempotencyKey: call.idempotencyKey ?? crypto.randomUUID() }
+        : {}),
+    };
+  }
+
+  #connectionError(call: Call, cause: unknown): ConnectionError {
+    const cancelled = call.signal?.aborted === true;
+    const route =
+      this.#routed && !cancelled
+        ? describeRoute(`${this.baseUrl}${call.path}`, cause)
+        : { via: "" };
+    return new ConnectionError({
+      message: cancelled
+        ? "The call was cancelled or ran past its deadline."
+        : call.method !== "GET"
+          ? `No answer from Runtime at ${this.baseUrl}${route.via}. The change may have happened; retrying with the same idempotencyKey is safe.`
+          : `No answer from Runtime at ${this.baseUrl}${route.via}.`,
+      hint: cancelled
+        ? "Raise timeoutMs for a long call, or retry with the same idempotencyKey."
+        : (route.hint ?? "Check the network, and RUNTIME_API_URL if you set it."),
+      code: cancelled ? "timeout" : "connection_error",
+      status: 0,
+      ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
+      cause,
+    });
+  }
+
+  async #send<T>(call: Call, consume: (response: Response) => Promise<T>): Promise<T> {
+    let apiKey: string;
+    try {
+      call.signal?.throwIfAborted();
+      apiKey = await untilAborted(this.#key(), call.signal);
+    } catch (cause) {
+      if (call.signal?.aborted) throw this.#connectionError(call, cause);
+      throw cause;
+    }
+    const key = call.method !== "GET" ? call.idempotencyKey : undefined;
     const roomMs = Math.max(0, call.waitForCapacityMs ?? 0);
     const roomUntil = performance.now() + roomMs;
     let roomAttempt = 0;
-    const timeoutMs = call.timeoutMs ?? this.#timeoutMs;
-    const deadline =
-      timeoutMs === 0 ? new AbortController().signal : AbortSignal.timeout(timeoutMs + roomMs);
-    const signal = call.signal ? AbortSignal.any([call.signal, deadline]) : deadline;
+    const signal = call.signal;
     const url = `${this.baseUrl}${call.path}${encodeQuery(call.query)}`;
     const body = call.bytes ?? (call.body === undefined ? undefined : JSON.stringify(call.body));
     const retry = call.retry ?? true;
-    for (let attempt = 0; ; attempt++) {
-      let response: Response;
+    let attempt = 0;
+    for (;;) {
+      let response: Response | undefined;
+      let inCallback = false;
       // Called as a plain function: Cloudflare Workers' fetch throws "Illegal
       // invocation" when called as a method of another object (this.#fetch()).
       const send = this.#fetch;
@@ -258,6 +348,7 @@ export class Transport {
         // "manual", not "error": Workers accept only "follow" and "manual".
         // The API never redirects, so a redirect is refused here exactly as
         // "error" refused it: thrown, retried, then a connection_error.
+        signal?.throwIfAborted();
         response = await send(url, {
           method: call.method,
           headers: this.#headers(call, key, apiKey),
@@ -272,132 +363,132 @@ export class Transport {
           await response.body?.cancel().catch(() => {});
           throw new TypeError(`fetch failed: Runtime answered a redirect (${response.status}).`);
         }
-      } catch (cause) {
-        // A proxy variable the SDK cannot use: retrying cannot change it.
-        if (cause instanceof RuntimeError) throw cause;
-        if (signal.aborted || !retry || attempt >= this.#maxRetries) {
-          const route = this.#routed && !signal.aborted ? describeRoute(url, cause) : { via: "" };
-          throw new ConnectionError({
-            message: signal.aborted
-              ? "The call was cancelled or ran past its deadline."
-              : write
-                ? `No answer from Runtime at ${this.baseUrl}${route.via}. The change may have happened; retrying with the same idempotencyKey is safe.`
-                : `No answer from Runtime at ${this.baseUrl}${route.via}.`,
-            hint: signal.aborted
-              ? "Raise timeoutMs for a long call, or retry with the same idempotencyKey."
-              : (route.hint ?? "Check the network, and RUNTIME_API_URL if you set it."),
-            code: signal.aborted ? "timeout" : "connection_error",
-            status: 0,
-            ...(key ? { idempotencyKey: key } : {}),
-            cause,
-          });
-        }
-        await sleep(backoff(attempt), signal);
-        continue;
-      }
-      /* An answer that took longer than the API holds its headers (90 s)
+        /* An answer that took longer than the API holds its headers (90 s)
          comes as a 200 sent early, and then its JSON: the answer, or
          {"error": ...} when the work failed after the status went
          (runtime-late-answer, api.md). Either way it is read here, so a
          failure is thrown as the error it is, never returned as a success. */
-      let late: { status: number; text: string } | undefined;
-      if (response.ok && response.headers.get("runtime-late-answer") === "true") {
-        const text = await response.text();
-        const failed = lateFailure(text);
-        if (failed === undefined) return new Response(text, { headers: response.headers });
-        late = { status: failed, text };
-      } else if (response.ok) {
-        call.onResponse?.(response);
-        return response;
-      }
-      const status = late?.status ?? response.status;
-      // Runtime never answers 407: it is a proxy refusing the tunnel, which
-      // Bun's fetch hands back as a response rather than an error.
-      if (response.status === 407 && this.#routed) {
-        await response.body?.cancel();
-        const route = describeRoute(url, 407);
-        throw new ConnectionError({
-          message: `No answer from Runtime at ${this.baseUrl}${route.via}.`,
-          code: "connection_error",
-          status: 0,
-          ...(route.hint ? { hint: route.hint } : {}),
-          ...(key ? { idempotencyKey: key } : {}),
+        let late: { status: number; text: string } | undefined;
+        if (response.ok && response.headers.get("runtime-late-answer") === "true") {
+          const text = await response.text();
+          const failed = lateFailure(text);
+          if (failed === undefined)
+            return await consume(new Response(text, { headers: response.headers }));
+          late = { status: failed, text };
+        } else if (response.ok) {
+          inCallback = true;
+          call.onResponse?.(response);
+          inCallback = false;
+          return await consume(response);
+        }
+        const status = late?.status ?? response.status;
+        // Runtime never answers 407: it is a proxy refusing the tunnel, which
+        // Bun's fetch hands back as a response rather than an error.
+        if (response.status === 407 && this.#routed) {
+          await response.body?.cancel();
+          const route = describeRoute(url, 407);
+          throw new ConnectionError({
+            message: `No answer from Runtime at ${this.baseUrl}${route.via}.`,
+            code: "connection_error",
+            status: 0,
+            ...(route.hint ? { hint: route.hint } : {}),
+            ...(key ? { idempotencyKey: key } : {}),
+          });
+        }
+        const text = late?.text ?? (await response.text());
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = { error: { message: text.slice(0, 500) || `HTTP ${status}` } };
+        }
+        const error = errorFor(status, parsed, key);
+        // A full house: wait for a slot or for room, then send the same call
+        // again. A request that can never fit (a fork of more copies than the
+        // trial runs) is not waited for.
+        if (
+          retry &&
+          roomMs > 0 &&
+          WAITS_FOR_ROOM.has(error.code) &&
+          error.details?.field !== "count"
+        ) {
+          const left = roomUntil - performance.now();
+          if (left <= 0) throw error;
+          const pause = Math.min(left, error.retryAfterMs ?? roomBackoff(roomAttempt++));
+          inCallback = true;
+          call.onCapacityWait?.(error, pause);
+          inCallback = false;
+          await sleep(pause, signal);
+          continue;
+        }
+        const retryable = [429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code);
+        if (!retry || !retryable || attempt >= this.#maxRetries) throw error;
+        const header = Number(response.headers.get("retry-after"));
+        const wait =
+          error.retryAfterMs ??
+          (Number.isFinite(header) && header > 0 ? header * 1000 : backoff(attempt));
+        await sleep(Math.min(30_000, wait) * (0.9 + Math.random() * 0.2), signal);
+      } catch (cause) {
+        // Deliberate API refusals and unusable proxy settings cannot be
+        // fixed by repeating the request. Body failures are transport
+        // failures too: a write replays under its original key.
+        if (inCallback) {
+          await response?.body?.cancel().catch(() => undefined);
+          throw cause;
+        }
+        if (cause instanceof RuntimeError) throw cause;
+        if (signal?.aborted || !retry || attempt >= this.#maxRetries)
+          throw this.#connectionError(call, cause);
+        await sleep(backoff(attempt), signal).catch((cause: unknown) => {
+          throw this.#connectionError(call, cause);
         });
       }
-      const text = late?.text ?? (await response.text());
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = { error: { message: text.slice(0, 500) || `HTTP ${status}` } };
-      }
-      const error = errorFor(status, parsed, key);
-      // A full house: wait for a slot or for room, then send the same call
-      // again. A request that can never fit (a fork of more copies than the
-      // trial runs) is not waited for.
-      if (
-        retry &&
-        roomMs > 0 &&
-        WAITS_FOR_ROOM.has(error.code) &&
-        error.details?.field !== "count"
-      ) {
-        const left = roomUntil - performance.now();
-        if (left <= 0) throw error;
-        const pause = Math.min(left, error.retryAfterMs ?? roomBackoff(roomAttempt++));
-        call.onCapacityWait?.(error, pause);
-        await sleep(pause, signal);
-        continue;
-      }
-      const retryable = [429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code);
-      if (!retry || !retryable || attempt >= this.#maxRetries) throw error;
-      const header = Number(response.headers.get("retry-after"));
-      const wait =
-        error.retryAfterMs ??
-        (Number.isFinite(header) && header > 0 ? header * 1000 : backoff(attempt));
-      await sleep(Math.min(30_000, wait) * (0.9 + Math.random() * 0.2), signal);
+      attempt++;
+    }
+  }
+
+  async #queued<T>(call: Call, consume: (response: Response) => Promise<T>): Promise<T> {
+    try {
+      await this.#slots.take(call.signal);
+    } catch (cause) {
+      throw this.#connectionError(call, cause);
+    }
+    try {
+      return await this.#send(call, consume);
+    } finally {
+      this.#slots.give();
     }
   }
 
   async json<T>(call: Call): Promise<T> {
-    await this.#slots.take();
-    try {
-      const text = await (await this.send(call)).text();
+    return this.#queued(this.#prepare(call), async (response) => {
+      const text = await response.text();
       return (text ? JSON.parse(text) : null) as T;
-    } finally {
-      this.#slots.give();
-    }
+    });
   }
 
   async bytes(call: Call): Promise<Uint8Array> {
-    await this.#slots.take();
-    try {
-      return new Uint8Array(await (await this.send(call)).arrayBuffer());
-    } finally {
-      this.#slots.give();
-    }
+    return this.#queued(
+      this.#prepare(call),
+      async (response) => new Uint8Array(await response.arrayBuffer()),
+    );
   }
 
-  /** A file's bytes, read whole and checked: the API says a body's length
-   * (x-content-length) and, when small, its SHA-256 (x-content-sha256) before
-   * sending it, and a body that falls short or differs is read again, twice,
-   * then refused. Nothing between the API and here reliably turns a stream
-   * cut part way into an error: on 25 September 2026 a 50 MB file came back
-   * 29 MB long, exit 0. */
+  /** A file's bytes, read whole and checked against its promised length and
+   * SHA-256. A short or different body is read again twice, within the same
+   * call deadline. */
   async fileBytes(call: Call): Promise<Uint8Array> {
+    call = this.#prepare(call);
     for (let attempt = 0; ; attempt++) {
-      await this.#slots.take();
-      let failure: RuntimeError;
-      try {
-        const response = await this.send(call);
+      const { body, problem } = await this.#queued(call, async (response) => {
         const body = new Uint8Array(await response.arrayBuffer());
-        const problem = await checkBody(response.headers, body);
-        if (!problem) return body;
-        failure = problem;
-      } finally {
-        this.#slots.give();
-      }
-      if (attempt >= 2 || call.signal?.aborted) throw failure;
-      await sleep(backoff(attempt), call.signal);
+        return { body, problem: await checkBody(response.headers, body) };
+      });
+      if (!problem) return body;
+      if (attempt >= 2) throw problem;
+      await sleep(backoff(attempt), call.signal).catch((cause: unknown) => {
+        throw this.#connectionError(call, cause);
+      });
     }
   }
 

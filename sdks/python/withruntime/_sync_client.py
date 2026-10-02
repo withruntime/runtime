@@ -67,7 +67,7 @@ def _seconds_until(moment: Any) -> float:
 
 
 def _check_key(key: str) -> str:
-    if not key or len(key) > 128 or not key[0].isalnum() or any(c.lower() not in _KEY_CHARS and not c.isupper() for c in key):
+    if not key or len(key) > 128 or not key.isascii() or not key[0].isalnum() or any(c.lower() not in _KEY_CHARS for c in key):
         raise ValueError("idempotency_key must be 1-128 letters, digits, '_', '.', ':' or '-'")
     return key
 
@@ -169,7 +169,8 @@ class _Transport:
                    raw: Optional[bytes] = None, idempotency_key: Optional[str] = None, wait: Optional[int] = None,
                    accept: str = "application/json", timeout: Optional[float] = None, retry: bool = True,
                    wait_for_capacity: float = 0, deadline: Optional[float] = None,
-                   on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None) -> Any:
+                   on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
+                   read_body: bool = False, unlimited_body: bool = False) -> Any:
         """Sends a call and returns the response once it succeeded. Retries
         transport failures, 429, 502, 503 and 504 with backoff, with the same
         Idempotency-Key every time, so a retried write never happens twice.
@@ -190,14 +191,38 @@ class _Transport:
         room_until = time.monotonic() + wait_for_capacity
         room_attempt = 0
         attempt = 0
+        def retry_pause(delay):
+            try:
+                _request_sleep(delay)
+            except timeouts() as error:
+                raise RuntimeError("The request deadline expired.", code="request_timeout", idempotency_key=key) from error
         while True:
             try:
                 scope.remaining()
                 extra = {} if deadline is None else {"deadline": deadline}
+                if not retry:
+                    extra["retry_stale"] = False
                 response = self._http.send(method, target, headers, data, per_call, **extra)
+                status = response.status
+                # Whole responses belong to the same attempt as their headers.
+                # A write may already have happened when its body is lost; the
+                # retry must retain this call's original idempotency key.
+                if 200 <= status < 300 and response.headers.get("runtime-late-answer") == "true":
+                    text = response.read()
+                    failed = _late_failure(text)
+                    if failed is None:
+                        return Answered(status, response.headers, text)
+                    status = failed
+                elif 200 <= status < 300:
+                    if not read_body:
+                        return response
+                    text = response.read(limit=None) if unlimited_body else response.read()
+                    return Answered(status, response.headers, text)
+                else:
+                    text = response.read()
             except (OSError, ValueError, *timeouts()) as error:
                 if (deadline is not None and time.monotonic() >= deadline) or (scope.configured and isinstance(error, timeouts())):
-                    raise RuntimeError("The request deadline expired.", code="request_timeout") from error
+                    raise RuntimeError("The request deadline expired.", code="request_timeout", idempotency_key=key) from error
                 if not retry or attempt >= self._max_retries:
                     via, hint = describe_route(self.origin.tls, self.origin.host, self.origin.port, error)
                     raise ConnectionError(
@@ -206,23 +231,9 @@ class _Transport:
                         else f"No answer from Runtime at {self.base_url}{via}.",
                         code="connection_error", idempotency_key=key,
                         hint=hint or "Check the network, and RUNTIME_API_URL if you set it.") from error
-                _request_sleep(_backoff(attempt))
+                retry_pause(_backoff(attempt))
                 attempt += 1
                 continue
-            status = response.status
-            if 200 <= status < 300 and response.headers.get("runtime-late-answer") == "true":
-                # Later than the API holds its headers (90 s): a 200 sent early,
-                # then the answer or {"error": ...} if the work failed after the
-                # status went (api.md). A failure is raised as the error it is.
-                text = response.read()
-                failed = _late_failure(text)
-                if failed is None:
-                    return Answered(status, response.headers, text)
-                status = failed
-            elif 200 <= status < 300:
-                return response
-            else:
-                text = response.read()
             try:
                 parsed = json.loads(text or b"null")
             except ValueError:
@@ -240,7 +251,7 @@ class _Transport:
                             else _room_backoff(room_attempt))
                 if on_capacity_wait is not None:
                     on_capacity_wait(error, pause)
-                _request_sleep(pause)
+                retry_pause(pause)
                 room_attempt += 1
                 continue
             if (not retry or status not in (429, 502, 503, 504) or error.code in _DELIBERATE
@@ -249,18 +260,18 @@ class _Transport:
             header = response.headers.get("retry-after")
             delay = (error.retry_after_ms / 1000 if error.retry_after_ms is not None
                      else float(header) if header and header.isdigit() else _backoff(attempt))
-            _request_sleep(min(30.0, delay) * random.uniform(0.9, 1.1))
+            retry_pause(min(30.0, delay) * random.uniform(0.9, 1.1))
             attempt += 1
 
     def json(self, method: str, path: str, **kwargs: Any) -> Any:
         with self._slots:
-            response = self.send(method, path, **kwargs)
+            response = self.send(method, path, read_body=True, **kwargs)
             text = response.read()
         return json.loads(text) if text else None
 
     def bytes(self, method: str, path: str, **kwargs: Any) -> bytes:
         with self._slots:
-            response = self.send(method, path, accept="application/octet-stream", **kwargs)
+            response = self.send(method, path, accept="application/octet-stream", read_body=True, **kwargs)
             return response.read()
 
     def file_bytes(self, path: str, query: dict[str, Any]) -> bytes:
@@ -273,8 +284,9 @@ class _Transport:
         attempt = 0
         while True:
             with self._slots:
-                response = self.send("GET", path, query=query, accept="application/octet-stream")
-                data = response.read(limit=None)
+                response = self.send("GET", path, query=query, accept="application/octet-stream",
+                                           read_body=True, unlimited_body=True)
+                data = response.read()
             problem = _check_body(response.headers, data)
             if problem is None:
                 return data
@@ -352,7 +364,7 @@ def _check_create_fields(fields: dict[str, Any]) -> None:
 
 
 class Answered:
-    """A response already read: a late answer that succeeded."""
+    """A complete response already read within its retry attempt."""
 
     def __init__(self, status: int, headers: dict[str, str], body: bytes) -> None:
         self.status, self.headers, self._body = status, headers, body
@@ -619,18 +631,29 @@ class Process:
         payload = data.encode() if isinstance(data, str) else bytes(data)
         with self._input_writes:
             sent = 0
+            chunk_size = CHUNK
             while True:
-                chunk = payload[sent:sent + CHUNK]
+                chunk = payload[sent:sent + chunk_size]
                 reply = self._t.json("POST", self._path(":write"), body={
                     "base64": base64.b64encode(chunk).decode(), "offset": self._input_offset,
                     "eof": eof and sent + len(chunk) == len(payload)})
                 offset = reply.get("offset")
                 if type(offset) is not int or offset < self._input_offset or offset > self._input_offset + len(chunk):
                     raise ConnectionError("The process returned an invalid input offset.", code="connection_error")
-                sent += offset - self._input_offset
+                accepted = offset - self._input_offset
+                sent += accepted
                 self._input_offset = offset
                 if sent >= len(payload):
                     return
+                if accepted == 0 and chunk:
+                    # The guest's input buffer is full. Yield before resending
+                    # the same bytes, so draining and cancellation can run.
+                    chunk_size = min(chunk_size, 65_536)
+                    sleep(0.1)
+                elif accepted < len(chunk):
+                    # Resend only as much as the guest showed it can accept,
+                    # rather than sending a whole MiB for every small advance.
+                    chunk_size = accepted
 
     def kill(self, signal: str = "SIGTERM") -> None:
         self._t.json("POST", self._path(":signal"), body={"signal": signal})
@@ -787,10 +810,67 @@ class Files:
     def rename(self, source: str, target: str, overwrite: bool = False) -> None:
         self._t.json("POST", self._path("/files:rename"), body={"from": source, "to": target, "overwrite": overwrite})
 
-    def upload(self, local_path: str, remote_path: str) -> None:
+    def archive(self, path: str, *, gzip: bool = True, user: str = "sandbox",
+                      exclude: Optional[list[str]] = None) -> bytes:
+        """Pack a folder as tar bytes, gzip-compressed by default. ``exclude``
+        contains relative paths, not globs. ``user='root'`` explicitly uses
+        passwordless sudo inside this sandbox."""
+        data = bytearray()
+        chunks = self._t.file_chunks(self._path("/files/archive"),
+                                     {"path": path, "gzip": gzip, "user": user, "exclude": exclude})
+        try:
+            for piece in chunks:
+                data.extend(piece)
+        finally:
+            _close_events(chunks)
+        return bytes(data)
+
+    def unarchive(self, path: str, data: bytes, *, gzip: Optional[bool] = None,
+                        user: str = "sandbox", idempotency_key: Optional[str] = None) -> None:
+        """Unpack tar bytes into a folder, merging existing files. Gzip is
+        detected from the header when omitted. Large archives use bounded
+        upload parts. ``user='root'`` explicitly uses guest root."""
+        import hashlib
+        from ._request_scope import Limits, request_scope
+        payload = bytes(data)
+        compressed = payload.startswith(b"\x1f\x8b")
+        if gzip is not None and gzip != compressed:
+            raise ValueError("gzip does not match the archive header")
+        key = _check_key(idempotency_key) if idempotency_key is not None else str(uuid.uuid4())
+        def phase(name):
+            return hashlib.sha256(json.dumps(["files.unarchive", key, name], separators=(",", ":")).encode()).hexdigest()
+        if len(payload) <= CHUNK:
+            self._t.json("PUT", self._path("/files/archive"), query={"path": path, "user": user},
+                               raw=payload, idempotency_key=key)
+            return
+        begin = self._t.json("POST", self._path("/files/archive/uploads"),
+                                   body={"path": path, "gzip": compressed, "user": user},
+                                   idempotency_key=phase("begin"))
+        upload = self._path(f"/files/archive/uploads/{_enc(begin['uploadId'])}")
+        try:
+            step = begin["chunkBytes"]
+            if type(step) is not int or not 0 < step <= CHUNK:
+                raise ConnectionError("The archive upload returned an invalid chunk size.", code="connection_error")
+            for offset in range(0, len(payload), step):
+                self._t.json("PUT", upload, query={"offset": offset}, raw=payload[offset:offset + step],
+                                   idempotency_key=phase(f"chunk:{offset}"))
+            self._t.json("POST", upload + ":commit", body={}, idempotency_key=phase("commit"))
+        except BaseException:
+            # An expired caller scope must not skip cleanup or replace the
+            # original failure with a failure to abort the partial upload.
+            try:
+                with request_scope(captured=Limits()):
+                    self._t.json("POST", upload + ":abort", body={}, idempotency_key=phase("abort"))
+            except BaseException:
+                pass
+            raise
+
+    def upload(self, local_path: str, remote_path: str, *, user: str = "sandbox") -> None:
         """Copies a local file or directory in. A directory travels as one gzipped tar
         to the API's folder routes, unpacked by the sandbox's own tar."""
         if os.path.isfile(local_path):
+            if user != "sandbox":
+                raise ValueError("Root uploads take a folder; use unarchive() for archive bytes")
             with open(local_path, "rb") as source:
                 # Its permissions travel with it: an uploaded script stays runnable.
                 self.write(remote_path, source.read(), mode=os.stat(local_path).st_mode & 0o777)
@@ -800,26 +880,7 @@ class Files:
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             archive.add(local_path, arcname=".")
-        # The API's folder routes: the sandbox's own tar unpacks it as it arrives.
-        data = buffer.getvalue()
-        if len(data) <= CHUNK:
-            response = self._t.send("PUT", self._path("/files/archive"), query={"path": remote_path}, raw=data)
-            response.read()
-            return
-        # Larger: parts in order; a part resent after a lost answer is not written twice.
-        begin = self._t.json("POST", self._path("/files/archive/uploads"), body={"path": remote_path, "gzip": True})
-        upload, step = self._path(f"/files/archive/uploads/{_enc(begin['uploadId'])}"), begin["chunkBytes"]
-        try:
-            for offset in range(0, len(data), step):
-                response = self._t.send("PUT", upload, query={"offset": offset}, raw=data[offset:offset + step])
-                response.read()
-            self._t.json("POST", upload + ":commit", body={})
-        except BaseException:
-            try:
-                self._t.json("POST", upload + ":abort", body={})
-            except RuntimeError:
-                pass
-            raise
+        self.unarchive(remote_path, buffer.getvalue(), gzip=True, user=user)
 
     def _stream_to(self, remote_path: str, local_path: str) -> None:
         """Streams a file to disk through a partial file beside the target,
@@ -844,10 +905,12 @@ class Files:
                     raise
                 attempt += 1
 
-    def download(self, remote_path: str, local_path: str) -> None:
+    def download(self, remote_path: str, local_path: str, *, user: str = "sandbox") -> None:
         """Copies a file or directory out. A file streams to disk, any size,
         checked against its length."""
-        entry = self.stat(remote_path)
+        # Root folder reads cannot first stat the path as the sandbox user:
+        # root's tar checks it directly, and rejects a missing or non-folder path.
+        entry = {"exists": True, "type": "directory"} if user == "root" else self.stat(remote_path)
         if not entry.get("exists"):
             raise RuntimeError(f"{remote_path} does not exist.", code="file_not_found", status=404)
         if entry.get("type") != "directory":
@@ -858,7 +921,7 @@ class Files:
         # arrives; one cut short is refused and nothing is put in place.
         unpacker = Unpacker(local_path)
         try:
-            chunks = self._t.file_chunks(self._path("/files/archive"), {"path": remote_path, "gzip": True})
+            chunks = self._t.file_chunks(self._path("/files/archive"), {"path": remote_path, "gzip": True, "user": user})
             try:
                 for piece in chunks:
                     unpacker.feed(piece)
@@ -1049,7 +1112,14 @@ class Sandbox:
         """The command's events as they happen: start, stdout, stderr, exit.
         Resumes by itself when the server ends a long stream or the connection
         drops after the command started, and yields ``truncated`` for output it
-        did not receive, so lost output never passes as whole."""
+        did not receive, so lost output never passes as whole. Event fields have
+        snake_case aliases; the original camelCase fields remain available."""
+        def event_names(event):
+            aliases = {"processId": "process_id", "exitCode": "exit_code", "timedOut": "timed_out",
+                       "durationMs": "duration_ms", "stdoutTruncated": "stdout_truncated",
+                       "stderrTruncated": "stderr_truncated", "droppedBytes": "dropped_bytes",
+                       "resumeAt": "resume_at"}
+            return {**event, **{alias: event[name] for name, alias in aliases.items() if name in event}}
         body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS), "stream": True}
         events = self._t.events("POST", self._path(":exec"), body=body, idempotency_key=idempotency_key,
                                 timeout=((timeout_ms or STREAMED_EXEC_TIMEOUT_MS) / 1000) + 60)
@@ -1066,7 +1136,7 @@ class Sandbox:
                 if event["type"] == "exit":
                     _close_events(events)  # as in Process.output
                 for passed in passing:
-                    yield passed
+                    yield event_names(passed)
                 if event["type"] == "exit":
                     return
         except Exception as error:  # noqa: BLE001 - reconnect only when the network cut it
@@ -1082,7 +1152,7 @@ class Sandbox:
         continued = Process(self._t, self.id, {"id": process_id}).output(cursor=read.cursor)
         try:
             for rest in continued:
-                yield rest
+                yield event_names(rest)
         finally:
             _close_events(continued)
 
@@ -1266,6 +1336,7 @@ class Sandbox:
             self.wait_for("paused")
         running = self.state == "running"
         snapshot = None
+        primary_error = None
         try:
             if running:
                 self.pause()
@@ -1289,11 +1360,30 @@ class Sandbox:
                 raise RuntimeError("The server did not confirm a disk-only snapshot.", code="snapshot_mode_mismatch",
                                    status=409, details={"snapshotId": snapshot["id"]})
             return snapshot
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
             if running:
                 # Capture's deadline must never prevent restoring the source.
-                with request_scope(captured=Limits()):
-                    self.wake()
+                try:
+                    with request_scope(captured=Limits()):
+                        self.wake()
+                except BaseException as error:
+                    failure = primary_error if primary_error is not None else error
+                    recovery = {"message": str(error)}
+                    if isinstance(error, RuntimeError):
+                        recovery["code"] = error.code
+                    details = {"sourceSandboxId": self.id, "sourceWakeError": recovery}
+                    if snapshot is not None:
+                        details["snapshotId"] = snapshot["id"]
+                    if isinstance(failure, RuntimeError):
+                        failure.details = {**(failure.details or {}), **details}
+                    else:
+                        for key, value in details.items():
+                            setattr(failure, key, value)
+                    if primary_error is None:
+                        raise
 
     def fork(self, count: Optional[int] = None, *, name: Optional[str] = None,
                    labels: Optional[dict[str, str]] = None, keep_snapshot: Optional[bool] = None,
@@ -1508,13 +1598,20 @@ class Runtime:
                              max_connections, wait_for_capacity)
         self.base_url = self._t.base_url
         self.sandboxes = Sandboxes(self._t)
+        self.sandbox = self.sandboxes
         self.snapshots = Snapshots(self._t)
+        self.snapshot = self.snapshots
         self.feedback = Feedback(self._t)
         self.account = Account(self._t)
         self.support = Support(self._t)
         from ._sync_products import CLIENT as PRODUCTS
         for name, product in PRODUCTS.items():
             setattr(self, name, product(self._t))
+        # Match the CLI's product names without making another client or pool.
+        # Account commands such as secrets, events and billing keep their names.
+        for singular, plural in (("image", "images"), ("volume", "volumes"), ("job", "jobs"),
+                                ("domain", "domains"), ("port", "ports"), ("address", "addresses")):
+            setattr(self, singular, getattr(self, plural))
 
     def me(self) -> dict[str, Any]:
         """Who this key is: organization, agent and credential."""
@@ -1529,6 +1626,12 @@ class Runtime:
         outbound traffic in bytes, with ``chargedMicros`` for what went past
         the month's free ``allowanceBytes``."""
         return self._t.json("GET", "/v1/usage")
+
+    def usage_requests(self, range: str = "24h") -> dict[str, Any]:
+        """This account's authenticated API answers: 24h, 7d, 30d or 90d.
+        Counts are exact decimal strings; errorPercent is None without calls.
+        The key needs usage permission. The window ends with the partial hour."""
+        return self._t.json("GET", "/v1/usage/requests", query={"range": range})
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
         """Any API route, with the client's auth, retries and errors."""

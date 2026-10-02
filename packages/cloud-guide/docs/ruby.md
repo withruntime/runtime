@@ -27,7 +27,8 @@ require "withruntime"
 runtime = WithRuntime::Client.new
 sbx = runtime.sandboxes.create(funding: "trial")
 begin
-  puts sbx.exec("python3 -c 'print(6 * 7)'", check: true).stdout
+  sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+  puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
 ensure
   sbx.stop
 end

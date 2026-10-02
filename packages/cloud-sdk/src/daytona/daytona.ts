@@ -252,6 +252,11 @@ export class SnapshotService {
     params: CreateSnapshotParams,
     options: { onLogs?: (chunk: string) => void; timeout?: number } = {},
   ): Promise<Snapshot> {
+    if (params.regionId)
+      throw new NotSupportedError(
+        "Choosing a snapshot region (regionId)",
+        "Omit regionId: Runtime places image builds on its available hosts.",
+      );
     if (params.resources)
       throw new NotSupportedError(
         "Resources on a snapshot",
@@ -362,11 +367,6 @@ export class Daytona implements AsyncDisposable {
     const client = params.withruntime?.client ?? this.#client;
     const lifecycle = lifecycleOf(params);
     const resources = { ...DEFAULT_RESOURCES, ...params.resources };
-    if (resources.gpu)
-      throw new NotSupportedError(
-        "GPUs",
-        "Runtime runs sandboxes on CPUs; remove gpu from resources.",
-      );
     const source = await this.#source(client, params, options.onSnapshotCreateLogs);
     const volumes = await this.#volumes(client, params.volumes);
     const network = networkRules(params);
@@ -465,11 +465,6 @@ export class Daytona implements AsyncDisposable {
   async #volumes(client: Runtime, mounts: VolumeMount[] | undefined) {
     const out: { volumeId: string; path: string }[] = [];
     for (const mount of mounts ?? []) {
-      if (mount.subpath)
-        throw new NotSupportedError(
-          "Mounting part of a volume (subpath)",
-          "Mount the whole volume.",
-        );
       let id = mount.volumeId;
       if (!UUID.test(id)) {
         const found = (await guard("other", () => client.volumes.list({ name: id, limit: 1 })))
@@ -591,7 +586,21 @@ export class Daytona implements AsyncDisposable {
   }
 }
 
-function refuseCreate(params: CreateSandboxBaseParams) {
+function refuseCreate(params: CreateSandboxBaseParams & { resources?: Resources }) {
+  const gpuType = params.resources?.gpuType;
+  if (
+    params.resources?.gpu ||
+    (gpuType !== undefined &&
+      gpuType !== null &&
+      gpuType !== "" &&
+      (!Array.isArray(gpuType) || gpuType.length > 0))
+  )
+    throw new NotSupportedError(
+      "GPUs",
+      "Runtime runs sandboxes on CPUs; remove gpu and gpuType from resources.",
+    );
+  if (params.volumes?.some((mount) => mount.subpath))
+    throw new NotSupportedError("Mounting part of a volume (subpath)", "Mount the whole volume.");
   const refusals: Array<[keyof CreateSandboxBaseParams, string, string]> = [
     ["spot", "Spot GPU sandboxes (spot)", "Remove it: Runtime runs sandboxes on CPUs."],
     [

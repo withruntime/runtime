@@ -6,7 +6,10 @@ archive's own links did not exist yet: a link ``x -> ../outside`` followed by
 ``x/pwned.txt`` passed it and wrote outside. These archives are the ones a
 hostile sandbox would send."""
 import io
+import gzip
 import os
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -110,6 +113,67 @@ class Unpack(unittest.TestCase):
                                ("./current", "link", "node_modules/.bin")), self.target)
         with open(os.path.join(self.target, "current", "tool")) as tool:
             self.assertEqual(tool.read(), "run()")
+
+    def test_header_checksum_is_required_before_publishing(self):
+        body = bytearray(gzip.decompress(archive(("a.txt", "file", "hello"))))
+        body[0] = ord("b")
+        self.refused(gzip.compress(body), "invalid header")
+        self.assertFalse(os.path.exists(self.target))
+
+    def test_two_end_blocks_are_required(self):
+        body = gzip.decompress(archive(("a.txt", "file", "hello")))[:1536]
+        with self.assertRaises(RuntimeError) as caught:
+            unpack_archive(gzip.compress(body), self.target)
+        self.assertEqual(caught.exception.code, "download_incomplete")
+        self.assertFalse(os.path.exists(self.target))
+
+    def test_path_record_length_must_advance(self):
+        from withruntime._unpack import _pax
+        # A regression must fail in bounded time even against the former loop.
+        try:
+            result = subprocess.run([sys.executable, "-c",
+                "from withruntime._unpack import _pax; _pax(b'0 a=b\\n')"],
+                capture_output=True, timeout=2, check=False)
+        except subprocess.TimeoutExpired:
+            self.fail("A zero-length path record did not stop within two seconds")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"invalid path metadata", result.stderr)
+        for body in (b"-1 a=b\n", b"99 a=b\n", b"bad a=b\n"):
+            with self.subTest(body=body), self.assertRaises(RuntimeError):
+                _pax(body)
+
+    def test_merged_link_is_checked_against_existing_tree_before_publication(self):
+        os.mkdir(self.target)
+        os.symlink("../outside", os.path.join(self.target, "old"))
+        self.refused(archive(("new", "link", "old/a.txt")), "leads outside")
+        self.assertFalse(os.path.lexists(os.path.join(self.target, "new")))
+
+    def test_safe_existing_link_is_retained_when_merging(self):
+        os.mkdir(self.target)
+        with open(os.path.join(self.target, "a.txt"), "w") as output:
+            output.write("kept")
+        os.symlink("a.txt", os.path.join(self.target, "old"))
+        unpack_archive(archive(("new", "link", "old")), self.target)
+        with open(os.path.join(self.target, "new")) as output:
+            self.assertEqual(output.read(), "kept")
+
+    def test_one_compressed_chunk_is_consumed_in_bounded_inflated_pieces(self):
+        from withruntime._unpack import Unpacker
+        data = archive(("large", "file", "a" * 2_000_000))
+        unpacker = Unpacker(self.target)
+        original = unpacker._step
+        held = []
+        def observed():
+            held.append(len(unpacker._held))
+            return original()
+        unpacker._step = observed
+        try:
+            unpacker.feed(data)
+            unpacker.finish()
+            self.assertLessEqual(max(held), 65_536 + 511)
+            self.assertEqual(os.path.getsize(os.path.join(self.target, "large")), 2_000_000)
+        finally:
+            unpacker.discard()
 
 
 if __name__ == "__main__":

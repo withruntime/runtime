@@ -22,8 +22,10 @@ in one line what you reported.
 Report generously. Good reasons to file:
 
 - **Bug**: something returned an error or behaved differently from the docs.
-- **Missing feature**: something you needed that does not exist, such as a
-  region, a larger size, a language SDK or a product.
+- **Feature request** (`missing_feature`): something you needed that does not
+  exist, such as a region, a larger size, a language SDK or a product. In the
+  account, **Request a feature** on the **Support** page opens the form on
+  this kind.
 - **Competitor gap**: another provider does something better or more simply.
   Name it.
 - **Migration blocker**: something specific stops a workload switching here.

@@ -1,4 +1,7 @@
-import { chmod, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, open, rename, unlink } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { Runtime } from "./client.js";
 import { RuntimeError } from "./errors.js";
 import { named } from "./cli-name.js";
@@ -120,6 +123,57 @@ function portNumber(product: NetworkProduct, text: string | undefined): number {
   return value;
 }
 
+/** A fresh private inode prevents disclosure through permissive files, symlinks
+ * and hard links. Rename publishes complete contents without a readable window. */
+async function privateOutput(path: string, text: string) {
+  const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
+  try {
+    const handle = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    try {
+      await handle.writeFile(text);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    return temporary;
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Check and stage before changing a remote peer. If the request or final write
+ * fails, this private draft preserves the newly generated key for recovery. */
+async function prepareOutput(path: string, privateKey?: string) {
+  try {
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink())
+      throw usage("tunnel", "The output must be a regular file, not a directory or symbolic link.");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const recovery = await privateOutput(
+    path,
+    `# DRAFT: request or output incomplete. Keep this file for recovery.\n[Interface]\nPrivateKey = ${privateKey ?? "<your private key>"}\n`,
+  );
+  return {
+    recovery,
+    async publish(config: string) {
+      const temporary = await privateOutput(path, config);
+      try {
+        await rename(temporary, path);
+      } finally {
+        await unlink(temporary).catch(() => undefined);
+      }
+      await unlink(recovery);
+    },
+  };
+}
+
 /** Writes a wg-quick file readable by its owner alone, or prints it. */
 async function deliver(
   out: Out,
@@ -127,14 +181,15 @@ async function deliver(
   path: string | undefined,
   hint: string,
   ready = true,
+  prepared?: Awaited<ReturnType<typeof prepareOutput>>,
 ) {
   if (!config) {
     out.error(hint);
     return;
   }
   if (path) {
-    await writeFile(path, config, { mode: 0o600 });
-    await chmod(path, 0o600);
+    if (!prepared) throw new Error("Tunnel output was not prepared.");
+    await prepared.publish(config);
     out.error(
       ready
         ? `Wrote ${path}. Bring it up with: sudo wg-quick up ${path.startsWith("/") ? path : `./${path}`}`
@@ -345,60 +400,83 @@ export async function networkProductCommand(
       case "peers": {
         const action = rest[0];
         if (action === "add" || action === "rotate") {
+          const argument = need(
+            rest[1],
+            action === "add" ? "the peer's name, such as office" : "a peer id",
+          );
           // The pair is made here unless a key is given: the private key never
           // leaves this machine, and goes only into the file written below.
           const given = flag("public-key");
           const pair = given ? undefined : generateWireGuardKeyPair();
           const publicKey = given ?? pair!.publicKey;
-          const answer =
-            action === "add"
-              ? await runtime.tunnel.addPeer({
-                  name: need(rest[1], "the peer's name, such as office"),
-                  publicKey,
-                  routes: args.flags.get("route") ?? [],
-                })
-              : await runtime.tunnel.rotatePeer(need(rest[1], "a peer id"), { publicKey });
-          const configReady = answer.configReady ?? !!answer.config;
-          const draftHint =
-            "Keep this file: it preserves your private key. Read runtime tunnel get when the gateway is ready, replace PublicKey in [Peer] with gatewayPublicKey, then run wg-quick up.";
-          // Older servers returned no config while the gateway was starting.
-          // Preserve the locally generated key in a draft rather than discard it.
-          const supplied =
-            answer.config ??
-            [
-              "# DRAFT: gateway key missing. Keep this file; it preserves your private key.",
-              "[Interface]",
-              `PrivateKey = ${pair?.privateKey ?? "<your private key>"}`,
-              `Address = ${answer.peer.address}/32`,
-              "",
-              "[Peer]",
-              `PublicKey = ${answer.tunnel.gatewayPublicKey ?? "<gatewayPublicKey from runtime tunnel get>"}`,
-              `Endpoint = ${answer.tunnel.endpoint}`,
-              `AllowedIPs = ${answer.tunnel.subnet}`,
-              "PersistentKeepalive = 25",
-              "",
-            ].join("\n");
-          const config = pair
-            ? supplied.replace(/^PrivateKey = .*$/m, `PrivateKey = ${pair.privateKey}`)
-            : supplied;
-          if (out.json) {
-            print("", {
-              ...answer,
+          const path = out.json ? undefined : (flag("out") ?? (pair ? "runtime.conf" : undefined));
+          const prepared = path ? await prepareOutput(path, pair?.privateKey) : undefined;
+          try {
+            const answer =
+              action === "add"
+                ? await runtime.tunnel.addPeer({
+                    name: argument,
+                    publicKey,
+                    routes: args.flags.get("route") ?? [],
+                  })
+                : await runtime.tunnel.rotatePeer(argument, { publicKey });
+            const configReady = answer.configReady ?? !!answer.config;
+            const draftHint =
+              "Keep this file: it preserves your private key. Read runtime tunnel get when the gateway is ready, replace PublicKey in [Peer] with gatewayPublicKey, then run wg-quick up.";
+            // Older servers returned no config while the gateway was starting.
+            // Preserve the locally generated key in a draft rather than discard it.
+            const supplied =
+              answer.config ??
+              [
+                "# DRAFT: gateway key missing. Keep this file; it preserves your private key.",
+                "[Interface]",
+                `PrivateKey = ${pair?.privateKey ?? "<your private key>"}`,
+                `Address = ${answer.peer.address}/32`,
+                "",
+                "[Peer]",
+                `PublicKey = ${answer.tunnel.gatewayPublicKey ?? "<gatewayPublicKey from runtime tunnel get>"}`,
+                `Endpoint = ${answer.tunnel.endpoint}`,
+                `AllowedIPs = ${answer.tunnel.subnet}`,
+                "PersistentKeepalive = 25",
+                "",
+              ].join("\n");
+            const privateKeyRow = /^[ \t]*PrivateKey[ \t]*=[^\r\n]*$/gm;
+            if (pair && (supplied.match(privateKeyRow)?.length ?? 0) !== 1)
+              throw new RuntimeError({
+                code: "invalid_response",
+                status: 0,
+                message:
+                  "Runtime returned a tunnel configuration without exactly one private-key field.",
+              });
+            const config = pair
+              ? supplied.replace(privateKeyRow, `PrivateKey = ${pair.privateKey}`)
+              : supplied;
+            if (out.json) {
+              print("", {
+                ...answer,
+                config,
+                configReady,
+                ...(!configReady ? { hint: draftHint } : {}),
+              });
+              return 0;
+            }
+            if (answer.tunnel.funded === false) out.error(fundingState(answer.tunnel));
+            await deliver(
+              out,
               config,
+              path,
+              configReady ? answer.hint : draftHint,
               configReady,
-              ...(!configReady ? { hint: draftHint } : {}),
-            });
+              prepared,
+            );
             return 0;
+          } catch (error) {
+            if (prepared)
+              out.error(
+                `The peer request or output did not finish. Your private draft is saved at ${prepared.recovery}; keep it for recovery.`,
+              );
+            throw error;
           }
-          if (answer.tunnel.funded === false) out.error(fundingState(answer.tunnel));
-          await deliver(
-            out,
-            config,
-            flag("out") ?? (pair ? "runtime.conf" : undefined),
-            configReady ? answer.hint : draftHint,
-            configReady,
-          );
-          return 0;
         }
         if (action === "rm" || action === "remove") {
           const after = await runtime.tunnel.removePeer(need(rest[1], "a peer id"));

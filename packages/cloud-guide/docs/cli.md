@@ -9,9 +9,10 @@ it once; npx spends about a quarter of a second of its own on every call, so an
 agent that runs many commands saves that by installing:
 
 ```bash no-run
-npx withruntime sandbox run -- python3 -c 'print(6 * 7)'   # without installing
+printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
+npx withruntime sandbox run -- python3 - < invoice.py   # without installing
 npm install --global withruntime                   # then the command is runtime
-runtime sandbox run -- python3 -c 'print(6 * 7)'
+runtime sandbox run -- python3 - < invoice.py
 ```
 
 The examples below use `runtime`, the installed command; without installing,
@@ -22,7 +23,8 @@ is connected and what to run first.
 ## One command in a fresh sandbox
 
 ```bash
-runtime sandbox run -- python3 -c 'print(6 * 7)'
+printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
+runtime sandbox run -- python3 - < invoice.py
 runtime sandbox run --keep --vcpu 2 -- nproc   # keeps it, and prints how to run more
 ```
 
@@ -94,7 +96,7 @@ to your jobs as `RUNTIME_API_KEY`.
 
 ```bash
 id=$(runtime sandbox create --name demo --label team=search)
-runtime sandbox exec "${id}" -- python3 -c 'print(6 * 7)'
+runtime sandbox exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 runtime sandbox exec "${id}" --cwd /workspace --env API_TOKEN="${API_TOKEN}" -- env
 runtime sandbox ls
 runtime sandbox ls --state running --label team=search
@@ -124,8 +126,12 @@ sandbox is running (`--no-wait` returns at once). Its options:
 
 From withruntime 0.7.0, every command refuses an option it does not take,
 before it sends anything, and names the one you likely meant: `--memory-mib`
-gets "Did you mean --memory?". `--help` after any command prints its product's
-help and runs nothing.
+gets "Did you mean --memory?". A value option followed by another flag fails
+locally, for example `--name --trial` answers `--name needs a value.`
+Boolean options accept `=true` or `=false`; `--persistent=maybe` answers
+`--persistent takes true or false.` Explicit numeric values, including zero,
+reach the API for validation rather than silently using a default. `--help`
+after any command prints its product's help and runs nothing.
 
 `ls` lists the live sandboxes; `ls --all` adds the stopped ones and lists every
 sandbox the account has had, oldest first, so the newest are last. `get`
@@ -427,11 +433,35 @@ S3, R2 or Google Cloud Storage bucket without the sandbox holding its key
 S3-compatible store)
 ([mount your own bucket](./storage#mount-your-own-bucket)).
 
+Shared volumes are disabled by default. Where the deployed API offers them,
+`runtime volume create --shared --size-mib <N>` creates one;
+`runtime volume attach <volume> <sandbox> --path /data`,
+`runtime volume detach <volume> <attachment>` and
+`runtime volume attachment <volume> <attachment>` submit and inspect saved
+attachment operations. Pending work remains visible; an error exits non-zero
+and prints its receipt. See [shared volumes](./storage#shared-volumes-when-enabled).
+
+Volume growth is disabled by default. If the deployed API offers it,
+`runtime volume resize <id> --size-mib <N>` grows a detached ordinary volume.
+A pending result retains the old confirmed size; use `runtime volume get <id>`
+to follow `resize.state` until `completed` or `failed`. Failure exits non-zero
+and keeps the error record. See [volume growth](./storage#growing-a-volume-when-enabled).
+
+Where deferred compression has been qualified and enabled, a memory
+snapshot can be ready for same-server starts while
+`compressionPending` is true. Raw preparation files are not charged; storage
+uses the final verified compressed allocation. Off-server copying waits for
+compression, and `backedUp` confirms the copy has been checked. See
+[snapshot storage](./storage#snapshots-survive-their-server).
+
 Forks and snapshots:
 
 - A fork or snapshot pauses a running sandbox for the moment it takes, then
   wakes it. A sandbox with volumes cannot be snapshotted. Copies and snapshots
-  run on the source's server, and each kept snapshot is also copied off it.
+  run on the source's server by default. Cross-server placement requires
+  [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled)
+  to be enabled. Each kept snapshot is also copied off its server after its
+  final compressed form is ready.
 - `fork` takes `--trial` or `--paid` as `create` does; with neither, the copies
   keep the source's funding. Copies keep the source's size and CPU, reserved or
   a raised floor, and are billed as a create with those would be. A trial copy
@@ -492,7 +522,14 @@ runtime ls
   `--csv` exports one row per resource for a spreadsheet: its name, kind, state,
   when it was made, its vCPUs and memory, how long it ran, the CPU seconds it
   used and what it was charged and still holds, in dollars to the microdollar.
-  It covers the newest 100 resources.
+  It covers the newest 100 resources. For all visible resources over a date
+  range, use `runtime usage export --since 2026-09-01T00:00:00Z
+--until 2026-10-01T00:00:00Z > usage.csv`. This follows every page and prints
+  the server's CSV with one header. It includes settled intervals at `since`
+  and excludes those at `until`, by settlement time; pending holds are excluded.
+  Amounts remain exact. `--json` prints one complete server page per line.
+  Each page rechecks current permissions and reads current settlements. See
+  [export settled usage](./api#export-settled-usage).
 - `runtime limits` says whether this machine's key is read-only and what its
   daily spending limit is, with what was used in the last 24 hours and what is
   left (0.3.1 and later), and, in versions after 0.8.4, the free-trial hours
@@ -531,8 +568,9 @@ runtime ls
 - `runtime sandbox identity-token --audience sts.amazonaws.com [--lifetime 600]`,
   inside a sandbox, prints an OIDC token naming it, for AWS, Google Cloud or
   your own API. It needs no API key. See [identity tokens](./identity-tokens).
-- `runtime sandbox metrics <id> [--range 1h]` shows a sandbox's CPU and memory
-  now and over the range (`15m`, `1h`, `6h`, `24h`, `7d`, `30d`).
+- `runtime sandbox metrics <id> [--range 1h]` shows a sandbox's CPU, memory,
+  CPU wait and memory stalls now and over the range (`15m`, `1h`, `6h`, `24h`,
+  `7d`, `30d`). Unmeasured waiting is named rather than shown as zero.
 - `runtime events [--sandbox <id>] [--type sandbox.stopped]` lists lifecycle
   events, newest first.
 - `runtime webhooks create <url> [--events a,b]` sends signed lifecycle events
@@ -588,3 +626,9 @@ runtime tunnel rm                                   # the tunnel and every peer
 `runtime network upstream-proxy` arrived in 0.7.0. Each has
 its own help: `runtime domain help`, `runtime port help`,
 `runtime address help`, `runtime tunnel help`, `runtime network help`.
+
+The WireGuard configuration contains a private key. The CLI writes it with
+owner-only permissions and replaces an existing regular file atomically.
+It refuses a symbolic link or a directory as the output path. If publishing
+the configuration fails, the error names the protected draft to recover;
+inspect the peer with `runtime tunnel get` before creating another one.

@@ -369,10 +369,15 @@ describe("background commands", () => {
     await open.closeStdin();
     const process = fake(sbx).processList[1]!;
     expect(world.called("process.write")).toEqual([
-      [process.id, "hello\n", {}],
-      [process.id, "", { eof: true }],
+      [process.id, "hello\n", { timeoutMs: 0, signal: expect.any(AbortSignal) }],
+      [process.id, "", { eof: true, timeoutMs: 0, signal: expect.any(AbortSignal) }],
     ]);
-    expect(world.called("sandbox.spawn")[1]![1]).toMatchObject({ stdin: "pipe" });
+    const spawn = world.called("sandbox.spawn")[1]![1] as Record<string, unknown>;
+    expect(spawn).toMatchObject({
+      stdin: "pipe",
+      request: { timeoutMs: 0, signal: expect.any(AbortSignal) },
+    });
+    expect(spawn.timeoutMs).toBeUndefined();
 
     const listed = await sbx.commands.list();
     expect(listed.map((one) => one.pid)).toContain(open.pid);
@@ -620,7 +625,6 @@ describe("forks, snapshots and ports", () => {
 describe("what Runtime does not have", () => {
   test("throws NotSupportedError naming the alternative", async () => {
     const sbx = await create();
-    expect(() => sbx.pty).toThrow(/terminal/);
     expect(() => sbx.git).toThrow(/commands.run/);
     for (const call of [sbx.updateNetwork(), sbx.uploadUrl(), sbx.downloadUrl()])
       expect(await call.catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);

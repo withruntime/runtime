@@ -12,6 +12,7 @@ from withruntime._sync_client import _Transport, Sandbox
 from withruntime._async_client import _Transport as AsyncTransport, AsyncSandbox
 from withruntime.e2b.code_interpreter import Sandbox as E2B, AsyncSandbox as AsyncE2B
 from withruntime.e2b import TimeoutException
+from withruntime._errors import RuntimeError
 from withruntime._request_scope import request_scope, current
 
 
@@ -63,8 +64,10 @@ class InterpreterDeadline(unittest.TestCase):
             with self.assertRaises(TimeoutException): sandbox.run_code('x', timeout=BUDGET)
             self.assertTrue(self.completed.wait(3))
             self.assertTrue(all(x['timeoutMs'] == 0 and x['interruptOnDisconnect'] is False for x in self.requests))
-            with self.assertRaises(TimeoutError):
+            # The native client's expired deadline is its typed request_timeout.
+            with self.assertRaises(RuntimeError) as caught:
                 with request_scope(BUDGET): sandbox.runtime.interpreter.run('x', timeout_ms=0)
+            self.assertEqual(caught.exception.code, 'request_timeout')
         finally: transport.close()
 
     def test_async_detach_cancellation_and_awaited_callbacks_close_stream(self):

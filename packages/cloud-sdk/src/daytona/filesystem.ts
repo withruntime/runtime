@@ -1,6 +1,7 @@
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { Readable } from "node:stream";
 import type { FileEntry } from "../types.js";
+import type { RequestOptions } from "../transport.js";
 import { resolvePath, WHOLE_OUTPUT, type SandboxContext } from "./context.js";
 import { DaytonaError, DaytonaFileNotFoundError, guard } from "./errors.js";
 
@@ -44,8 +45,53 @@ export interface FileDownloadResponse {
   errorDetails?: { message: string; statusCode?: number; code?: string; source?: string };
 }
 export type UploadSource = Buffer | Uint8Array | string | Readable | ReadableStream<Uint8Array>;
+export type UploadProgress = { bytesSent: number };
+export type UploadStreamOptions = {
+  signal?: AbortSignal;
+  timeout?: number;
+  onProgress?: (progress: UploadProgress) => void;
+};
 
 const PERMISSIONS = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+
+function downloadRequest(timeout: number, signal?: AbortSignal): RequestOptions {
+  if (!Number.isFinite(timeout) || timeout < 0)
+    throw new DaytonaError("Download timeout must be a nonnegative finite number.");
+  signal?.throwIfAborted();
+  const deadline = timeout > 0 ? AbortSignal.timeout(Math.ceil(timeout * 1000)) : undefined;
+  return {
+    timeoutMs: 0,
+    ...(deadline || signal
+      ? {
+          signal: deadline && signal ? AbortSignal.any([deadline, signal]) : (deadline ?? signal),
+        }
+      : {}),
+  };
+}
+
+/** Wait on client-local setup within the transfer's existing deadline. The
+ * setup may finish later; the caller cannot proceed to an upload after abort. */
+function waitForRequest<T>(pending: Promise<T>, request: RequestOptions): Promise<T> {
+  const signal = request.signal;
+  if (!signal) return pending;
+  return new Promise<T>((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- passes the pending call's own failure through unchanged
+        reject(error);
+      },
+    );
+  });
+}
 
 function fileInfo(entry: FileEntry): FileInfo {
   const bits = (parseInt(entry.mode, 8) || 0) & 0o777;
@@ -60,20 +106,6 @@ function fileInfo(entry: FileEntry): FileInfo {
     owner: "",
     group: "",
   };
-}
-
-async function bytesOf(source: UploadSource): Promise<Uint8Array> {
-  if (typeof source === "string") {
-    const { readFile } = await import("node:fs/promises");
-    return readFile(source);
-  }
-  if (source instanceof Uint8Array) return source;
-  if (typeof (source as ReadableStream).getReader === "function")
-    return new Uint8Array(await new Response(source as ReadableStream).arrayBuffer());
-  const chunks: Buffer[] = [];
-  for await (const chunk of source as Readable)
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array));
-  return Buffer.concat(chunks);
 }
 
 /** `sandbox.fs`: Daytona's file calls over Runtime's files API. Relative
@@ -118,35 +150,77 @@ export class FileSystem {
   /** The file's bytes, or with a local path, the file written there. */
   downloadFile(remotePath: string, timeout?: number): Promise<Buffer>;
   downloadFile(remotePath: string, localPath: string, timeout?: number): Promise<void>;
-  async downloadFile(remotePath: string, localOrTimeout?: string | number): Promise<Buffer | void> {
+  async downloadFile(
+    remotePath: string,
+    localOrTimeout?: string | number,
+    timeout = 30 * 60,
+  ): Promise<Buffer | void> {
+    // The numeric second argument is the published buffer overload. In that
+    // overload zero falls back to the default, as the pinned SDK does.
+    const request = downloadRequest(
+      typeof localOrTimeout === "number" && localOrTimeout !== 0 ? localOrTimeout : timeout,
+    );
+    return this.#downloadFile(
+      remotePath,
+      typeof localOrTimeout === "string" ? localOrTimeout : undefined,
+      request,
+    );
+  }
+
+  async #downloadFile(
+    remotePath: string,
+    localPath: string | undefined,
+    request: RequestOptions,
+  ): Promise<Buffer | void> {
+    request.signal?.throwIfAborted();
     const target = await this.#path(remotePath);
     const files = await this.#files();
-    if (typeof localOrTimeout !== "string")
-      return Buffer.from(await guard("file", () => files.read(target)));
+    request.signal?.throwIfAborted();
+    if (localPath === undefined)
+      return Buffer.from(await guard("file", () => files.read(target, request)));
     // Streamed to disk, any size, checked against the file's length.
-    await guard("file", () => files.download(target, localOrTimeout));
+    await guard("file", () => files.download(target, localPath, request));
   }
 
   /** The file as it arrives, without holding it in memory. It errors with
    * `download_incomplete` if it ends short of the file's length. */
-  async downloadFileStream(remotePath: string): Promise<Readable> {
+  async downloadFileStream(
+    remotePath: string,
+    timeoutOrOptions?: number | { timeout?: number; signal?: AbortSignal },
+  ): Promise<Readable> {
+    const options =
+      typeof timeoutOrOptions === "number"
+        ? { timeout: timeoutOrOptions }
+        : (timeoutOrOptions ?? {});
+    const request = downloadRequest(options.timeout ?? 30 * 60, options.signal);
     const { Readable } = await import("node:stream");
     const target = await this.#path(remotePath);
     const files = await this.#files();
-    const stream = await guard("file", () => files.readStream(target));
+    request.signal?.throwIfAborted();
+    const stream = await guard("file", () => files.readStream(target, request));
     return Readable.fromWeb(stream as unknown as WebReadableStream<Uint8Array>);
   }
 
   /** Several files; a file that fails carries `error` instead of `result`. */
-  async downloadFiles(files: FileDownloadRequest[]): Promise<FileDownloadResponse[]> {
+  async downloadFiles(
+    files: FileDownloadRequest[],
+    timeout = 30 * 60,
+  ): Promise<FileDownloadResponse[]> {
+    const request = downloadRequest(timeout);
     const out: FileDownloadResponse[] = [];
     for (const file of files) {
+      request.signal?.throwIfAborted();
       try {
         if (file.destination) {
-          await this.downloadFile(file.source, file.destination);
+          await this.#downloadFile(file.source, file.destination, request);
           out.push({ source: file.source, result: file.destination });
-        } else out.push({ source: file.source, result: await this.downloadFile(file.source) });
+        } else
+          out.push({
+            source: file.source,
+            result: (await this.#downloadFile(file.source, undefined, request)) as Buffer,
+          });
       } catch (error) {
+        if (request.signal?.aborted) throw error;
         const failure = error as DaytonaError;
         out.push({
           source: file.source,
@@ -253,26 +327,76 @@ export class FileSystem {
    * directories and replacing one that exists. */
   uploadFile(file: Buffer, remotePath: string, timeout?: number): Promise<void>;
   uploadFile(localPath: string, remotePath: string, timeout?: number): Promise<void>;
-  async uploadFile(source: Buffer | string, remotePath: string): Promise<void> {
-    const target = await this.#path(remotePath);
-    const bytes = await bytesOf(source);
-    const files = await this.#files();
-    await guard("file", () => files.write(target, bytes));
+  async uploadFile(source: Buffer | string, remotePath: string, timeout = 30 * 60): Promise<void> {
+    await this.#uploadFile(source, remotePath, downloadRequest(timeout));
   }
 
-  async uploadFileStream(source: UploadSource, remotePath: string): Promise<void> {
-    const target = await this.#path(remotePath);
-    const bytes = await bytesOf(source);
-    const files = await this.#files();
-    await guard("file", () => files.write(target, bytes));
+  async #uploadFile(
+    source: UploadSource,
+    remotePath: string,
+    request: RequestOptions,
+    onProgress?: (progress: UploadProgress) => void,
+  ): Promise<void> {
+    request.signal?.throwIfAborted();
+    const readable =
+      typeof source !== "string" && typeof (source as Readable).destroy === "function"
+        ? (source as Readable)
+        : undefined;
+    const stopInput = () => {
+      readable?.destroy();
+    };
+    request.signal?.addEventListener("abort", stopInput, { once: true });
+    try {
+      const target = await waitForRequest(this.#path(remotePath), request);
+      request.signal?.throwIfAborted();
+      const files = await waitForRequest(this.#files(), request);
+      request.signal?.throwIfAborted();
+      // Node Readables can emit strings after setEncoding; Daytona uploads
+      // their UTF-8 bytes. The generator retains only the current source chunk.
+      const input =
+        typeof source === "string" ||
+        source instanceof Uint8Array ||
+        typeof (source as ReadableStream).getReader === "function"
+          ? source
+          : (async function* () {
+              for await (const chunk of source as Readable)
+                yield typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Uint8Array);
+            })();
+      await guard("file", () =>
+        input instanceof Uint8Array && !onProgress
+          ? files.write(target, input, request)
+          : files.writeStream(target, input, {
+              ...request,
+              ...(onProgress ? { onProgress } : {}),
+            }),
+      );
+    } finally {
+      request.signal?.removeEventListener("abort", stopInput);
+    }
   }
 
-  async uploadFiles(files: FileUpload[]): Promise<void> {
+  /** Uploads with bounded memory. Unknown-length streams stage in a private
+   * temporary file before the native atomic upload; local paths avoid staging. */
+  async uploadFileStream(
+    source: UploadSource,
+    remotePath: string,
+    options: UploadStreamOptions = {},
+  ): Promise<void> {
+    const cancelled = () => new DaytonaError(`Upload cancelled: ${remotePath}`);
+    if (options.signal?.aborted) throw cancelled();
+    const request = downloadRequest(options.timeout ?? 30 * 60, options.signal);
+    try {
+      await this.#uploadFile(source, remotePath, request, options.onProgress);
+    } catch (error) {
+      if (options.signal?.aborted) throw cancelled();
+      throw error;
+    }
+  }
+
+  async uploadFiles(files: FileUpload[], timeout = 30 * 60): Promise<void> {
+    const request = downloadRequest(timeout);
     for (const file of files) {
-      const target = await this.#path(file.destination);
-      const bytes = await bytesOf(file.source);
-      const api = await this.#files();
-      await guard("file", () => api.write(target, bytes));
+      await this.#uploadFile(file.source, file.destination, request);
     }
   }
 }

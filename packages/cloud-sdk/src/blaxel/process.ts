@@ -267,12 +267,15 @@ export class SandboxProcess {
 
   /** A call that found the sandbox paused (autoWake off) is made again once,
    * after a wake: it never started, so it cannot run twice. */
-  async #retryPaused<T>(work: () => Promise<T>): Promise<T> {
+  async #retryPaused<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     try {
       return await work();
     } catch (error) {
+      signal?.throwIfAborted();
       if (codeOf(error) !== "sandbox_paused") throw translate(error);
       await this.#ctx.wake();
+      signal?.throwIfAborted();
       return guard(work);
     }
   }
@@ -399,17 +402,24 @@ export class SandboxProcess {
   }
 
   /** A process by pid or name: the registry first, then Runtime's list. */
-  async #find(identifier: string): Promise<Found> {
+  async #find(identifier: string, signal?: AbortSignal): Promise<Found> {
+    signal?.throwIfAborted();
     const runtime = await this.#ctx.live();
+    signal?.throwIfAborted();
     const registry = this.#registry;
     const known =
       registry.byName.get(identifier) ?? (registry.meta.has(identifier) ? identifier : undefined);
     if (known !== undefined) {
-      const process = await this.#retryPaused(() => runtime.processes.get(known));
+      const process = await this.#retryPaused(
+        () => runtime.processes.get(known, { signal }),
+        signal,
+      );
+      signal?.throwIfAborted();
       registry.processes.set(known, process);
       return { id: known, info: process.info, process };
     }
-    const all = await this.#retryPaused(() => runtime.processes.list());
+    const all = await this.#retryPaused(() => runtime.processes.list({ signal }), signal);
+    signal?.throwIfAborted();
     let found: ProcessInfo | undefined;
     for (const info of all) {
       const parsed = parseProcessLine(info.command);
@@ -439,7 +449,9 @@ export class SandboxProcess {
     const out: Output = { stdout: "", stderr: "", logs: "" };
     const running = found.info.state === "running";
     if (running && !untilExit && found.info.outputBytes <= found.info.firstOffset) return out;
+    signal?.throwIfAborted();
     const runtime = await this.#ctx.live();
+    signal?.throwIfAborted();
     const abort = new AbortController();
     const forward = () => abort.abort();
     signal?.throwIfAborted();
@@ -484,9 +496,26 @@ export class SandboxProcess {
     options: { signal?: AbortSignal; retry?: boolean } = {},
   ): Promise<GetProcessByIdentifierResponse> {
     options.signal?.throwIfAborted();
-    const found = await this.#find(identifier);
-    const out = await this.#output(found, false, options.signal);
-    return this.#settled(this.#response(found.info, this.#registry.meta.get(found.id), out));
+    const signal = options.signal;
+    let onAbort: (() => void) | undefined;
+    const interrupted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(new Error("Process read was interrupted.", { cause: signal?.reason }));
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      const reading = (async () => {
+        const found = await this.#find(identifier, signal);
+        const out = await this.#output(found, false, signal);
+        signal?.throwIfAborted();
+        return this.#settled(this.#response(found.info, this.#registry.meta.get(found.id), out));
+      })();
+      return await Promise.race([reading, interrupted]);
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
+      throw error;
+    } finally {
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   /** Waits for the process to end (at most `maxWait` ms, -1 for no limit) and
@@ -517,17 +546,34 @@ export class SandboxProcess {
     signal?.throwIfAborted();
     signal?.addEventListener("abort", forward, { once: true });
     const timer = maxWait === -1 ? undefined : setTimeout(() => abort.abort(late()), maxWait);
+    let onAbort: (() => void) | undefined;
+    const interrupted = new Promise<never>((_, reject) => {
+      onAbort = () => {
+        const reason: unknown = abort.signal.reason;
+        reject(
+          reason instanceof Error
+            ? reason
+            : new Error("Process wait was interrupted.", { cause: reason }),
+        );
+      };
+      abort.signal.addEventListener("abort", onAbort, { once: true });
+    });
     try {
-      const found = await this.#find(identifier);
-      const out = await this.#output(found, true, abort.signal);
-      return await this.#settled(
-        this.#response(found.info, this.#registry.meta.get(found.id), out),
-      );
+      const result = (async () => {
+        const found = await this.#find(identifier, abort.signal);
+        const out = await this.#output(found, true, abort.signal);
+        abort.signal.throwIfAborted();
+        return await this.#settled(
+          this.#response(found.info, this.#registry.meta.get(found.id), out),
+        );
+      })();
+      return await Promise.race([result, interrupted]);
     } catch (error) {
       if (abort.signal.aborted) throw abort.signal.reason ?? error;
       throw error;
     } finally {
       clearTimeout(timer);
+      if (onAbort) abort.signal.removeEventListener("abort", onAbort);
       signal?.removeEventListener("abort", forward);
     }
   }

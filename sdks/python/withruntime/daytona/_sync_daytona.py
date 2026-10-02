@@ -294,28 +294,38 @@ class FileSystem:
     def download_file(self, remote_path: str, local_path: Optional[str] = None,
                             timeout: int = 30 * 60) -> Optional[bytes]:
         """The file's bytes, or with ``local_path``, the file written there."""
+        from .._request_scope import request_scope
         if isinstance(local_path, (int, float)):
+            timeout = local_path
             local_path = None
-        target = self._path(remote_path)
-        files = self._files()
-        if local_path is None:
-            return bytes(_guard("file", lambda: files.read(target)))
-        # Streamed to disk, any size, checked against the file's length.
-        _guard("file", lambda: files.download(target, local_path))
+        with request_scope(timeout) as scope:
+            target = self._path(remote_path)
+            files = self._files()
+            scope.remaining()
+            if local_path is None:
+                return bytes(_guard("file", lambda: files.read(target)))
+            # Streamed to disk, any size, checked against the file's length.
+            _guard("file", lambda: files.download(target, local_path))
         return None
 
     def download_files(self, files: List[FileDownloadRequest], timeout: int = 30 * 60) -> List[FileDownloadResponse]:
+        from .._request_scope import request_scope
         out = []
-        for request in files:
-            try:
-                if request.destination:
-                    self.download_file(request.source, request.destination)
-                    out.append(FileDownloadResponse(source=request.source, result=request.destination))
-                else:
-                    out.append(FileDownloadResponse(source=request.source,
-                                                    result=self.download_file(request.source)))
-            except DaytonaError as error:
-                out.append(FileDownloadResponse(source=request.source, error=str(error)))
+        with request_scope(timeout) as scope:
+            for request in files:
+                scope.remaining()
+                try:
+                    if request.destination:
+                        self.download_file(request.source, request.destination)
+                        out.append(FileDownloadResponse(source=request.source, result=request.destination))
+                    else:
+                        out.append(FileDownloadResponse(source=request.source,
+                                                        result=self.download_file(request.source)))
+                except DaytonaError as error:
+                    # A batch deadline is a failed transfer, not a successful
+                    # response containing one fabricated per-file error.
+                    scope.remaining()
+                    out.append(FileDownloadResponse(source=request.source, error=str(error)))
         return out
 
     def find_files(self, path: str, pattern: str) -> List[Match]:
@@ -747,8 +757,14 @@ class Sandbox:
         raise NotSupportedError("Daytona's computer use",
                                 "Use Runtime's desktop through sandbox.withruntime.desktop.")
 
-    set_labels = staticmethod(core.unsupported("Changing a sandbox's labels",
-                                               "Runtime sets labels once, at create."))
+    def set_labels(self, labels: Dict[str, str], request_timeout: Optional[float] = None) -> Dict[str, str]:
+        from .._request_scope import request_scope
+        internal = {key: value for key, value in self.labels.items()
+                    if key == core.LANGUAGE_LABEL or key.startswith("compat.")}
+        timeout = max(1, request_timeout) if request_timeout is not None and request_timeout > 0 else request_timeout
+        with request_scope(timeout):
+            _guard("sandbox", lambda: self.withruntime.update(labels={**labels, **internal}))
+        return self.labels
     recover = staticmethod(core.unsupported("Recovering a failed sandbox", "Create a new sandbox."))
     resize = staticmethod(core.unsupported("Resizing a sandbox", "Create a new one with the resources you need."))
     get_metrics = staticmethod(core.unsupported("Sandbox metrics", "Use `sandbox.withruntime.metrics(range=\"1h\")` for its CPU and memory over time."))
@@ -931,8 +947,11 @@ class Daytona:
         if lifecycle.auto_delete_interval > 0:
             try:
                 _guard("sandbox", lambda: runtime.set_retention(core.retention_days(lifecycle.auto_delete_interval)))
-            except Exception:
-                runtime.stop(wait=False)
+            except BaseException as original:
+                try:
+                    runtime.stop(wait=False)
+                except BaseException as cleanup:
+                    raise original from cleanup
                 raise
         env = dict(params.env_vars or {})
         if params.outbound_proxy_url:

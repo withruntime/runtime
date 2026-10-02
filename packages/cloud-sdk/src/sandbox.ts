@@ -28,6 +28,7 @@ import type {
 import { sandboxFactories, type SandboxExtensions } from "./products/index.js";
 import type { Snapshot, SnapshotOptions } from "./snapshots.js";
 import { Tunnel, type PortForward } from "./tunnel.js";
+import type { StreamUploadSource } from "./file-source.js";
 
 const CHUNK = 1_048_576;
 /** Chunks of a large write in flight at once. Each chunk's reply waits on the
@@ -37,6 +38,52 @@ const CHUNK = 1_048_576;
  * connections at once. */
 const PARALLEL = 8;
 const enc = (id: string) => encodeURIComponent(id);
+
+/** One explicit deadline across a composed operation and its queue/retries. */
+function requestScope(options: RequestOptions) {
+  const deadline =
+    options.timeoutMs === undefined || options.timeoutMs === 0
+      ? undefined
+      : AbortSignal.timeout(options.timeoutMs);
+  const signal =
+    deadline && options.signal
+      ? AbortSignal.any([deadline, options.signal])
+      : (deadline ?? options.signal);
+  const request = {
+    ...options,
+    ...(deadline ? { timeoutMs: 0 } : {}),
+    ...(signal ? { signal } : {}),
+  };
+  const cancelled = () =>
+    new ConnectionError({
+      message: "The call was cancelled or ran past its deadline.",
+      code: "timeout",
+      status: 0,
+      cause: signal?.reason,
+    });
+  const check = () => {
+    if (signal?.aborted) throw cancelled();
+  };
+  const wait = <T>(pending: Promise<T>): Promise<T> => {
+    if (!signal) return pending;
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(cancelled());
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+      pending.then(
+        (value) => {
+          signal.removeEventListener("abort", abort);
+          resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener("abort", abort);
+          reject(error instanceof Error ? error : new Error(String(error), { cause: error }));
+        },
+      );
+    });
+  };
+  return { request, check, wait };
+}
 
 /** DELETE /v1/sandboxes/{id}, for `sandbox.delete()` and
  * `runtime.sandboxes.delete(id)`. */
@@ -332,9 +379,11 @@ export class Sandbox implements AsyncDisposable {
       stdin?: string;
       pty?: { cols?: number; rows?: number };
       outputEncoding?: "utf8" | "base64";
+      /** HTTP request options, independently of the process execution deadline. */
+      request?: RequestOptions;
     } = {},
   ): Promise<Process> {
-    const { stdin, pty, outputEncoding, ...rest } = options;
+    const { stdin, pty, outputEncoding, request, ...rest } = options;
     const info = await this.#t.json<ProcessInfo>({
       method: "POST",
       path: `/v1/sandboxes/${enc(this.id)}/processes`,
@@ -345,6 +394,7 @@ export class Sandbox implements AsyncDisposable {
         ...(outputEncoding ? { outputEncoding } : {}),
       },
       ...pick(rest),
+      ...request,
     });
     return new Process(this.#t, this.id, info);
   }
@@ -545,6 +595,9 @@ export class Sandbox implements AsyncDisposable {
     const running = this.state === "running";
     // Check before entering cleanup: an abort during refresh must not pause or wake.
     const pauseOptions = running ? request() : undefined;
+    let captured: Snapshot | undefined;
+    let primary: unknown;
+    let failed = false;
     try {
       if (running) await this.pause(pauseOptions);
       let snapshot = await this.#t.json<Snapshot>({
@@ -555,6 +608,7 @@ export class Sandbox implements AsyncDisposable {
         ...(idempotencyKey ? { idempotencyKey } : {}),
         ...request(),
       });
+      captured = snapshot;
       // Prefer: wait is bounded on the server. A capture still in progress
       // must keep its source paused, or the worker refuses it after we wake.
       while (snapshot.state === "capturing") {
@@ -587,10 +641,34 @@ export class Sandbox implements AsyncDisposable {
           message: "The server did not confirm a disk-only snapshot.",
           details: { snapshotId: snapshot.id },
         });
-      return snapshot;
-    } finally {
-      if (running) await this.wake();
+      captured = snapshot;
+    } catch (error) {
+      failed = true;
+      primary = error;
     }
+    if (running) {
+      try {
+        await this.wake();
+      } catch (wakeError) {
+        const recovery = {
+          ...(captured ? { snapshotId: captured.id } : {}),
+          sourceSandboxId: this.id,
+          sourceWakeError: {
+            ...(wakeError instanceof RuntimeError ? { code: wakeError.code } : {}),
+            message: wakeError instanceof Error ? wakeError.message : String(wakeError),
+          },
+        };
+        const reported = failed ? primary : wakeError;
+        if (reported instanceof Error && Object.isExtensible(reported)) {
+          if (reported instanceof RuntimeError)
+            Object.assign(reported, { details: { ...reported.details, ...recovery } });
+          else Object.assign(reported, recovery);
+        }
+        if (!failed) throw wakeError;
+      }
+    }
+    if (failed) throw primary;
+    return captured!;
   }
   /** Copies of this sandbox as it is now (files, memory, running processes),
    * each its own sandbox, answered once they run. A running sandbox is paused
@@ -829,18 +907,20 @@ export class Processes {
     private readonly t: Transport,
     private readonly sandboxId: string,
   ) {}
-  async list(): Promise<ProcessInfo[]> {
+  async list(options: RequestOptions = {}): Promise<ProcessInfo[]> {
     return (
       await this.t.json<{ data: ProcessInfo[] }>({
         method: "GET",
         path: `/v1/sandboxes/${enc(this.sandboxId)}/processes`,
+        ...options,
       })
     ).data;
   }
-  async get(processId: string): Promise<Process> {
+  async get(processId: string, options: RequestOptions = {}): Promise<Process> {
     const info = await this.t.json<ProcessInfo>({
       method: "GET",
       path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(processId)}`,
+      ...options,
     });
     return new Process(this.t, this.sandboxId, info);
   }
@@ -952,16 +1032,33 @@ export class Process {
       processId: this.id,
     };
   }
-  /** Sends input. Offsets are tracked for you, so a retried write is never typed twice. */
-  write(data: string | Uint8Array, options: { eof?: boolean } = {}): Promise<void> {
+  /** Sends input. Offsets protect transport retries; signal and timeoutMs cover
+   * the whole logical write, including its queue and backpressure. */
+  write(
+    data: string | Uint8Array,
+    options: { eof?: boolean } & Pick<RequestOptions, "signal" | "timeoutMs"> = {},
+  ): Promise<void> {
+    if ((options as RequestOptions).idempotencyKey !== undefined)
+      return Promise.reject(
+        new RuntimeError({
+          message:
+            "Process input writes do not accept caller idempotency keys; offsets protect transport retries.",
+          code: "unsupported_process_write_option",
+          status: 400,
+        }),
+      );
     // Copy before queuing: callers may reuse their buffer while a previous
     // write waits for the guest to drain its pipe.
     const bytes = new Uint8Array(utf8(data));
     const eof = options.eof === true;
+    const { eof: _eof, ...requestOptions } = options;
+    const scope = requestScope(requestOptions);
     const write = this.#inputWrites.then(async () => {
       let sent = 0;
+      let chunkSize = CHUNK;
       do {
-        const chunk = bytes.subarray(sent, sent + 1_048_576);
+        scope.check();
+        const chunk = bytes.subarray(sent, sent + chunkSize);
         const reply = await this.t.json<{ offset: number }>({
           method: "POST",
           path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:write`,
@@ -970,6 +1067,7 @@ export class Process {
             offset: this.#inputOffset,
             ...(eof && sent + chunk.length === bytes.length ? { eof: true } : {}),
           },
+          ...scope.request,
         });
         const accepted = reply.offset - this.#inputOffset;
         if (!Number.isSafeInteger(reply.offset) || accepted < 0 || accepted > chunk.length)
@@ -980,26 +1078,39 @@ export class Process {
           });
         sent += accepted;
         this.#inputOffset = reply.offset;
+        // A slow pipe may take only part of a chunk. Keep later uploads within
+        // that observed capacity instead of resending almost a MiB each time.
+        // Zero is legitimate backpressure: retry a bounded probe at the same
+        // offset without discarding bytes or inventing progress.
+        if (accepted < chunk.length) {
+          chunkSize = accepted > 0 ? accepted : Math.min(chunkSize, 65_536);
+          // A full pipe must yield even if a proxy answers immediately; don't
+          // spin requests while the guest has accepted none of this input.
+          if (accepted === 0) await scope.wait(new Promise((resolve) => setTimeout(resolve, 100)));
+        }
       } while (sent < bytes.length);
     });
     this.#inputWrites = write.catch(() => undefined);
-    return write;
+    return scope.wait(write);
   }
   async kill(
     signal:
       "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP" | "SIGQUIT" | "SIGUSR1" | "SIGUSR2" = "SIGTERM",
+    options: RequestOptions = {},
   ): Promise<void> {
     await this.t.json({
       method: "POST",
       path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:signal`,
       body: { signal },
+      ...options,
     });
   }
-  async resize(cols: number, rows: number): Promise<void> {
+  async resize(cols: number, rows: number, options: RequestOptions = {}): Promise<void> {
     await this.t.json({
       method: "POST",
       path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}:resize`,
       body: { cols, rows },
+      ...options,
     });
   }
   async refresh(): Promise<ProcessInfo> {
@@ -1151,6 +1262,8 @@ export class Files {
     writeOptions: RequestOptions & { mode?: number } = {},
   ): Promise<{ path: string; size: number }> {
     const { mode, ...options } = writeOptions;
+    const scope = requestScope(options);
+    scope.check();
     const octal = mode === undefined ? undefined : (mode & 0o777).toString(8).padStart(3, "0");
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     if (bytes.length <= CHUNK) {
@@ -1161,28 +1274,121 @@ export class Files {
         path: this.#path("/files/content"),
         query: { path, ...(octal ? { mode: octal } : {}) },
         bytes,
-        ...options,
+        ...scope.request,
       });
       return { path, size: bytes.length };
     }
-    const sha256 = await sha256Hex(bytes);
+    const sha256 = await scope.wait(sha256Hex(bytes));
+    return this.#writeUpload(
+      path,
+      {
+        size: bytes.length,
+        sha256,
+        chunkAt: (offset, length) => bytes.subarray(offset, offset + length),
+      },
+      octal,
+      scope,
+    );
+  }
+  /** Uploads byte streams with bounded memory on Node/Bun. Unknown-length
+   * inputs stage once in a private local temporary file; known local files
+   * and Blobs avoid that extra disk copy. Paths are local file paths. */
+  async writeStream(
+    path: string,
+    input: StreamUploadSource | Uint8Array,
+    writeOptions: RequestOptions & {
+      mode?: number;
+      onProgress?: (progress: { bytesSent: number }) => void;
+    } = {},
+  ): Promise<{ path: string; size: number }> {
+    const { mode, onProgress, ...options } = writeOptions;
+    if (input instanceof Uint8Array) {
+      const result = await this.write(path, input, {
+        ...options,
+        ...(mode === undefined ? {} : { mode }),
+      });
+      onProgress?.({ bytesSent: result.size });
+      return result;
+    }
+    const scope = requestScope(options);
+    scope.check();
+    if (
+      !(globalThis as { process?: { versions?: { node?: string; bun?: string } } }).process
+        ?.versions?.node
+    )
+      throw new RuntimeError({
+        message:
+          "Streamed file uploads require Node or Bun for incremental hashing and private local staging. Use files.write with byte data in a browser.",
+        code: "unsupported_runtime",
+        status: 0,
+      });
+    const { prepareFileSource } = await import("./file-source.js");
+    const source = await prepareFileSource(input, { ...scope, signal: scope.request.signal });
+    let written: { path: string; size: number };
+    try {
+      if (source.size <= CHUNK) {
+        written = await this.write(path, await scope.wait(source.chunkAt(0, source.size)), {
+          ...scope.request,
+          ...(mode === undefined ? {} : { mode }),
+        });
+        onProgress?.({ bytesSent: written.size });
+      } else {
+        const octal = mode === undefined ? undefined : (mode & 0o777).toString(8).padStart(3, "0");
+        written = await this.#writeUpload(path, source, octal, scope, onProgress);
+      }
+    } catch (primary) {
+      try {
+        await source.close();
+      } catch (cleanupError) {
+        if (primary === undefined) throw cleanupError;
+        if (primary instanceof Error && Object.isExtensible(primary)) {
+          try {
+            Object.defineProperty(primary, "cleanupError", {
+              value: cleanupError,
+              configurable: true,
+            });
+          } catch {
+            /* Keep the original upload failure. */
+          }
+        }
+      }
+      throw primary;
+    }
+    // A failed close after a good upload is the call's failure.
+    await source.close();
+    return written;
+  }
+  /** One implementation of atomic, checked chunk uploads for bytes and streams. */
+  async #writeUpload(
+    path: string,
+    source: {
+      size: number;
+      sha256: string;
+      chunkAt(offset: number, length: number): Uint8Array | Promise<Uint8Array>;
+    },
+    octal: string | undefined,
+    scope: ReturnType<typeof requestScope>,
+    onProgress?: (progress: { bytesSent: number }) => void,
+  ): Promise<{ path: string; size: number }> {
+    const sha256 = source.sha256;
     // A guest journals mutations across operations, not per URL. One logical
     // write therefore owns separate stable keys for each mutation phase.
-    const uploadKey = options.idempotencyKey ?? crypto.randomUUID();
+    const uploadKey = scope.request.idempotencyKey ?? crypto.randomUUID();
     const phaseKeys = new Map<string, string>();
     for (const phase of ["begin", "legacy-begin", "commit", "chmod", "abort"])
       phaseKeys.set(phase, await sha256Hex(JSON.stringify(["files.write", uploadKey, phase])));
     const phaseOptions = (phase: string): RequestOptions => ({
-      ...options,
+      ...scope.request,
       idempotencyKey: phaseKeys.get(phase)!,
     });
     type Upload = { uploadId: string; chunkBytes: number; mode?: string; replayed?: boolean };
     let begin: Upload;
+    scope.check();
     try {
       begin = await this.t.json<Upload>({
         method: "POST",
         path: this.#path("/uploads"),
-        body: { path, size: bytes.length, sha256, ...(octal ? { mode: octal } : {}) },
+        body: { path, size: source.size, sha256, ...(octal ? { mode: octal } : {}) },
         ...phaseOptions("begin"),
       });
     } catch (error) {
@@ -1190,70 +1396,157 @@ export class Files {
         throw error;
       // The API aborted the unsupported transfer before accepting chunks.
       // A different body needs a different key; retain deterministic retries.
+      scope.check();
       begin = await this.t.json<Upload>({
         method: "POST",
         path: this.#path("/uploads"),
-        body: { path, size: bytes.length, sha256 },
+        body: { path, size: source.size, sha256 },
         ...phaseOptions("legacy-begin"),
       });
     }
-    const commit = () =>
-      this.t.json({
+    // A malformed response does not prove ownership of any transfer to abort.
+    if (typeof begin.uploadId !== "string" || begin.uploadId.length === 0)
+      throw new ConnectionError({
+        message: "The file upload returned no transfer identifier.",
+        code: "connection_error",
+        status: 0,
+      });
+    const commit = () => {
+      scope.check();
+      return this.t.json({
         method: "POST",
         path: this.#path(`/uploads/${enc(begin.uploadId)}:commit`),
         body: {},
         ...phaseOptions("commit"),
       });
+    };
     let committed = false;
-    if (begin.replayed) {
-      // A completed commit removed the transfer. Ask its journal before
-      // resending chunks; an incomplete transfer alone is safe to continue.
-      try {
-        await commit();
-        committed = true;
-      } catch (error) {
-        if (!(error instanceof RuntimeError) || error.code !== "upload_incomplete") throw error;
-      }
-    }
-    const offsets: number[] = [];
-    for (let offset = 0; offset < bytes.length; offset += begin.chunkBytes) offsets.push(offset);
-    let next = 0;
+    let nextOffset = 0;
+    const stopChunks = new AbortController();
+    const chunkSignal = scope.request.signal
+      ? AbortSignal.any([scope.request.signal, stopChunks.signal])
+      : stopChunks.signal;
+    const chunkScope = requestScope({ ...scope.request, signal: chunkSignal });
+    let bytesSent = 0;
+    let failed = false;
+    let primaryFailure: unknown;
     const worker = async () => {
-      while (next < offsets.length) {
-        const offset = offsets[next++]!;
-        await this.t.bytes({
-          method: "PUT",
-          path: this.#path(`/uploads/${enc(begin.uploadId)}`),
-          query: { offset },
-          bytes: bytes.subarray(offset, offset + begin.chunkBytes),
-        });
+      try {
+        while (nextOffset < source.size) {
+          scope.check();
+          if (stopChunks.signal.aborted) return;
+          const offset = nextOffset;
+          nextOffset += begin.chunkBytes;
+          const offered = source.chunkAt(offset, Math.min(begin.chunkBytes, source.size - offset));
+          const chunk = offered instanceof Promise ? await chunkScope.wait(offered) : offered;
+          chunkScope.check();
+          if (chunk.length !== Math.min(begin.chunkBytes, source.size - offset))
+            throw new ConnectionError({
+              message: "The local upload source returned an incomplete chunk.",
+              code: "source_changed",
+              status: 0,
+            });
+          const receipt = await this.t.json<{ received: number }>({
+            method: "PUT",
+            path: this.#path(`/uploads/${enc(begin.uploadId)}`),
+            query: { offset },
+            bytes: chunk,
+            ...scope.request,
+            signal: chunkSignal,
+            // Offsets and byte hashes make chunk replay safe without mutation keys.
+            idempotencyKey: undefined,
+          });
+          // Parallel receipts report cumulative accepted bytes, not this offset.
+          if (
+            !Number.isSafeInteger(receipt.received) ||
+            receipt.received < chunk.length ||
+            receipt.received > source.size
+          )
+            throw new ConnectionError({
+              message: "The file upload returned invalid byte progress.",
+              code: "connection_error",
+              status: 0,
+            });
+          bytesSent += chunk.length;
+          onProgress?.({ bytesSent });
+        }
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          primaryFailure = error;
+          stopChunks.abort(error);
+        }
+        throw error;
       }
     };
     try {
+      if (
+        !Number.isSafeInteger(begin.chunkBytes) ||
+        begin.chunkBytes <= 0 ||
+        begin.chunkBytes > CHUNK
+      )
+        throw new ConnectionError({
+          message: "The file upload returned an invalid chunk size.",
+          code: "connection_error",
+          status: 0,
+        });
+      if (begin.replayed) {
+        // A completed commit removed the transfer. Ask its journal before
+        // resending chunks; an incomplete transfer alone is safe to continue.
+        try {
+          await commit();
+          committed = true;
+          onProgress?.({ bytesSent: source.size });
+        } catch (error) {
+          if (!(error instanceof RuntimeError) || error.code !== "upload_incomplete") throw error;
+        }
+      }
       if (!committed) {
-        await Promise.all(Array.from({ length: Math.min(PARALLEL, offsets.length) }, worker));
+        const workers = Array.from(
+          { length: Math.min(PARALLEL, Math.ceil(source.size / begin.chunkBytes)) },
+          worker,
+        );
+        // Drain every owned in-flight chunk before aborting its transfer.
+        // Promise.all's early rejection could otherwise leave writes racing cleanup.
+        await Promise.allSettled(workers);
+        if (failed) throw primaryFailure;
         await commit();
       }
       // An older sandbox image ignores the mode in the upload; set it after.
-      if (octal && begin.mode !== octal)
+      if (octal && begin.mode !== octal) {
+        scope.check();
         await this.t.json({
           method: "POST",
           path: this.#path("/files:chmod"),
           body: { path, mode: octal },
           ...phaseOptions("chmod"),
         });
+      }
     } catch (error) {
-      await this.t
-        .json({
+      try {
+        await this.t.json({
           method: "POST",
           path: this.#path(`/uploads/${enc(begin.uploadId)}:abort`),
           body: {},
-          ...phaseOptions("abort"),
-        })
-        .catch(() => undefined);
+          idempotencyKey: phaseKeys.get("abort")!,
+          timeoutMs: 5000,
+        });
+      } catch (cleanupError) {
+        // Keep the original failure; retain cleanup evidence when possible.
+        if (error instanceof Error && Object.isExtensible(error)) {
+          try {
+            Object.defineProperty(error, error.cause === undefined ? "cause" : "cleanupError", {
+              value: cleanupError,
+              configurable: true,
+            });
+          } catch {
+            /* A frozen property cannot replace the primary failure. */
+          }
+        }
+      }
       throw error;
     }
-    return { path, size: bytes.length };
+    return { path, size: source.size };
   }
   /** Directory entries; `depth` goes deeper, `glob` filters (e.g. "**\/*.py"). */
   async list(
@@ -1334,6 +1627,91 @@ export class Files {
       ...request,
     });
   }
+  /** Packs a directory as archive bytes; `gzip: false` returns plain tar.
+   * Exclusions are relative paths, not globs. `user: root` selects guest root. */
+  async archive(
+    path: string,
+    options: RequestOptions & {
+      gzip?: boolean;
+      exclude?: string[];
+      user?: "sandbox" | "root";
+    } = {},
+  ): Promise<Uint8Array> {
+    const { gzip = true, exclude, user, ...request } = options;
+    return this.t.fileBytes({
+      method: "GET",
+      path: this.#path("/files/archive"),
+      query: { path, gzip, ...(exclude ? { exclude } : {}), ...(user ? { user } : {}) },
+      accept: gzip ? "application/gzip" : "application/x-tar",
+      ...request,
+    });
+  }
+  /** Unpacks archive bytes in a directory with the sandbox user's rights by
+   * default; `user: root` explicitly selects root inside this guest. */
+  async unarchive(
+    path: string,
+    bytes: Uint8Array,
+    options: RequestOptions & { gzip?: boolean; user?: "sandbox" | "root" } = {},
+  ): Promise<void> {
+    const { gzip = bytes[0] === 0x1f && bytes[1] === 0x8b, user, ...request } = options;
+    const scope = requestScope(request);
+    scope.check();
+    if (bytes.length <= CHUNK) {
+      await this.t.bytes({
+        method: "PUT",
+        path: this.#path("/files/archive"),
+        query: { path, ...(user ? { user } : {}) },
+        bytes,
+        ...scope.request,
+      });
+      return;
+    }
+    const key = request.idempotencyKey ?? crypto.randomUUID();
+    const phase = async (name: string) => ({
+      ...scope.request,
+      idempotencyKey: await sha256Hex(JSON.stringify(["files.unarchive", key, name])),
+    });
+    const begin = await this.t.json<{ uploadId: string; chunkBytes: number }>({
+      method: "POST",
+      path: this.#path("/files/archive/uploads"),
+      body: { path, gzip, ...(user ? { user } : {}) },
+      ...(await phase("begin")),
+    });
+    const upload = (suffix = "") =>
+      this.#path(`/files/archive/uploads/${enc(begin.uploadId)}${suffix}`);
+    try {
+      if (!Number.isSafeInteger(begin.chunkBytes) || begin.chunkBytes <= 0)
+        throw new ConnectionError({
+          message: "The archive upload returned an invalid chunk size.",
+          code: "connection_error",
+          status: 0,
+        });
+      for (let offset = 0; offset < bytes.length; offset += begin.chunkBytes) {
+        scope.check();
+        await this.t.bytes({
+          method: "PUT",
+          path: upload(),
+          query: { offset },
+          bytes: bytes.subarray(offset, offset + begin.chunkBytes),
+          ...(await phase(`chunk:${offset}`)),
+        });
+      }
+      scope.check();
+      await this.t.json({
+        method: "POST",
+        path: upload(":commit"),
+        body: {},
+        ...(await phase("commit")),
+      });
+    } catch (error) {
+      // Cleanup must still run when the caller's signal/deadline has expired.
+      const idempotencyKey = await sha256Hex(JSON.stringify(["files.unarchive", key, "abort"]));
+      await this.t
+        .json({ method: "POST", path: upload(":abort"), body: {}, idempotencyKey })
+        .catch(() => undefined);
+      throw error;
+    }
+  }
   /** Copies a local file or directory into the sandbox. A directory travels as
    * one gzipped tar to the API's folder routes, and the sandbox's own `tar`
    * unpacks it as it arrives, making the folder. */
@@ -1393,21 +1771,40 @@ export class Files {
    * into place only once every byte has arrived: a failed copy never leaves
    * a short file under the name asked for. A short stream is tried again,
    * twice, as a short `read` is. */
-  async #streamTo(remotePath: string, localPath: string): Promise<void> {
+  async #streamTo(
+    remotePath: string,
+    localPath: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    const scope = requestScope(options);
     const fs = await import("node:fs/promises");
     const partial = `${localPath}.runtime-partial-${crypto.randomUUID().slice(0, 8)}`;
     for (let attempt = 0; ; attempt++) {
       try {
-        const stream = await this.readStream(remotePath);
+        scope.check();
+        const stream = await this.readStream(remotePath, scope.request);
         // The handle is closed before anything else touches the file, so a
         // failed copy's partial file is really gone when the error returns.
-        const file = await fs.open(partial, "w");
         try {
-          for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>)
-            await file.write(chunk);
+          const file = await fs.open(partial, "w");
+          try {
+            for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+              let written = 0;
+              while (written < chunk.length) {
+                scope.check();
+                const result = await file.write(chunk.subarray(written));
+                if (result.bytesWritten === 0) throw new Error("The local file accepted no bytes.");
+                written += result.bytesWritten;
+              }
+            }
+          } finally {
+            await file.close();
+          }
         } finally {
-          await file.close();
+          // Opening or writing the local file can fail before consumption.
+          await stream.cancel().catch(() => undefined);
         }
+        scope.check();
         await fs.rename(partial, localPath);
         return;
       } catch (error) {
@@ -1424,10 +1821,16 @@ export class Files {
   /** Copies a file or directory out of the sandbox. A file streams to disk,
    * any size, checked against its length; a directory comes as one tar from
    * the API's folder route. */
-  async download(remotePath: string, localPath: string): Promise<void> {
+  async download(
+    remotePath: string,
+    localPath: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    const scope = requestScope(options);
+    scope.check();
     const fs = await import("node:fs/promises");
     const paths = await import("node:path");
-    const entry = await this.stat(remotePath);
+    const entry = await this.stat(remotePath, scope.request);
     if (!entry.exists)
       throw new RuntimeError({
         message: `${remotePath} does not exist.`,
@@ -1436,7 +1839,7 @@ export class Files {
       });
     if (entry.type !== "directory") {
       await fs.mkdir(paths.dirname(localPath), { recursive: true });
-      await this.#streamTo(remotePath, localPath);
+      await this.#streamTo(remotePath, localPath, scope.request);
       return;
     }
     // The sandbox's own `tar` packs it as it streams, and it is unpacked as
@@ -1446,9 +1849,16 @@ export class Files {
       path: this.#path("/files/archive"),
       query: { path: remotePath, gzip: true },
       accept: "application/gzip",
+      ...scope.request,
     });
     const { unpackStream } = await import("./tar.js");
-    await unpackStream(archive as unknown as AsyncIterable<Uint8Array>, localPath);
+    try {
+      await unpackStream(archive as unknown as AsyncIterable<Uint8Array>, localPath, {
+        signal: scope.request.signal,
+      });
+    } finally {
+      await archive.cancel().catch(() => undefined);
+    }
   }
 }
 
@@ -1456,6 +1866,7 @@ export function sandboxPage(
   t: Transport,
   body: { data: SandboxInfo[]; nextCursor: string | null },
   query: Record<string, unknown>,
+  options: RequestOptions = {},
 ): Page<Sandbox> {
   return new Page(
     body.data.map((info) => new Sandbox(t, info)),
@@ -1467,8 +1878,10 @@ export function sandboxPage(
           method: "GET",
           path: "/v1/sandboxes",
           query: Object.assign({}, query, { cursor }) as Query,
+          ...options,
         }),
         query,
+        options,
       ),
   );
 }

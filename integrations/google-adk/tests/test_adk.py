@@ -1,5 +1,6 @@
 """The executor and the toolset against fake Runtime clients; nothing leaves the machine."""
 
+import asyncio
 import gc
 
 import pytest
@@ -149,3 +150,90 @@ async def test_toolset_filter_and_a_sandbox_you_own():
     assert [t.name for t in await toolset.get_tools()] == ["runtime_exec"]
     await toolset.close()
     assert not sandbox.stopped and toolset.sandbox is sandbox
+
+
+async def test_concurrent_tool_requests_share_one_created_sandbox():
+    class SlowRuntime(FakeAsyncRuntime):
+        async def create(self, **fields):
+            await asyncio.sleep(0)
+            return await super().create(**fields)
+
+    runtime = SlowRuntime()
+    toolset = RuntimeToolset(runtime=runtime)
+    first, second = await asyncio.gather(toolset.get_tools(), toolset.get_tools())
+    assert len(runtime.made) == 1
+    assert first == second
+    await toolset.close()
+    assert all(sandbox.stopped for sandbox in runtime.made)
+
+
+async def test_close_waits_for_creation_and_stops_its_sandbox():
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class SlowRuntime(FakeAsyncRuntime):
+        async def create(self, **fields):
+            started.set()
+            await release.wait()
+            return await super().create(**fields)
+
+    runtime = SlowRuntime()
+    toolset = RuntimeToolset(runtime=runtime)
+    request = asyncio.create_task(toolset.get_tools())
+    await started.wait()
+    closing = asyncio.create_task(toolset.close())
+    release.set()
+    await asyncio.gather(request, closing)
+    assert len(runtime.made) == 1 and runtime.made[0].stopped
+    assert toolset.sandbox is None
+
+
+async def test_failed_binding_stops_the_guest_and_closes_its_owned_client(monkeypatch):
+    import google_adk_withruntime as adapter
+
+    class OwnedRuntime(FakeAsyncRuntime):
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    runtime = OwnedRuntime()
+    monkeypatch.setattr(adapter, "AsyncRuntime", lambda: runtime)
+
+    def fail_binding(*args, **kwargs):
+        raise ValueError("bad binding")
+
+    monkeypatch.setattr(adapter, "sandbox_tools", fail_binding)
+    toolset = RuntimeToolset()
+    with pytest.raises(ValueError, match="bad binding"):
+        await toolset.get_tools()
+    assert runtime.made[0].stopped and runtime.closed
+    assert toolset.sandbox is None
+
+
+async def test_failed_binding_does_not_stop_a_borrowed_guest(monkeypatch):
+    import google_adk_withruntime as adapter
+
+    def fail_binding(*args, **kwargs):
+        raise ValueError("bad binding")
+
+    monkeypatch.setattr(adapter, "sandbox_tools", fail_binding)
+    sandbox = FakeAsyncSandbox({})
+    toolset = RuntimeToolset(sandbox)
+    with pytest.raises(ValueError, match="bad binding"):
+        await toolset.get_tools()
+    assert not sandbox.stopped and toolset.sandbox is sandbox
+
+
+def test_failed_input_upload_is_reported_to_the_model():
+    runtime = FakeRuntime()
+    executor = RuntimeCodeExecutor(runtime=runtime)
+    sandbox = executor.sandbox
+
+    def fail_write(*args):
+        raise ConnectionError("input upload reset")
+
+    sandbox.files.write = fail_write
+    result = run(executor, "print(1)", [File(name="input.txt", content="data")])
+    assert "input upload reset" in result.stderr and result.exit_code is None
+    assert sandbox.commands == []
+    executor.close()

@@ -10,8 +10,8 @@ load it.
 import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
 ```
 
-The mapping was written against `@blaxel/core` 0.3.23 and Blaxel's sandbox API
-source, checked 27 September 2026. Every name `@blaxel/core` exports can be
+The mapping was written against `@blaxel/core` 0.3.24 and Blaxel's sandbox API
+source, checked 30 September 2026. Every name `@blaxel/core` exports can be
 imported: code that only mentions an agent, model or MCP helper still loads.
 
 ## Keys
@@ -100,7 +100,7 @@ name, or through `getByExternalId`, use the same Runtime key.
 | `process.exec` without `waitForCompletion`                                            | One Runtime process, answered running. Its Blaxel name is kept in its command line, so `get("name")` finds it from any client.                                                                                                                                                                                                                                                                   |
 | `process.exec({ waitForCompletion: true })`                                           | One streamed call, answered with `status`, `exitCode`, `stdout`, `stderr` and `logs`. Past `timeout` the wait ends with a 422 and the process runs on.                                                                                                                                                                                                                                           |
 | `onLog`, `onStdout`, `onStderr`, `streamLogs`                                         | The process's output as it comes; `streamLogs` gives whole lines, as Blaxel's does.                                                                                                                                                                                                                                                                                                              |
-| `process.get`, `wait`, `list`, `logs`, `stop`, `kill`, `writeStdin`, `closeStdin`     | Runtime processes by id or name. `wait` follows the output instead of polling. `stop` is SIGTERM, `kill` SIGKILL.                                                                                                                                                                                                                                                                                |
+| `process.get`, `wait`, `list`, `logs`, `stop`, `kill`, `writeStdin`, `closeStdin`     | Runtime processes by id or name. `wait` follows output with one deadline covering lookup and output. Cancellation leaves the process running. `stop` is SIGTERM, `kill` SIGKILL.                                                                                                                                                                                                                 |
 | `keepAlive`, `timeout`                                                                | The sandbox does not pause for idleness while the process may run (its `timeout`, 600 s by default, 0 for as long as a lease allows); once no `keepAlive` process runs, it gets its idle pause back.                                                                                                                                                                                             |
 | `restartOnFailure`, `maxRestarts`, `waitForPorts`, `workingDir`, `env`, `stdin`       | A restart loop in the same process, with Blaxel's note in the output (`restartCount` counts the notes); a wait in the sandbox for the ports; as in Blaxel.                                                                                                                                                                                                                                       |
 | `fs.read`, `write`, `readBinary`, `writeBinary`, `writeTree`, `mkdir`, `rm`, `cp`     | Runtime's files API, or one command. A path only root may read or write (outside `/workspace`, or made by a root process) goes through sudo, as Blaxel's root-owned API could.                                                                                                                                                                                                                   |
@@ -208,7 +208,7 @@ leaves those names alone.
 
 `bun run test` in `packages/cloud-sdk` runs the unit tests against a fake of
 Runtime's SDK: `tests/blaxel`, including a check that every name
-`@blaxel/core` 0.3.23 exports is exported here.
+`@blaxel/core` 0.3.24 exports is exported here.
 
 The end-to-end test runs Blaxel's guides, unmodified but for the import,
 against the real API: `tests/fixtures/blaxel-quickstart.mjs` (create, processes,

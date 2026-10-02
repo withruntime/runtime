@@ -104,9 +104,8 @@ class AsyncContainerProcess:
                         raise IOError("Process output was truncated")
                     elif event["type"] == "exit":
                         exited = True
-                        if event.get("timedOut"):
-                            raise TimeoutError("Modal-compatible command timed out")
-                        self.returncode = event.get("exitCode")
+                        # Match the pinned SDK's deadline sentinel and stdio EOF.
+                        self.returncode = -1 if event.get("timedOut") else event.get("exitCode")
                     self._condition.notify_all()
             if not exited:
                 raise IOError("Process output ended before an exit status")

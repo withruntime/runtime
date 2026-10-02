@@ -121,7 +121,7 @@ merge.
 import { SpritesClient } from "@fly/sprites";
 const client = new SpritesClient(process.env.SPRITE_TOKEN);
 const sprite = await client.createSprite("my-sprite");
-const result = await sprite.execFile("python3", ["-c", "print(6 * 7)"]);
+const result = await sprite.execFile("python3", ["-c", "print(sum([125, 250, 375]))"]);
 console.log(result.stdout);
 await sprite.delete();
 ```
@@ -132,7 +132,8 @@ Runtime:
 import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "trial" });
 try {
-  console.log((await box.exec(["python3", "-c", "print(6 * 7)"], { check: true })).stdout);
+  await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  console.log((await box.exec(["python3", "/workspace/invoice.py"], { check: true })).stdout);
 } finally {
   await box.stop();
 }

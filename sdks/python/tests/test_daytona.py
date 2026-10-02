@@ -337,7 +337,7 @@ class ErrorsAndGaps(Base):
 
     def test_gaps(self):
         sandbox = self.daytona.create()
-        for refuse in (sandbox.set_labels, sandbox.resize, sandbox.get_metrics, sandbox.create_signed_preview_url,
+        for refuse in (sandbox.resize, sandbox.get_metrics, sandbox.create_signed_preview_url,
                        sandbox.create_ssh_access, sandbox.upload_url, lambda: sandbox.computer_use,
                        lambda: self.daytona.volume.create("v"),
                        lambda: sandbox.code_interpreter.run_code("1", envs={"A": "1"})):

@@ -18,6 +18,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import types
 import unittest
 import uuid
 from pathlib import Path
@@ -35,10 +36,46 @@ from withruntime._errors import RuntimeError as RuntimeCloudError
 def local_mode():
     """How this machine can play the sandbox: "sudo" (real passwordless sudo, sandbox user uid 1000),
     "root" (running as root, no sudo needed) or None (root commands cannot run here)."""
-    if os.path.exists("/usr/bin/sudo") and subprocess.run(["/usr/bin/sudo", "-n", "-E", "true"],
-                                                          capture_output=True).returncode == 0:
-        return "sudo"
+    if os.path.exists("/usr/bin/sudo"):
+        try:
+            if subprocess.run(["/usr/bin/sudo", "-n", "-E", "true"], capture_output=True).returncode == 0:
+                return "sudo"
+        except OSError:
+            # A filesystem sandbox can forbid sudo itself, without forbidding
+            # the adapter's ordinary non-root contract tests.
+            pass
     return "root" if os.geteuid() == 0 else None
+
+
+@unittest.skipUnless(HAVE_HARBOR, "Harbor is not installed")
+class FolderRouteContract(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_directory_uses_the_native_root_folder_route(self):
+        from withruntime.harbor import RuntimeEnvironment
+
+        calls = []
+
+        async def upload(local_path, remote_path, *, user):
+            calls.append((local_path, remote_path, user))
+
+        sandbox = types.SimpleNamespace(files=types.SimpleNamespace(upload=upload))
+        environment = types.SimpleNamespace(_require=lambda: (sandbox, object()))
+        with tempfile.TemporaryDirectory(prefix="harbor-route-") as source:
+            (Path(source) / "test.txt").write_text("folder contents")
+            await RuntimeEnvironment.upload_dir(environment, Path(source), "/root/data")
+            self.assertEqual(calls, [(source, "/root/data", "root")])
+
+    async def test_download_directory_uses_the_native_root_folder_route(self):
+        from withruntime.harbor import RuntimeEnvironment
+
+        calls = []
+
+        async def download(remote_path, local_path, *, user):
+            calls.append((remote_path, local_path, user))
+
+        sandbox = types.SimpleNamespace(files=types.SimpleNamespace(download=download))
+        environment = types.SimpleNamespace(_require=lambda: (sandbox, object()))
+        await RuntimeEnvironment.download_dir(environment, "/root/data", Path("local-dir"))
+        self.assertEqual(calls, [("/root/data", "local-dir", "root")])
 
 
 class FakeFiles:
@@ -74,6 +111,20 @@ class FakeFiles:
         else:
             raise NotFoundError("gone", code="file_not_found", status=404)
         return True
+
+    async def upload(self, local_path, remote_path, *, user="sandbox"):
+        if user != "root":
+            raise AssertionError("Harbor directories must travel as root")
+        target = self.sandbox.local(remote_path) if remote_path.startswith("/workspace/") else remote_path
+        shutil.copytree(local_path, target, symlinks=True, dirs_exist_ok=True)
+        self.sandbox.world.calls.append(("upload_dir", remote_path, user))
+
+    async def download(self, remote_path, local_path, *, user="sandbox"):
+        if user != "root":
+            raise AssertionError("Harbor directories must travel as root")
+        source = self.sandbox.local(remote_path) if remote_path.startswith("/workspace/") else remote_path
+        shutil.copytree(source, local_path, symlinks=True, dirs_exist_ok=True)
+        self.sandbox.world.calls.append(("download_dir", remote_path, user))
 
 
 class FakeNetwork:
@@ -445,6 +496,8 @@ class HarborEnvironmentTest(unittest.TestCase):
         run_result, is_dir, is_file = run(body())
         self.assertEqual(run_result.stdout, "ok\n", "an uploaded script keeps its mode")
         self.assertTrue(is_dir and is_file)
+        self.assertIn(("upload_dir", target + "/tests", "root"), self.world.calls)
+        self.assertIn(("download_dir", target + "/tests", "root"), self.world.calls)
         self.assertEqual((back / "sub" / "data.bin").read_bytes(), bytes(range(256)) * 4096)
         self.assertEqual((back / "test.sh").read_text(), "#!/bin/sh\necho ok\n")
         self.assertEqual((self.dir / "run.sh").read_text(), "#!/bin/sh\necho ok\n")

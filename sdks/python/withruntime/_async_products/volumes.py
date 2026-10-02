@@ -21,11 +21,11 @@ class AsyncVolumes:
 
     async def create(self, size_mib: Optional[int] = None, *, name: Optional[str] = None,
                      labels: Optional[dict[str, str]] = None, region: Optional[str] = None,
-                     from_backup: Optional[str] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+                     from_backup: Optional[str] = None, shared: Optional[bool] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Creates a volume and waits (up to 10 s) until it is ready. With
         ``from_backup``, a restore of that backup (omit ``size_mib``)."""
         body = {k: v for k, v in {"sizeMiB": size_mib, "name": name, "labels": labels, "region": region,
-                                  "fromBackup": from_backup}.items() if v is not None}
+                                  "fromBackup": from_backup, "shared": shared}.items() if v is not None}
         return await self._t.json("POST", "/v1/volumes", body=body, wait=10, idempotency_key=idempotency_key)
 
     async def get(self, volume_id: str) -> dict[str, Any]:
@@ -40,6 +40,28 @@ class AsyncVolumes:
             body = await self._t.json("GET", "/v1/volumes", query={**query, "cursor": cursor})
             return AsyncPage(body["data"], body.get("nextCursor"), fetch)
         return await fetch(None)
+
+    async def resize(self, volume_id: str, size_mib: int, *, wait: int = 10,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Grows a detached ordinary volume, waiting up to ``wait`` seconds."""
+        return await self._t.json("POST", f"/v1/volumes/{_enc(volume_id)}:resize",
+                                  body={"sizeMiB": size_mib}, wait=wait, idempotency_key=idempotency_key)
+
+    async def attach(self, volume_id: str, sandbox_id: str, path: str, *, wait: int = 10,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Attaches a shared disk where shared disks are enabled."""
+        return await self._t.json("POST", f"/v1/volumes/{_enc(volume_id)}:attach",
+                                  body={"sandboxId": sandbox_id, "path": path}, wait=wait,
+                                  idempotency_key=idempotency_key)
+
+    async def detach(self, volume_id: str, attachment_id: str, *, wait: int = 10,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Detaches a shared disk and waits for its attachment to finish."""
+        return await self._t.json("POST", f"/v1/volumes/{_enc(volume_id)}/attachments/{_enc(attachment_id)}:detach",
+                                  body={}, wait=wait, idempotency_key=idempotency_key)
+
+    async def get_attachment(self, volume_id: str, attachment_id: str) -> dict[str, Any]:
+        return await self._t.json("GET", f"/v1/volumes/{_enc(volume_id)}/attachments/{_enc(attachment_id)}")
 
     async def delete(self, volume_id: str) -> dict[str, Any]:
         """Deletes a volume no sandbox holds. Its bytes are gone for good."""

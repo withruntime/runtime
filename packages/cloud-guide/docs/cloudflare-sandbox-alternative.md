@@ -29,8 +29,8 @@ Weighing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-sa
   separately and pay for no more.
 - **Work survives idle time.** A paused Runtime sandbox wakes with its files,
   memory and running processes, kept for 1 to 365 days. A Cloudflare sandbox
-  that sleeps after 10 idle minutes starts again from its image, with its files
-  gone unless you backed them up to R2 first.
+  restores saved files from filesystem-only snapshots in public beta; memory
+  and processes restart. Snapshots expire 30 days after creation or last restore.
 - **A desktop built in.** Start a Linux desktop in any sandbox and drive it
   with clicks, keys and screenshots. Cloudflare removed its Sandbox SDK desktop
   in version 0.10.2, in June 2026.
@@ -70,14 +70,14 @@ documentation, checked {{checked:cloudflare}}.
 | Plan fee       | None; prepaid credit from {{topup-min}}                                     | Workers Paid, at least {{term:cloudflare:workers-paid}} a month      |
 | Free start     | {{trial-hours}} sandbox hours, no card                                      | No free tier; the plan includes 375 vCPU-minutes a month             |
 | Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart              | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU             |
-| When idle      | Pause keeps files and memory; paid retention 1–365 days                     | Sleeps after 10 idle minutes by default; files are lost              |
+| When idle      | Pause keeps files and memory; paid retention 1–365 days                     | Filesystem-only snapshots; processes restart                         |
 | Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs            | A TypeScript SDK called from a Cloudflare Worker                     |
 
 ## Cost for the same job
 
 Take 1,000 runs of a 2 vCPU sandbox. Each run lasts 60 seconds and keeps the CPU
 busy for 20 CPU-seconds: an agent that spends most of its time waiting for a
-model. Runtime gets 4 GiB. Cloudflare's smallest 2 vCPU size has 6 GiB, because
+model. Runtime gets 4 GiB. Cloudflare's smallest custom 2 vCPU size has 6 GiB, because
 a custom size needs at least 3 GiB per vCPU; it gets 12 GB of disk, the size in
 Cloudflare's own example.
 
@@ -102,7 +102,7 @@ Cloudflare  CPU    1,000 × 20 s × {{=$6 rate:cloudflare:cpu / 3600}}          
   4 GiB, still costs {{cost:runtime}}, because CPU is billed as measured.
 
 The Cloudflare figure assumes each sandbox is destroyed when its run ends; one
-left alone keeps billing memory and disk until it has been idle for 10 minutes.
+left alone keeps billing memory and disk until its inactivity timeout ends.
 Workers requests, Durable Object time, the {{term:cloudflare:workers-paid}} plan minimum, network, taxes and
 free allowances are left out of both. On Runtime, inbound traffic is free, and
 each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See
@@ -126,7 +126,7 @@ export { Sandbox } from "@cloudflare/sandbox";
 export default {
   async fetch(request, env) {
     const sandbox = getSandbox(env.Sandbox, "my-sandbox");
-    const result = await sandbox.exec("python3 -c 'print(6 * 7)'");
+    const result = await sandbox.exec("python3 -c 'print(sum([125, 250, 375]))'");
     await sandbox.destroy();
     return Response.json({ stdout: result.stdout });
   },
@@ -139,7 +139,8 @@ Runtime, from any server:
 import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "trial" });
 try {
-  console.log((await box.exec("python3 -c 'print(6 * 7)'", { check: true })).stdout);
+  await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);
 } finally {
   await box.stop();
 }
@@ -187,7 +188,8 @@ export default {
       onLeaseEnd: "stop",
     });
     try {
-      const result = await box.exec("python3 -c 'print(6 * 7)'", { check: true });
+      await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+      const result = await box.exec("python3 /workspace/invoice.py", { check: true });
       return Response.json({ stdout: result.stdout });
     } finally {
       await box.stop();
@@ -222,8 +224,8 @@ What does not carry over:
   that has its image, across Cloudflare's network. Runtime runs in one US
   region.
 - **Your app already lives on Workers.** Sandboxes then share its account,
-  billing and bindings, and a directory backed up to R2 can be restored by any
-  sandbox.
+  billing and bindings, and filesystem-only snapshots can restore saved files, while R2 bucket data
+  outlives individual instances.
 - **Very large fleets.** A Cloudflare account can run 1,500 vCPUs and 6 TiB of
   memory at once. A paid Runtime account runs {{paid-sandboxes}} sandboxes, {{account-vcpus}} vCPUs and {{account-memory}}
   at once ({{new-account-sandboxes}} sandboxes in its first week), raised on request.
@@ -232,6 +234,9 @@ What does not carry over:
 
 Checked 23 September 2026.
 
+Cloudflare's snapshot behavior checked 30 September 2026.
+
+- [Cloudflare sandbox lifetime](https://developers.cloudflare.com/sandbox/concepts/lifetime/)
 - [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/)
 - [Sandbox SDK pricing](https://developers.cloudflare.com/sandbox/platform/pricing/)
 - [Containers limits and instance types](https://developers.cloudflare.com/containers/platform/limits/)

@@ -1,7 +1,8 @@
-import { Runtime, type RuntimeOptions } from "../client.js";
+import { Runtime, type CreateOptions, type RuntimeOptions } from "../client.js";
 import { RuntimeError, NotFoundError } from "../errors.js";
 import type { Sandbox } from "../sandbox.js";
 import type { CreateSandbox, ExecOptions } from "../types.js";
+import type { RequestOptions } from "../transport.js";
 import { SHELL_BROKER } from "./shell.js";
 
 export type ClientOptions = RuntimeOptions & { client?: Runtime };
@@ -49,9 +50,15 @@ export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export const pathAt = (path: string, cwd = "/workspace") =>
   path.startsWith("/") ? path : `${cwd.replace(/\/$/, "")}/${path}`;
 const ENV_PATH = "/workspace/.runtime-compat/environment.json";
-export async function environment(sandbox: Sandbox): Promise<Record<string, string>> {
+export async function environment(
+  sandbox: Sandbox,
+  options: RequestOptions = {},
+): Promise<Record<string, string>> {
+  options.signal?.throwIfAborted();
   try {
-    return JSON.parse(await sandbox.files.readText(ENV_PATH)) as Record<string, string>;
+    const text = await sandbox.files.readText(ENV_PATH, options);
+    options.signal?.throwIfAborted();
+    return JSON.parse(text) as Record<string, string>;
   } catch (error) {
     if (error instanceof NotFoundError) return {};
     throw error;
@@ -60,9 +67,15 @@ export async function environment(sandbox: Sandbox): Promise<Record<string, stri
 export async function saveEnvironment(
   sandbox: Sandbox,
   env: Record<string, string>,
+  options: RequestOptions = {},
 ): Promise<void> {
+  options.signal?.throwIfAborted();
   validateEnvironment(env);
-  await sandbox.files.write(ENV_PATH, JSON.stringify(env), { mode: 0o600 });
+  await sandbox.files.write(ENV_PATH, JSON.stringify(env), {
+    mode: 0o600,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs,
+  });
 }
 export function validateEnvironment(env: Record<string, string>): void {
   for (const key of Object.keys(env))
@@ -75,8 +88,10 @@ export function validateEnvironment(env: Record<string, string>): void {
 export async function execOptions(
   sandbox: Sandbox,
   options: ExecOptions = {},
+  request: RequestOptions = {},
 ): Promise<ExecOptions> {
-  return { ...options, env: { ...(await environment(sandbox)), ...options.env } };
+  const requestOptions = { ...request, signal: request.signal ?? options.signal };
+  return { ...options, env: { ...(await environment(sandbox, requestOptions)), ...options.env } };
 }
 export async function create(
   runtime: Runtime,
@@ -84,17 +99,38 @@ export async function create(
   input: CreateSandbox,
   env: Record<string, string> | undefined = undefined,
   setup?: (sandbox: Sandbox) => Promise<void>,
+  options: CreateOptions = {},
 ): Promise<Sandbox> {
+  options.signal?.throwIfAborted();
   if (env !== undefined) validateEnvironment(env);
-  const sandbox = await runtime.sandboxes.create({
-    ...input,
-    labels: { ...input.labels, "compat.provider": provider },
-  });
+  const sandbox = await runtime.sandboxes.create(
+    {
+      ...input,
+      labels: { ...input.labels, "compat.provider": provider },
+    },
+    options,
+  );
   try {
-    if (env !== undefined || !input.snapshot) await saveEnvironment(sandbox, env ?? {});
+    options.signal?.throwIfAborted();
+    if (env !== undefined || !input.snapshot) await saveEnvironment(sandbox, env ?? {}, options);
+    options.signal?.throwIfAborted();
     await setup?.(sandbox);
+    options.signal?.throwIfAborted();
     return sandbox;
   } catch (error) {
+    // Cancellation cannot authorize deleting a remote resource: the response
+    // may be a retry/reuse of a sandbox that already has somebody's work.
+    // Legacy failed-initialization rollback is limited to an ordinary create
+    // with a new SDK-generated mutation key and no replay/reuse marker.
+    if (
+      options.signal?.aborted ||
+      (error instanceof RuntimeError && error.code === "timeout") ||
+      input.getOrCreate === true ||
+      options.idempotencyKey !== undefined ||
+      sandbox.info.replayed === true ||
+      sandbox.info.reused === true
+    )
+      throw error;
     try {
       await destroy(sandbox);
     } catch (cleanup) {
@@ -106,12 +142,18 @@ export async function create(
     throw error;
   }
 }
-export async function destroy(sandbox: Sandbox): Promise<void> {
+export async function destroy(sandbox: Sandbox, options: RequestOptions = {}): Promise<void> {
   // Stop before releasing persistence: a paused sandbox cannot change its disk
   // meter, and must never be woken solely to delete it. The stopped update queues
   // disk destruction; see ARCHITECTURE.md section 10 and migration 0181.
-  await sandbox.stop();
-  if (sandbox.info.persistent) await sandbox.update({ persistent: false });
+  options.signal?.throwIfAborted();
+  if (options.idempotencyKey !== undefined)
+    throw new CompatibilityError(
+      "Runtime",
+      "caller idempotency keys for compound sandbox deletion",
+    );
+  await sandbox.stop(options);
+  if (sandbox.info.persistent) await sandbox.update({ persistent: false }, options);
 }
 export async function ready(sandbox: Sandbox): Promise<Sandbox> {
   if (sandbox.state === "paused") await sandbox.wake();
@@ -119,12 +161,20 @@ export async function ready(sandbox: Sandbox): Promise<Sandbox> {
   else if (sandbox.state !== "running") await sandbox.waitFor("running");
   return sandbox;
 }
-export async function lookup(runtime: Runtime, id: string): Promise<Sandbox> {
-  if (/^[a-f0-9-]{36}$/i.test(id)) return runtime.sandboxes.get(id);
-  const page = await runtime.sandboxes.list({ name: id, includeStopped: true });
-  for await (const sandbox of page) if (sandbox.info.name === id) return sandbox;
+export async function lookup(
+  runtime: Runtime,
+  id: string,
+  options: RequestOptions = {},
+): Promise<Sandbox> {
+  options.signal?.throwIfAborted();
+  if (/^[a-f0-9-]{36}$/i.test(id)) return runtime.sandboxes.get(id, options);
+  const page = await runtime.sandboxes.list({ name: id, includeStopped: true }, options);
+  for await (const sandbox of page) {
+    options.signal?.throwIfAborted();
+    if (sandbox.info.name === id) return sandbox;
+  }
   // IDs are not necessarily UUIDs in local or self-hosted servers.
-  return runtime.sandboxes.get(id);
+  return runtime.sandboxes.get(id, options);
 }
 export async function all(runtime: Runtime, provider: string): Promise<Sandbox[]> {
   const result: Sandbox[] = [];
@@ -161,13 +211,23 @@ export async function shellCommand(
   command: string,
   name?: string | null,
   overrides: { env?: Record<string, string>; cwd?: string; persist?: boolean } = {},
+  request: RequestOptions = {},
 ): Promise<string | string[]> {
+  request.signal?.throwIfAborted();
   if (!name) return command;
   const root = await shellRoot(name);
-  await sandbox.files.mkdir(root, { parents: true });
+  await sandbox.files.mkdir(root, {
+    parents: true,
+    signal: request.signal,
+    timeoutMs: request.timeoutMs,
+  });
   if (overrides.persist !== false) {
     const script = "/workspace/.runtime-compat/shell.py";
-    await sandbox.files.write(script, SHELL_BROKER, { mode: 0o600 });
+    await sandbox.files.write(script, SHELL_BROKER, {
+      mode: 0o600,
+      signal: request.signal,
+      timeoutMs: request.timeoutMs,
+    });
     return [
       "python3",
       script,
@@ -177,7 +237,7 @@ export async function shellCommand(
         command,
         env: overrides.env ?? {},
         cwd: overrides.cwd,
-        baseEnv: await environment(sandbox),
+        baseEnv: await environment(sandbox, request),
       }),
     ];
   }

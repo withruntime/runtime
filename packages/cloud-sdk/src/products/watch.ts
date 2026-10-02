@@ -82,10 +82,13 @@ export class WatchHandle {
   #stopped = false;
   /** stop() was called: deliver what the watch reports until its end. */
   #stopping = false;
+  #stopPending: Promise<void> | undefined;
+  #remoteStop: Promise<unknown> | undefined;
   /** Callbacks under way. */
   #delivering = 0;
   #exitNotified = false;
   #following: Promise<void> | undefined;
+  #followingActive = false;
   #abort = new AbortController();
   constructor(
     private readonly t: Transport,
@@ -105,6 +108,7 @@ export class WatchHandle {
   /** Start delivering again from where it left off, after a pause. */
   resume(): void {
     if (this.#stopped || this.#stopping) throw new Error("This watch was stopped");
+    if (this.#followingActive) throw new Error("This watch is already delivering");
     this.#abort = new AbortController();
     this.begin();
   }
@@ -112,11 +116,43 @@ export class WatchHandle {
    * delivered: the watch reports it and ends, and this returns once that has
    * arrived (at most 5 s). Called from inside a callback, it stops at once. */
   async stop(options?: RequestOptions): Promise<void> {
-    if (this.#stopped || this.#stopping) return;
+    if (this.#stopped) return;
+    if (this.#stopping) {
+      // Even a callback must observe whether the remote delete succeeded.
+      // It cannot join the drain, which is waiting for that callback to finish.
+      await this.#remoteStop;
+      if (this.#delivering === 0) await this.#stopPending;
+      else this.#finishLocalStop();
+      return;
+    }
     this.#stopping = true;
-    await this.t
-      .json({ method: "DELETE", path: `${this.base}/${encodeURIComponent(this.id)}`, ...options })
-      .catch(() => undefined);
+    this.#remoteStop = (async () =>
+      await this.t.json({
+        method: "DELETE",
+        path: `${this.base}/${encodeURIComponent(this.id)}`,
+        ...options,
+      }))();
+    const pending = this.#finishStop(this.#remoteStop);
+    this.#stopPending = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.#stopPending === pending) {
+        this.#stopPending = undefined;
+        this.#remoteStop = undefined;
+      }
+    }
+  }
+  async #finishStop(remote: Promise<unknown>): Promise<void> {
+    try {
+      await remote;
+    } catch (error) {
+      // A failed delete does not prove the remote watch stopped. Close local
+      // delivery, but let the caller observe the failure and retry the delete.
+      this.#abort.abort();
+      this.#stopping = false;
+      throw error;
+    }
     // Inside a callback, #following is awaiting the caller: waiting for it
     // here would make that callback await itself.
     if (this.#following && this.#delivering === 0) {
@@ -129,6 +165,9 @@ export class WatchHandle {
       ]);
       clearTimeout(timer);
     }
+    this.#finishLocalStop();
+  }
+  #finishLocalStop() {
     this.#stopped = true;
     this.#abort.abort();
     this.#notifyExit("stopped");
@@ -138,7 +177,7 @@ export class WatchHandle {
     this.#exitNotified = true;
     this.options.onExit?.(reason);
   }
-  async #follow(): Promise<void> {
+  async #follow(abort: AbortController): Promise<void> {
     for (;;) {
       let next: "continue" | "exit" = "exit";
       try {
@@ -146,7 +185,7 @@ export class WatchHandle {
           method: "GET",
           path: `${this.base}/${encodeURIComponent(this.id)}/events`,
           query: { cursor: this.cursor, follow: true },
-          signal: this.#abort.signal,
+          signal: abort.signal,
           timeoutMs: 150_000,
         })) {
           this.cursor = event.cursor ?? this.cursor;
@@ -165,6 +204,9 @@ export class WatchHandle {
             }
           } else if (event.k === "continue") next = "continue";
           else if (event.k === "end" || event.k === "paused") {
+            // A paused callback may resume immediately. Retire this reader
+            // before invoking it, without letting its finalizer retire the new one.
+            this.#followingActive = false;
             if (!this.#stopped) this.#notifyExit(event.k === "paused" ? "paused" : event.reason);
             return;
           } else if (event.k === "failure")
@@ -178,7 +220,7 @@ export class WatchHandle {
           else this.options.onNotice?.(event);
         }
       } catch (error) {
-        if (this.#stopped || this.#abort.signal.aborted) return;
+        if (this.#stopped || abort.signal.aborted) return;
         throw error;
       }
       if (next !== "continue" || this.#stopped) return;
@@ -186,8 +228,13 @@ export class WatchHandle {
   }
   /** @internal */
   begin() {
+    if (this.#followingActive) throw new Error("This watch is already delivering");
     this.#exitNotified = false;
-    this.#following = this.#follow();
+    this.#followingActive = true;
+    const abort = this.#abort;
+    this.#following = this.#follow(abort).finally(() => {
+      if (this.#abort === abort) this.#followingActive = false;
+    });
     // An error surfaces through `done`; nothing is left unhandled meanwhile.
     this.#following.catch(() => undefined);
     return this;

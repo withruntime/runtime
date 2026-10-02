@@ -10,9 +10,11 @@ import type {
 } from "@cloudflare/workers-types/index.ts";
 import { only, CompatibilityError } from "../compat/core.js";
 import { Runtime } from "../client.js";
+import { workerSandboxIdentity } from "./identity.js";
 import {
   Sandbox as RuntimeSandbox,
   sanitizeSandboxId,
+  validateSandboxConfiguration,
   type ExecutionSession,
   type Process,
   type SandboxOptions,
@@ -29,9 +31,56 @@ export interface RuntimeWorkerEnv {
 }
 type Configuration = {
   sandboxName?: { name: string; normalizeId?: boolean };
+  nativeSandboxId?: string;
   sleepAfter?: string | number;
   keepAlive?: boolean;
 };
+type ConfigurationIntent = {
+  sandboxId?: string;
+  previous: Configuration;
+  next: Configuration;
+};
+const CONFIGURATION_KEY = "runtime.configuration";
+const CONFIGURATION_INTENT_KEY = "runtime.configuration.pending";
+
+/** Preserve the original failure even when durable recovery also fails. */
+function configurationFailure(error: unknown, uncertain: boolean, cleanup?: unknown) {
+  if (error !== null && (typeof error === "object" || typeof error === "function")) {
+    try {
+      if (uncertain)
+        Object.defineProperty(error, "configurationUncertain", { value: true, configurable: true });
+      if (cleanup !== undefined)
+        Object.defineProperty(
+          error,
+          "cause" in error && error.cause !== undefined ? "cleanupError" : "cause",
+          {
+            value: cleanup,
+            configurable: true,
+          },
+        );
+    } catch {
+      // A frozen exception still keeps its original identity and type.
+    }
+  }
+  return error;
+}
+
+/** Queue waits share the caller's existing signal and never reset its deadline. */
+async function waitForConfiguration(pending: Promise<unknown>, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  if (!signal) return pending;
+  let cancel!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    cancel = () => reject(signal.reason);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+  try {
+    return await Promise.race([pending, aborted]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+}
 
 /** The official Worker SDK returns plain records with callable RPC properties,
  * so ids/status are values rather than remote-property promises. */
@@ -83,7 +132,14 @@ function processTarget(process: Process) {
 }
 export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends DurableObject<Env> {
   private configuration: Configuration = {};
+  private configurationIntent?: ConfigurationIntent;
   private facade?: RuntimeSandbox;
+  private configurationTail: Promise<unknown> = Promise.resolve();
+  private configurationOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.configurationTail.catch(() => undefined).then(operation);
+    this.configurationTail = result;
+    return result;
+  }
   private previewTail: Promise<unknown> = Promise.resolve();
   private previewOperation<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.previewTail.catch(() => undefined).then(operation);
@@ -94,34 +150,146 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.initialized = ctx.blockConcurrencyWhile(async () => {
-      this.configuration = (await ctx.storage.get<Configuration>("runtime.configuration")) ?? {};
+      this.configuration = (await ctx.storage.get<Configuration>(CONFIGURATION_KEY)) ?? {};
+      this.configurationIntent =
+        await ctx.storage.get<ConfigurationIntent>(CONFIGURATION_INTENT_KEY);
     });
   }
-  private async sandbox() {
-    await this.initialized;
+  private async sandbox(signal?: AbortSignal) {
+    await waitForConfiguration(this.initialized, signal);
+    // A staged intent is transient while an update is still running. Wait for
+    // the queued update before deciding whether uncertainty was retained.
+    let configurationTail: Promise<unknown>;
+    do {
+      configurationTail = this.configurationTail;
+      await waitForConfiguration(
+        configurationTail.catch(() => undefined),
+        signal,
+      );
+    } while (configurationTail !== this.configurationTail);
+    signal?.throwIfAborted();
+    if (this.configurationIntent)
+      throw configurationFailure(
+        new Error(
+          "Runtime's configuration is uncertain. Call configure() to reconcile it before use.",
+        ),
+        true,
+      );
     if (!this.configuration.sandboxName)
       throw new Error("Call getSandbox(namespace, id) before using the Durable Object");
     if (!this.env.RUNTIME_API_KEY?.startsWith("rtcloud_"))
       throw new Error("Set the RUNTIME_API_KEY Worker secret to a Runtime API key");
     this.facade ??= new RuntimeSandbox(
       new Runtime({ apiKey: this.env.RUNTIME_API_KEY, baseUrl: this.env.RUNTIME_API_URL }),
-      this.configuration.sandboxName.name,
-      this.configuration,
+      workerSandboxIdentity(this.ctx.id.toString(), this.configuration),
+      { ...this.configuration },
     );
     return this.facade;
   }
   async configure(configuration: Configuration) {
     only("Cloudflare Worker configure", configuration, ["sandboxName", "sleepAfter", "keepAlive"]);
-    await this.initialized;
-    if (
-      this.configuration.sandboxName &&
-      configuration.sandboxName &&
-      this.configuration.sandboxName.name !== configuration.sandboxName.name
-    )
-      throw new Error("A Durable Object cannot change sandbox identity");
-    this.configuration = { ...this.configuration, ...configuration };
-    await this.ctx.storage.put("runtime.configuration", this.configuration);
-    if (this.facade) await this.facade.configure(configuration);
+    validateSandboxConfiguration(configuration);
+    if (configuration.sandboxName !== undefined) {
+      only("Cloudflare Worker sandboxName", configuration.sandboxName, ["name", "normalizeId"]);
+      sanitizeSandboxId(configuration.sandboxName.name);
+      if (
+        configuration.sandboxName.normalizeId !== undefined &&
+        typeof configuration.sandboxName.normalizeId !== "boolean"
+      )
+        throw new TypeError("normalizeId must be a boolean");
+    }
+    const requested = {
+      ...(configuration.sandboxName === undefined
+        ? {}
+        : { sandboxName: { ...configuration.sandboxName } }),
+      ...(configuration.sleepAfter === undefined ? {} : { sleepAfter: configuration.sleepAfter }),
+      ...(configuration.keepAlive === undefined ? {} : { keepAlive: configuration.keepAlive }),
+    };
+    return this.configurationOperation(async () => {
+      await this.initialized;
+      if (
+        this.configuration.sandboxName &&
+        requested.sandboxName &&
+        this.configuration.sandboxName.name !== requested.sandboxName.name
+      )
+        throw new Error("A Durable Object cannot change sandbox identity");
+      if (this.configurationIntent) {
+        const facade =
+          this.facade ??
+          new RuntimeSandbox(
+            new Runtime({ apiKey: this.env.RUNTIME_API_KEY, baseUrl: this.env.RUNTIME_API_URL }),
+            workerSandboxIdentity(this.ctx.id.toString(), this.configuration),
+            { ...this.configuration },
+          );
+        try {
+          // Recovery uses the saved UUID even after a Durable Object restart.
+          const actual = await facade.reconcileConfiguration(this.configurationIntent.sandboxId);
+          const reconciled = { ...this.configuration, ...actual };
+          await this.ctx.storage.put(CONFIGURATION_KEY, reconciled);
+          await this.ctx.storage.delete(CONFIGURATION_INTENT_KEY);
+          this.configuration = reconciled;
+          this.facade = facade;
+          this.configurationIntent = undefined;
+        } catch (error) {
+          throw configurationFailure(error, true);
+        }
+      }
+      const previous = this.configuration;
+      const stored = await this.ctx.storage.get<Configuration>(CONFIGURATION_KEY);
+      const nativeSandboxId = workerSandboxIdentity(this.ctx.id.toString(), previous);
+      const next = { ...previous, ...requested, nativeSandboxId };
+      if (!this.facade) {
+        await this.ctx.storage.put(CONFIGURATION_KEY, next);
+        this.configuration = next;
+        return;
+      }
+      this.configurationIntent = { sandboxId: this.facade.existingNativeId(), previous, next };
+      try {
+        await this.ctx.storage.put(CONFIGURATION_INTENT_KEY, this.configurationIntent);
+      } catch (error) {
+        let cleanup: unknown;
+        try {
+          // Native mutation has not started. A failed write may still have
+          // persisted the intent, so clear this operation's staging record.
+          await this.ctx.storage.delete(CONFIGURATION_INTENT_KEY);
+          this.configurationIntent = undefined;
+        } catch (failure) {
+          cleanup = failure;
+        }
+        throw configurationFailure(error, this.configurationIntent !== undefined, cleanup);
+      }
+      let nativeAttempted = false;
+      try {
+        await this.ctx.storage.put(CONFIGURATION_KEY, next);
+        nativeAttempted = true;
+        await this.facade.configure({
+          ...(requested.sleepAfter === undefined ? {} : { sleepAfter: requested.sleepAfter }),
+          ...(requested.keepAlive === undefined ? {} : { keepAlive: requested.keepAlive }),
+        });
+      } catch (error) {
+        let cleanup: unknown;
+        try {
+          if (stored === undefined) await this.ctx.storage.delete(CONFIGURATION_KEY);
+          else await this.ctx.storage.put(CONFIGURATION_KEY, stored);
+          if (!nativeAttempted) {
+            await this.ctx.storage.delete(CONFIGURATION_INTENT_KEY);
+            this.configurationIntent = undefined;
+          }
+        } catch (failure) {
+          cleanup = failure;
+        }
+        // A rejected native request may have applied remotely. Keep its intent
+        // until an authoritative read succeeds; rollback is only local state.
+        throw configurationFailure(error, this.configurationIntent !== undefined, cleanup);
+      }
+      this.configuration = next;
+      try {
+        await this.ctx.storage.delete(CONFIGURATION_INTENT_KEY);
+        this.configurationIntent = undefined;
+      } catch (error) {
+        throw configurationFailure(error, true);
+      }
+    });
   }
   setSandboxName(name: string, normalizeId = false) {
     return this.configure({
@@ -135,10 +303,10 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
     return this.configure({ keepAlive });
   }
   async exec(command: string, options?: ExecOptions) {
-    return (await this.sandbox()).exec(command, options);
+    return (await this.sandbox(options?.signal)).exec(command, options);
   }
   async execStream(command: string, options?: ExecOptions) {
-    return (await this.sandbox()).execStream(command, options);
+    return (await this.sandbox(options?.signal)).execStream(command, options);
   }
   async startProcess(command: string, options?: ProcessOptions) {
     return processTarget(await (await this.sandbox()).startProcess(command, options));

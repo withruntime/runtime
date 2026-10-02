@@ -3,7 +3,7 @@ import { publicEncrypt, randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authenticationCommand, named } from "../src/login";
+import { authenticationCommand, beginDeviceLogin, named } from "../src/login";
 import { connectionStore, resolveCredential } from "../src/credentials";
 
 let directory: string;
@@ -81,6 +81,53 @@ function mockServer(
     },
   };
 }
+
+for (const resumed of [false, true]) {
+  test(`MCP device login refuses production credentials for another API${resumed ? " when resumed" : ""}`, async () => {
+    const mixed = { ...env, RUNTIME_API_URL: "https://unrelated.example" };
+    const store = connectionStore(mixed);
+    if (resumed)
+      await store.savePending({
+        version: 1,
+        apiOrigin: "https://unrelated.example",
+        authOrigin: "https://withruntime.com",
+        privateKey: "unused",
+        deviceCode: "a".repeat(43),
+        url: "https://withruntime.com/connect?code=ABCD-EF01-2345",
+        userCode: "ABCD-EF01-2345",
+        agentName: "MCP agent",
+        expiresAt: Date.now() + 60_000,
+      });
+    const server = mockServer();
+    await expect(beginDeviceLogin(mixed, "MCP agent", { fetch: server.fetcher })).rejects.toThrow(
+      "Check RUNTIME_AUTH_URL and RUNTIME_API_URL",
+    );
+    expect(server.requests).toEqual([]);
+    expect(await store.read()).toBeNull();
+  });
+}
+
+test("MCP device login retains paired local endpoints", async () => {
+  const local = {
+    ...env,
+    RUNTIME_AUTH_URL: "http://localhost:4011",
+    RUNTIME_API_URL: "http://127.0.0.1:4010",
+  };
+  const requests: string[] = [];
+  const pending = await beginDeviceLogin(local, "MCP agent", {
+    fetch: (async (input) => {
+      requests.push(input instanceof Request ? input.url : String(input));
+      return Response.json({
+        deviceCode: "a".repeat(43),
+        userCode: "ABCD-EF01-2345",
+        expiresAt: Date.now() + 60_000,
+        verificationUri: "http://localhost:4011/connect?code=ABCD-EF01-2345",
+      });
+    }) as typeof fetch,
+  });
+  expect(pending.url).toBe("http://localhost:4011/connect?code=ABCD-EF01-2345");
+  expect(requests).toEqual(["http://localhost:4011/api/connect/start"]);
+});
 
 test("agent login opens only the verified browser URL and keeps credentials out of output", async () => {
   const server = mockServer();

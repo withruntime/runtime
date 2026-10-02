@@ -169,7 +169,7 @@ Blaxel:
 import { SandboxInstance } from "@blaxel/core";
 const sandbox = await SandboxInstance.create({ name: "my-sandbox", memory: 4096 });
 const result = await sandbox.process.exec({
-  command: "python3 -c 'print(6 * 7)'",
+  command: "python3 -c 'print(sum([125, 250, 375]))'",
   waitForCompletion: true,
 });
 await sandbox.delete();
@@ -181,7 +181,8 @@ Runtime:
 import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "trial" });
 try {
-  console.log((await box.exec("python3 -c 'print(6 * 7)'", { check: true })).stdout);
+  await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);
 } finally {
   await box.stop();
 }

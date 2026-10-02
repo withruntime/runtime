@@ -121,7 +121,7 @@ test("a page drives the sandbox with the token alone, with no Buffer", async () 
     if (url.pathname.endsWith("/files/content") && method === "PUT") return Response.json({});
     if (url.pathname.endsWith("/uploads"))
       return Response.json({ uploadId: "u1", chunkBytes: 1_048_576 });
-    if (url.pathname.includes("/uploads/")) return Response.json({});
+    if (url.pathname.includes("/uploads/")) return Response.json({ received: 1_048_577 });
     return undefined;
   });
   const sbx = Sandbox.fromSession({

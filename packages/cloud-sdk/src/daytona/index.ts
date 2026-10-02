@@ -60,6 +60,8 @@ export {
   type ReplaceResult,
   type SearchFilesResponse,
   type UploadSource,
+  type UploadProgress,
+  type UploadStreamOptions,
 } from "./filesystem.js";
 export { Git, type GitStatus, type ListBranchResponse } from "./git.js";
 export { Image } from "./image.js";

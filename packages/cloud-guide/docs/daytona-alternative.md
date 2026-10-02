@@ -144,7 +144,7 @@ The calls map one to one. Daytona:
 import { Daytona } from "@daytonaio/sdk";
 const daytona = new Daytona();
 const sandbox = await daytona.create();
-const response = await sandbox.process.executeCommand("python3 -c 'print(6 * 7)'");
+const response = await sandbox.process.executeCommand("python3 -c 'print(sum([125, 250, 375]))'");
 await sandbox.delete();
 ```
 
@@ -154,7 +154,8 @@ Runtime:
 import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "trial" });
 try {
-  console.log((await box.exec("python3 -c 'print(6 * 7)'", { check: true })).stdout);
+  await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);
 } finally {
   await box.stop();
 }

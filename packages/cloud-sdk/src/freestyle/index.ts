@@ -36,6 +36,11 @@ export interface ExecOptions {
   env?: Record<string, string>;
   stdin?: string;
 }
+function validateMetadata(metadata: Record<string, string> | undefined) {
+  for (const key of ["compat.provider", "fs.displayName"])
+    if (metadata !== undefined && Object.prototype.hasOwnProperty.call(metadata, key))
+      throw new CompatibilityError("Freestyle", `metadata key ${key} reserved by this adapter`);
+}
 const data = (s: Sandbox) => ({
   id: s.id,
   state: s.state,
@@ -57,6 +62,7 @@ const snapshotData = (s: Snapshot) => ({
   id: s.id,
   sourceVmId: s.sourceSandboxId,
   slug: s.name,
+  displayName: (s.labels as Record<string, string> | undefined)?.["fs.displayName"] ?? null,
   public: false,
   createdAt: s.createdAt,
   updatedAt: s.createdAt,
@@ -74,9 +80,40 @@ export class VmsNamespace {
     this.snapshots = {
       get: async (id: string) => snapshotData(await this.resolveSnapshot(id)),
       delete: async (id: string) => runtime.snapshots.delete((await this.resolveSnapshot(id)).id),
-      list: async () => ({
-        snapshots: (await (await runtime.snapshots.list()).toArray()).map(snapshotData),
-      }),
+      list: async (options: { sourceVmId?: string; limit?: number; offset?: number } = {}) => {
+        only("Freestyle snapshot list", options, ["sourceVmId", "limit", "offset"]);
+        if (options.sourceVmId !== undefined && typeof options.sourceVmId !== "string")
+          throw new TypeError("sourceVmId must be a string");
+        if (
+          options.limit !== undefined &&
+          (!Number.isSafeInteger(options.limit) || options.limit <= 0)
+        )
+          throw new TypeError("limit must be a positive safe integer");
+        if (
+          options.offset !== undefined &&
+          (!Number.isSafeInteger(options.offset) || options.offset < 0)
+        )
+          throw new TypeError("offset must be a nonnegative safe integer");
+        const offset = options.offset ?? 0;
+        const snapshots: ReturnType<typeof snapshotData>[] = [];
+        let totalCount = 0;
+        // Count the filtered catalog across every native page without retaining
+        // snapshots outside the requested page or Page.toArray's default cap.
+        const page = await runtime.snapshots.list(
+          options.sourceVmId === undefined ? {} : { sandboxId: options.sourceVmId },
+        );
+        for await (const snapshot of page) {
+          if (options.sourceVmId !== undefined && snapshot.sourceSandboxId !== options.sourceVmId)
+            continue;
+          if (
+            totalCount >= offset &&
+            (options.limit === undefined || snapshots.length < options.limit)
+          )
+            snapshots.push(snapshotData(snapshot));
+          totalCount++;
+        }
+        return { snapshots, totalCount };
+      },
     };
   }
   private async resolveSnapshot(id: string) {
@@ -98,6 +135,7 @@ export class VmsNamespace {
       "metadata",
       "firewall",
     ]);
+    validateMetadata(options.metadata);
     if (!options.firewall || !Array.isArray(options.firewall.rules))
       throw new TypeError("firewall.rules is required");
     only("Freestyle firewall", options.firewall, ["rules"]);
@@ -345,6 +383,7 @@ export class Vm {
     metadata?: Record<string, string>;
   }) {
     only("Freestyle update", options, ["slug", "displayName", "idleTimeoutSeconds", "metadata"]);
+    validateMetadata(options.metadata);
     const s = await lookup(this.runtime, this.id);
     await s.update({
       name: options.slug,
@@ -381,12 +420,11 @@ export class Vm {
     only("Freestyle snapshot", options, ["slug", "displayName", "ttlSeconds"]);
     if (
       options.ttlSeconds !== undefined &&
-      (options.ttlSeconds <= 0 || options.ttlSeconds % 86400 !== 0)
+      (options.ttlSeconds <= 0 ||
+        options.ttlSeconds > 365 * 86400 ||
+        options.ttlSeconds % 86400 !== 0)
     )
-      throw new CompatibilityError(
-        "Freestyle",
-        "snapshot retention other than whole positive days",
-      );
+      throw new CompatibilityError("Freestyle", "snapshot retention outside 1 to 365 whole days");
     const s = await (
       await lookup(this.runtime, this.id)
     ).snapshot({

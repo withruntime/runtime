@@ -5,6 +5,7 @@ import time
 from types import SimpleNamespace
 import unittest
 
+from withruntime._errors import RuntimeError
 from withruntime._request_scope import current, request_scope
 from withruntime._sync_client import _Transport, Files
 from withruntime._async_client import _Transport as AsyncTransport, AsyncFiles
@@ -100,9 +101,12 @@ class HTTPDeadline(unittest.TestCase):
             self.assertLess(time.monotonic() - started, .3)
             self.assertTrue(self.peer_closed.wait(.3))
             started = time.monotonic()
-            with self.assertRaises(TimeoutError):
+            # The native transport names an expired deadline as its own typed
+            # error, during a retry wait as during a read.
+            with self.assertRaises(RuntimeError) as caught:
                 with request_scope(.03):
                     transport.json("GET", "/retry")
+            self.assertEqual(caught.exception.code, "request_timeout")
             self.assertLess(time.monotonic() - started, .2)
             self.assertEqual(sum("retry" in path for path in self.calls), 1)
             self.assertIsNone(current().deadline)

@@ -89,7 +89,13 @@ export function translate(error: unknown, sandboxName?: string): unknown {
       message,
     );
   if (error.status < 200 || error.status > 599) return error;
-  const json = { error: { code: error.code, message: error.message } };
+  const json = {
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(error.details ? { details: error.details } : {}),
+    },
+  };
   const out = new APIError(
     new Response(JSON.stringify(json), {
       status: error.status,

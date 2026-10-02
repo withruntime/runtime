@@ -498,11 +498,26 @@ class ExecutionsAPI:
     def _stream(self, execution_id, devbox_id, channel, offset):
         process = self._process(execution_id, devbox_id)
         def events():
-            for event in process.output(cursor=int(offset or 0)):
-                if event["type"] == channel:
-                    yield Model(output=event["data"], offset=event.get("offset"))
-                elif event["type"] == "truncated":
-                    raise IOError("Runloop execution output was truncated")
+            source = process.output(cursor=int(offset or 0))
+            primary = None
+            try:
+                for event in source:
+                    if event["type"] == channel:
+                        yield Model(output=event["data"], offset=event.get("offset"))
+                    elif event["type"] == "truncated":
+                        raise IOError("Runloop execution output was truncated")
+            except BaseException as error:
+                primary = error
+                raise
+            finally:
+                close = getattr(source, "aclose", None) or getattr(source, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except BaseException as cleanup:
+                        if primary is not None:
+                            raise primary from cleanup
+                        raise
         return events()
 
     def stream_stdout_updates(self, execution_id, *, devbox_id, offset=None):

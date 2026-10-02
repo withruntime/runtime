@@ -31,10 +31,8 @@ How it maps Harbor onto Runtime:
 """
 from __future__ import annotations
 
-import io
 import logging
 import os
-import tarfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -55,8 +53,7 @@ except ImportError:  # pragma: no cover - older Harbor
 from ._async_client import AsyncRuntime, AsyncSandbox
 from ._errors import NotFoundError
 from ._errors import RuntimeError as RuntimeCloudError
-from ._unpack import unpack_archive
-from ._eval_sandbox import (_TRANSFER_TIMEOUT_S, MissingSudoError, _file_error, _missing_sudo, _Shell, _sizes,
+from ._eval_sandbox import (MissingSudoError, _missing_sudo, _Shell, _sizes,
                             dockerfile_workdir, ensure_image, image_name, image_tag)
 
 logger = logging.getLogger("withruntime.harbor")
@@ -269,19 +266,8 @@ class RuntimeEnvironment(BaseEnvironment):
         await shell.write(target_path, source.read_bytes(), user="root", mode=source.stat().st_mode & 0o777)
 
     async def upload_dir(self, source_dir: Path | str, target_dir: str) -> None:
-        sandbox, shell = self._require()
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-            archive.add(str(source_dir), arcname=".")
-        staging = shell._path()
-        try:
-            await sandbox.files.write(staging, buffer.getvalue())
-            result = await shell.run(["/bin/sh", "-c", 'mkdir -p -- "$1" && tar -x -z -o -f "$2" -C "$1"', "sh",
-                                      target_dir, staging], user="root", timeout_s=_TRANSFER_TIMEOUT_S)
-            if result.exit_code != 0:
-                raise RuntimeError(f"Could not unpack into {target_dir}: {result.stderr or result.stdout}")
-        finally:
-            await shell.remove(staging)
+        sandbox, _ = self._require()
+        await sandbox.files.upload(str(source_dir), target_dir, user="root")
 
     async def download_file(self, source_path: str, target_path: Path | str) -> None:
         _, shell = self._require()
@@ -291,19 +277,8 @@ class RuntimeEnvironment(BaseEnvironment):
         target.write_bytes(data)
 
     async def download_dir(self, source_dir: str, target_dir: Path | str) -> None:
-        sandbox, shell = self._require()
-        staging = shell._path()
-        try:
-            result = await shell.run(["tar", "-c", "-z", "-f", "-", "-C", source_dir, "."], user="root",
-                                     stdout_path=staging, timeout_s=_TRANSFER_TIMEOUT_S)
-            if result.exit_code != 0:
-                raise _file_error(source_dir, result)
-            data = await sandbox.files.read(staging)
-        finally:
-            await shell.remove(staging)
-        target = Path(target_dir)
-        target.mkdir(parents=True, exist_ok=True)
-        unpack_archive(data, str(target))
+        sandbox, _ = self._require()
+        await sandbox.files.download(source_dir, str(target_dir), user="root")
 
 
 __all__ = ["ENVIRONMENT_TYPE", "MissingSudoError", "RuntimeEnvironment"]

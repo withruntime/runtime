@@ -6,6 +6,7 @@ import {
   open,
   readdir,
   readFile,
+  readlink,
   realpath,
   rename,
   rm,
@@ -149,13 +150,116 @@ function cutShort(cause?: unknown): RuntimeError {
   });
 }
 
+function checkSignal(signal?: AbortSignal): void {
+  if (signal?.aborted)
+    throw new RuntimeError({
+      message: "The download was cancelled or ran past its deadline.",
+      code: "timeout",
+      status: 0,
+      cause: signal.reason,
+    });
+}
+
+/** Linux path names fit well below this generous metadata-only memory bound. */
+const MAX_LONG_NAME_BYTES = 65_536;
+
+function archiveSize(field: string): number {
+  const text = field.trim();
+  if (text !== "" && !/^[0-7]+$/.test(text))
+    throw new Error("The archive contains an invalid file size.");
+  const size = text === "" ? 0 : parseInt(text, 8);
+  if (!Number.isSafeInteger(size) || size < 0 || size > Number.MAX_SAFE_INTEGER - 511)
+    throw new Error("The archive contains an invalid file size.");
+  return size;
+}
+
+/** The gzip check protects the compressed bytes; tar's own checksum also
+ * protects the header that determines each file's name, kind and length. */
+function checkHeader(header: Uint8Array, field: string): void {
+  const text = field.trim();
+  let unsigned = 0;
+  let signed = 0;
+  for (let index = 0; index < header.length; index++) {
+    const byte = index >= 148 && index < 156 ? 32 : header[index]!;
+    unsigned += byte;
+    signed += byte < 128 ? byte : byte - 256;
+  }
+  const expected = /^[0-7]+$/.test(text) ? parseInt(text, 8) : NaN;
+  // Older tar implementations used signed bytes for non-ASCII path names.
+  if (expected !== unsigned && expected !== signed)
+    throw new Error("The archive contains an invalid header checksum.");
+}
+
+/** Validate links against the tree a merge will produce. Staged entries
+ * take precedence; paths absent there retain the existing target's entry.
+ * A link safe in staging may otherwise lead through an old escaping link. */
+async function mergedLinkStaysInside(
+  staging: string,
+  root: string,
+  destination: string,
+  link: string,
+): Promise<boolean> {
+  let path = dirname(join(root, relative(staging, destination)));
+  const pending = link.split("/");
+  const followed = new Set<string>();
+  while (pending.length) {
+    const part = pending.shift()!;
+    if (!part || part === ".") continue;
+    path = part === ".." ? dirname(path) : join(path, part);
+    if (path !== root && !path.startsWith(root + sep)) return false;
+    const staged = join(staging, relative(root, path));
+    const stagedKind = await lstat(staged).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+      throw error;
+    });
+    const actual = stagedKind ? staged : path;
+    const kind =
+      stagedKind ??
+      (await lstat(actual).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+        throw error;
+      }));
+    if (!kind?.isSymbolicLink()) continue;
+    if (followed.has(path)) return false;
+    followed.add(path);
+    const next = await readlink(actual);
+    if (isAbsolute(next)) {
+      // An existing absolute link is safe only when it stays in this root.
+      if (next !== root && !next.startsWith(root + sep)) return false;
+      path = root;
+      pending.unshift(...relative(root, next).split(sep));
+    } else {
+      path = dirname(path);
+      pending.unshift(...next.split("/"));
+    }
+  }
+  return true;
+}
+
 /** The gzip stream's bytes, decompressed as they arrive. */
-function gunzipped(source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>): Readable {
+function gunzipped(
+  source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  signal?: AbortSignal,
+): Readable {
   const input = Readable.from(source, { objectMode: false });
   const output = createGunzip();
+  // A filesystem await may precede async iteration; retain early stream
+  // errors for that iterator without an unhandled EventEmitter error.
+  output.on("error", () => undefined);
   input.on("error", (error) => output.destroy(error));
   input.pipe(output);
-  output.on("close", () => input.destroy());
+  const abort = () => {
+    try {
+      checkSignal(signal);
+    } catch (error) {
+      output.destroy(error as Error);
+    }
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  output.on("close", () => {
+    signal?.removeEventListener("abort", abort);
+    input.destroy();
+  });
   return output;
 }
 
@@ -210,7 +314,7 @@ type Link = { destination: string; link: string; name: string };
 /** Unpacks a tar stream into `root`, a fresh folder: files and folders as they
  * arrive, links noted to make at the end. Throws unless the archive's end
  * arrived. */
-async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
+async function unpackEntries(bytes: Bytes, root: string, signal?: AbortSignal): Promise<Link[]> {
   const links: Link[] = [];
   const decode = (slice: Uint8Array) => {
     const end = slice.indexOf(0);
@@ -219,14 +323,18 @@ async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
   let longName: string | undefined;
   let longLink: string | undefined;
   for (;;) {
+    checkSignal(signal);
     const header = await bytes.exactly(512);
     if (!header) throw cutShort();
     if (header.every((byte) => byte === 0)) {
+      const terminator = await bytes.exactly(512);
+      if (!terminator || !terminator.every((byte) => byte === 0)) throw cutShort();
       await bytes.drain();
       return links;
     }
     const text = (start: number, length: number) => decode(header.subarray(start, start + length));
-    const size = parseInt(text(124, 12).trim() || "0", 8);
+    const size = archiveSize(text(124, 12));
+    checkHeader(header, text(148, 8));
     const type = String.fromCharCode(header[156] ?? 48);
     const prefix = text(345, 155);
     let name = longName ?? (prefix ? `${prefix}/${text(0, 100)}` : text(0, 100));
@@ -239,6 +347,8 @@ async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
       for await (const _ of bytes.take(size + padding));
     };
     if (type === "L" || type === "K") {
+      if (size > MAX_LONG_NAME_BYTES)
+        throw new Error("The archive contains oversized path metadata.");
       const parts: Uint8Array[] = [];
       for await (const part of bytes.take(size)) parts.push(Uint8Array.from(part));
       for await (const _ of bytes.take(padding));
@@ -264,7 +374,15 @@ async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
       await mkdir(dirname(destination), { recursive: true });
       const file = await open(destination, "w");
       try {
-        for await (const part of bytes.take(size)) await file.write(part);
+        for await (const part of bytes.take(size)) {
+          let written = 0;
+          while (written < part.length) {
+            checkSignal(signal);
+            const result = await file.write(part.subarray(written));
+            if (result.bytesWritten === 0) throw new Error("The local file accepted no bytes.");
+            written += result.bytesWritten;
+          }
+        }
       } finally {
         await file.close();
       }
@@ -276,8 +394,9 @@ async function unpackEntries(bytes: Bytes, root: string): Promise<Link[]> {
 
 /** Moves what was unpacked in `from` into `to`, merging with what is there
  * and replacing files of the same name, never through a link in `to`. */
-async function merge(from: string, to: string, root: string): Promise<void> {
+async function merge(from: string, to: string, root: string, signal?: AbortSignal): Promise<void> {
   for (const name of await readdir(from)) {
+    checkSignal(signal);
     const source = join(from, name);
     const destination = join(to, name);
     await assertPlain(root, destination, relative(root, destination));
@@ -285,7 +404,8 @@ async function merge(from: string, to: string, root: string): Promise<void> {
       lstat(source),
       lstat(destination).catch(() => undefined),
     ]);
-    if (kind.isDirectory() && there?.isDirectory()) await merge(source, destination, root);
+    checkSignal(signal);
+    if (kind.isDirectory() && there?.isDirectory()) await merge(source, destination, root, signal);
     else await rename(source, destination);
   }
 }
@@ -299,27 +419,42 @@ async function merge(from: string, to: string, root: string): Promise<void> {
 export async function unpackStream(
   source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   target: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<void> {
+  checkSignal(options.signal);
   const final = resolve(target);
   await mkdir(dirname(final), { recursive: true });
   const staging = await mkdtemp(`${final}.runtime-partial-`);
-  const stream = gunzipped(source);
+  const stream = gunzipped(source, options.signal);
   try {
     const root = await realpath(staging);
-    const links = await unpackEntries(new Bytes(stream), root);
+    const links = await unpackEntries(new Bytes(stream), root, options.signal);
     for (const { destination, link, name } of links) {
+      checkSignal(options.signal);
       await assertPlain(root, destination, name);
       await mkdir(dirname(destination), { recursive: true });
       await symlink(link, destination).catch(() => undefined);
     }
     for (const { destination, link, name } of links) {
+      checkSignal(options.signal);
       if (await linkStaysInside(root, dirname(destination), link)) continue;
       await unlink(destination).catch(() => undefined);
       throw new Error(`Refusing an archive link that leads outside the target: ${name} -> ${link}`);
     }
     const there = await lstat(final).catch(() => undefined);
+    checkSignal(options.signal);
     if (!there) await rename(staging, final);
-    else await merge(root, await realpath(final), await realpath(final));
+    else {
+      const targetRoot = await realpath(final);
+      for (const { destination, link, name } of links) {
+        checkSignal(options.signal);
+        if (!(await mergedLinkStaysInside(root, targetRoot, destination, link)))
+          throw new Error(
+            `Refusing an archive link that leads outside the target: ${name} -> ${link}`,
+          );
+      }
+      await merge(root, targetRoot, targetRoot, options.signal);
+    }
   } finally {
     stream.destroy();
     await rm(staging, { recursive: true, force: true });

@@ -183,14 +183,18 @@ export class Command {
   }
 
   /** Sends a signal, SIGTERM by default. */
-  async kill(signal: Signal = "SIGTERM", _opts: { abortSignal?: AbortSignal } = {}): Promise<void> {
+  async kill(signal: Signal = "SIGTERM", opts: { abortSignal?: AbortSignal } = {}): Promise<void> {
+    opts.abortSignal?.throwIfAborted();
     if (!this.init.process) return;
     const name = typeof signal === "number" ? SIGNAL_NUMBERS[signal] : signal;
     if (!name)
       throw new RangeError(
         `Signal ${signal} has no name Runtime knows; use SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2.`,
       );
-    await guard(() => this.init.process!.kill(name), this.init.sandboxName);
+    await guard(
+      () => this.init.process!.kill(name, opts.abortSignal ? { signal: opts.abortSignal } : {}),
+      this.init.sandboxName,
+    );
   }
 }
 

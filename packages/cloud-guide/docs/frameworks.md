@@ -271,7 +271,7 @@ from withruntime.tools import sandbox_tools
 
 with Sandbox.create() as sbx:
     run, read, write, ls = sandbox_tools(sbx)
-    print(write("hello.py", "print(6 * 7)\n"))
+    print(write("hello.py", "print(sum([125, 250, 375]))\n"))
     print(run("python3 hello.py"))
     print(ls("."))
 ```
@@ -286,7 +286,7 @@ import { sandboxTools } from "withruntime/tools";
 await using sbx = await Sandbox.create();
 for (const t of sandboxTools(sbx)) console.log(t.name, Object.keys(t.inputSchema.properties));
 const [exec] = sandboxTools(sbx);
-console.log(await exec.execute({ command: "python3 -c 'print(6 * 7)'" }));
+console.log(await exec.execute({ command: "python3 -c 'print(sum([125, 250, 375]))'" }));
 ```
 
 ## Coding agents

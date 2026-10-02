@@ -23,6 +23,19 @@ the SDKs and MCP: `runtime domain`, `runtime port`, `runtime address` and
 30-day month, prorated to funded time. IPv6, custom domains, TCP ports and
 joining a tailnet are included. See [pricing](./pricing).
 
+## Private preview links
+
+A [preview link](./sandbox-environment) shares an HTTP port without adding a
+custom domain. Keep it private when only selected visitors should connect;
+anyone holding its token can use it until it expires or you rotate it.
+
+The API can issue a token with a relative `ttlSeconds` lifetime or an absolute
+`expiresAt` ISO timestamp. With both, the earlier deadline wins; tokens issued
+through a sandbox session also end when that session ends. An absolute deadline
+is never rounded past the time you requested. Read the returned `tokenExpiresAt`
+for its actual end time. See [private preview tokens](./api#private-preview-tokens)
+for the supported API and MCP inputs.
+
 ## Custom domains
 
 ```bash no-run
@@ -242,8 +255,13 @@ soon as it runs; a join that fails stops the new sandbox and answers why.
   reaches 100.x addresses directly (`mode: "kernel"`). Otherwise
   (`mode: "userspace"`) your tailnet still reaches the sandbox's ports, and
   programs in it reach the tailnet through the SOCKS5 and HTTP proxy on
-  `localhost:1055`. MagicDNS names are not resolved in the sandbox; use the
-  100.x address or the `dnsName` the answer gives with your own resolver.
+  `localhost:1055`.
+- **MagicDNS.** Once an image with Runtime's Tailscale DNS bridge has been
+  qualified and released, it can resolve `.ts.net`
+  names in both kernel and userspace modes. Ordinary public names keep using
+  the usual resolver. Older images stay connected and warn that MagicDNS
+  needs an image with the bridge; use the 100.x address or rebuild the image
+  before relying on tailnet names.
 - **Your network rules still apply.** Tailscale's traffic leaves through the
   same proxy as everything else, so the sandbox needs `*.tailscale.com` and
   `pkgs.tailscale.com` on port 443, which paid sandboxes reach by default, and

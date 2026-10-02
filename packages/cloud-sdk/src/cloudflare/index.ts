@@ -112,10 +112,24 @@ const cleanEnv = (env: Record<string, string | undefined> = {}) =>
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 function sleepSeconds(value: string | number = 600) {
-  if (typeof value === "number") return value;
-  const match = /^(\d+)(s|m|h)$/.exec(value);
-  if (!match) throw new TypeError("sleepAfter must be seconds or a duration such as 5m");
-  return Number(match[1]) * ({ s: 1, m: 60, h: 3600 }[match[2]!] ?? 1);
+  let seconds: number;
+  if (typeof value === "number") seconds = value;
+  else {
+    const match = /^(\d+)(s|m|h)$/.exec(value);
+    if (!match) throw new TypeError("sleepAfter must be seconds or a duration such as 5m");
+    seconds = Number(match[1]) * ({ s: 1, m: 60, h: 3600 }[match[2]!] ?? 1);
+  }
+  if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > 86_400)
+    throw new CompatibilityError("Cloudflare", "sleepAfter outside whole seconds from 0 to 86400");
+  return seconds;
+}
+
+export function validateSandboxConfiguration(
+  options: Pick<SandboxOptions, "sleepAfter" | "keepAlive">,
+): void {
+  if (options.sleepAfter !== undefined) sleepSeconds(options.sleepAfter);
+  if (options.keepAlive !== undefined && typeof options.keepAlive !== "boolean")
+    throw new TypeError("keepAlive must be a boolean");
 }
 /** Worker bindings are deliberately not inspected or invoked. Supply Runtime credentials
  * through options.runtime in Workers; Node also supports RUNTIME_API_KEY/login. */
@@ -127,27 +141,55 @@ export function getSandbox(namespace: unknown, id: string, options: SandboxOptio
 }
 export class Sandbox {
   private pending?: Promise<NativeSandbox>;
+  private existing?: NativeSandbox;
   readonly id: string;
   constructor(
     readonly runtime: Runtime,
     id: string,
     private readonly options: SandboxOptions = {},
   ) {
+    validateSandboxConfiguration(options);
     this.id = id;
   }
   async configure(options: Pick<SandboxOptions, "sleepAfter" | "keepAlive">) {
-    if (options.sleepAfter !== undefined) sleepSeconds(options.sleepAfter);
+    only("Cloudflare configure", options, ["sleepAfter", "keepAlive"]);
+    validateSandboxConfiguration(options);
     const changed =
       (options.sleepAfter !== undefined && options.sleepAfter !== this.options.sleepAfter) ||
       (options.keepAlive !== undefined && options.keepAlive !== this.options.keepAlive);
-    Object.assign(this.options, options);
+    const next = { ...this.options, ...options };
     if (changed && this.pending) {
       const s = await this.pending;
       await s.update({
-        idlePauseSeconds: this.options.keepAlive ? 0 : sleepSeconds(this.options.sleepAfter),
+        idlePauseSeconds: next.keepAlive ? 0 : sleepSeconds(next.sleepAfter),
         ...(options.keepAlive !== undefined ? { persistent: options.keepAlive } : {}),
       });
     }
+    Object.assign(this.options, options);
+  }
+  /** Only a successfully initialized native handle can supply a recovery id. */
+  existingNativeId(): string | undefined {
+    return this.existing?.id;
+  }
+  /** Reconcile an uncertain update from an authoritative read, without allocation. */
+  async reconcileConfiguration(nativeId = this.existingNativeId()) {
+    if (!nativeId)
+      throw new Error("The uncertain Runtime configuration has no existing sandbox identity.");
+    const sandbox = await this.runtime.sandboxes.get(nativeId);
+    const { idlePauseSeconds, persistent } = sandbox.info;
+    if (
+      typeof idlePauseSeconds !== "number" ||
+      !Number.isSafeInteger(idlePauseSeconds) ||
+      idlePauseSeconds < 0 ||
+      idlePauseSeconds > 86_400 ||
+      typeof persistent !== "boolean"
+    )
+      throw new Error("Runtime did not return authoritative idle and persistence settings.");
+    const configuration = { sleepAfter: idlePauseSeconds, keepAlive: persistent };
+    Object.assign(this.options, configuration);
+    this.existing = sandbox;
+    this.pending = Promise.resolve(sandbox);
+    return configuration;
   }
   async native() {
     if (!this.pending) {
@@ -169,6 +211,7 @@ export class Sandbox {
             throw e;
           }
         }
+        this.existing = s;
         return s;
       })();
       this.pending.catch(() => {

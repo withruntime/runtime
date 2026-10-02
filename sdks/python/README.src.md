@@ -21,7 +21,8 @@ command-line argument.
 from withruntime import Sandbox
 
 with Sandbox.create() as sbx:
-    result = sbx.exec("python3 -c 'print(6 * 7)'")
+    sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+    result = sbx.exec("python3 /workspace/invoice.py")
     print(result.exit_code, result.stdout)
 ```
 
@@ -30,6 +31,8 @@ leaving the `with` block stops it. With no arguments you get the free trial
 while it lasts: {{trial-hours}} free hours, no card, up to {{trial-sandboxes}} sandboxes running at once.
 The current default image includes NumPy, pandas and matplotlib; see the
 [sandbox environment](https://withruntime.com/docs/sandbox-environment).
+Omitting `funding` can use prepaid credit after the trial is exhausted. Use
+`Sandbox.create(funding="trial")` for free use only; it never falls back to paid.
 `AsyncRuntime` is the same client for asyncio, method for method:
 
 ```python
@@ -60,14 +63,20 @@ also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
 the sandbox with that name or creates it. A sandbox pauses itself after {{idle-pause}}
 with nothing happening in it, keeping its memory and processes, so an
 idle sandbox costs no compute; `idle_pause_seconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or 0 for
-never. The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
+never. `runtime.sandbox`, `snapshot`, `image`, `volume`, `job`, `domain`,
+`port` and `address` name the products as the CLI does. Their existing plural
+names remain aliases of the same product clients. The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
 `secrets`, `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and
 `audit` to watch the account; `domains`, `ports`, `addresses`, `tunnel` and
 `network` to connect sandboxes to your own world (paid accounts); and `mcp`,
 `sso`, `billing`, `referrals` and `switching`. `runtime.limits.get()` (0.3.1 and later) says whether the key is read-only and
 what its agent may still spend today. Every write carries an
 idempotency key, so retries never do anything twice; errors are typed and carry
-`code`, `hint` and `request_id`.
+`code`, `hint` and `request_id`. `RuntimeAPIError` and
+`RuntimeConnectionError` name the SDK errors without shadowing Python's built-in
+errors; the previous `RuntimeError` and `ConnectionError` exports remain aliases.
+`runtime.usage_requests("7d")` reads the account's API call counts and error rates;
+counts are exact decimal strings, and an empty window has `errorPercent: None`.
 
 ## Behind a proxy
 
@@ -86,7 +95,7 @@ proxy http://proxy.internal:3128 (HTTPS_PROXY).`
 
 ## Code written for E2B
 
-`withruntime.e2b` runs code written for E2B's Python SDK on Runtime. Change
+`withruntime.e2b` translates supported E2B Python sandbox calls. Change
 the import and set `RUNTIME_API_KEY`:
 
 ```python no-run
@@ -124,7 +133,7 @@ JavaScript package list every mapping and gap.
 
 ## Code written for Blaxel
 
-`withruntime.blaxel` runs code written for Blaxel's Python SDK (`blaxel`
+`withruntime.blaxel` translates supported Blaxel Python sandbox calls (`blaxel`
 0.4.11) on Runtime. Change the import and set `RUNTIME_API_KEY`, or run
 `npx withruntime login` once:
 

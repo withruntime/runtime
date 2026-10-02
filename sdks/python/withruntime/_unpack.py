@@ -78,6 +78,8 @@ def _text(field: bytes) -> str:
 def _size(field: bytes) -> int:
     """An octal size, or GNU's base-256 one for a file of 8 GiB or more."""
     if field[0] & 0x80:
+        if field[0] & 0x40:
+            raise ValueError("negative size")
         return int.from_bytes(field[1:], "big")
     return int(_text(field).strip() or "0", 8)
 
@@ -86,7 +88,12 @@ def _pax(body: bytes) -> dict[str, str]:
     """A pax header's records, ``<length> <key>=<value>\\n`` each."""
     out: dict[str, str] = {}
     while body:
-        length = int(body.split(b" ", 1)[0])
+        try:
+            length = int(body.split(b" ", 1)[0])
+        except ValueError as error:
+            raise _refuse("The archive contains invalid path metadata.") from error
+        if length <= 0 or length > len(body) or b" " not in body[:length] or not body[:length].endswith(b"\n"):
+            raise _refuse("The archive contains invalid path metadata.")
         key, _, value = body[:length].split(b" ", 1)[1].rstrip(b"\n").partition(b"=")
         out[key.decode()] = value.decode("utf-8", "surrogateescape")
         body = body[length:]
@@ -112,6 +119,7 @@ class Unpacker:
         self._held = bytearray()
         self._links: list[tuple[str, str, str]] = []
         self._ended = False
+        self._zero_blocks = 0
         # What the bytes after the header are: ("file", handle, path, mode),
         # ("long", key, parts) or ("skip",), with how many are left of the
         # entry's body and then of its padding.
@@ -122,11 +130,16 @@ class Unpacker:
 
     def feed(self, data: bytes) -> None:
         try:
-            self._held += self._inflate.decompress(data)
+            while True:
+                part = self._inflate.decompress(data, 65_536)
+                self._held += part
+                while self._step():
+                    pass
+                data = self._inflate.unconsumed_tail
+                if not data and len(part) < 65_536:
+                    break
         except zlib.error as error:
             raise _cut_short() from error
-        while self._step():
-            pass
 
     def _step(self) -> bool:
         if self._ended:
@@ -138,8 +151,11 @@ class Unpacker:
             header = bytes(self._held[:512])
             del self._held[:512]
             if not any(header):
-                self._ended = True
+                self._zero_blocks += 1
+                self._ended = self._zero_blocks == 2
                 return True
+            if self._zero_blocks:
+                raise _cut_short()
             self._begin(header)
             return True
         if self._left:
@@ -169,7 +185,16 @@ class Unpacker:
         return True
 
     def _begin(self, header: bytes) -> None:
-        size = _size(header[124:136])
+        try:
+            expected = int(_text(header[148:156]).strip(), 8)
+            checked = header[:148] + b" " * 8 + header[156:]
+            if expected not in (sum(checked), sum(byte if byte < 128 else byte - 256 for byte in checked)):
+                raise ValueError("invalid checksum")
+            size = _size(header[124:136])
+            if size < 0:
+                raise ValueError("negative size")
+        except ValueError as error:
+            raise _refuse("The archive contains an invalid header.") from error
         kind = chr(header[156]) if header[156] else "0"
         prefix = _text(header[345:500])
         name = self._long.pop("path", None) or (f"{prefix}/{_text(header[:100])}" if prefix else _text(header[:100]))
@@ -178,6 +203,8 @@ class Unpacker:
         mode = int(_text(header[100:108]).strip() or "644", 8)
         self._left, self._padding = size, -size % 512
         if kind in ("L", "K", "x"):
+            if size > 65_536:
+                raise _refuse("The archive contains oversized path metadata.")
             self._entry = ("long", kind, [])
         else:
             self._entry = ("skip",)
@@ -234,12 +261,46 @@ class Unpacker:
             os.rename(self._staging, self._final)
         else:
             final = os.path.realpath(self._final)
+            for destination, link, name in self._links:
+                if not _merged_link_stays_inside(root, final, destination, link):
+                    raise _refuse(f"Refusing an archive link that leads outside the target: {name}")
             _merge(root, final, final)
 
     def discard(self) -> None:
         if self._entry is not None and self._entry[0] == "file":
             self._entry[1].close()
         shutil.rmtree(self._staging, ignore_errors=True)
+
+
+def _merged_link_stays_inside(staging: str, root: str, destination: str, link: str) -> bool:
+    """Checks a link against staged entries and the existing destination tree."""
+    path = os.path.dirname(os.path.join(root, os.path.relpath(destination, staging)))
+    pending = link.split("/")
+    followed: set[str] = set()
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        path = os.path.dirname(path) if part == ".." else os.path.join(path, part)
+        if not _inside(root, path):
+            return False
+        staged = os.path.join(staging, os.path.relpath(path, root))
+        actual = staged if os.path.lexists(staged) else path
+        if not os.path.islink(actual):
+            continue
+        if path in followed:
+            return False
+        followed.add(path)
+        next_link = os.readlink(actual)
+        if os.path.isabs(next_link):
+            if not _inside(root, next_link):
+                return False
+            path = root
+            pending[:0] = os.path.relpath(next_link, root).split(os.sep)
+        else:
+            path = os.path.dirname(path)
+            pending[:0] = next_link.split("/")
+    return True
 
 
 def _merge(source_dir: str, target_dir: str, root: str) -> None:

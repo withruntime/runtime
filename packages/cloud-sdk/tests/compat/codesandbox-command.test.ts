@@ -3,6 +3,41 @@ import { Command, SandboxClient } from "../../src/codesandbox/index.js";
 import type { Process, Sandbox } from "../../src/sandbox.js";
 import type { OutputEvent } from "../../src/types.js";
 
+test("CodeSandbox disposed clients refuse new port and task operations before native calls", async () => {
+  const calls: string[] = [];
+  const sandbox = {
+    info: { labels: {} },
+    previews: {
+      async create() {
+        calls.push("preview-create");
+        return { url: "https://example.invalid" };
+      },
+      async list() {
+        calls.push("preview-list");
+        return [];
+      },
+    },
+    async exec() {
+      calls.push("exec");
+    },
+    files: {
+      async exists() {
+        calls.push("exists");
+        return false;
+      },
+    },
+  } as unknown as Sandbox;
+  const client = new SandboxClient(sandbox, {});
+  client.dispose();
+  // Pinned AgentConnection.request refuses before sending after dispose;
+  // Ports.get/getAll/waitForPort all reach that request through getPorts.
+  await expect(client.ports.get(8080)).rejects.toThrow("disconnected");
+  await expect(client.ports.getAll()).rejects.toThrow("disconnected");
+  await expect(client.ports.waitForPort(8080)).rejects.toThrow("disconnected");
+  await expect(client.tasks.getAll()).rejects.toThrow("disconnected");
+  expect(calls).toEqual([]);
+});
+
 function processFixture() {
   let end!: (exit: number) => void;
   let ready!: () => void;

@@ -4,6 +4,7 @@ import { Runtime } from "../src/index";
 const ID = "8a1f9c2e-0d1b-4c3a-9e8f-7a6b5c4d3e2f";
 async function fixture(kind: "modern" | "legacy" | "old-api" | "denied") {
   const calls: { path: string; body: Record<string, unknown>; key: string | null }[] = [];
+  let accepted = 0;
   const runtime = new Runtime({
     apiKey: "rt_test",
     baseUrl: "http://localhost",
@@ -28,11 +29,16 @@ async function fixture(kind: "modern" | "legacy" | "old-api" | "denied") {
             },
             { status: kind === "denied" ? 403 : 409 },
           );
+        accepted = 0;
         return Response.json({
           uploadId: "upload-1",
           chunkBytes: 1048576,
           ...(kind === "modern" ? { mode: body.mode } : {}),
         });
+      }
+      if (request.method === "PUT" && path.includes("/uploads/")) {
+        accepted += (await request.arrayBuffer()).byteLength;
+        return Response.json({ received: accepted });
       }
       return Response.json({ ok: true });
     }) as typeof fetch,

@@ -35,7 +35,8 @@ public class Hello {
   public static void main(String[] args) {
     RuntimeClient runtime = RuntimeClient.create();
     try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox().funding("trial"))) {
-      CommandResult result = sbx.exec("python3 -c 'print(6 * 7)'", new ExecOptions().check(true));
+      sbx.files().write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+      CommandResult result = sbx.exec("python3 /workspace/invoice.py", new ExecOptions().check(true));
       System.out.print(result.stdout());
     }
   }

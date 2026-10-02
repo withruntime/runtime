@@ -167,6 +167,49 @@ describe("daytona.create", () => {
       return Image.base("x").pipInstallFromPyproject();
     }
   });
+
+  test("unsupported GPU preferences and volume subpaths fail before image builds or lookups", async () => {
+    const cases = [
+      { resources: { gpuType: "a100" } },
+      { resources: { gpu: 0, gpuType: ["a100", "h100"] } },
+      { volumes: [{ volumeId: "data", mountPath: "/data", subpath: "private" }] },
+      {
+        volumes: [
+          { volumeId: "first", mountPath: "/first" },
+          { volumeId: "data", mountPath: "/data", subpath: "private" },
+        ],
+      },
+    ];
+    for (const params of cases) {
+      await expect(daytona.create({ image: "python:3.12-slim", ...params })).rejects.toBeInstanceOf(
+        NotSupportedError,
+      );
+      expect(world.calls).toEqual([]);
+    }
+  });
+
+  test("omitted and empty GPU preferences retain CPU create defaults", async () => {
+    for (const resources of [{}, { gpu: 0 }, { gpuType: [] }, { gpuType: null }]) {
+      await daytona.create({ resources });
+      expect(lastCreate()).toEqual({
+        vcpu: 1,
+        memoryMiB: 1024,
+        diskMiB: 3072,
+        timeoutSeconds: 900,
+        onLeaseEnd: "pause",
+      });
+    }
+  });
+
+  test("explicit snapshot regions fail before image lookup or build", async () => {
+    await expect(
+      daytona.snapshot.create({ name: "placed", image: "python:3.12-slim", regionId: "us" }),
+    ).rejects.toBeInstanceOf(NotSupportedError);
+    expect(world.calls).toEqual([]);
+    // The pinned SDK treats an empty region as its configured default.
+    await daytona.snapshot.create({ name: "default", image: "python:3.12-slim", regionId: "" });
+    expect(world.called("images.build")).toHaveLength(1);
+  });
 });
 
 describe("keys and configuration", () => {
@@ -528,7 +571,6 @@ describe("errors and gaps", () => {
   test("each gap throws NotSupportedError naming what to use", async () => {
     const sandbox = await daytona.create();
     const refusals = [
-      () => sandbox.setLabels(),
       () => sandbox.resize(),
       () => sandbox.getMetrics(),
       () => sandbox.getSignedPreviewUrl(),

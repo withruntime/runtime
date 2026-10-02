@@ -77,12 +77,12 @@ export function snapshotModel(snapshot: RuntimeSnapshot, sandboxName?: string): 
 
 /** Envs as a record; a nameless one is refused. */
 export function envRecord(envs: Env[] | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const env of envs ?? []) {
-    if (!env.name) throw responseError(400, "every env needs a name");
-    out[env.name] = env.value ?? "";
-  }
-  return out;
+  return Object.fromEntries(
+    (envs ?? []).map((env) => {
+      if (!env.name) throw responseError(400, "every env needs a name");
+      return [env.name, env.value ?? ""];
+    }),
+  );
 }
 
 /** Appends envs to a sandbox's env file: they win over the ones it has. */

@@ -17,6 +17,7 @@ machine's ``withruntime login``.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from typing import Any
 
 from pydantic_ai import RunContext
@@ -27,6 +28,7 @@ from withruntime.tools import DEFAULT_MAX_OUTPUT_CHARS, DEFAULT_TIMEOUT_SECONDS,
 
 __all__ = ["RuntimeToolset"]
 __version__ = "0.1.0"
+logger = logging.getLogger("pydantic_ai_withruntime")
 
 _INSTRUCTIONS = (
     "You have a Linux sandbox (Ubuntu 24.04 with Python, Node.js, git and passwordless sudo). "
@@ -108,18 +110,26 @@ class RuntimeToolset(AbstractToolset[Any]):
     async def __aenter__(self) -> Self:
         self._entered += 1
         if self._owned and self._sandbox is None:
-            if self._runtime is None:
-                self._client = AsyncRuntime()
-            client = self._runtime or self._client
-            fields = {"timeout_seconds": 1800, "on_lease_end": "stop", **self._create}
-            fields["labels"] = {"created_by": "pydantic-ai", **(fields.get("labels") or {})}
             try:
+                if self._runtime is None:
+                    self._client = AsyncRuntime()
+                client = self._runtime or self._client
+                fields = {"timeout_seconds": 1800, "on_lease_end": "stop", **self._create}
+                fields["labels"] = {"created_by": "pydantic-ai", **(fields.get("labels") or {})}
                 self._sandbox = await client.sandboxes.create(**fields)
+                self._tools = self._bind(self._sandbox)
             except BaseException:
                 self._entered -= 1
-                await self._close_client()
+                sandbox, self._sandbox, self._tools = self._sandbox, None, None
+                try:
+                    try:
+                        if sandbox is not None:
+                            await sandbox.stop()
+                    finally:
+                        await self._close_client()
+                except Exception as error:  # noqa: BLE001 - preserve the initialization failure
+                    logger.warning("Runtime: could not clean up failed toolset initialization: %s", error)
                 raise
-            self._tools = self._bind(self._sandbox)
         return self
 
     async def __aexit__(self, *args: object) -> bool | None:

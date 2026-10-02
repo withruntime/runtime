@@ -41,20 +41,27 @@ npx withruntime sandbox metrics <id> --range 6h
 
 What you get:
 
-| Field             | Meaning                                                                |
-| ----------------- | ---------------------------------------------------------------------- |
-| `cpuPercent`      | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)         |
-| `cpuCores`        | The same as a number of cores                                          |
-| `cpuPeakPercent`  | The busiest interval between two readings inside the bucket            |
-| `memoryBytes`     | Memory the sandbox's machine holds, as its host measures it            |
-| `memoryPeakBytes` | The most it held inside the bucket                                     |
-| `latest`          | The newest reading while the sandbox runs; null when it is not running |
+| Field                | Meaning                                                                     |
+| -------------------- | --------------------------------------------------------------------------- |
+| `cpuPercent`         | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)              |
+| `cpuCores`           | The same as a number of cores                                               |
+| `cpuPeakPercent`     | The busiest interval between two readings inside the bucket                 |
+| `cpuWaitPercent`     | Measured wall time ready to run while waiting for a processor, as a percent |
+| `memoryStallPercent` | Measured wall time with a thread waiting for memory, as a percent           |
+| `memoryBytes`        | Memory the sandbox's machine holds, as its host measures it                 |
+| `memoryPeakBytes`    | The most it held inside the bucket                                          |
+| `latest`             | The newest reading while the sandbox runs; null when it is not running      |
 
 CPU is measured, not estimated: the machine's CPU time between two readings of
 its host, the same reading the bill is made from. The host reads every running
 sandbox at least every half minute. A paused or stopped sandbox uses nothing
 and has no new readings: `latest` is null, and its earlier readings stay in
 `points`.
+
+CPU wait and memory stalls use the differences between complete readings of the
+same run, weighted by the time measured. A first reading, missing counter or
+counter reset returns null, rather than reporting no waiting. The same fields
+are in `points` and `latest`; older servers can omit them.
 
 `range` picks the window and the bucket each point sums:
 
@@ -72,10 +79,39 @@ Each reading is kept 24 hours. Hourly averages and peaks are kept 30 days.
 In your account, [Sandboxes](https://withruntime.com/account/sandboxes) shows
 each sandbox's CPU and memory now, and Home draws a trace of each running one.
 A sandbox's own page charts CPU with its events marked on it, and its Activity
-tab charts CPU and memory over any of the ranges above, updating while it runs,
+tab charts CPU, memory, CPU wait and memory stalls over any of the ranges above,
+updating while it runs,
 and lists its commands and what happened to it. Once it has stopped, its page
 shows its whole life: CPU and memory from start to stop, and a timeline of its
-events and commands.
+events and commands. CPU wait is time ready to run while waiting for a
+processor; a memory stall is time with a thread waiting for memory. A first
+reading, a missing counter or a counter reset shows as not measured, never as
+no waiting.
+
+## Account API calls
+
+[Usage & billing](https://withruntime.com/account/billing) shows the account's
+recorded authenticated calls, its error rate and service errors, grouped by
+operation, over 24 hours, 7, 30 or 90 days. Refused calls are 4xx answers; service errors are 5xx. The error rate
+includes both, with every recorded answer, redirects included, in its total. A
+window with no counted calls has a null rate. A failed read remains unavailable.
+
+`GET /v1/usage/requests?range=24h` serves the same counts. The other ranges are
+`7d`, `30d` and `90d`. Each window is a fixed number of hourly buckets, ending
+with the current partial hour; `since` is inclusive and `until` is the read
+time. Counts are written about once a minute. Requests that never authenticated
+are excluded, and a key needs the `usage` scope or a read-only or all-products
+key. Every account member can read the account's counts on the website.
+
+`calls`, `clientErrors` and `serverErrors` are exact integer decimal strings.
+`errorPercent` is a percentage rounded to two decimal places, or null with no
+calls. `operations` contains the same fields and an `operation` name per row.
+These are recorded API answers; they are separate from the [uptime promise](/legal/sla).
+
+For billing detail over a chosen period, the same page exports settled usage
+as a CSV file, and [export settled usage](./api#export-settled-usage) covers
+every resource visible to your key. It keeps exact amounts and includes
+settled charges, while pending holds stay separate.
 
 ## Commands
 
@@ -344,6 +380,6 @@ account can have three exports.
 
 ## MCP
 
-`runtime_sandbox_metrics` reads a sandbox's CPU and memory, and
+`runtime_sandbox_metrics` reads a sandbox's CPU, memory, CPU wait and memory stalls, and
 `runtime_events_list` its events. `runtime_webhooks_manage` and
 `runtime_otel_manage` list, create, test and change webhooks and exports.

@@ -8,8 +8,8 @@ export class Page<T> implements AsyncIterable<T> {
   get hasMore(): boolean {
     return this.nextCursor !== null;
   }
-  async next(): Promise<Page<T> | null> {
-    return this.nextCursor === null ? null : this.fetchPage(this.nextCursor);
+  async next(cursor: string | null = this.nextCursor): Promise<Page<T> | null> {
+    return cursor === null ? null : this.fetchPage(cursor);
   }
   /** Every page, fetched as you go. */
   async *pages(): AsyncGenerator<Page<T>> {

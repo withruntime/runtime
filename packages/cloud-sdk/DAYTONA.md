@@ -1,7 +1,7 @@
 # Code written for Daytona, on Runtime
 
-Run code written for [Daytona](https://www.daytona.io)'s SDK on Runtime Cloud
-by changing one import. It is part of Runtime's SDK (`withruntime`), built on
+Supported sandbox calls from [Daytona](https://www.daytona.io)'s SDK keep
+their call shapes on Runtime Cloud after changing the import. It is part of Runtime's SDK (`withruntime`), built on
 the same client, so it gets that SDK's retries, idempotency keys and errors.
 Importing `withruntime` alone does not load it.
 
@@ -16,8 +16,9 @@ from withruntime.daytona import Daytona  # was: from daytona import Daytona
 from withruntime.daytona import AsyncDaytona  # was: from daytona import AsyncDaytona
 ```
 
-The mapping was written against `@daytona/sdk` 0.216.1 and `daytona` 0.216.1
-on PyPI, checked 23 September 2026.
+The mapping was written against `@daytona/sdk` 0.220.0 and `daytona` 0.220.0
+on PyPI, checked 29 September 2026. The exact releases and artifact hashes
+are kept in `compatibility-lock.json`.
 
 ## Keys
 
@@ -60,6 +61,7 @@ package talks only to Runtime.
 | `create({ image: "python:3.12" })`                                            | Built once as a Runtime image from the registry reference (named after it), then reused. `onSnapshotCreateLogs` receives the build log.                                                                       |
 | `create({ image: Image.debianSlim(...).pipInstall(...)... })`                 | The Dockerfile Daytona's `Image` stands for, with its local files, built as a Runtime image named after its content and reused.                                                                               |
 | `resources`, `envVars`, `labels`, `name`, `volumes`                           | `vcpu`, `memoryMiB`, `diskMiB`; environment given to every command; labels; name; Runtime volumes by id or by name.                                                                                           |
+| `setLabels` (Python `set_labels`)                                             | Replaces customer labels while preserving the language and Runtime compatibility labels; reconnects retain the language.                                                                                      |
 | `networkBlockAll`, `networkAllowList`, `domainAllowList`, `outboundProxyUrl`  | Runtime network rules (`internet: false`, or an `allow` list); the proxy as `HTTP_PROXY` and `HTTPS_PROXY` for commands.                                                                                      |
 | `public: true`                                                                | `getPreviewLink(port)` shares the port publicly; without it, privately with a token.                                                                                                                          |
 | `language`                                                                    | The language of `codeRun`, kept in Daytona's `code-toolbox-language` label so a sandbox found later keeps it.                                                                                                 |
@@ -93,7 +95,7 @@ Each of these throws `NotSupportedError` before anything happens. Its
 | `user` other than `daytona`                                           | Commands run as the sandbox owner with passwordless `sudo`.                                                                                                                             |
 | PTY sessions, the entrypoint session, language servers                | `sandbox.withruntime.terminal(...)`, and sessions with `runAsync`.                                                                                                                      |
 | `computerUse`                                                         | Runtime's desktop, `sandbox.withruntime.desktop`.                                                                                                                                       |
-| `setLabels`, `resize`, `recover`                                      | Set labels and resources at create; create a new sandbox.                                                                                                                               |
+| `resize`, `recover`                                                   | Set labels and resources at create; create a new sandbox.                                                                                                                               |
 | Signed preview URLs, signed upload and download URLs, SSH access      | `getPreviewLink`, `fs.uploadFile` and `downloadFile`, `npx withruntime sandbox ssh <id>`.                                                                                               |
 | `getMetrics`                                                          | `sandbox.withruntime.metrics()`: its CPU and memory over time.                                                                                                                          |
 | `Image.pipInstallFromPyproject`, snapshot `resources` or `entrypoint` | `pipInstallFromRequirements`; resources at create; a session after create.                                                                                                              |
@@ -102,10 +104,14 @@ Each of these throws `NotSupportedError` before anything happens. Its
 | `runCode(code, { envs })`                                             | `envVars` at create, or `os.environ` in the code.                                                                                                                                       |
 | Listing by anything but name, labels and states                       | Filter the result yourself.                                                                                                                                                             |
 
+File download timeouts are seconds, including buffer and local-path overloads
+and batches. A batch shares one deadline and stops starting later files once
+it expires. JavaScript `downloadFileStream(path, { timeout, signal })` also
+bounds and cancels the stream. An incomplete local download is never published
+as the completed file.
+
 Some differences are not refusals:
 
-- Sandbox `envVars` live in the object that created the sandbox;
-  `daytona.get(id)` from another process does not know them.
 - A session runs one command at a time. A command sent while another runs
   waits for it, as it would typed into a shell. Sessions made by another
   client are found by name, but only their output from then on is known.

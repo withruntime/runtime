@@ -117,7 +117,7 @@ const BLAXEL_HINTS: Record<string, string> = {
   trial_busy:
     "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
   public_preview_not_allowed:
-    "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt). A public preview needs a paid sandbox, which is the account owner's decision.",
+    "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
   busy: AGAIN,
   guest_busy: AGAIN,
   rate_limited: AGAIN,

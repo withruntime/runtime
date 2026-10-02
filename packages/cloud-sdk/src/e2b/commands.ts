@@ -1,5 +1,6 @@
 import type { Process } from "../sandbox.js";
 import type { ProcessInfo as RuntimeProcessInfo } from "../types.js";
+import type { RequestOptions } from "../transport.js";
 import type { RuntimeSandbox } from "./client.js";
 import {
   CommandExitError,
@@ -52,9 +53,10 @@ export interface ProcessInfo {
  * keep: it is the sandbox's own `env`, added to every command there. */
 export interface SandboxContext {
   readonly runtime: RuntimeSandbox;
+  readonly requestTimeoutMs?: number;
   /** Makes /home/user (E2B's home) lead to /workspace (Runtime's), once, when
    * something names it. */
-  ensureHome(text: string | undefined): Promise<void>;
+  ensureHome(text: string | undefined, options?: RequestOptions): Promise<void>;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -70,7 +72,7 @@ export function pidOf(processId: string): number {
   return hash >>> 1 || 1;
 }
 
-function refuseUser(user: Username | undefined) {
+export function refuseUser(user: Username | undefined) {
   if (user !== undefined && user !== "user")
     throw new NotSupportedError(
       `Running as the user "${user}"`,
@@ -78,14 +80,67 @@ function refuseUser(user: Username | undefined) {
     );
 }
 
-function timeoutFor(timeoutMs: number | undefined) {
+export function timeoutFor(timeoutMs: number | undefined) {
   if (timeoutMs === undefined) return DEFAULT_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0)
     throw new InvalidArgumentError("timeoutMs must be a nonnegative whole number.");
   return timeoutMs;
 }
 
-function timedOut(timeoutMs: number) {
+/** One budget for lookup and mutation, including retries and queued input. */
+export function commandRequest(
+  opts: CommandRequestOpts,
+  defaultTimeoutMs = 60_000,
+): RequestOptions {
+  opts.signal?.throwIfAborted();
+  const timeoutMs = timeoutFor(opts.requestTimeoutMs ?? defaultTimeoutMs);
+  const deadline = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    opts.signal && deadline ? AbortSignal.any([opts.signal, deadline]) : (opts.signal ?? deadline);
+  return { timeoutMs: 0, ...(signal ? { signal } : {}) };
+}
+
+export async function findProcess(ctx: SandboxContext, pid: number, options: RequestOptions) {
+  options.signal?.throwIfAborted();
+  const processes = await guard("sandbox", () => ctx.runtime.processes.list(options));
+  options.signal?.throwIfAborted();
+  const matches = processes.filter((info) => pidOf(info.id) === pid && info.state === "running");
+  if (matches.length > 1)
+    throw new SandboxError(
+      `More than one running command has pid ${pid}; use the native process id instead.`,
+    );
+  return matches[0];
+}
+
+export async function resolveProcess(
+  ctx: SandboxContext,
+  pid: number,
+  options: RequestOptions,
+): Promise<Process> {
+  const info = await findProcess(ctx, pid, options);
+  if (!info) throw new SandboxError(`No running command with pid ${pid}.`);
+  return guard("sandbox", () => ctx.runtime.processes.get(info.id, options));
+}
+
+export async function killProcess(
+  ctx: SandboxContext,
+  pid: number,
+  options: RequestOptions,
+): Promise<boolean> {
+  const info = await findProcess(ctx, pid, options);
+  if (!info) return false;
+  try {
+    const process = await guard("sandbox", () => ctx.runtime.processes.get(info.id, options));
+    options.signal?.throwIfAborted();
+    await guard("sandbox", () => process.kill("SIGKILL", options));
+    return true;
+  } catch (error) {
+    if (error instanceof SandboxError && error.statusCode === 404) return false;
+    throw error;
+  }
+}
+
+export function timedOut(timeoutMs: number) {
   return new TimeoutError(
     `Command timed out after ${timeoutMs} ms: this error is likely due to exceeding 'timeoutMs'. ` +
       "Pass a larger 'timeoutMs', or 0 for no limit.",
@@ -112,6 +167,26 @@ function toResult(result: {
           error: result.exitCode === null ? "terminated by a signal" : `exit status ${exitCode}`,
         }),
     ...(result.truncated ? { truncated: true as const } : {}),
+  };
+}
+
+/** The subscription deadline includes the opening handshake. */
+export function connectionRequest(opts: CommandConnectOpts, defaultTimeoutMs?: number) {
+  const timeoutMs = timeoutFor(opts.timeoutMs);
+  const deadline = timeoutMs > 0 ? performance.now() + timeoutMs : undefined;
+  const connectionTimeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    connectionTimeout && opts.signal
+      ? AbortSignal.any([connectionTimeout, opts.signal])
+      : (connectionTimeout ?? opts.signal);
+  return {
+    timeoutMs,
+    deadline,
+    request: commandRequest({ ...opts, signal }, defaultTimeoutMs),
+    failure: (error: unknown): never => {
+      if (connectionTimeout?.aborted) throw timedOut(timeoutMs);
+      throw error;
+    },
   };
 }
 
@@ -157,33 +232,37 @@ export class Commands {
     opts?: CommandStartOpts & { background?: boolean },
   ): Promise<CommandHandle | CommandResult>;
   async run(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle | CommandResult> {
-    opts.signal?.throwIfAborted();
+    const opening = connectionRequest(opts, this.#ctx.requestTimeoutMs);
     refuseUser(opts.user);
-    await this.#ctx.ensureHome(`${cmd}\n${opts.cwd ?? ""}`);
-    const timeoutMs = timeoutFor(opts.timeoutMs);
-    const handle = await this.#start(cmd, opts, timeoutMs);
+    const handle = await (async () => {
+      await this.#ctx.ensureHome(`${cmd}\n${opts.cwd ?? ""}`, opening.request);
+      opening.request.signal?.throwIfAborted();
+      return this.#start(cmd, opts, opening.timeoutMs, opening.request, opening.deadline);
+    })().catch(opening.failure);
     return opts.background ? handle : handle.wait();
   }
 
-  async #start(cmd: string, opts: CommandStartOpts, timeoutMs: number) {
-    opts.signal?.throwIfAborted();
-    const requestDeadline = opts.requestTimeoutMs
-      ? AbortSignal.timeout(opts.requestTimeoutMs)
-      : undefined;
-    const signals = [opts.signal, requestDeadline].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
+  async #start(
+    cmd: string,
+    opts: CommandStartOpts,
+    timeoutMs: number,
+    request: RequestOptions,
+    deadline?: number,
+  ) {
+    request.signal?.throwIfAborted();
     const process = await guard("sandbox", () =>
       this.#ctx.runtime.spawn(cmd, {
         ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
         ...this.#env(opts.envs),
         ...(opts.stdin ? { stdin: "pipe" } : {}),
-        ...(signals.length ? { signal: AbortSignal.any(signals) } : {}),
+        request,
       }),
     );
     return new CommandHandle(process, {
       stdin: opts.stdin === true,
       timeoutMs,
+      deadline,
+      requestTimeoutMs: this.#ctx.requestTimeoutMs,
       signal: opts.signal,
       ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
       ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
@@ -191,54 +270,47 @@ export class Commands {
   }
 
   /** Running commands. */
-  async list(_opts: CommandRequestOpts = {}): Promise<ProcessInfo[]> {
-    const processes = await guard("sandbox", () => this.#ctx.runtime.processes.list());
+  async list(opts: CommandRequestOpts = {}): Promise<ProcessInfo[]> {
+    const request = commandRequest(opts, this.#ctx.requestTimeoutMs);
+    const processes = await guard("sandbox", () => this.#ctx.runtime.processes.list(request));
     return processes.filter((info) => info.state === "running").map(describe);
   }
 
-  async #find(pid: number): Promise<RuntimeProcessInfo | undefined> {
-    const processes = await guard("sandbox", () => this.#ctx.runtime.processes.list());
-    return processes.find((info) => pidOf(info.id) === pid && info.state === "running");
-  }
-
-  async #process(pid: number): Promise<Process> {
-    const info = await this.#find(pid);
-    if (!info) throw new SandboxError(`No running command with pid ${pid}.`);
-    return guard("sandbox", () => this.#ctx.runtime.processes.get(info.id));
-  }
-
   /** Kills a command with SIGKILL, as E2B does. False when there is none. */
-  async kill(pid: number, _opts: CommandRequestOpts = {}): Promise<boolean> {
-    const info = await this.#find(pid);
-    if (!info) return false;
-    const process = await guard("sandbox", () => this.#ctx.runtime.processes.get(info.id));
-    await guard("sandbox", () => process.kill("SIGKILL"));
-    return true;
+  async kill(pid: number, opts: CommandRequestOpts = {}): Promise<boolean> {
+    return killProcess(this.#ctx, pid, commandRequest(opts, this.#ctx.requestTimeoutMs));
   }
 
   /** Sends input to a command started with `stdin: true`. */
-  async sendStdin(pid: number, data: string | Uint8Array, _opts: CommandRequestOpts = {}) {
-    const process = await this.#process(pid);
+  async sendStdin(pid: number, data: string | Uint8Array, opts: CommandRequestOpts = {}) {
+    const request = commandRequest(opts, this.#ctx.requestTimeoutMs);
+    const process = await resolveProcess(this.#ctx, pid, request);
     if (!process.info.stdinOpen)
       throw new InvalidArgumentError(
         `The command with pid ${pid} was not started with stdin: true, so its input is closed.`,
       );
-    await guard("sandbox", () => process.write(data));
+    request.signal?.throwIfAborted();
+    await guard("sandbox", () => process.write(data, request));
   }
 
-  async closeStdin(pid: number, _opts: CommandRequestOpts = {}) {
-    const process = await this.#process(pid);
-    await guard("sandbox", () => process.write("", { eof: true }));
+  async closeStdin(pid: number, opts: CommandRequestOpts = {}) {
+    const request = commandRequest(opts, this.#ctx.requestTimeoutMs);
+    const process = await resolveProcess(this.#ctx, pid, request);
+    request.signal?.throwIfAborted();
+    await guard("sandbox", () => process.write("", { ...request, eof: true }));
   }
 
   /** Attaches to a running command; output from now on reaches the handle. */
   async connect(pid: number, opts: CommandConnectOpts = {}): Promise<CommandHandle> {
-    const process = await this.#process(pid);
+    const opening = connectionRequest(opts, this.#ctx.requestTimeoutMs);
+    const process = await resolveProcess(this.#ctx, pid, opening.request).catch(opening.failure);
     return new CommandHandle(process, {
       stdin: process.info.stdinOpen,
-      timeoutMs: timeoutFor(opts.timeoutMs),
+      timeoutMs: opening.timeoutMs,
+      deadline: opening.deadline,
       signal: opts.signal,
       cursor: process.info.outputBytes,
+      requestTimeoutMs: this.#ctx.requestTimeoutMs,
       ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
       ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
     });
@@ -255,6 +327,28 @@ function describe(info: RuntimeProcessInfo): ProcessInfo {
   };
 }
 
+/** Reader cancellation also releases a callback whose promise never settles. */
+async function deliver(signal: AbortSignal, callback: () => void | Promise<void>) {
+  signal.throwIfAborted();
+  let cancelled!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    cancelled = () => reject(signal.reason);
+    signal.addEventListener("abort", cancelled, { once: true });
+  });
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => {
+        signal.throwIfAborted();
+        return callback();
+      }),
+      aborted,
+    ]);
+  } finally {
+    signal.removeEventListener("abort", cancelled);
+  }
+}
+
 /** A command started in the background: E2B's CommandHandle over a Runtime
  * process. Output streams into `stdout`/`stderr` and the callbacks as it
  * arrives. */
@@ -263,6 +357,7 @@ export class CommandHandle {
   readonly #process: Process;
   readonly #stdin: boolean;
   readonly #timeoutMs: number;
+  readonly #requestTimeoutMs: number | undefined;
   readonly #abort = new AbortController();
   readonly #done: Promise<void>;
   #stdout = "";
@@ -282,19 +377,29 @@ export class CommandHandle {
       signal?: AbortSignal;
       onStdout?: (data: string) => void | Promise<void>;
       onStderr?: (data: string) => void | Promise<void>;
+      onData?: (data: Uint8Array) => void | Promise<void>;
+      pty?: boolean;
+      requestTimeoutMs?: number;
+      deadline?: number;
     },
   ) {
     this.#process = process;
     this.pid = pidOf(process.id);
     this.#stdin = options.stdin;
     this.#timeoutMs = options.timeoutMs;
+    this.#requestTimeoutMs = options.requestTimeoutMs;
     // E2B's timeout limits the subscription. It never asks us to kill the
     // process: the sandbox lease still bounds the workload after disconnect.
     if (options.timeoutMs > 0) {
-      this.#deadline = setTimeout(() => {
-        this.#failure = timedOut(options.timeoutMs);
-        this.#abort.abort();
-      }, options.timeoutMs);
+      this.#deadline = setTimeout(
+        () => {
+          this.#failure = timedOut(options.timeoutMs);
+          this.#abort.abort();
+        },
+        options.deadline === undefined
+          ? options.timeoutMs
+          : Math.max(0, options.deadline - performance.now()),
+      );
       this.#deadline.unref?.();
     }
     this.#done = this.#follow(options);
@@ -305,22 +410,34 @@ export class CommandHandle {
     signal?: AbortSignal;
     onStdout?: (data: string) => void | Promise<void>;
     onStderr?: (data: string) => void | Promise<void>;
+    onData?: (data: Uint8Array) => void | Promise<void>;
+    pty?: boolean;
   }) {
     const signal = options.signal
       ? AbortSignal.any([options.signal, this.#abort.signal])
       : this.#abort.signal;
     try {
-      for await (const event of this.#process.output({
+      const outputOptions = {
         ...(options.cursor ? { cursor: options.cursor } : {}),
         signal,
-      })) {
-        if (this.#disconnected || signal.aborted) break;
-        if (event.type === "stdout") {
+      };
+      const output = options.pty
+        ? this.#process.outputBytes(outputOptions)
+        : this.#process.output(outputOptions);
+      for await (const event of output) {
+        if (this.#disconnected) break;
+        signal.throwIfAborted();
+        if (
+          (event.type === "stdout" || event.type === "stderr") &&
+          event.data instanceof Uint8Array
+        ) {
+          await deliver(signal, () => options.onData?.(event.data as Uint8Array));
+        } else if (event.type === "stdout" && typeof event.data === "string") {
           this.#stdout += event.data;
-          await options.onStdout?.(event.data);
-        } else if (event.type === "stderr") {
+          await deliver(signal, () => options.onStdout?.(event.data as string));
+        } else if (event.type === "stderr" && typeof event.data === "string") {
           this.#stderr += event.data;
-          await options.onStderr?.(event.data);
+          await deliver(signal, () => options.onStderr?.(event.data as string));
         } else if (event.type === "truncated") {
           this.#truncated = true;
         } else if (event.type === "exit") {
@@ -394,7 +511,9 @@ export class CommandHandle {
   async kill(): Promise<boolean> {
     if (this.#exit) return false;
     try {
-      await guard("sandbox", () => this.#process.kill("SIGKILL"));
+      await guard("sandbox", () =>
+        this.#process.kill("SIGKILL", commandRequest({}, this.#requestTimeoutMs)),
+      );
       return true;
     } catch (error) {
       if (error instanceof SandboxError && error.statusCode === 404) return false;
@@ -402,17 +521,19 @@ export class CommandHandle {
     }
   }
 
-  async sendStdin(data: string | Uint8Array, _opts: CommandRequestOpts = {}): Promise<void> {
+  async sendStdin(data: string | Uint8Array, opts: CommandRequestOpts = {}): Promise<void> {
+    const request = commandRequest(opts, this.#requestTimeoutMs);
     if (!this.#stdin)
       throw new InvalidArgumentError(
         "The command was not started with stdin: true, so its input is closed.",
       );
-    await guard("sandbox", () => this.#process.write(data));
+    await guard("sandbox", () => this.#process.write(data, request));
   }
 
-  async closeStdin(_opts: CommandRequestOpts = {}): Promise<void> {
+  async closeStdin(opts: CommandRequestOpts = {}): Promise<void> {
+    const request = commandRequest(opts, this.#requestTimeoutMs);
     if (!this.#stdin)
       throw new InvalidArgumentError("The command was not started with stdin: true.");
-    await guard("sandbox", () => this.#process.write("", { eof: true }));
+    await guard("sandbox", () => this.#process.write("", { ...request, eof: true }));
   }
 }

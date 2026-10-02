@@ -4,6 +4,7 @@ scripts/generate_dropin_sync.py; edit this one."""
 from __future__ import annotations
 
 import json
+import math
 import re
 import os
 import time
@@ -13,9 +14,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .._async_client import AsyncRuntime
+from .._request_scope import request_scope
 
 from . import _core as core
-from ._async_io import call, finish, gather, http, now, start, stop
+from ._async_io import call, finish, gather, http, now, preview_token_expiration, start, stop
 from ._core import (AsyncStreamHandle, AsyncWatchHandle, ContentSearchResponse, CopyResponse, Directory, Execution,
                     ExecutionError, FindMatch, FindResponse, NotSupportedError, OutputMessage, Preview, PreviewMetadata,
                     PreviewSpec, PreviewToken, PreviewTokenMetadata, PreviewTokenSpec, ProcessResponse,
@@ -79,10 +81,12 @@ class AsyncPaginatedList(list):
     """One page of a list: a list, with ``data``, ``has_more``,
     ``next_cursor``, ``next_page()`` and ``auto_paging_iter()``."""
 
-    def __init__(self, data: Optional[List[Any]] = None, *, page: Any = None, mapper: Any = None) -> None:
+    def __init__(self, data: Optional[List[Any]] = None, *, meta: Any = core.UNSET,
+                 fetch_next: Any = None, page: Any = None, mapper: Any = None) -> None:
         super().__init__(data or [])
-        self._page, self._mapper = page, mapper
-        self.meta = None
+        self._page, self._mapper, self._fetch_next = page, mapper, fetch_next
+        self.meta = core.PaginationMeta(has_more=page.has_more, next_cursor=page.next_cursor) \
+            if meta is core.UNSET and page is not None else meta
 
     @property
     def data(self) -> List[Any]:
@@ -90,20 +94,33 @@ class AsyncPaginatedList(list):
 
     @property
     def has_more(self) -> bool:
-        return bool(self._page is not None and self._page.has_more)
+        return bool(self.meta is not core.UNSET and self.meta is not None and getattr(self.meta, "has_more", False))
 
     @property
     def next_cursor(self) -> Optional[str]:
-        return self._page.next_cursor if self._page is not None else None
+        if not self.has_more:
+            return None
+        cursor = getattr(self.meta, "next_cursor", None)
+        return None if cursor is core.UNSET or cursor == "" else cursor
 
     @property
     def is_empty(self) -> bool:
         return len(self) == 0
 
     async def next_page(self) -> "AsyncPaginatedList":
-        if not self.has_more:
+        cursor = self.next_cursor
+        if not cursor:
             return AsyncPaginatedList([])
+        if self._fetch_next is not None:
+            return await self._fetch_next(cursor)
+        if self._page is None:
+            return AsyncPaginatedList([])
+        if cursor != self._page.next_cursor:
+            raise NotSupportedError("Changing a native list cursor",
+                                    "Walk native pages with page.next_page(); custom pages may supply fetch_next.")
         page = await _guard("sandbox", lambda: self._page.next_page())
+        if page is None:
+            return AsyncPaginatedList([])
         return AsyncPaginatedList([self._mapper(one) for one in page.data], page=page, mapper=self._mapper)
 
     async def auto_paging_iter(self) -> Any:
@@ -358,14 +375,19 @@ class AsyncSandboxProcess:
     async def wait(self, identifier: str, max_wait: int = 60000, interval: int = 1000) -> ProcessResponse:
         """Waits for the process to end, at most ``max_wait`` ms (-1: no
         limit); raises TimeoutError, leaving it running, when it does not."""
-        if max_wait < 0 and max_wait != -1 or interval <= 0:
+        if (not isinstance(max_wait, (int, float)) or isinstance(max_wait, bool) or not math.isfinite(max_wait)
+                or max_wait < 0 and max_wait != -1 or not isinstance(interval, (int, float))
+                or isinstance(interval, bool) or not math.isfinite(interval) or interval <= 0):
             raise ValueError("max_wait must be -1 or finite and non-negative; interval must be finite and positive")
-        pid = await self._resolve(identifier)
-        deadline = None if max_wait == -1 else now() + max_wait / 1000
-        output = await self._follow(pid, {}, deadline)
-        if not output.done:
+        if max_wait == 0:
             raise TimeoutError(f"Process did not finish in time ({identifier}); it may still be running")
-        return self._shape(pid, output)
+        deadline = None if max_wait == -1 else now() + max_wait / 1000
+        with request_scope(None if max_wait == -1 else max_wait / 1000):
+            pid = await self._resolve(identifier)
+            output = await self._follow(pid, {}, deadline)
+            if not output.done:
+                raise TimeoutError(f"Process did not finish in time ({identifier}); it may still be running")
+            return self._shape(pid, output)
 
     async def list(self) -> List[ProcessResponse]:
         runtime = await self._sandbox._live()
@@ -476,9 +498,13 @@ class AsyncSandboxFileSystem:
                 if code != "permission_denied" and (in_workspace or code != "file_not_found"):
                     raise translate(error, "file") from error
         staging = f"{core.RUNTIME_HOME}/.runtime-blaxel-{uuid.uuid4()}"
-        await _guard("file", lambda: files.write(staging, data))
-        await self._sudo('mkdir -p "$(dirname "$2")" && mv -f "$1" "$2"', [staging, target],
-                         f"error writing file {target}")
+        try:
+            await _guard("file", lambda: files.write(staging, data))
+            await self._sudo('mkdir -p "$(dirname "$2")" && mv -f "$1" "$2"', [staging, target],
+                             f"error writing file {target}")
+        except BaseException:
+            await self._unstage(staging)
+            raise
 
     async def _stage(self, target: str) -> str:
         """A copy of a file only root may read, owned by the sandbox user."""
@@ -741,9 +767,8 @@ class AsyncSandboxPreviewToken:
         return (self.preview_token.spec.token if self.preview_token.spec else "") or ""
 
     @property
-    def expires_at(self) -> datetime:
-        text = self.preview_token.spec.expires_at if self.preview_token.spec else None
-        return datetime.fromtimestamp(core.epoch(text), tz=timezone.utc) if text else datetime.now(timezone.utc)
+    def expires_at(self) -> Any:
+        return preview_token_expiration(self.preview_token)
 
 
 class AsyncSandboxPreviewTokens:
@@ -759,20 +784,31 @@ class AsyncSandboxPreviewTokens:
         return self._preview._sandbox.metadata.name
 
     async def create(self, expires_at: datetime) -> AsyncSandboxPreviewToken:
-        """A token good until ``expires_at`` (a minute to 30 days)."""
-        seconds = int(core.epoch(expires_at) - time.time())
-        if seconds < 60:
-            raise ValueError("expires_at must be at least a minute from now.")
+        """A token capped by an aware deadline, one minute to seven days away."""
+        if not isinstance(expires_at, datetime) or expires_at.utcoffset() is None:
+            raise ValueError("A preview token needs a valid expiration date with a timezone.")
+        target = expires_at.astimezone(timezone.utc)
+        seconds = target.timestamp() - time.time()
+        if not math.isfinite(seconds) or seconds < 60 or seconds > 7 * 86_400:
+            raise ValueError("expires_at must be one minute to seven days from now.")
+        deadline = target.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         runtime = await self._preview._sandbox._live()
-        port = self._preview.spec.port
-        got = await _guard("sandbox", lambda: runtime.previews.get(port, ttl_seconds=min(seconds, 30 * 86_400)))
+        got = await _guard("sandbox", lambda: runtime.previews.get(self._preview.spec.port, expires_at=deadline))
         if not got.get("token"):
-            raise SandboxAPIError(f"Preview {self.preview_name} is public and takes no token.", 400, "public_preview")
+            raise SandboxAPIError(f"Preview {self.preview_name} returned no private token.", 400, "public_preview")
+        returned = got.get("tokenExpiresAt")
+        try:
+            actual = datetime.fromisoformat(returned.replace("Z", "+00:00"))
+            valid = actual.utcoffset() is not None and actual <= target
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            valid = False
+        if not valid:
+            raise SandboxAPIError("The preview returned an invalid or extended token expiration.",
+                                  502, "invalid_preview_token")
         return AsyncSandboxPreviewToken(PreviewToken(
             metadata=PreviewTokenMetadata(name=f"token-{uuid.uuid4().hex[:8]}", preview_name=self.preview_name,
                                           resource_name=self.resource_name, resource_type="sandbox"),
-            spec=PreviewTokenSpec(token=got["token"], expires_at=got.get("tokenExpiresAt") or core.iso(
-                time.time() + seconds), expired=False)))
+            spec=PreviewTokenSpec(token=got["token"], expires_at=returned, expired=False)))
 
     list = staticmethod(core.unsupported(
         "Listing a preview's tokens", "Runtime keeps no list of tokens: keep the ones you create."))
@@ -1340,10 +1376,14 @@ class AsyncSandboxInstance:
 
     async def fork(self, target_name: str, *, target_type: str = "sandbox", port: Optional[int] = None,
                    traffic: Optional[int] = None, custom_domain: Optional[str] = None, prefix: Optional[str] = None,
-                   snapshot_id: Optional[str] = None, envs: Optional[List[Any]] = None) -> SandboxForkResponse:
+                   snapshot_id: Optional[str] = None, envs: Optional[List[Any]] = None,
+                   lifecycle: Optional[Union[core.SandboxLifecycle, Dict[str, Any]]] = None) -> SandboxForkResponse:
         """A new sandbox named ``target_name`` with this one's files, memory and
         running processes (or those of ``snapshot_id``), and its envs, with
         ``envs`` on top."""
+        if lifecycle is not None:
+            raise NotSupportedError("A lifecycle override on a fork",
+                                    "Omit lifecycle to use the existing Runtime fork behavior.")
         core.check_fork(target_type, port, traffic, custom_domain, prefix)
         runtime = await self._live()
         labels = dict(runtime.info.get("labels") or {})
@@ -1574,7 +1614,8 @@ async def _settle(runtime: Any, works: List[Callable[[], Any]]) -> None:
 async def _name_free(client: AsyncRuntime, work: Callable[[], Any], subject: str = "sandbox") -> Any:
     """Runs a create or fork that names a sandbox. When the name is still held
     by one that is stopping (deleted a moment ago), waits up to 30 seconds for
-    it to stop and runs it once more, as Blaxel waits out a deletion."""
+    it to stop and runs it once more. This is Runtime-specific; Blaxel
+    delegates conflict reconciliation to its server."""
     try:
         return await work()
     except Exception as error:  # noqa: BLE001

@@ -83,7 +83,7 @@ test("an option of the command itself points after --", async () => {
   const { error, sent } = await cli(["sandbox", "run", "python3", "-c", "print(1)"]);
   expect(sent).toEqual([]);
   expect(error?.message).toBe(
-    "Unknown option -c. If it belongs to the command, put the command after --: runtime sandbox run -- python3 -c 'print(6*7)'",
+    "Unknown option -c. If it belongs to the command, put the command after --: runtime sandbox run -- python3 < invoice.py",
   );
 });
 

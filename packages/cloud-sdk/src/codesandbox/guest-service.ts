@@ -32,15 +32,35 @@ def settled(run):
   # Keep terminal failure readable over the socket even when storage is full.
   run['exitCode']=125
   run['error']=(run.get('error','')+'; ' if run.get('error') else '')+'Cannot persist task result: '+str(e)
+def exited(proc):
+ if proc.returncode is not None: return True
+ # Leave the leader waitable: its PID cannot be reused before group cleanup.
+ try: return os.waitid(os.P_PID,proc.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT) is not None
+ except ChildProcessError: return proc.returncode is not None
+def kill_group(proc,signum):
+ # Callers hold the run lock, so no other thread can reap this owned leader.
+ if proc.returncode is not None: return
+ try: os.killpg(proc.pid,signum)
+ except ProcessLookupError: pass
+ except PermissionError:
+  # Darwin reports EPERM for a group containing only zombies. Keep real
+  # permission failures observable; only accept a verified empty/live-free
+  # group while our unreaped leader still prevents group-ID reuse.
+  if sys.platform!='darwin' or not exited(proc): raise
+  states=subprocess.run(['ps','-o','stat=','-g',str(proc.pid)],capture_output=True,text=True,timeout=2)
+  if states.returncode not in (0,1) or any(not state.startswith('Z') for state in states.stdout.split()): raise
 def complete(run):
  fd=run['fd']
  failed=False
  try:
   with open(os.path.join(root,run['id']+'.log'),'ab',buffering=0) as out:
    while True:
+    with run['_lock']:
+     done=exited(run['process'])
+     if done: kill_group(run['process'],signal.SIGKILL)
     ready,_,_=select.select([fd],[],[],0.05)
     if not ready:
-     if run['process'].poll() is not None: break
+     if done: break
      continue
     try: data=os.read(fd,65536)
     except OSError as e:
@@ -51,27 +71,35 @@ def complete(run):
  except BaseException as e:
   failed=True
   with run['_lock']: run['error']=str(e)
-  try: os.killpg(run['process'].pid,signal.SIGKILL)
-  except ProcessLookupError: pass
+  with run['_lock']: kill_group(run['process'],signal.SIGKILL)
  finally:
-  code=run['process'].wait()
-  with run['_lock']:
-   try: os.close(fd)
-   except OSError: pass
-   run['fd']=None
-   run['exitCode']=125 if failed else code
-   run['state']='exited'
-   settled(run)
+  # A terminal can report EIO as its leader exits, before the polling branch
+  # observes that exit. Cleanup must also precede this final reap. Do not hold
+  # the run lock while a still-running leader waits, so stop remains usable.
+  while True:
+   with run['_lock']:
+    if exited(run['process']):
+     kill_group(run['process'],signal.SIGKILL)
+     code=run['process'].wait()
+     try: os.close(fd)
+     except OSError: pass
+     run['fd']=None
+     run['exitCode']=125 if failed else code
+     run['state']='exited'
+     settled(run)
+     break
+   time.sleep(0.02)
 def stop(run):
  if run.get('state')!='running': return
  proc=run.get('process')
- if proc is not None and proc.poll() is None:
-  try: os.killpg(proc.pid,signal.SIGTERM)
-  except ProcessLookupError: pass
-  try: proc.wait(timeout=2)
-  except subprocess.TimeoutExpired:
-   try: os.killpg(proc.pid,signal.SIGKILL)
-   except ProcessLookupError: pass
+ if proc is not None:
+  with run['_lock']:
+   kill_group(proc,signal.SIGTERM)
+   deadline=time.monotonic()+2
+   while not exited(proc) and time.monotonic()<deadline: time.sleep(0.02)
+   # The leader can exit on TERM while a descendant ignores it. Kill the
+   # remaining group before reaping, even when the leader already exited.
+   kill_group(proc,signal.SIGKILL)
    proc.wait()
  elif proc is None and run.get('pid') and run.get('identity') and identity(run['pid'])==run['identity']:
   # On supervisor recovery, fence against PID reuse before touching a process.
@@ -237,10 +265,19 @@ def boot():
    while True:
     try:
      with open(progress) as f: result=json.load(f)
-    except FileNotFoundError: return
+    except FileNotFoundError: raise RuntimeError('Setup exited without terminal progress')
     if result.get('state')!='IN_PROGRESS': break
+    # A second runner may have won the setup lock. Wait only while it owns
+    # that lock; an exited runner with stale progress cannot ever finish.
+    with open(os.path.join(setup_root,'lock'),'a') as active:
+     try: fcntl.flock(active,fcntl.LOCK_EX|fcntl.LOCK_NB)
+     except BlockingIOError: pass
+     else:
+      with open(progress) as f: result=json.load(f)
+      if result.get('state')=='IN_PROGRESS': raise RuntimeError('Setup exited without terminal progress')
+      break
     time.sleep(0.1)
-   if result.get('state')!='FINISHED' or result.get('config')!=setup['config']: return
+   if result.get('state')!='FINISHED' or result.get('config')!=setup['config']: raise RuntimeError('Setup exited without matching terminal progress')
  # The service owns automatic tasks independently of SDK connections.
  with mutex:
   for task,definition in cfg['tasks'].items():

@@ -30,6 +30,9 @@ export type CreatePreview = {
   visibility?: "private" | "public";
   /** How long the returned token lasts, 60 s to 7 days (default 1 day). */
   ttlSeconds?: number;
+  /** An absolute ISO private-token deadline, a minute to a week ahead.
+   * Used exactly without TTL; with TTL, the earlier expiry wins. */
+  expiresAt?: string;
   /** The sites that may show it in an iframe, as origins
    * (`https://app.example.com`, `https://*.example.com`, `http://localhost:3000`),
    * up to 16. Any other site's iframe is refused. Omitted: a shared port keeps
@@ -53,12 +56,24 @@ export function sandboxPreviews(t: Transport, sandbox: Sandbox) {
     /** Every shared port, each private one with a fresh token. */
     list: async (options?: RequestOptions) =>
       (await t.json<{ data: Preview[] }>({ method: "GET", path: base(), ...options })).data,
-    /** One preview, with a fresh token of `ttlSeconds` if it is private. */
-    get: (port: number, ttlSeconds?: number, options?: RequestOptions) =>
+    /** One preview, with a fresh private token. `expiresAt` bounds its expiry
+     * to an absolute ISO deadline; with no TTL, that deadline is used exactly. */
+    get: (
+      port: number,
+      ttlSeconds?: number,
+      { expiresAt, ...options }: RequestOptions & { expiresAt?: string } = {},
+    ) =>
       t.json<Preview>({
         method: "GET",
         path: `${base()}/${port}`,
-        ...(ttlSeconds ? { query: { ttlSeconds } } : {}),
+        ...(ttlSeconds !== undefined || expiresAt !== undefined
+          ? {
+              query: {
+                ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+                ...(expiresAt === undefined ? {} : { expiresAt }),
+              },
+            }
+          : {}),
         ...options,
       }),
     /** Refuses every token issued for this port so far and returns a new one. */

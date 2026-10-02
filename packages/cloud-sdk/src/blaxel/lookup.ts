@@ -64,8 +64,9 @@ export async function findByExternalId(
 
 /** Runs a create or fork that names a sandbox. When the name is still held
  * by a sandbox that is stopping (deleted a moment ago, by this client or
- * another), waits for it to stop, up to 30 seconds, and runs it once more, as
- * Blaxel's createIfNotExists waits out a sandbox being deleted. */
+ * another), waits for it to stop, up to 30 seconds, and runs it once more.
+ * This reconciles Runtime's stopping-name conflicts. Blaxel 0.3.25 delegates
+ * createIfNotExists reconciliation to its control plane without client polling. */
 export async function whenNameFree<T>(client: Runtime, work: () => Promise<T>): Promise<T> {
   try {
     return await work();

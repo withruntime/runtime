@@ -24,6 +24,19 @@ export function connectionOrigins(env: NodeJS.ProcessEnv) {
     auth: apiOrigin(env.RUNTIME_AUTH_URL ?? "https://withruntime.com"),
   };
 }
+/** Browser-issued production credentials must only reach the production API.
+ * CLI and MCP share this boundary, including resumed device requests. */
+export function checkBrowserOrigins(origins: ReturnType<typeof connectionOrigins>) {
+  const local = (origin: string) =>
+    ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
+  if (!(
+    (origins.auth === "https://withruntime.com" && origins.api === "https://api.withruntime.com") ||
+    (local(origins.auth) && local(origins.api))
+  ))
+    throw new Error(
+      "Browser login supports Runtime's production endpoints or local test endpoints. Check RUNTIME_AUTH_URL and RUNTIME_API_URL.",
+    );
+}
 function defaultDirectory(env: NodeJS.ProcessEnv) {
   const root = env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
   if (!isAbsolute(root)) throw new Error("XDG_CONFIG_HOME must be an absolute path.");
@@ -98,29 +111,85 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
         if (error.code !== "ENOENT") throw error;
       });
   }
+  const lockFile = join(directory, `${name}.lock`);
+  /** ARCHITECTURE.md section 3.9: concurrent CLI processes keep each account's
+   * connection. Serialize the entire read/modify/write, not only each rename.
+   * Never steal a lock: stale cleanup can otherwise delete a new live lock. */
+  async function updateAccounts<T>(update: () => Promise<T>): Promise<T> {
+    await privateDirectory(true);
+    const until = performance.now() + 10_000;
+    let handle;
+    for (;;) {
+      try {
+        handle = await open(lockFile, "wx", 0o600);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      const text = await readPrivate(lockFile, 1024, "credential update lock");
+      let pid: unknown;
+      try {
+        pid = (JSON.parse(text ?? "null") as { pid?: unknown } | null)?.pid;
+      } catch {
+        // The holder may not have finished writing its process id yet.
+      }
+      if (typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH")
+            throw new Error(
+              `A previous Runtime credential update was interrupted. Remove ${lockFile} and retry.`,
+            );
+        }
+      }
+      if (performance.now() >= until)
+        throw new Error(
+          `Another Runtime command is updating saved accounts. Retry when it finishes. If no command is running, remove ${lockFile} and retry.`,
+        );
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    try {
+      await handle.writeFile(JSON.stringify({ pid: process.pid }));
+      return await update();
+    } finally {
+      try {
+        await handle.close();
+      } finally {
+        await unlink(lockFile);
+      }
+    }
+  }
   const pendingFile = join(directory, `${name}.pending.json`);
   const accountsFile = join(directory, `${name}.accounts.json`);
+  /** Active and archived connections must satisfy the same contract: switching
+   * accounts cannot publish a credential the next command refuses to read. */
+  function validConnection(value: unknown): value is SavedConnection {
+    if (value === null || typeof value !== "object") return false;
+    const saved = value as Partial<SavedConnection>;
+    return (
+      saved.version === 1 &&
+      saved.apiOrigin === origins.api &&
+      saved.authOrigin === origins.auth &&
+      typeof saved.key === "string" &&
+      /^rtcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$/.test(saved.key) &&
+      typeof saved.connectionId === "string" &&
+      typeof saved.orgId === "string" &&
+      typeof saved.agentName === "string" &&
+      (saved.orgName === undefined || typeof saved.orgName === "string")
+    );
+  }
   return {
     async read(): Promise<SavedConnection | null> {
       const text = await readPrivate(file, 4096, "saved connection");
       if (text === null) return null;
-      let saved: SavedConnection;
+      let saved: unknown;
       try {
-        saved = JSON.parse(text) as SavedConnection;
+        saved = JSON.parse(text) as unknown;
       } catch {
         throw new Error("Runtime's saved connection is invalid. Connect again.");
       }
-      if (
-        saved.version !== 1 ||
-        saved.apiOrigin !== origins.api ||
-        saved.authOrigin !== origins.auth ||
-        typeof saved.key !== "string" ||
-        !/^rtcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$/.test(saved.key) ||
-        typeof saved.connectionId !== "string" ||
-        typeof saved.orgId !== "string" ||
-        typeof saved.agentName !== "string" ||
-        (saved.orgName !== undefined && typeof saved.orgName !== "string")
-      )
+      if (!validConnection(saved))
         throw new Error("Runtime's saved connection is invalid. Connect again.");
       return saved;
     },
@@ -130,17 +199,19 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
     async save(connection: SavedConnection) {
       if (connection.apiOrigin !== origins.api || connection.authOrigin !== origins.auth)
         throw new Error("Connection origins do not match.");
-      const previous = await this.read().catch(() => null);
-      if (previous && previous.orgId !== connection.orgId) {
-        const others = (await this.others()).filter(
-          (one) => one.orgId !== previous.orgId && one.orgId !== connection.orgId,
-        );
-        await writePrivate(
-          accountsFile,
-          JSON.stringify([previous, ...others].slice(0, SAVED_ACCOUNTS)),
-        );
-      }
-      await writePrivate(file, JSON.stringify(connection));
+      return updateAccounts(async () => {
+        const previous = await this.read().catch(() => null);
+        if (previous && previous.orgId !== connection.orgId) {
+          const others = (await this.others()).filter(
+            (one) => one.orgId !== previous.orgId && one.orgId !== connection.orgId,
+          );
+          await writePrivate(
+            accountsFile,
+            JSON.stringify([previous, ...others].slice(0, SAVED_ACCOUNTS)),
+          );
+        }
+        await writePrivate(file, JSON.stringify(connection));
+      });
     },
     /** The other accounts this machine has connected, newest first. */
     async others(): Promise<SavedConnection[]> {
@@ -152,19 +223,8 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
       }
       if (text === null) return [];
       try {
-        const list = JSON.parse(text) as SavedConnection[];
-        return Array.isArray(list)
-          ? list.filter(
-              (one) =>
-                one &&
-                one.version === 1 &&
-                one.apiOrigin === origins.api &&
-                one.authOrigin === origins.auth &&
-                typeof one.key === "string" &&
-                /^rtcloud_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$/.test(one.key) &&
-                typeof one.orgId === "string",
-            )
-          : [];
+        const list: unknown = JSON.parse(text);
+        return Array.isArray(list) ? list.filter(validConnection) : [];
       } catch {
         return [];
       }
@@ -172,24 +232,31 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
     /** Use another saved account's connection, by account id or name. The one
      * in use moves to the saved accounts. Null when none matches. */
     async use(which: string): Promise<SavedConnection | null> {
-      const others = await this.others();
-      const wanted = which.trim().toLowerCase();
-      const chosen =
-        others.find((one) => one.orgId === which) ??
-        others.find((one) => one.orgName?.toLowerCase() === wanted) ??
-        null;
-      if (!chosen) return null;
-      const current = await this.read().catch(() => null);
-      const rest = others.filter((one) => one.orgId !== chosen.orgId);
-      await writePrivate(
-        accountsFile,
-        JSON.stringify((current ? [current, ...rest] : rest).slice(0, SAVED_ACCOUNTS)),
-      );
-      await writePrivate(file, JSON.stringify(chosen));
-      return chosen;
+      return updateAccounts(async () => {
+        const others = await this.others();
+        const wanted = which.trim().toLowerCase();
+        const chosen =
+          others.find((one) => one.orgId === which) ??
+          others.find((one) => one.orgName?.toLowerCase() === wanted) ??
+          null;
+        if (!chosen) return null;
+        const current = await this.read().catch(() => null);
+        const rest = others.filter((one) => one.orgId !== chosen.orgId);
+        await writePrivate(
+          accountsFile,
+          JSON.stringify((current ? [current, ...rest] : rest).slice(0, SAVED_ACCOUNTS)),
+        );
+        await writePrivate(file, JSON.stringify(chosen));
+        return chosen;
+      });
     },
-    async remove() {
-      await removePrivate(file);
+    /** Forget the expected credential after a remote revoke or refusal. A
+     * concurrent login may have saved another connection during that request. */
+    async remove(expectedKey?: string) {
+      await updateAccounts(async () => {
+        if (expectedKey !== undefined && (await this.read())?.key !== expectedKey) return;
+        await removePrivate(file);
+      });
     },
     /** A browser approval that was started and not yet answered, so a command
      * that was stopped while it waited picks up the same link and code rather

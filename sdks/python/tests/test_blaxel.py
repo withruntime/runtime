@@ -255,9 +255,9 @@ class Create(Base):
                           "archive it (sandbox.archive()), then try again. Moving to paid credit is the account "
                           "owner's decision.",
             "public_preview_not_allowed": 'On the trial, share the port privately: sandbox.previews.create({"metadata": '
-                                          '{"name": ...}, "spec": {"port": ..., "public": False}}) and a token from '
-                                          "preview.tokens.create(expires_at). A public preview needs a paid sandbox, "
-                                          "which is the account owner's decision.",
+                                          '{"name": ...}, "spec": {"port": ..., "public": False}}) and a Runtime '
+                                          "duration-based token from sandbox.withruntime.previews.get(port, ttl_seconds=seconds). "
+                                          "A public preview needs a paid sandbox, which is the account owner's decision.",
             "busy": "Try again in a moment.", "guest_busy": "Try again in a moment.",
             "rate_limited": "Try again in a moment.",
             "unauthorized": "Set RUNTIME_API_KEY to a Runtime key (https://withruntime.com/account/keys), or run "
@@ -710,6 +710,24 @@ class Processes(Base):
 
 
 class Files(Base):
+    def test_failed_privileged_write_removes_its_staging_bytes(self):
+        box = self.create()
+        error = ResponseError('move failed', 422, 'permission_denied')
+        undo = self.refuse(box, 'write', {'/root/private'})
+        def fail(*args):
+            raise error
+        box.fs._sudo = fail
+        try:
+            with self.assertRaises(ResponseError) as caught:
+                box.fs.write('/root/private', 'private bytes')
+        finally:
+            undo()
+        self.assertIs(caught.exception, error)
+        self.assertEqual(self.runtime(box).file_map, {})
+        removed = self.world.called('files.remove')
+        self.assertEqual(len(removed), 1)
+        self.assertTrue(removed[0][0].startswith('/workspace/.runtime-blaxel-'))
+
     def test_paths_and_shapes(self):
         box = self.create()
         written = box.fs.write("/blaxel/app/config.json", "{}")
@@ -867,6 +885,20 @@ class Files(Base):
 
 
 class Previews(Base):
+    def test_invalid_token_expirations_refuse_before_lookup_or_native_requests(self):
+        box = SyncSandboxInstance({"metadata": {"name": "unresolved-source"}})
+        preview = _sync_sandbox.SandboxPreview(bl.Preview.from_dict({
+            "metadata": {"name": "app"}, "spec": {"port": 3000, "public": False}}), box)
+        now = datetime.now(timezone.utc)
+        for seconds in (-1, 0, 5, 59.999, 8 * 86400, 40 * 86400):
+            with self.subTest(seconds=seconds), self.assertRaises(ValueError):
+                preview.tokens.create(now + timedelta(seconds=seconds))
+            self.assertEqual(self.world.calls, [])
+        for invalid in (None, "not-a-date", object(), datetime.now() + timedelta(minutes=10)):
+            with self.assertRaises(ValueError):
+                preview.tokens.create(invalid)
+            self.assertEqual(self.world.calls, [])
+
     def test_create_get_tokens_delete(self):
         box = self.create({"name": "web"})
         preview = box.previews.create({"metadata": {"name": "app"}, "spec": {"port": 3000, "public": False}})
@@ -876,9 +908,15 @@ class Previews(Base):
         other = SyncSandboxInstance.get("web")
         self.assertEqual(other.previews.get("app").spec.port, 3000)
         self.assertEqual([one.name for one in other.previews.list()], ["app"])
-        token = preview.tokens.create(datetime.now(timezone.utc) + timedelta(minutes=10))
-        self.assertEqual(token.value, "tok-1")
-        self.assertTrue(595 <= self.world.called("previews.get")[-1][1] <= 600)
+        deadline = datetime.now(timezone(timedelta(hours=5, minutes=30))) + timedelta(minutes=10, microseconds=123)
+        private = preview.tokens.create(deadline)
+        self.assertEqual(private.value, "tok-1")
+        self.assertLessEqual(private.expires_at, deadline)
+        self.assertEqual(self.world.called("previews.get")[-1],
+                         (3000, None, deadline.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")))
+        token = box.withruntime.previews.get(3000, ttl_seconds=600)
+        self.assertEqual(token["token"], "tok-1")
+        self.assertEqual(self.world.called("previews.get")[-1][1], 600)
         with self.assertRaises(NotSupportedError):
             preview.tokens.list()
         with self.assertRaises(NotSupportedError) as caught:
@@ -892,6 +930,37 @@ class Previews(Base):
         with self.assertRaises(SandboxAPIError) as caught:
             box.previews.get("app")
         self.assertEqual(caught.exception.status_code, 404)
+
+    def test_exact_deadline_rejects_bad_responses_and_never_retries_an_old_server(self):
+        box = self.create({"name": "web"})
+        preview = box.previews.create({"metadata": {"name": "app"}, "spec": {"port": 3000}})
+        native = box.withruntime.previews
+        deadline = datetime.now(timezone.utc) + timedelta(minutes=10)
+        replies = ({"token": "must-not-escape"},
+                   {"token": "must-not-escape", "tokenExpiresAt": "not-a-date"},
+                   {"token": "must-not-escape", "tokenExpiresAt": (deadline + timedelta(seconds=1)).isoformat()},
+                   {"token": "must-not-escape", "tokenExpiresAt": deadline.replace(tzinfo=None).isoformat()},
+                   {"token": None, "tokenExpiresAt": None})
+        for reply in replies:
+            calls = []
+            def get(port, **options):
+                calls.append((port, options))
+                return reply
+            native.get = get
+            with self.subTest(reply=reply), self.assertRaises(SandboxAPIError):
+                preview.tokens.create(deadline)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(set(calls[0][1]), {"expires_at"})
+        calls = []
+        def old_server(port, **options):
+            calls.append((port, options))
+            raise withruntime.InvalidRequestError("Unknown expiresAt field", code="unknown_field", status=400)
+        native.get = old_server
+        with self.assertRaises(SandboxAPIError) as caught:
+            preview.tokens.create(deadline)
+        self.assertEqual((caught.exception.status_code, caught.exception.code), (400, "unknown_field"))
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("ttl_seconds", calls[0][1])
 
     def test_what_a_runtime_preview_cannot_do(self):
         box = self.create()
@@ -988,7 +1057,20 @@ class Lifecycle(Base):
             self.create({"name": name})
         page = SyncSandboxInstance.list(limit=2)
         self.assertEqual(([one.metadata.name for one in page.data], page.has_more), (["a", "b"], True))
+        self.assertTrue(page.meta.has_more)
+        self.assertEqual(page.meta.next_cursor, page.next_cursor)
+        self.assertIsNone(page.meta.total)
+        self.assertIsNone(page.meta.total_is_partial)
+        final = page.next_page()
+        self.assertFalse(final.meta.has_more)
+        self.assertIsNone(final.meta.next_cursor)
+        self.assertNotIn('total', final.meta.to_dict())
         self.assertEqual([one.metadata.name for one in page.auto_paging_iter()], ["a", "b", "c"])
+        page.meta.next_cursor = "changed-native-cursor"
+        before = list(self.world.calls)
+        with self.assertRaises(NotSupportedError):
+            page.next_page()
+        self.assertEqual(self.world.calls, before)
         with self.assertRaises(NotSupportedError):
             SyncSandboxInstance.list(cursor="abc")
 
@@ -1024,6 +1106,33 @@ class Lifecycle(Base):
         for kwargs in ({"target_type": "application"}, {"port": 3000}):
             with self.assertRaises(NotSupportedError):
                 box.fork("x", **kwargs)
+
+
+class ForkLifecycle(Base):
+    def test_sync_fork_lifecycle_override_refuses_before_lookup_or_mutation(self):
+        box = SyncSandboxInstance({"metadata": {"name": "unresolved-source"}})
+        for lifecycle in ({}, {"expirationPolicies": []}, bl.SandboxLifecycle.from_dict({})):
+            for options in ({}, {"snapshot_id": "unresolved-snapshot"}):
+                with self.subTest(lifecycle=lifecycle, options=options):
+                    with self.assertRaises(NotSupportedError) as caught:
+                        box.fork("copy", lifecycle=lifecycle, **options)
+                    self.assertIn("lifecycle", caught.exception.feature)
+                    self.assertEqual(caught.exception.alternative,
+                                     "Omit lifecycle to use the existing Runtime fork behavior.")
+                    self.assertEqual(self.world.calls, [])
+
+    def test_sync_fork_default_and_explicit_none_pass_labels_without_override(self):
+        lifecycle = {"expirationPolicies": [{"type": "ttl-idle", "value": "3d", "action": "delete"}]}
+        box = self.create({"name": "lifecycle-source", "ttl": "5d", "lifecycle": lifecycle})
+        labels = dict(self.runtime(box).info["labels"])
+        default = box.fork("default-copy")
+        explicit = box.fork("none-copy", lifecycle=None)
+        self.assertEqual((default.name, explicit.name), ("default-copy", "none-copy"))
+        forks = self.world.called("sandbox.fork")
+        self.assertEqual(len(forks), 2)
+        for _, fields in forks:
+            self.assertEqual(fields["labels"], labels)
+            self.assertNotIn("lifecycle", fields)
 
 
 class Interpreter(Base):
@@ -1086,6 +1195,31 @@ class Unsupported(Base):
 
 
 class Async(unittest.TestCase):
+    def test_canceled_privileged_write_removes_its_staging_bytes(self):
+        from withruntime.blaxel._async_sandbox import AsyncSandboxFileSystem
+        async def scenario():
+            paths = {}
+            class Files:
+                async def write(self, path, data):
+                    if path == '/root/private':
+                        raise withruntime.PermissionDeniedError('root only', code='permission_denied', status=403)
+                    paths[path] = data
+                async def remove(self, path):
+                    paths.pop(path, None)
+            files = Files()
+            async def get_files():
+                return files
+            canceled = asyncio.CancelledError()
+            async def fail(*args):
+                raise canceled
+            filesystem = AsyncSandboxFileSystem(None, None)
+            filesystem._files, filesystem._sudo = get_files, fail
+            with self.assertRaises(asyncio.CancelledError) as caught:
+                await filesystem.write('/root/private', 'private bytes')
+            self.assertIs(caught.exception, canceled)
+            self.assertEqual(paths, {})
+        asyncio.run(scenario())
+
     def setUp(self) -> None:
         offline()
         self.world = BlaxelWorld()
@@ -1095,6 +1229,95 @@ class Async(unittest.TestCase):
         bl.use_client(None)
         os.environ.clear()
         os.environ.update(SAVED)
+
+    def test_async_native_list_metadata_tracks_each_page_without_invented_totals(self):
+        async def scenario():
+            for name in ("a", "b", "c"):
+                await SandboxInstance.create({"name": name})
+            page = await SandboxInstance.list(limit=2)
+            self.assertEqual([one.metadata.name for one in page.data], ["a", "b"])
+            self.assertTrue(page.meta.has_more)
+            self.assertEqual(page.meta.next_cursor, page.next_cursor)
+            self.assertIsNone(page.meta.total)
+            self.assertIsNone(page.meta.total_is_partial)
+            final = await page.next_page()
+            self.assertEqual([one.metadata.name for one in final.data], ["c"])
+            self.assertFalse(final.meta.has_more)
+            self.assertIsNone(final.meta.next_cursor)
+            self.assertNotIn("total", final.meta.to_dict())
+            page.meta.next_cursor = "changed-native-cursor"
+            before = list(self.world.calls)
+            with self.assertRaises(NotSupportedError):
+                await page.next_page()
+            self.assertEqual(self.world.calls, before)
+        asyncio.run(scenario())
+
+    def test_async_invalid_token_expirations_refuse_before_lookup_or_native_requests(self):
+        from withruntime.blaxel._async_sandbox import AsyncSandboxPreview
+        async def scenario():
+            box = SandboxInstance({"metadata": {"name": "unresolved-source"}})
+            preview = AsyncSandboxPreview(bl.Preview.from_dict({
+                "metadata": {"name": "app"}, "spec": {"port": 3000, "public": False}}), box)
+            now = datetime.now(timezone.utc)
+            for seconds in (-1, 0, 5, 59.999, 8 * 86400, 40 * 86400):
+                with self.subTest(seconds=seconds), self.assertRaises(ValueError):
+                    await preview.tokens.create(now + timedelta(seconds=seconds))
+                self.assertEqual(self.world.calls, [])
+            for invalid in (None, "not-a-date", object(), datetime.now() + timedelta(minutes=10)):
+                with self.assertRaises(ValueError):
+                    await preview.tokens.create(invalid)
+                self.assertEqual(self.world.calls, [])
+        asyncio.run(scenario())
+
+    def test_async_token_forwards_exact_deadline_and_refuses_extension(self):
+        async def scenario():
+            box = await SandboxInstance.create({"name": "web"})
+            preview = await box.previews.create({"metadata": {"name": "app"}, "spec": {"port": 3000}})
+            deadline = datetime.now(timezone.utc) + timedelta(minutes=10, microseconds=123)
+            token = await preview.tokens.create(deadline)
+            self.assertEqual(token.value, "tok-1")
+            self.assertTrue(token.expires_at.endswith("Z"))
+            self.assertLessEqual(datetime.fromisoformat(token.expires_at.replace("Z", "+00:00")), deadline)
+            self.assertEqual(self.world.called("previews.get")[-1],
+                             (3000, None, deadline.isoformat(timespec="milliseconds").replace("+00:00", "Z")))
+            calls = []
+            def get(port, **options):
+                calls.append((port, options))
+                return {"token": "must-not-escape", "tokenExpiresAt": (deadline + timedelta(seconds=1)).isoformat()}
+            self.world.sandboxes[box.withruntime.id].previews.get = get
+            with self.assertRaises(SandboxAPIError):
+                await preview.tokens.create(deadline)
+            self.assertEqual(len(calls), 1)
+        asyncio.run(scenario())
+
+    def test_async_fork_lifecycle_override_refuses_before_lookup_or_mutation(self):
+        async def scenario():
+            box = SandboxInstance({"metadata": {"name": "unresolved-source"}})
+            for lifecycle in ({}, {"expirationPolicies": []}, bl.SandboxLifecycle.from_dict({})):
+                for options in ({}, {"snapshot_id": "unresolved-snapshot"}):
+                    with self.subTest(lifecycle=lifecycle, options=options):
+                        with self.assertRaises(NotSupportedError) as caught:
+                            await box.fork("copy", lifecycle=lifecycle, **options)
+                        self.assertIn("lifecycle", caught.exception.feature)
+                        self.assertEqual(caught.exception.alternative,
+                                     "Omit lifecycle to use the existing Runtime fork behavior.")
+                        self.assertEqual(self.world.calls, [])
+        asyncio.run(scenario())
+
+    def test_async_fork_default_and_explicit_none_pass_labels_without_override(self):
+        async def scenario():
+            lifecycle = {"expirationPolicies": [{"type": "ttl-idle", "value": "3d", "action": "delete"}]}
+            box = await SandboxInstance.create({"name": "lifecycle-source", "ttl": "5d", "lifecycle": lifecycle})
+            labels = dict(self.world.sandboxes[box.withruntime.id].info["labels"])
+            default = await box.fork("default-copy")
+            explicit = await box.fork("none-copy", lifecycle=None)
+            self.assertEqual((default.name, explicit.name), ("default-copy", "none-copy"))
+            forks = self.world.called("sandbox.fork")
+            self.assertEqual(len(forks), 2)
+            for _, fields in forks:
+                self.assertEqual(fields["labels"], labels)
+                self.assertNotIn("lifecycle", fields)
+        asyncio.run(scenario())
 
     def test_the_async_api(self):
         async def scenario():
@@ -1168,6 +1391,204 @@ class ImportPaths(unittest.TestCase):
             with self.assertRaises(NotSupportedError) as caught:
                 refused()
             self.assertTrue(caught.exception.alternative)
+
+
+class PreviewTokenExpiryShape(unittest.TestCase):
+    def test_sync_utc_expiry_supports_the_python_310_iso_parser(self):
+        from unittest.mock import patch
+        from withruntime.blaxel._async_sandbox import AsyncSandboxPreviewToken
+        calls = []
+        class Python310Datetime:
+            @staticmethod
+            def fromisoformat(text):
+                calls.append(text)
+                if text.endswith('Z'):
+                    raise ValueError('Python 3.10 does not parse terminal Z')
+                return datetime.fromisoformat(text)
+        expiry = '2026-10-01T00:00:00.123Z'
+        model = bl.PreviewToken(spec=bl.PreviewTokenSpec(token='private', expires_at=expiry))
+        with patch('withruntime.blaxel._sync_io.datetime', Python310Datetime):
+            parsed = _sync_sandbox.SandboxPreviewToken(model).expires_at
+        self.assertEqual(parsed, datetime(2026, 10, 1, 0, 0, 0, 123000, tzinfo=timezone.utc))
+        self.assertEqual(calls, ['2026-10-01T00:00:00.123+00:00'])
+        self.assertIs(AsyncSandboxPreviewToken(model).expires_at, expiry)
+
+    def test_async_expiry_text_and_sync_datetime_match_consumer_expectations(self):
+        from withruntime.blaxel._async_sandbox import AsyncSandboxPreviewToken
+        for expiry in ('2026-10-01T00:00:00.123Z', '2026-10-01T05:30:00.123+05:30'):
+            model = bl.PreviewToken(spec=bl.PreviewTokenSpec(token='private', expires_at=expiry))
+            asynchronous = AsyncSandboxPreviewToken(model)
+            synchronous = _sync_sandbox.SandboxPreviewToken(model)
+            self.assertIs(asynchronous.expires_at, model.spec.expires_at)
+            self.assertEqual(asynchronous.expires_at.endswith('Z'), expiry.endswith('Z'))
+            self.assertEqual(synchronous.expires_at, datetime.fromisoformat(expiry.replace('Z', '+00:00')))
+            self.assertEqual(synchronous.expires_at.utcoffset(), datetime.fromisoformat(expiry.replace('Z', '+00:00')).utcoffset())
+        empty = bl.PreviewToken(spec=bl.PreviewTokenSpec())
+        self.assertIsNone(AsyncSandboxPreviewToken(empty).expires_at)
+        self.assertIsNone(_sync_sandbox.SandboxPreviewToken(empty).expires_at.utcoffset())
+        no_spec = bl.PreviewToken()
+        self.assertIsNone(AsyncSandboxPreviewToken(no_spec).expires_at.utcoffset())
+        self.assertIsNone(_sync_sandbox.SandboxPreviewToken(no_spec).expires_at.utcoffset())
+
+    @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
+    def test_pinned_official_unchanged_expiry_property_consumers(self):
+        import importlib.metadata
+        from blaxel.core.sandbox.default.preview import SandboxPreviewToken as OfficialAsync
+        from blaxel.core.sandbox.sync.preview import SyncSandboxPreviewToken as OfficialSync
+        from blaxel.core.client.models.preview_token import PreviewToken as OfficialToken
+        from blaxel.core.client.models.preview_token_spec import PreviewTokenSpec as OfficialSpec
+        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.13')
+        expiry = '2026-10-01T00:00:00.123Z'
+        def async_consumer(token):
+            return token.value, token.expires_at.endswith('Z'), token.expires_at
+        def sync_consumer(token):
+            return token.value, token.expires_at.isoformat(), token.expires_at.utcoffset()
+        official = OfficialToken(spec=OfficialSpec(token='private', expires_at=expiry))
+        migrated = bl.PreviewToken(spec=bl.PreviewTokenSpec(token='private', expires_at=expiry))
+        self.assertEqual(async_consumer(OfficialAsync(official)), async_consumer(bl.SandboxPreviewToken(migrated)))
+        self.assertEqual(sync_consumer(OfficialSync(official)), sync_consumer(_sync_sandbox.SandboxPreviewToken(migrated)))
+
+
+class NativePreviewDeadlineTransport(unittest.TestCase):
+    def test_native_sync_and_async_forward_deadline_fields_and_preserve_existing_options(self):
+        from types import SimpleNamespace
+        from withruntime._sync_products.previews import Previews
+        from withruntime._async_products.previews import AsyncPreviews
+        deadline = '2026-10-01T00:00:00.123Z'
+        calls = []
+        class Transport:
+            def json(self, method, path, **options):
+                calls.append((method, path, options))
+                return {}
+        sync = Previews(Transport(), SimpleNamespace(id='box'))
+        sync.get(3000)
+        sync.get(3000, expires_at=deadline)
+        sync.get(3000, ttl_seconds=120, expires_at=deadline)
+        sync.create(3000, visibility='private', ttl_seconds=120, expires_at=deadline,
+                    embed_origins=['https://app.test'], idempotency_key='request')
+        expected = [('GET', '/v1/sandboxes/box/previews/3000', {'query': None}),
+                    ('GET', '/v1/sandboxes/box/previews/3000', {'query': {'expiresAt': deadline}}),
+                    ('GET', '/v1/sandboxes/box/previews/3000', {'query': {'ttlSeconds': 120, 'expiresAt': deadline}}),
+                    ('POST', '/v1/sandboxes/box/previews',
+                     {'body': {'port': 3000, 'visibility': 'private', 'ttlSeconds': 120, 'expiresAt': deadline,
+                               'embedOrigins': ['https://app.test']}, 'idempotency_key': 'request'})]
+        self.assertEqual(calls, expected)
+        calls.clear()
+        class AsyncTransport:
+            async def json(self, method, path, **options):
+                calls.append((method, path, options))
+                return {}
+        async def run():
+            native = AsyncPreviews(AsyncTransport(), SimpleNamespace(id='box'))
+            await native.get(3000)
+            await native.get(3000, expires_at=deadline)
+            await native.get(3000, ttl_seconds=120, expires_at=deadline)
+            await native.create(3000, visibility='private', ttl_seconds=120, expires_at=deadline,
+                                embed_origins=['https://app.test'], idempotency_key='request')
+        asyncio.run(run())
+        self.assertEqual(calls, expected)
+
+
+class PaginationMetadata(unittest.TestCase):
+    def test_official_metadata_imports_resolve_to_the_same_model(self):
+        from withruntime.blaxel.core.client.models import PaginationMeta
+        from withruntime.blaxel.core.client.models.pagination_meta import PaginationMeta as FromModule
+        self.assertIs(PaginationMeta, bl.PaginationMeta)
+        self.assertIs(FromModule, bl.PaginationMeta)
+        from withruntime.blaxel.core.client.pagination import AsyncPaginatedList, PaginatedList
+        self.assertIs(PaginatedList, bl.PaginatedList)
+        self.assertIs(AsyncPaginatedList, bl.AsyncPaginatedList)
+
+    @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
+    def test_pinned_official_unchanged_pagination_consumers(self):
+        import importlib
+        import importlib.metadata
+        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.13')
+        def sync_consumer(pages, model):
+            seen = []
+            meta = model(has_more=True, next_cursor='before')
+            final = pages.PaginatedList([2], meta=model(has_more=False))
+            page = pages.PaginatedList([1], meta=meta, fetch_next=lambda cursor: seen.append(cursor) or final)
+            self.assertIs(page.meta, meta)
+            self.assertIs(page.data, page)
+            meta.next_cursor = 'after'
+            values = list(page.auto_paging_iter())
+            return values, seen, meta.to_dict(), final.has_more, final.next_cursor
+        async def async_consumer(pages, model):
+            seen = []
+            meta = model(has_more=True, next_cursor='before')
+            final = pages.AsyncPaginatedList([2], meta=model(has_more=False))
+            async def fetch(cursor):
+                seen.append(cursor)
+                return final
+            page = pages.AsyncPaginatedList([1], meta=meta, fetch_next=fetch)
+            self.assertIs(page.meta, meta)
+            self.assertIs(page.data, page)
+            meta.next_cursor = 'after'
+            values = [value async for value in page.auto_paging_iter()]
+            return values, seen, meta.to_dict(), final.has_more, final.next_cursor
+        results = []
+        for prefix in ('blaxel', 'withruntime.blaxel'):
+            pages = importlib.import_module(prefix + '.core.client.pagination')
+            model = importlib.import_module(prefix + '.core.client.models.pagination_meta').PaginationMeta
+            results.append((sync_consumer(pages, model), asyncio.run(async_consumer(pages, model))))
+        expected = ([1, 2], ['after'], {'hasMore': True, 'nextCursor': 'after'}, False, None)
+        self.assertEqual(results, [(expected, expected), (expected, expected)])
+
+    def test_model_aliases_unknown_fields_and_independent_defaults(self):
+        first = bl.PaginationMeta.from_dict({'hasMore': True, 'nextCursor': 'opaque', 'totalIsPartial': True, 'vendor': 1})
+        second = bl.PaginationMeta.from_dict({'has_more': False, 'total': 3})
+        self.assertEqual((first.has_more, first.next_cursor, first.total, first.total_is_partial), (True, 'opaque', None, True))
+        self.assertEqual(first.to_dict(), {'hasMore': True, 'nextCursor': 'opaque', 'totalIsPartial': True, 'vendor': 1})
+        self.assertEqual(second.to_dict(), {'hasMore': False, 'total': 3})
+        self.assertEqual(first['vendor'], 1)
+        first['changed'] = 2
+        self.assertNotIn('changed', second)
+        self.assertEqual(first.additional_keys, ['vendor', 'changed'])
+        del first['changed']
+        self.assertEqual(first.additional_keys, ['vendor'])
+        self.assertIsNone(bl.PaginationMeta.from_dict({}))
+        self.assertEqual(bl.PaginationMeta().to_dict(), {})
+        self.assertEqual(bl.PaginationMeta(has_more=core.UNSET).to_dict(), {})
+        aliases = bl.PaginationMeta.from_dict({'hasMore': False, 'has_more': True,
+                                             'nextCursor': 'first', 'next_cursor': 'second'})
+        self.assertEqual(aliases.to_dict(), {'hasMore': False, 'nextCursor': 'first'})
+
+    def test_sync_custom_metadata_identity_mutable_cursor_and_dict_behavior(self):
+        seen = []
+        meta = bl.PaginationMeta(has_more=True, next_cursor='original')
+        expected = bl.PaginatedList([2])
+        page = bl.PaginatedList([1], meta=meta, fetch_next=lambda cursor: seen.append(cursor) or expected)
+        self.assertIs(page.meta, meta)
+        self.assertIs(page.data, page)
+        meta.next_cursor = 'changed'
+        self.assertIs(page.next_page(), expected)
+        self.assertEqual(seen, ['changed'])
+        meta.has_more = False
+        self.assertFalse(page.has_more)
+        self.assertEqual(page.next_page(), [])
+        raw = {'has_more': True, 'next_cursor': 'ignored'}
+        direct = bl.PaginatedList([1], meta=raw, fetch_next=lambda _: self.fail('dict metadata must not fetch'))
+        self.assertIs(direct.meta, raw)
+        self.assertFalse(direct.has_more)
+        self.assertEqual(direct.next_page(), [])
+
+    def test_async_custom_metadata_identity_and_mutable_cursor(self):
+        async def run():
+            seen = []
+            meta = bl.PaginationMeta(has_more=True, next_cursor='original')
+            expected = bl.AsyncPaginatedList([2])
+            async def fetch(cursor):
+                seen.append(cursor)
+                return expected
+            page = bl.AsyncPaginatedList([1], meta=meta, fetch_next=fetch)
+            self.assertIs(page.meta, meta)
+            meta.next_cursor = 'changed'
+            self.assertIs(await page.next_page(), expected)
+            self.assertEqual(seen, ['changed'])
+            meta.has_more = False
+            self.assertEqual(await page.next_page(), [])
+        asyncio.run(run())
 
 
 class Generated(unittest.TestCase):

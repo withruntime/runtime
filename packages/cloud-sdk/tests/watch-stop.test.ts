@@ -60,3 +60,86 @@ test("stop with nothing pending returns as soon as the watch ends", async () => 
   expect(seen).toEqual([]);
   expect(Date.now() - started).toBeLessThan(1_000);
 });
+
+test("a failed remote stop closes local delivery, reports the error and permits retry", async () => {
+  const failure = new Error("connection lost while stopping");
+  let deletes = 0;
+  let remoteRunning = true;
+  let streamClosed = false;
+  const exits: string[] = [];
+  const transport = {
+    json: async () => {
+      if (++deletes === 1) throw failure;
+      remoteRunning = false;
+      return { stopped: true };
+    },
+    // eslint-disable-next-line require-yield -- a stream that stays open and then ends with no event
+    async *events({ signal }: { signal: AbortSignal }) {
+      try {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 50);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      } finally {
+        streamClosed = true;
+      }
+    },
+  } as unknown as Transport;
+  const handle = new WatchHandle(transport, "/watch", "id", "/workspace", 0, {
+    onExit: (reason) => exits.push(reason),
+  }).begin();
+  await expect(handle.stop()).rejects.toBe(failure);
+  await handle.done;
+  expect(streamClosed).toBe(true);
+  expect(remoteRunning).toBe(true);
+  expect(exits).toEqual([]);
+  await handle.stop();
+  expect(deletes).toBe(2);
+  expect(remoteRunning).toBe(false);
+  expect(exits).toEqual(["stopped"]);
+});
+
+test("overlapping stop callers await the same remote outcome", async () => {
+  const deletion = Promise.withResolvers<void>();
+  const failure = new Error("remote deletion failed");
+  let deletes = 0;
+  const handle = new WatchHandle(
+    {
+      json: async () => {
+        deletes++;
+        await deletion.promise;
+        throw failure;
+      },
+    } as unknown as Transport,
+    "/watch",
+    "id",
+    "/workspace",
+    0,
+    {},
+  );
+  const first = handle.stop().catch((error: unknown) => error);
+  let secondSettled = false;
+  const second = handle.stop().then(
+    () => {
+      secondSettled = true;
+    },
+    (error: unknown) => {
+      secondSettled = true;
+      return error;
+    },
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(secondSettled).toBe(false);
+  deletion.resolve();
+  expect(await first).toBe(failure);
+  expect(await second).toBe(failure);
+  expect(deletes).toBe(1);
+});

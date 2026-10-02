@@ -113,7 +113,7 @@ export function resetClients() {
 /** Request options for a Runtime call from E2B's. */
 export function request(opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}) {
   return {
-    ...(opts.requestTimeoutMs ? { timeoutMs: opts.requestTimeoutMs } : {}),
+    ...(opts.requestTimeoutMs === undefined ? {} : { timeoutMs: opts.requestTimeoutMs }),
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
 }

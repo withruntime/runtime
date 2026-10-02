@@ -263,11 +263,18 @@ class BlaxelPreviews:
         self._s.previews_by_port[port] = visibility or "private"
         return self._view(port)
 
-    def get(self, port: int, ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
-        self._w.record("previews.get", port, ttl_seconds)
+    def get(self, port: int, ttl_seconds: Optional[int] = None,
+            expires_at: Optional[str] = None) -> Dict[str, Any]:
+        if expires_at is not None:
+            self._w.record("previews.get", port, ttl_seconds, expires_at)
+        else:
+            self._w.record("previews.get", port, ttl_seconds)
         if port not in self._s.previews_by_port:
             raise not_found("not_found", f"Port {port} is not shared.")
-        return self._view(port)
+        result = self._view(port)
+        if expires_at is not None and result["token"]:
+            result["tokenExpiresAt"] = expires_at
+        return result
 
     def list(self) -> List[Dict[str, Any]]:
         return [self._view(port) for port in self._s.previews_by_port]

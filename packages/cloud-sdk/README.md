@@ -12,7 +12,7 @@ The client uses `RUNTIME_API_KEY` when it is set, and otherwise the connection
 this machine saved when the CLI connected it (one browser approval, no key to
 copy). On a server or a CI runner, set `RUNTIME_API_KEY` from your secret
 manager: `npx withruntime keys create` prints a new key once after an account
-owner approves it in the browser, or create one at
+owner, admin or developer approves it in the browser, or create one at
 https://withruntime.com/account/keys. Never put a key in browser code, a URL or
 a command-line argument.
 
@@ -20,7 +20,8 @@ a command-line argument.
 import { Sandbox } from "withruntime";
 
 await using sbx = await Sandbox.create();
-const result = await sbx.exec("python3 -c 'print(6 * 7)'");
+await sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+const result = await sbx.exec("python3 /workspace/invoice.py");
 console.log(result.exitCode, result.stdout);
 ```
 
@@ -30,6 +31,8 @@ Node 22 call `await sbx.stop()`). With no arguments you get the free
 trial while it lasts (100 free hours, up to eight sandboxes running at once), 2 vCPU, 4 GiB of
 memory and a 4 GiB disk. The current default image includes NumPy, pandas and
 matplotlib; see the [sandbox environment](https://withruntime.com/docs/sandbox-environment).
+Omitting `funding` can use prepaid credit after the trial is exhausted. Use
+`Sandbox.create({ funding: "trial" })` for free use only; it never falls back to paid.
 
 The sandbox object does the rest:
 
@@ -57,7 +60,9 @@ no compute; `idlePauseSeconds` sets 10 to 86,400, or 0 for never.
 `Sandbox.getOrCreate(name)` returns the sandbox with that name, woken if it is
 paused, or creates it.
 
-The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`, `secrets`,
+`runtime.sandbox`, `snapshot`, `image`, `volume`, `job`, `domain`, `port` and
+`address` name the products as the CLI does. Their existing plural names
+remain aliases of the same product clients. The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`, `secrets`,
 `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and `audit`
 to watch the account; `domains`, `ports`, `addresses`, `tunnel` and `network`
 to connect sandboxes to your own world (paid accounts); and `mcp`, `sso`,
@@ -65,6 +70,8 @@ to connect sandboxes to your own world (paid accounts); and `mcp`, `sso`,
 the key is read-only and what its agent may still spend today. Every write carries an idempotency key, made for you, so the SDK's
 own retries (timeouts, 429, 503) never do anything twice. Errors are typed and
 carry a `code`, a `hint` and a `requestId`.
+`runtime.usageRequests("7d")` reads the account's API call counts and error rates;
+counts are exact decimal strings, and an empty window has a null `errorPercent`.
 
 ## Behind a proxy
 
@@ -87,7 +94,7 @@ Runtime improves fast because agents tell us what they run into: reports go stra
 
 ## Code written for E2B
 
-`withruntime/e2b` runs code written for E2B's SDK on Runtime. Change the
+`withruntime/e2b` translates supported E2B sandbox calls to Runtime. Change the
 import and set `RUNTIME_API_KEY`. The
 [switch guide](https://withruntime.com/docs/migrate) covers the other providers
 and how to work out what you save:
@@ -121,7 +128,7 @@ package list every mapping and gap.
 
 ## Code written for Blaxel
 
-`withruntime/blaxel` runs code written for Blaxel's sandbox SDK. Change the
+`withruntime/blaxel` translates supported Blaxel sandbox calls. Change the
 import:
 
 ```ts no-run
@@ -132,7 +139,7 @@ Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB.
 Standby becomes Runtime's pause: after 60 seconds without a call a sandbox
 pauses with its memory and processes, and the next call wakes it. Envs,
 processes by name, files, previews, snapshots, forks and the code interpreter
-work as they do on Blaxel, and so do sessions: `sandbox.sessions` makes a
+are supported by the adapter, along with sessions: `sandbox.sessions` makes a
 Runtime sandbox session and `SandboxInstance.fromSession` drives the sandbox
 with its token. A Blaxel key is never sent anywhere. Drives, codegen, schedules and Blaxel's agent, model and MCP hosting throw
 `NotSupportedError` before anything happens, naming what to use instead.
@@ -152,7 +159,8 @@ https://withruntime.com/docs/frameworks.
 ## CLI
 
 ```bash no-run
-npx withruntime sandbox run -- python3 -c 'print(6 * 7)'   # connects on first use
+printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
+npx withruntime sandbox run -- python3 - < invoice.py   # connects on first use
 npx withruntime sandbox create
 npx withruntime help
 ```

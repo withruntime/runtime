@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.8.4. `pip show withruntime` shows the
+This guide describes `withruntime` 0.10.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -22,14 +22,31 @@ On a server, put a key from https://withruntime.com/account/keys in
 or a command-line argument. With no key anywhere, the first call fails with
 `missing_api_key` and says how to get one.
 
+The singular product names match the CLI. Each pair below uses the same
+product client, connections and defaults; existing plural calls keep working.
+
+| Preferred product  | Existing alias      |
+| ------------------ | ------------------- |
+| `runtime.sandbox`  | `runtime.sandboxes` |
+| `runtime.snapshot` | `runtime.snapshots` |
+| `runtime.image`    | `runtime.images`    |
+| `runtime.volume`   | `runtime.volumes`   |
+| `runtime.job`      | `runtime.jobs`      |
+| `runtime.domain`   | `runtime.domains`   |
+| `runtime.port`     | `runtime.ports`     |
+| `runtime.address`  | `runtime.addresses` |
+
 ## Hello, sandbox
+
+Write a file that totals three invoice amounts, then run it; the total is 750.
 
 ```python
 from withruntime import Sandbox
 
 with Sandbox.create() as sbx:
-    result = sbx.exec("python3 -c 'print(6 * 7)'")
-    print(result.exit_code, result.stdout)
+    sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+    result = sbx.exec("python3 /workspace/invoice.py")
+    print(result.exit_code, result.stdout)  # 0, "750\n"
 ```
 
 `Sandbox.create()` takes no required arguments and returns once the sandbox is
@@ -37,8 +54,12 @@ running. Leaving the `with` block stops it, even after an exception.
 
 With no arguments you get the free trial while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
-can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and 4 GiB. Every field
-is optional and takes snake_case names:
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
+4 GiB.
+
+Omitting `funding` can use prepaid credit after the trial is exhausted. Set
+`funding="trial"` when you want free use only; it never falls back to paid.
+Every field is optional and takes snake_case names:
 
 ```python
 from withruntime import Runtime
@@ -154,8 +175,13 @@ with Sandbox.create() as sbx:
         if event["type"] == "stdout":
             print(event["data"], end="")
         elif event["type"] == "exit":
-            print("exit", event["exitCode"])
+            print("exit", event["exit_code"])
 ```
+
+`exec_stream` events expose snake_case fields, including `process_id`,
+`exit_code`, `timed_out`, `duration_ms`, `stdout_truncated`,
+`stderr_truncated`, `dropped_bytes` and `resume_at`, when the event carries
+that value. The previous camelCase keys remain available with the same values.
 
 While you read a command's stream, the command waits for you rather than lose
 output, from its first byte. The sandbox keeps the latest 1 MiB; a reader away
@@ -176,7 +202,7 @@ with Sandbox.create() as sbx:
     print(server.id, server.info["state"])
 
     repl = sbx.spawn(["python3", "-i", "-q"], stdin="pipe")
-    repl.write("print(21 * 2)\n")
+    repl.write("print(sum([125, 250, 375]))\n")
     repl.write("exit()\n", eof=True)
     print(repl.wait().stdout)
 
@@ -184,6 +210,11 @@ with Sandbox.create() as sbx:
         print(process["id"], process["state"], process["command"])
     server.kill("SIGTERM")
 ```
+
+`process.write()` tracks accepted input offsets and keeps concurrent writes in
+order. When the process accepts only part of the input, later chunks match its
+capacity; when its input pipe is full, the SDK waits briefly before retrying
+without advancing the offset. An empty EOF write closes input after earlier queued writes finish.
 
 `process.output(cursor=0)` yields every event from the start until the process
 exits. A process outlives your connection; get it back with `sbx.process(id)`.
@@ -246,9 +277,30 @@ with Sandbox.create() as sbx:
 An uploaded file keeps its permissions; `write(path, data, mode=0o755)` sets
 them (0o644 when left out).
 
+`files.archive(path, gzip=True, exclude=None, user="sandbox")` returns the
+folder's tar bytes, gzip-compressed by default. `exclude` holds plain relative
+paths, not globs. `files.unarchive(path, data, gzip=None, user="sandbox")`
+merges archive bytes into the destination and detects gzip when omitted. Pass
+`user="root"` explicitly for root-owned trees; this requires passwordless
+`sudo` inside the sandbox.
+
+```python check
+from withruntime import Sandbox
+
+with Sandbox.create() as sbx:
+    sbx.files.write("/workspace/project/report.txt", "total: 750\n")
+    archive = sbx.files.archive("/workspace/project")
+    sbx.files.unarchive("/workspace/restored", archive)
+    print(sbx.files.read_text("/workspace/restored/report.txt"))
+```
+
 A directory download keeps the links inside the directory and raises
 `unsafe_archive` for any entry or link that would reach outside it, so
 nothing in a sandbox can write elsewhere on your machine.
+The download also checks links against files already in the destination before
+publishing. Invalid checksums, malformed path metadata and incomplete tar
+end markers are refused. Compressed archives are unpacked in bounded pieces;
+this adds no limit on the total downloaded directory size.
 
 From `withruntime` 0.7.0, reads are checked. The API sends
 every file's length before its bytes, and a small file's SHA-256; `read` reads
@@ -415,13 +467,13 @@ want a persistent sandbox's disk back.
 ## Errors and retries
 
 ```python
-from withruntime import NotFoundError, RuntimeError, Sandbox
+from withruntime import NotFoundError, RuntimeAPIError, Sandbox
 
 try:
     Sandbox.connect("00000000-0000-4000-8000-000000000000")
 except NotFoundError:
     print("no such sandbox")
-except RuntimeError as error:
+except RuntimeAPIError as error:
     print(error.code, error.hint, error.request_id)
 ```
 
@@ -429,9 +481,15 @@ The classes match the JavaScript SDK: `AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `ConflictError`,
 `InvalidRequestError`, `RateLimitError`, `ServiceUnavailableError`,
 `AccountBlockedError` (from 0.7.0), `ConnectionError` and `CommandError`, all
-subclasses of `withruntime.RuntimeError`. Every write carries an idempotency
+subclasses of `withruntime.RuntimeAPIError`. `RuntimeAPIError` and
+`RuntimeConnectionError` name the SDK errors without hiding Python's built-in
+`RuntimeError` and `ConnectionError`. The old exports remain aliases of the
+same classes, so existing catches keep working. Every write carries an idempotency
 key, made for you; transport failures, 429 and 503 are retried with the same
 key, so a retry never makes two sandboxes or runs a command twice.
+Interrupted complete response bodies are retried with the same key too;
+streamed output is never replayed after it reaches your code. A failed body
+read or retry delay carries the original `error.idempotency_key`.
 
 Pass your own `idempotency_key` to make a retry safe across process restarts.
 For 24 hours, a create or a command sent again with the same key and the same
@@ -604,8 +662,31 @@ Forks and snapshots:
 - A sandbox created with `pausable=False` cannot be forked.
 - If a fork stops partway and left its source paused, the source stays paused,
   and an account notice says so and how to wake it.
-- Copies run on the source's server. A kept snapshot is stored there too and
-  copied off it, encrypted, as soon as it is taken ([storage and backups](./storage)).
+- Copies run on the source's server by default. Cross-server placement requires
+  [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled)
+  to be enabled. A kept snapshot is stored on its source server and
+  copied off it, encrypted, after its final compressed form is ready. It survives loss of the server once
+  `backedUp` is `True`, meaning that copy has been checked
+  ([storage and backups](./storage)).
+- Snapshots default to `mode="memory"`, keeping files, memory and running
+  processes. `base.snapshot(mode="disk")` keeps only the root filesystem;
+  each copy boots fresh without the saved processes. Both modes pause a
+  running source until capture finishes, then wake it; an already paused
+  source stays paused.
+
+Where deferred compression has been qualified and enabled, a memory
+snapshot can be `"ready"` with `compressionPending` set to `True`
+and start copies on the same server before background compression finishes.
+Temporary raw files are not charged; snapshot billing uses the final verified
+compressed allocation. The off-server copy waits for that final form, so
+`backedUp` is false while compression is pending. See
+[snapshot storage](./storage#snapshots-survive-their-server).
+
+If a snapshot was captured but waking its source fails, the error keeps the
+original failure and `details["snapshotId"]`, `details["sourceSandboxId"]` and
+`details["sourceWakeError"]`. Read that saved snapshot and wake the source
+explicitly before taking another capture; a failed recovery does not erase the
+snapshot id.
 
 See [JavaScript](./javascript#custom-images) for what each does; the Python
 methods are the same in snake_case.
@@ -667,6 +748,13 @@ the port so far and returns a new one; `sbx.previews.delete(3000)` stops sharing
 address is under `runtimehost.com`, the domain for everything sandboxes serve,
 kept apart from Runtime's own site.
 See [JavaScript](./javascript#share-a-port) for what each does.
+
+Native `previews.create` and `previews.get` accept `expires_at` as a
+timezone-qualified ISO timestamp, a minute to a week ahead. It rounds down
+to a whole second; with `ttl_seconds`, the earlier deadline wins. A session's
+expiry also limits its preview reads. Use the returned `tokenExpiresAt` as
+the actual deadline. The matching server feature is required: an older server
+refuses the absolute field rather than falling back to a relative lifetime.
 
 ## A sandbox from a browser
 
@@ -752,6 +840,24 @@ print(latest, verify_webhook.__name__)
 pushes events and metrics to an OpenTelemetry endpoint. See
 [metrics and webhooks](./observability).
 
+## Account API calls
+
+```python check
+from withruntime import Runtime
+
+with Runtime() as runtime:
+    counts = runtime.usage_requests("7d")
+    print(counts["calls"], counts["errorPercent"])
+    for row in counts["operations"]:
+        print(row["operation"], row["serverErrors"])
+```
+
+`usage_requests()` defaults to `"24h"`; `"7d"`, `"30d"` and `"90d"` select
+longer windows. Counts are exact decimal strings, and `errorPercent` is `None`
+when no calls were counted. `AsyncRuntime` has the same method, awaited. A key
+needs the `usage` scope, read-only access or all-products access. See
+[account API calls](./observability#account-api-calls).
+
 ## Identity tokens
 
 Inside a sandbox, `Sandbox.identity_token("sts.amazonaws.com")` returns a
@@ -770,7 +876,8 @@ and group roles. See [single sign-on](./single-sign-on).
 
 ## Coming from E2B, Daytona, Vercel Sandbox or Blaxel
 
-Code written for their Python SDKs runs on Runtime after changing one import,
+Their supported Python sandbox calls keep the same call shapes on Runtime
+after changing the import,
 in `withruntime` 0.4.0 and later for E2B and 0.5.0 and later for Daytona and
 Vercel Sandbox, and 0.8.1 and later for Blaxel:
 
@@ -781,9 +888,9 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance
 ```
 
-Sandboxes get the old provider's defaults, and a call Runtime cannot honour
-the same way raises an error naming what to use instead before anything
-happens. To move to Runtime's own calls, see [migration](./migrate).
+The adapters translate supported calls to Runtime's native sandbox, with the
+provider defaults described in each mapping. Unsupported options are refused
+before allocation, and the mapping names the supported alternatives. To move to Runtime's own calls, see [migration](./migrate).
 
 ## Configuration
 

@@ -34,6 +34,7 @@ const toolOutputs = (items: RunItem[]) =>
   items
     .filter((item) => item.type === "tool_call_output_item")
     .map((item) => JSON.stringify(item.rawItem));
+export const INVOICE_EXAMPLE = "print(sum([125, 250, 375]))\n";
 
 export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?: string) {
   const results: Record<string, string> = {};
@@ -41,17 +42,17 @@ export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?:
   // withruntime/tools: the four tools every adapter wraps.
   const [exec, read, write, list] = sandboxTools(sandbox);
   assert.match(
-    await write.execute({ path: "demo/app.py", content: "print(6 * 7)\n" }),
-    /^Wrote 13 bytes/,
+    await write.execute({ path: "demo/invoice.py", content: INVOICE_EXAMPLE }),
+    /^Wrote 28 bytes/,
   );
-  assert.deepEqual(await exec.execute({ command: "python3 demo/app.py" }), {
+  assert.deepEqual(await exec.execute({ command: "python3 demo/invoice.py" }), {
     exitCode: 0,
-    stdout: "42\n",
+    stdout: "750\n",
     stderr: "",
     timedOut: false,
   });
-  assert.equal(await read.execute({ path: "demo/app.py" }), "print(6 * 7)\n");
-  assert.match(JSON.stringify(await list.execute({ path: "demo" })), /app\.py/);
+  assert.equal(await read.execute({ path: "demo/invoice.py" }), INVOICE_EXAMPLE);
+  assert.match(JSON.stringify(await list.execute({ path: "demo" })), /invoice\.py/);
   assert.equal((await exec.execute({ command: "sleep 5", timeoutSeconds: 1 })).timedOut, true);
   await write.execute({ path: "/tmp/outside.txt", content: "outside" });
   assert.equal(await read.execute({ path: "/tmp/outside.txt" }), "outside");
@@ -177,7 +178,7 @@ export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?:
       return [
         functionCall(
           "write_stdin",
-          { session_id: id, chars: "print(6 * 7)\n", yield_time_ms: 1500 },
+          { session_id: id, chars: "exec(open('invoice.py').read())\n", yield_time_ms: 1500 },
           { callId: "s7" },
         ),
       ];
@@ -190,7 +191,10 @@ export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?:
       model: scripted,
       instructions: "Work in the sandbox.",
       defaultManifest: {
-        entries: { "notes.md": { type: "file", content: "from the manifest\n" } },
+        entries: {
+          "notes.md": { type: "file", content: "from the manifest\n" },
+          "invoice.py": { type: "file", content: INVOICE_EXAMPLE },
+        },
       },
     }),
     "go",
@@ -202,7 +206,7 @@ export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?:
   assert.match(outputs, /tick 1/);
   assert.match(outputs, /tick 3/);
   assert.match(outputs, /hello from apply_patch/);
-  assert.match(outputs, /print\(6 \* 7\)\\r\\n42/); // typed into the terminal, answered
+  assert.match(outputs, /exec\(open\('invoice\.py'\)\.read\(\)\)\\r\\n750/); // typed into the terminal, answered
   results.openaiAgentsSandboxClient = "passed";
 
   // Runtime's hosted MCP server, with the same key.

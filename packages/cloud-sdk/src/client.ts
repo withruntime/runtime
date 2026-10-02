@@ -1,7 +1,8 @@
 import { WAIT_FOR_TIMEOUT_SECONDS } from "./api-defaults.js";
 import { RuntimeError } from "./errors.js";
 import type { Page } from "./page.js";
-import { clientFactories, type ClientExtensions } from "./products/index.js";
+import { clientFactories, clientProductAliases, type ClientExtensions } from "./products/index.js";
+import { usageExport as makeUsageExport } from "./products/observability.js";
 import { Sandbox, deleteSandbox, sandboxPage } from "./sandbox.js";
 import { Snapshots } from "./snapshots.js";
 import { Transport, missingKey, type RequestOptions } from "./transport.js";
@@ -13,7 +14,7 @@ export type RuntimeOptions = {
   /** Default: RUNTIME_API_URL, then https://api.withruntime.com. */
   baseUrl?: string;
   fetch?: typeof fetch;
-  /** Per call, retries included. Default 5 minutes. */
+  /** Per call, queue and retries included. Default 5 minutes; 0 disables it. */
   timeoutMs?: number;
   /** Retries of transport failures, 429, 502, 503 and 504. Default 4. */
   maxRetries?: number;
@@ -27,11 +28,12 @@ export type RuntimeOptions = {
   waitForCapacityMs?: number;
 };
 
-/** The key `runtime login` saved for this machine, found on first use. */
-const savedKey = async (): Promise<string> => {
+/** The key `runtime login` saved for this machine and this API origin, found
+ * on first use. A constructor override must never receive another API's key. */
+const savedKey = async (apiOrigin: string): Promise<string> => {
   if (typeof process === "undefined" || !process.versions?.node) throw missingKey();
   const { resolveCredential } = await import("./credentials.js");
-  return resolveCredential(process.env);
+  return resolveCredential({ ...process.env, RUNTIME_API_URL: apiOrigin });
 };
 
 const env = (name: string) =>
@@ -46,32 +48,42 @@ export interface Runtime extends ClientExtensions {}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class Runtime {
   readonly transport: Transport;
+  /** The sandbox product; `sandboxes` remains the same client for compatibility. */
+  readonly sandbox: Sandboxes;
   readonly sandboxes: Sandboxes;
+  readonly snapshot: Snapshots;
   readonly snapshots: Snapshots;
   readonly feedback: FeedbackApi;
   readonly support: SupportApi;
   readonly account: AccountApi;
+  /** Date-range settlements, paged with exact charges and the server's CSV. */
+  readonly usageExport: ReturnType<typeof makeUsageExport>;
   constructor(options: RuntimeOptions = {}) {
     this.transport = new Transport({
       // A key given, then RUNTIME_API_KEY, then (in Node and Bun) the key
       // `runtime login` saved for this machine, read on the first call.
-      apiKey: options.apiKey ?? env("RUNTIME_API_KEY") ?? savedKey,
+      apiKey: options.apiKey ?? env("RUNTIME_API_KEY") ?? (() => savedKey(this.transport.baseUrl)),
       baseUrl: options.baseUrl ?? env("RUNTIME_API_URL"),
       ...(options.fetch ? { fetch: options.fetch } : {}),
-      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-      ...(options.maxConnections ? { maxConnections: options.maxConnections } : {}),
+      ...(options.maxConnections !== undefined ? { maxConnections: options.maxConnections } : {}),
       ...(options.waitForCapacityMs !== undefined
         ? { waitForCapacityMs: options.waitForCapacityMs }
         : {}),
     });
     this.sandboxes = new Sandboxes(this.transport);
+    this.sandbox = this.sandboxes;
     this.snapshots = new Snapshots(this.transport);
+    this.snapshot = this.snapshots;
     this.feedback = new FeedbackApi(this.transport);
     this.support = new SupportApi(this.transport);
     this.account = new AccountApi(this.transport);
+    this.usageExport = makeUsageExport(this.transport);
     for (const [name, make] of clientFactories())
       Object.defineProperty(this, name, { value: make(this.transport), enumerable: true });
+    for (const [alias, name] of Object.entries(clientProductAliases))
+      Object.defineProperty(this, alias, { value: this[name], enumerable: true });
   }
   /** Who this key is: organization, agent and credential. */
   me(options: RequestOptions = {}) {
@@ -96,6 +108,32 @@ export class Runtime {
     return this.transport.json<Usage>({
       method: "GET",
       path: "/v1/usage",
+      ...options,
+    });
+  }
+  /** This account's authenticated API answers, in hourly windows. Counts are
+   * exact decimal strings, and an empty window has a null error percentage.
+   * A key needs usage permission. */
+  usageRequests(range: "24h" | "7d" | "30d" | "90d" = "24h", options: RequestOptions = {}) {
+    return this.transport.json<{
+      range: "24h" | "7d" | "30d" | "90d";
+      since: string;
+      until: string;
+      calls: string;
+      clientErrors: string;
+      serverErrors: string;
+      errorPercent: number | null;
+      operations: Array<{
+        operation: string;
+        calls: string;
+        clientErrors: string;
+        serverErrors: string;
+        errorPercent: number | null;
+      }>;
+    }>({
+      method: "GET",
+      path: "/v1/usage/requests",
+      query: { range },
       ...options,
     });
   }
@@ -134,7 +172,12 @@ export class Sandboxes {
     });
     const sandbox = new Sandbox(this.t, info);
     if (wait !== false && info.state !== "running") {
-      await sandbox.waitFor("running", { timeoutSeconds: WAIT_FOR_TIMEOUT_SECONDS });
+      await sandbox.waitFor("running", {
+        timeoutSeconds: WAIT_FOR_TIMEOUT_SECONDS,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        idempotencyKey: options.idempotencyKey,
+      });
       if (sandbox.state !== "running")
         throw new RuntimeError({
           message: `Sandbox ${info.id} is ${sandbox.state}, not running.`,
@@ -171,7 +214,8 @@ export class Sandboxes {
   delete(id: string, options: RequestOptions = {}): Promise<DeletedSandbox> {
     return deleteSandbox(this.t, id, options);
   }
-  /** Live sandboxes, oldest first. Await for a page, or `for await` over all. */
+  /** Live sandboxes, oldest first. Await for a page, or `for await` over all.
+   * Request options apply to the initial request and every subsequent page. */
   async list(
     filter: {
       state?: SandboxInfo["state"][];
@@ -181,6 +225,7 @@ export class Sandboxes {
       name?: string;
       limit?: number;
     } = {},
+    options: RequestOptions = {},
   ): Promise<Page<Sandbox>> {
     const query = {
       ...(filter.state ? { state: filter.state } : {}),
@@ -193,8 +238,9 @@ export class Sandboxes {
     };
     return sandboxPage(
       this.t,
-      await this.t.json({ method: "GET", path: "/v1/sandboxes", query }),
+      await this.t.json({ method: "GET", path: "/v1/sandboxes", query, ...options }),
       query,
+      options,
     );
   }
 }

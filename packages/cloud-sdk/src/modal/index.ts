@@ -202,6 +202,7 @@ export class SandboxService {
       throw new CompatibilityError("Modal", "fractional CPU reservations");
     if (params.blockNetwork && (params.outboundDomainAllowlist || params.outboundCidrAllowlist))
       throw new TypeError("blockNetwork cannot be combined with allowlists");
+    const placement = region("Modal", params.regions?.[0]);
     const built = await image.build(app);
     let primary: Process | undefined;
     const s = await create(
@@ -218,7 +219,7 @@ export class SandboxService {
         cpu: "reserved",
         vcpu: params.cpu,
         memoryMiB: params.memoryMiB,
-        region: region("Modal", params.regions?.[0]),
+        region: placement,
         timeoutSeconds: Math.ceil((params.timeoutMs ?? 300_000) / 1000),
         idlePauseSeconds: 0,
         onLeaseEnd: "stop",

@@ -120,6 +120,8 @@ export type SandboxForkOptions = {
   /** A snapshot's id or, of this sandbox's snapshots, its name. */
   snapshotId?: string;
   envs?: Env[];
+  /** Blaxel's fork override; Runtime cannot enforce this override during a fork. */
+  lifecycle?: SandboxLifecycle;
 };
 export type SandboxArchiveOptions = { wait?: boolean; maxWait?: number; interval?: number };
 
@@ -952,6 +954,11 @@ export class SandboxInstance {
    * (files, memory and running processes), or started from a snapshot with
    * `snapshotId`. `envs` are added over this sandbox's. */
   async fork(targetName: string, options: SandboxForkOptions = {}): Promise<SandboxForkResponse> {
+    if (options.lifecycle !== undefined)
+      throw new NotSupportedError(
+        "Overriding lifecycle during a fork",
+        "Omit lifecycle to use the existing Runtime fork behavior.",
+      );
     refuseApplication(options);
     const envs = envRecord(options.envs);
     checkEnvNames(Object.keys(envs));

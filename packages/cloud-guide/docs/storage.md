@@ -1,8 +1,9 @@
 # Storage and backups
 
-Snapshots and volume backups survive the loss of the server they were made
-on, and your own buckets mount inside a sandbox without it ever holding their
-keys. A snapshot is copied off its server as soon as it is taken. A volume is
+Checked off-server copies of snapshots and volume backups survive the loss of
+the server they were made on, and your own buckets mount inside a sandbox
+without it ever holding their keys. A snapshot starts copying off its server
+once its final compressed form is ready; `backedUp: true` confirms that copy is ready. A volume is
 backed up off its server every day, and whenever you ask, and can be restored
 onto any server in its region. Every copy is encrypted with a key that belongs
 to your organization alone.
@@ -13,7 +14,7 @@ to your organization alone.
 | --------------------- | ---------------------- | ---------------------------------------------------------- |
 | A sandbox's own disk  | Its server             | None. Keep what you cannot rebuild on a volume             |
 | A volume              | One server, fixed size | A backup every day, and on request, kept 7 days unless set |
-| A snapshot            | Its source's server    | Copied once, when it is taken, and kept as long as it is   |
+| A snapshot            | Its source's server    | Copied once after compression, and kept as long as it is   |
 | A fork's own snapshot | Its source's server    | None: it is deleted when the fork ends                     |
 
 `backedUp` on a volume or a snapshot is `true` once its copy has been written
@@ -21,8 +22,45 @@ off the server, read back and checked. Until then it is `false`.
 
 In your account, [Volumes](https://withruntime.com/account/volumes) lists each
 volume with how full it is, the sandbox it is attached to and its backups, and
-gives the commands that back it up, restore it and delete it. A volume keeps
-the size it was made with.
+lets you create a volume, back it up now, change its backup policy, restore
+a backup as a new volume, or delete a volume or backup. You can attach a
+volume when creating a new sandbox. Spending and deletion ask for
+confirmation using the console agent's existing permissions. Growth and
+shared-volume attachment controls appear only when the deployed API offers
+those guarded features; they are disabled by default.
+
+## Growing a volume when enabled
+
+Volume growth is disabled by default and appears in the API reference and
+MCP tool list only after it is enabled. Where offered, it grows an ordinary
+volume on its current server while the volume is detached; shrinking and
+shared volumes are refused.
+
+Use `runtime volume resize <id> --size-mib <N>`,
+`runtime.volumes.resize(id, { sizeMiB })` in JavaScript, or
+`runtime.volumes.resize(volume_id, size_mib)` in Python. The volume stays
+`ready`, while `resize.state` tracks `pending`, `running`, `completed` or
+`failed`. Poll the volume if the request returns before completion. Attachments
+and deletion wait while the operation is active.
+
+The old disk and confirmed size remain until the grown copy has been checked.
+The larger size is billed only after completion, at the volume's existing
+rate. A failure keeps the old confirmed size and records the error.
+
+## Shared volumes when enabled
+
+Shared volumes are disabled by default. Where the deployed API offers them,
+`shared: true` at volume creation lets several sandboxes read and write the
+same volume. The mode stays fixed; restoring a backup preserves its source
+volume's mode rather than converting it.
+
+Attach through `runtime volume attach <volume> <sandbox> --path /data`, and
+follow the returned attachment's `attaching`, `active`, `detaching` or
+`detached` state. `runtime volume attachment <volume> <attachment>` reads the
+saved receipt, and `runtime volume detach <volume> <attachment>` requests a
+detach. A request that stops waiting does not cancel the saved operation.
+If a detach is busy, the mount remains and the receipt records the error;
+free the mount before trying again.
 
 ## Volume backups
 
@@ -84,25 +122,51 @@ runtime volume backup-rm "${backup}"
 
 ## Snapshots survive their server
 
-A snapshot is copied off its server, encrypted, as soon as it is ready.
-`durability.state` says where that stands:
+On hosts where deferred compression has been qualified and enabled, a
+memory snapshot can be `ready` and startable on its server while
+`compressionPending: true`: capture has finished, and Runtime is preparing its
+final compressed form in the background. Temporary raw files are Runtime
+overhead, not charged storage. The final verified compressed allocation is
+used for storage billing from the snapshot's ready time, within the existing
+prepaid bounds.
 
-| `durability.state` | Meaning                                                                     |
-| ------------------ | --------------------------------------------------------------------------- |
-| `pending`          | Being copied off the server                                                 |
-| `durable`          | Copied, read back and checked; `backedUp` is `true`                         |
-| `restoring`        | Its server was lost, and it is being restored onto another from its copy    |
-| `failed`           | It could not be copied; `error` says why                                    |
-| `none`             | A fork's own snapshot, which is deleted when the fork ends and never copied |
+Its encrypted off-server copy is queued only after compression finishes.
+While compression is pending, `meteredBytes` is zero, `backedUp` is false and
+`durability.state` is `none`. `backedUp: true` means the off-server copy has
+been checked. `durability.state` says where that stands:
+
+| `durability.state` | Meaning                                                                      |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `pending`          | Being copied off the server                                                  |
+| `durable`          | Copied, read back and checked; `backedUp` is `true`                          |
+| `restoring`        | Its server was lost, and it is being restored onto another from its copy     |
+| `failed`           | It could not be copied; `error` says why                                     |
+| `none`             | A temporary fork snapshot, or capture waiting for compression before copying |
 
 If a snapshot's server is lost, the snapshot is restored from its copy onto a
-server in its region with the same processor, where its memory loads, and new
-sandboxes start from it there. While that happens, a create or fork from it
+server in its region with a compatible processor. Memory snapshots resume the
+saved machine there; disk snapshots boot fresh from the saved root filesystem. While that happens, a create or fork from it
 answers `snapshot_restoring` (503); try again in a few minutes. If no such
 server has room yet, the snapshot stays copied off the server and its `error`
 says it is waiting; it is restored as soon as one does. A snapshot whose server
 was lost before it was copied is deleted, its `error` says why, and it is not
 charged after the server's last sign of life.
+
+## Wake or fork on another server when enabled
+
+Cross-server wake and fork transfers are disabled by default and require
+operator qualification. Ordinary wakes and copies stay on the source server.
+On a qualified deployment with transfers enabled, placement may choose a
+healthy compatible server in the same region when the source cannot fit the
+wake or copy. Saved processor, kernel and device compatibility, image and
+volume placement, and private-placement choices still constrain that move.
+
+Transfer workspaces and replicas are Runtime overhead, not an extra customer
+charge. Uncertain outcomes keep the source data and reserved capacity until
+handover or cleanup is verified. A capture awaiting compression cannot be
+exported for transfer; same-server starts can still use that raw capture.
+This capability does not change when an off-server backup is considered
+checked: `backedUp` remains the authority for that protection.
 
 ## Updating the default image
 

@@ -199,23 +199,46 @@ export class Devboxes {
   readonly executions: Executions;
   readonly diskSnapshots: DiskSnapshots;
   private readonly transitions = new Map<string, Promise<unknown>>();
-  private transition<T>(id: string, operation: () => Promise<T>): Promise<T> {
+  private transition<T>(id: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    if (signal?.aborted) return Promise.reject(signal.reason);
     const pending = (this.transitions.get(id) ?? Promise.resolve())
       .catch(() => undefined)
-      .then(operation);
+      .then(() => {
+        signal?.throwIfAborted();
+        return operation();
+      });
     this.transitions.set(id, pending);
     void pending
       .finally(() => {
         if (this.transitions.get(id) === pending) this.transitions.delete(id);
       })
       .catch(() => undefined);
-    return pending;
+    if (!signal) return pending;
+    return new Promise<T>((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      pending.then(
+        (value) => {
+          signal.removeEventListener("abort", abort);
+          resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener("abort", abort);
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- passes the pending call's own failure through unchanged
+          reject(error);
+        },
+      );
+      if (signal.aborted) abort();
+    });
   }
   constructor(private readonly runtime: Runtime) {
     this.executions = new Executions(runtime);
     this.diskSnapshots = new DiskSnapshots(runtime);
   }
   async create(input: DevboxCreateParams = {}, options: RequestOptions = {}) {
+    options.signal?.throwIfAborted();
     only("Runloop", input, [
       "name",
       "metadata",
@@ -265,23 +288,29 @@ export class Devboxes {
       },
       input.environment_variables ?? undefined,
       async (sandbox) => {
-        for (const [path, content] of Object.entries(input.file_mounts ?? {}))
-          await sandbox.files.write(path, content);
+        for (const [path, content] of Object.entries(input.file_mounts ?? {})) {
+          options.signal?.throwIfAborted();
+          await sandbox.files.write(path, content, {
+            signal: options.signal,
+            timeoutMs: options.timeout,
+          });
+        }
         for (const command of p.launch_commands ?? [])
           await sandbox.exec(command, {
-            ...(await execOptions(sandbox)),
+            ...(await execOptions(sandbox, { signal: options.signal }, nativeOptions(options))),
             check: true,
             signal: options.signal,
           });
       },
+      nativeOptions(options),
     );
     return view(sandbox);
   }
   createAndAwaitRunning(input?: DevboxCreateParams, options?: RequestOptions) {
     return this.create(input, options);
   }
-  async retrieve(id: string) {
-    return view(await lookup(this.runtime, id));
+  async retrieve(id: string, options: RequestOptions = {}) {
+    return view(await lookup(this.runtime, id, nativeOptions(options)));
   }
   async awaitRunning(id: string, options: LongPollRequestOptions = {}) {
     return this.waitForStatus(id, "running", options);
@@ -362,7 +391,12 @@ export class Devboxes {
       throw new TypeError("limit must be positive");
     const values: DevboxView[] = [];
     let cursor: string | null = null;
+    const seenCursors = new Set<string>();
     do {
+      if (cursor !== null) {
+        if (seenCursors.has(cursor)) throw new Error("Pagination returned a repeated cursor");
+        seenCursors.add(cursor);
+      }
       const page: { data: SandboxInfo[]; nextCursor: string | null } =
         await this.runtime.transport.json({
           method: "GET",
@@ -402,47 +436,91 @@ export class Devboxes {
       (after) => this.listPage({ ...query, starting_after: after }, options),
     );
   }
-  suspend(id: string) {
-    return this.transition(id, async () => {
-      const s = await lookup(this.runtime, id);
-      if (s.state === "stopped") {
-        if (s.info.persistent && s.info.labels[SUSPENDED] === "true") return view(s);
-        throw new Error("A shut down Devbox cannot be suspended");
-      }
-      // ARCHITECTURE.md section 10: paid disk persistence must be admitted
-      // before stop; an uncertain stop keeps retention enabled to preserve bytes.
-      await s.update({ persistent: true, labels: { ...s.info.labels, [SUSPENDED]: "true" } });
-      await s.stop();
-      return view(s);
-    });
+  suspend(id: string, options: RequestOptions = {}) {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason);
+    if (options.idempotencyKey !== undefined)
+      return Promise.reject(
+        new CompatibilityError("Runloop", "caller idempotency keys for compound suspend"),
+      );
+    return this.transition(
+      id,
+      async () => {
+        const s = await lookup(this.runtime, id, nativeOptions(options));
+        if (s.state === "stopped") {
+          if (s.info.persistent && s.info.labels[SUSPENDED] === "true") return view(s);
+          throw new Error("A shut down Devbox cannot be suspended");
+        }
+        // ARCHITECTURE.md section 10: paid disk persistence must be admitted
+        // before stop; an uncertain stop keeps retention enabled to preserve bytes.
+        await s.update(
+          { persistent: true, labels: { ...s.info.labels, [SUSPENDED]: "true" } },
+          nativeOptions(options),
+        );
+        await s.stop(nativeOptions(options));
+        return view(s);
+      },
+      options.signal,
+    );
   }
-  resume(id: string) {
-    return this.transition(id, async () => {
-      const s = await lookup(this.runtime, id);
-      if (s.state === "stopped") {
-        if (!s.info.persistent || s.info.labels[SUSPENDED] !== "true")
-          throw new Error("A shut down Devbox cannot be resumed");
-        await s.restart();
-      } else if (s.state === "paused" || s.state === "pausing") {
-        // Migrate older adapter pauses through the same disk-only boundary.
-        await s.update({ persistent: true, labels: { ...s.info.labels, [SUSPENDED]: "true" } });
-        await s.stop();
-        await s.restart();
-      } else await s.waitFor("running");
-      if (s.info.labels[SUSPENDED] !== undefined) {
-        const labels = { ...s.info.labels };
-        delete labels[SUSPENDED];
-        await s.update({ labels });
-      }
-      return view(s);
-    });
+  resume(id: string, options: RequestOptions = {}) {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason);
+    if (options.idempotencyKey !== undefined)
+      return Promise.reject(
+        new CompatibilityError("Runloop", "caller idempotency keys for compound resume"),
+      );
+    return this.transition(
+      id,
+      async () => {
+        const s = await lookup(this.runtime, id, nativeOptions(options));
+        if (s.state === "stopped") {
+          if (!s.info.persistent || s.info.labels[SUSPENDED] !== "true")
+            throw new Error("A shut down Devbox cannot be resumed");
+          await s.restart(nativeOptions(options));
+        } else if (s.state === "paused" || s.state === "pausing") {
+          // Migrate older adapter pauses through the same disk-only boundary.
+          await s.update(
+            { persistent: true, labels: { ...s.info.labels, [SUSPENDED]: "true" } },
+            nativeOptions(options),
+          );
+          await s.stop(nativeOptions(options));
+          await s.restart(nativeOptions(options));
+        } else await s.waitFor("running", nativeOptions(options));
+        if (s.info.labels[SUSPENDED] !== undefined) {
+          const labels = { ...s.info.labels };
+          delete labels[SUSPENDED];
+          await s.update({ labels }, nativeOptions(options));
+        }
+        return view(s);
+      },
+      options.signal,
+    );
   }
-  shutdown(id: string) {
-    return this.transition(id, async () => {
-      const s = await lookup(this.runtime, id);
-      await destroy(s);
-      return view(s);
-    });
+  shutdown(
+    id: string,
+    params: { force?: string } | RequestOptions = {},
+    options: RequestOptions = {},
+  ): Promise<DevboxView> {
+    if (requestOptions(params)) return this.shutdown(id, {}, params);
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- rejects with the caller's abort reason as is, as the upstream SDK does
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason);
+    if (options.idempotencyKey !== undefined)
+      return Promise.reject(
+        new CompatibilityError("Runloop", "caller idempotency keys for compound shutdown"),
+      );
+    only("Runloop shutdown", params, ["force"]);
+    if (params.force !== undefined && params.force !== "false")
+      return Promise.reject(new CompatibilityError("Runloop", "forced shutdown during snapshots"));
+    return this.transition(
+      id,
+      async () => {
+        const s = await lookup(this.runtime, id, nativeOptions(options));
+        await destroy(s, nativeOptions(options));
+        return view(s);
+      },
+      options.signal,
+    );
   }
   executeSync(id: string, body: DevboxExecuteParams, options?: RequestOptions) {
     return this.executions.executeSync(id, body, options);
@@ -454,13 +532,24 @@ export class Devboxes {
     const execution = await this.executeAsync(id, body, options);
     return this.executions.awaitCompleted(id, execution.execution_id, options);
   }
-  async readFileContents(id: string, body: { file_path: string }) {
+  async readFileContents(id: string, body: { file_path: string }, options: RequestOptions = {}) {
+    options.signal?.throwIfAborted();
     only("Runloop read", body, ["file_path"]);
-    return (await lookup(this.runtime, id)).files.readText(body.file_path);
+    return (await lookup(this.runtime, id, nativeOptions(options))).files.readText(
+      body.file_path,
+      nativeOptions(options),
+    );
   }
-  async writeFileContents(id: string, body: { file_path: string; contents: string }) {
+  async writeFileContents(
+    id: string,
+    body: { file_path: string; contents: string },
+    options: RequestOptions = {},
+  ) {
+    options.signal?.throwIfAborted();
     only("Runloop write", body, ["file_path", "contents"]);
-    await (await lookup(this.runtime, id)).files.write(body.file_path, body.contents);
+    await (
+      await lookup(this.runtime, id, nativeOptions(options))
+    ).files.write(body.file_path, body.contents, nativeOptions(options));
     return result(id, { stdout: "", stderr: "", exitCode: 0, timedOut: false });
   }
   snapshotDisk(
@@ -512,17 +601,22 @@ export class Executions {
   async executeSync(id: string, body: DevboxExecuteParams, options: RequestOptions = {}) {
     only("Runloop execute", body, ["command", "shell_name", "attach_stdin"]);
     if (body.attach_stdin) throw new TypeError("attach_stdin requires executeAsync");
-    const s = await lookup(this.runtime, id);
+    options.signal?.throwIfAborted();
+    const s = await lookup(this.runtime, id, nativeOptions(options));
     return result(
       id,
       await s.exec(
-        await shellCommand(s, body.command, body.shell_name),
-        await execOptions(s, {
-          signal: options.signal,
-          timeoutMs: options.timeout,
-          idempotencyKey: options.idempotencyKey,
-          onStdout: () => {},
-        }),
+        await shellCommand(s, body.command, body.shell_name, {}, nativeOptions(options)),
+        await execOptions(
+          s,
+          {
+            signal: options.signal,
+            timeoutMs: options.timeout,
+            idempotencyKey: options.idempotencyKey,
+            onStdout: () => {},
+          },
+          nativeOptions(options),
+        ),
       ),
     );
   }
@@ -534,46 +628,118 @@ export class Executions {
     only("Runloop execute", body, ["command", "shell_name", "attach_stdin"]);
     if (body.shell_name && body.attach_stdin)
       throw new CompatibilityError("Runloop", "interactive stdin in a named shell");
-    const s = await lookup(this.runtime, id);
-    const p = await s.spawn(await shellCommand(s, body.command, body.shell_name), {
-      ...(await execOptions(s, { signal: options.signal, idempotencyKey: options.idempotencyKey })),
-      stdin: body.attach_stdin ? "pipe" : undefined,
-    });
+    options.signal?.throwIfAborted();
+    const s = await lookup(this.runtime, id, nativeOptions(options));
+    const p = await s.spawn(
+      await shellCommand(s, body.command, body.shell_name, {}, nativeOptions(options)),
+      {
+        ...(await execOptions(
+          s,
+          {
+            signal: options.signal,
+            idempotencyKey: options.idempotencyKey,
+          },
+          nativeOptions(options),
+        )),
+        stdin: body.attach_stdin ? "pipe" : undefined,
+        request: nativeOptions(options),
+      },
+    );
     return { devbox_id: id, execution_id: p.id, status: "running" };
   }
-  async retrieve(id: string, execution: string): Promise<DevboxAsyncExecutionDetailView> {
-    const p = await (await lookup(this.runtime, id)).processes.get(execution);
+  async retrieve(
+    id: string,
+    execution: string,
+    query: { last_n?: string } | RequestOptions = {},
+    options: RequestOptions = {},
+  ): Promise<DevboxAsyncExecutionDetailView> {
+    if (requestOptions(query)) return this.retrieve(id, execution, {}, query);
+    options.signal?.throwIfAborted();
+    only("Runloop execution retrieve", query, ["last_n"]);
+    if (query.last_n !== undefined)
+      throw new CompatibilityError("Runloop", "execution output tail selection (last_n)");
+    const p = await (
+      await lookup(this.runtime, id, nativeOptions(options))
+    ).processes.get(execution, nativeOptions(options));
     return p.info.state === "running"
       ? { devbox_id: id, execution_id: execution, status: "running" }
-      : { ...result(id, await p.wait()), execution_id: execution, status: "completed" };
+      : {
+          ...result(id, await p.wait({ signal: options.signal })),
+          execution_id: execution,
+          status: "completed",
+        };
   }
   async awaitCompleted(
     id: string,
     execution: string,
     options: RequestOptions = {},
   ): Promise<DevboxAsyncExecutionDetailView> {
-    const p = await (await lookup(this.runtime, id)).processes.get(execution);
+    options.signal?.throwIfAborted();
+    const p = await (
+      await lookup(this.runtime, id, nativeOptions(options))
+    ).processes.get(execution, nativeOptions(options));
     return {
       ...result(id, await p.wait({ signal: options.signal })),
       execution_id: execution,
       status: "completed",
     };
   }
-  async kill(id: string, execution: string, body: { kill_process_group?: boolean | null } = {}) {
+  async kill(
+    id: string,
+    execution: string,
+    body: { kill_process_group?: boolean | null } | RequestOptions = {},
+    options: RequestOptions = {},
+  ): Promise<DevboxAsyncExecutionDetailView> {
+    if (requestOptions(body)) return this.kill(id, execution, {}, body);
+    options.signal?.throwIfAborted();
     only("Runloop kill", body, ["kill_process_group"]);
     if (body.kill_process_group) throw new CompatibilityError("Runloop", "kill_process_group");
-    await (await (await lookup(this.runtime, id)).processes.get(execution)).kill("SIGKILL");
-    return this.retrieve(id, execution);
+    await (
+      await (
+        await lookup(this.runtime, id, nativeOptions(options))
+      ).processes.get(execution, nativeOptions(options))
+    ).kill("SIGKILL", nativeOptions(options));
+    return this.retrieve(id, execution, {}, options);
   }
   async sendStdIn(
     id: string,
     execution: string,
-    body: { text?: string | null; signal?: "EOF" | "INTERRUPT" | null } = {},
-  ) {
-    const p = await (await lookup(this.runtime, id)).processes.get(execution);
-    if (body.text || body.signal === "EOF")
-      await p.write(body.text ?? "", { eof: body.signal === "EOF" });
-    if (body.signal === "INTERRUPT") await p.kill("SIGINT");
+    body: { text?: string | null; signal?: "EOF" | "INTERRUPT" | null } | RequestOptions = {},
+    options: RequestOptions = {},
+  ): Promise<{ devbox_id: string; execution_id: string; success: boolean }> {
+    if (
+      requestOptions(body) &&
+      (body.signal === undefined || (typeof body.signal === "object" && body.signal !== null))
+    )
+      return this.sendStdIn(id, execution, {}, body);
+    options.signal?.throwIfAborted();
+    only("Runloop stdin", body, ["text", "signal"]);
+    const text = "text" in body ? body.text : undefined;
+    const bodySignal = body.signal;
+    if (text !== undefined && text !== null && typeof text !== "string")
+      throw new TypeError("Runloop stdin text must be a string");
+    if (
+      bodySignal !== undefined &&
+      bodySignal !== null &&
+      bodySignal !== "EOF" &&
+      bodySignal !== "INTERRUPT"
+    )
+      throw new TypeError("Runloop stdin signal must be EOF or INTERRUPT");
+    if (options.idempotencyKey !== undefined && (text || bodySignal === "EOF"))
+      throw new CompatibilityError(
+        "Runloop",
+        "caller idempotency keys for process input; native offsets protect transport retries",
+      );
+    const p = await (
+      await lookup(this.runtime, id, nativeOptions(options))
+    ).processes.get(execution, nativeOptions(options));
+    if (text || bodySignal === "EOF")
+      await p.write(text ?? "", {
+        eof: bodySignal === "EOF",
+        signal: options.signal,
+        timeoutMs: options.timeout,
+      });
+    if (bodySignal === "INTERRUPT") await p.kill("SIGINT", nativeOptions(options));
     return { devbox_id: id, execution_id: execution, success: true };
   }
   async *streamStdoutUpdates(
@@ -599,7 +765,10 @@ export class Executions {
     query: { offset?: string },
     options: RequestOptions,
   ) {
-    const p = await (await lookup(this.runtime, id)).processes.get(execution);
+    options.signal?.throwIfAborted();
+    const p = await (
+      await lookup(this.runtime, id, nativeOptions(options))
+    ).processes.get(execution, nativeOptions(options));
     let offset = 0;
     const from = Number(query.offset ?? 0);
     for await (const event of p.output({ signal: options.signal }))

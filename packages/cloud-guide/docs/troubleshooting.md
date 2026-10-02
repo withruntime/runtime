@@ -38,6 +38,10 @@ login again. `RUNTIME_API_KEY` overrides the saved connection: an invalid
 environment key can fail even when browser login previously worked. Remove an
 unwanted override without printing its value.
 
+If a previous credential update was interrupted, the CLI names its lock file.
+Remove that file only after confirming no Runtime command is running, then
+retry. The CLI never steals an active lock automatically.
+
 ## Behind a proxy, every call says `No answer from Runtime`
 
 **From SDK version 0.4.0, the CLI and both SDKs use the proxy your environment

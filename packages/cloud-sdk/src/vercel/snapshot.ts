@@ -25,8 +25,8 @@ function metadataOf(snapshot: RuntimeSnapshot) {
   };
 }
 
-/** A saved sandbox, as Vercel's Snapshot, over a Runtime snapshot: files,
- * memory and running processes. `sourceSessionId` is the Runtime id of the
+/** A saved filesystem, as Vercel's Snapshot, over a Runtime disk snapshot.
+ * Restoring it starts fresh processes. `sourceSessionId` is the Runtime id of the
  * sandbox it came from. */
 export class Snapshot {
   readonly #snapshot: RuntimeSnapshot;
@@ -74,10 +74,11 @@ export class Snapshot {
 
   /** Snapshots, oldest first; `name` narrows to one sandbox's. */
   static async list(
-    params: { name?: string; limit?: number } & Credentials & {
+    params: { name?: string; limit?: number; signal?: AbortSignal } & Credentials & {
         withruntime?: WithRuntime;
       } & Record<string, unknown> = {},
   ) {
+    params.signal?.throwIfAborted();
     for (const field of ["since", "until", "cursor", "sortOrder"])
       if (params[field] !== undefined)
         throw new NotSupportedError(
@@ -88,16 +89,21 @@ export class Snapshot {
     let sandboxId: string | undefined;
     if (params.name !== undefined) {
       const found = (
-        await guard(() => client.sandboxes.list({ name: params.name!, includeStopped: true }))
+        await guard(() =>
+          client.sandboxes.list({ name: params.name!, includeStopped: true }, signalOf(params)),
+        )
       ).data[0];
       if (!found) return paginate([], null);
       sandboxId = found.id;
     }
     const page = await guard(() =>
-      client.snapshots.list({
-        ...(sandboxId ? { sandboxId } : {}),
-        ...(params.limit ? { limit: params.limit } : {}),
-      }),
+      client.snapshots.list(
+        {
+          ...(sandboxId ? { sandboxId } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+        },
+        signalOf(params),
+      ),
     );
     return paginate(page.data, page.nextCursor, page);
   }
@@ -114,8 +120,15 @@ export class Snapshot {
   async delete(opts: { signal?: AbortSignal } = {}): Promise<void> {
     try {
       await guard(() => this.#client.snapshots.delete(this.#snapshot.id, signalOf(opts)));
+      Object.assign(
+        this.#snapshot,
+        await guard(() => this.#client.snapshots.get(this.#snapshot.id, signalOf(opts))),
+      );
     } catch (error) {
-      if (error instanceof APIError && error.response.status === 404) return;
+      if (error instanceof APIError && error.response.status === 404) {
+        this.#snapshot.state = "deleted";
+        return;
+      }
       throw error;
     }
   }

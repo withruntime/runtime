@@ -449,7 +449,7 @@ describe("lifecycle", () => {
     expect(world.called("sandbox.stop")).toHaveLength(1);
   });
 
-  test("snapshot keeps the machine, then stops the sandbox, as Vercel does", async () => {
+  test("snapshot keeps the filesystem, then stops the sandbox, as Vercel does", async () => {
     const sandbox = await create();
     const snapshot = await sandbox.snapshot();
     expect(snapshot).toBeInstanceOf(Snapshot);

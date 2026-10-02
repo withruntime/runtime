@@ -157,11 +157,11 @@ class PrimeTests(Base):
 
     def test_invalid_request_rejected_before_build(self):
         sdk = SandboxClient(self.client)
-        for request in (self.request(gpu_count=1, gpu_type="H100"), self.request(cpu_cores=0.5),
-                        self.request(start_command={"executable": "python", "unknown": True}),
-                        self.request(start_command={"executable": "bad\x00"})):
+        for options in ({"gpu_count": 1, "gpu_type": "H100"}, {"cpu_cores": 0.5},
+                        {"start_command": {"executable": "python", "unknown": True}},
+                        {"start_command": {"executable": "bad\x00"}}):
             with self.assertRaises((CompatibilityError, ValueError)):
-                sdk.create(request)
+                sdk.create(self.request(**options))
         self.assertEqual(self.world.called("images.build"), [])
         self.assertEqual(self.world.called("sandboxes.create"), [])
 

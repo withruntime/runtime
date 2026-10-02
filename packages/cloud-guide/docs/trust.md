@@ -78,23 +78,21 @@ The full list, with what each company does and where, is on the
 - **The database** can be rewound to any moment in the last 24 hours, and a
   sealed copy goes off-site every night and is kept 30 days, locked so it cannot
   be deleted early. A restore from that copy is drilled every month.
-- **Volumes are backed up off their server every day**, and snapshots as soon
-  as they are taken, so they survive the loss of the server
-  ([storage and backups](./storage)).
+- **Volumes are backed up off their server every day.** A snapshot survives
+  loss of its server once its off-server copy is checked, shown by
+  `backedUp: true` ([storage and backups](./storage)).
 
 ## How Runtime is run
 
-These are the practices every change and every operator follows.
+The service uses the following operational controls.
 
 - **Access.** Production is reached only with named keys, never passwords, and
-  only by the people who operate it. Who holds access to each system is
-  reviewed every quarter.
-- **Change.** Every change to the service is in version control, and the rule
-  is that it passes formatting, a check of every dependency against published
-  security advisories, linting, type checks, a full build and the test suite
-  before it is pushed. Going live is a separate, deliberate step.
-- **Vulnerabilities.** Dependencies are checked against published advisories on
-  every change. Reports go to security@withruntime.com, as
+  only by the people who operate it.
+- **Change.** Changes are in version control and pass repository checks before
+  they are pushed. The checks cover formatting, dependency advisories, linting,
+  types, builds and tests for the affected packages. A production website
+  release passes the full check; going live is a separate, deliberate step.
+- **Vulnerabilities.** Dependencies are checked against published advisories. Reports go to security@withruntime.com, as
   [security.txt](https://withruntime.com/.well-known/security.txt) says
   ([report a vulnerability](./security#report-a-vulnerability)).
 - **Monitoring.** Security events, such as an account locked after wrong
@@ -109,11 +107,7 @@ These are the practices every change and every operator follows.
   processing agreement.
 - **Retention and deletion.** What is kept, and for how long, is in the
   [privacy policy](/legal/privacy).
-- **Review.** Risks and these practices are reviewed every year, and after any
-  incident.
 
-| Check                              | How often     | Last done         |
-| ---------------------------------- | ------------- | ----------------- |
-| Who holds access to each system    | Every quarter | 27 September 2026 |
-| Restore the database from its copy | Every month   | 27 September 2026 |
-| Risks and these practices          | Every year    | 27 September 2026 |
+| Check                              | How often   | Last done         |
+| ---------------------------------- | ----------- | ----------------- |
+| Restore the database from its copy | Every month | 27 September 2026 |

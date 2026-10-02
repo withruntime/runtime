@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.8.4. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.10.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -24,14 +24,31 @@ On a server, put a key from https://withruntime.com/account/keys in
 a browser bundle or a command-line argument. With no key anywhere, the first
 call fails with `missing_api_key` and says how to get one.
 
+The singular product names match the CLI. Each pair below uses the same
+product client, connections and defaults; existing plural calls keep working.
+
+| Preferred product  | Existing alias      |
+| ------------------ | ------------------- |
+| `runtime.sandbox`  | `runtime.sandboxes` |
+| `runtime.snapshot` | `runtime.snapshots` |
+| `runtime.image`    | `runtime.images`    |
+| `runtime.volume`   | `runtime.volumes`   |
+| `runtime.job`      | `runtime.jobs`      |
+| `runtime.domain`   | `runtime.domains`   |
+| `runtime.port`     | `runtime.ports`     |
+| `runtime.address`  | `runtime.addresses` |
+
 ## Hello, sandbox
+
+Write a file that totals three invoice amounts, then run it; the total is 750.
 
 ```ts
 import { Sandbox } from "withruntime";
 
 await using sbx = await Sandbox.create();
-const result = await sbx.exec("python3 -c 'print(6 * 7)'");
-console.log(result.exitCode, result.stdout);
+await sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+const result = await sbx.exec("python3 /workspace/invoice.py");
+console.log(result.exitCode, result.stdout); // 0, "750\n"
 ```
 
 `Sandbox.create()` takes no required arguments and returns once the sandbox is
@@ -41,8 +58,12 @@ needs Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
 
 With no arguments you get the free trial while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
-can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and 4 GiB. Every field
-is optional:
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
+4 GiB.
+
+Omitting `funding` can use prepaid credit after the trial is exhausted. Set
+`funding: "trial"` when you want free use only; it never falls back to paid.
+Every field is optional:
 
 ```ts
 import { Runtime } from "withruntime";
@@ -171,7 +192,7 @@ const server = await sbx.spawn("python3 -m http.server 8000", { cwd: "/workspace
 console.log(server.id, server.info.state);
 
 const repl = await sbx.spawn(["python3", "-i", "-q"], { stdin: "pipe" });
-await repl.write("print(21 * 2)\n");
+await repl.write("print(sum([125, 250, 375]))\n");
 await repl.write("exit()\n", { eof: true });
 const done = await repl.wait();
 console.log(done.stdout);
@@ -179,6 +200,22 @@ console.log(done.stdout);
 for (const p of await sbx.processes.list()) console.log(p.id, p.state, p.command);
 await server.kill("SIGTERM");
 ```
+
+`spawn(command, { request: { signal, timeoutMs, idempotencyKey } })` controls
+the HTTP request separately from the process's execution timeout. The outer
+`timeoutMs` controls the guest process; `request.timeoutMs` controls the
+client's request and its retries.
+
+`process.write()` tracks accepted input offsets and keeps concurrent writes in
+order. When the process accepts only part of the input, later chunks match its
+capacity; when its input pipe is full, the SDK waits briefly before retrying
+without advancing the offset. An empty EOF write closes input after earlier queued writes finish. Pass `signal` and `timeoutMs` in the same options object as `eof`.
+Caller-supplied `idempotencyKey` is refused before writing: replaying a logical
+write after partial progress could duplicate input. Each request retry remains
+protected by its input offset and the SDK's per-request key. An explicit timeout covers
+the queue, every chunk and backpressure wait together; a canceled queued write
+sends nothing. Process `get`, `list`, `kill` and `resize` also accept request
+options with the same cancellation and timeout controls.
 
 `process.output()` yields every event from the start, or from a `cursor`, until
 the process exits. The sandbox keeps each process's latest 1 MiB of output, so a
@@ -257,12 +294,38 @@ await sbx.exec("cd project && python3 main.py > result.txt");
 await sbx.files.download("/workspace/project", join(project, "..", "project-out"));
 ```
 
+`download(remote, local, { signal, timeoutMs })` applies one explicit deadline
+to metadata, transfer, gzip, extraction and retries. A file download publishes
+its temporary file only once complete. A directory download stages and verifies the archive before merging.
+Cancellation stops subsequent changes and keeps files already merged into an
+existing destination.
+
 An uploaded file keeps its permissions, so a script stays runnable;
 `write(path, data, { mode: 0o755 })` sets them (0o644 when left out).
+
+`files.archive(path, { gzip, exclude, user })` returns a `Uint8Array` of a
+folder's tar bytes, gzip-compressed by default. `exclude` holds plain relative
+paths, not globs. `files.unarchive(path, bytes, { gzip, user })` merges those
+bytes into a folder and detects gzip when omitted. Both default to the sandbox
+user; pass `user: "root"` explicitly for root-owned trees. This requires
+passwordless `sudo` inside the sandbox. For example:
+
+```ts check
+import { Sandbox } from "withruntime";
+
+await using sbx = await Sandbox.create();
+await sbx.files.write("/workspace/project/report.txt", "total: 750\n");
+const archive = await sbx.files.archive("/workspace/project");
+await sbx.files.unarchive("/workspace/restored", archive);
+console.log(await sbx.files.readText("/workspace/restored/report.txt"));
+```
 
 A directory download keeps the links inside the directory and throws
 `unsafe_archive` for any entry or link that would reach outside it, so
 nothing in a sandbox can write elsewhere on your machine.
+The download also checks links against files already in the destination before
+publishing. Invalid checksums, malformed path metadata and incomplete tar
+end markers are refused; do not treat a partial directory as a successful copy.
 
 From `withruntime` 0.7.0, reads are checked. The API sends
 every file's length before its bytes, and a small file's SHA-256; `read` reads
@@ -281,6 +344,30 @@ await using sbx = await Sandbox.create();
 const stream = await sbx.files.readStream("/workspace/dataset.tar");
 await stream.pipeTo(Writable.toWeb(createWriteStream("dataset.tar")));
 ```
+
+For single-file uploads on Node or Bun, `files.writeStream` accepts a local
+file path, a Blob, a byte iterator or a readable byte stream. It checks the
+complete size and digest before starting the remote upload. A known local file
+or Blob avoids an extra staging copy; an unknown-length source first writes
+one private temporary file, bounded by the initially available local disk,
+then reads it for upload. That adds one payload write and read on your machine.
+Browser callers use `files.write` with byte data instead.
+
+```ts no-run
+import { Sandbox } from "withruntime";
+
+await using sbx = await Sandbox.create();
+await sbx.files.writeStream("/workspace/dataset.tar", "./dataset.tar", {
+  signal: AbortSignal.timeout(120_000),
+  onProgress: ({ bytesSent }) => console.log(bytesSent),
+});
+```
+
+Upload reads use bounded parallel chunks rather than buffering the whole
+file; source-produced chunks and transport buffers also use memory. Canceling
+or failing closes owned input streams, drains active upload workers, attempts
+remote abort with a separate cleanup deadline and removes the private stage.
+An input iterator that never finishes closing has a bounded cleanup wait.
 
 `upload` and `download` of a directory move one tar archive through the API's
 folder routes, which pack and unpack it with `tar` inside the sandbox; from a
@@ -355,7 +442,7 @@ await again.stop();
 A paused sandbox keeps its memory, its processes and its files. `pause()`
 returns once the sandbox's processors have stopped, which is where compute
 billing ends; the host then writes its memory to disk, and a wake or snapshot
-asked for meanwhile waits for that write. Wake restores it on the same host. See [pricing](./pricing) for what a paused sandbox costs and
+asked for meanwhile waits for that write. Wake restores it on the same host by default; [qualified cross-server transfers](./storage#wake-or-fork-on-another-server-when-enabled) can select a compatible server when enabled. See [pricing](./pricing) for what a paused sandbox costs and
 how long it is kept.
 
 ### Wake on request
@@ -509,7 +596,17 @@ try {
 Every write carries an idempotency key, made for you. Timeouts, dropped
 connections, 429 and 503 are retried with the same key and a growing delay, so a
 retried create never makes two sandboxes and a retried command never runs twice.
-Pass your own `idempotencyKey` to make a retry safe across process restarts.
+For methods that accept it, pass your own `idempotencyKey` to make a retry
+safe across process restarts. A transport timeout or connection error on a
+mutation carries `error.idempotencyKey`, including the key the SDK generated.
+Reuse it with identical input only on methods that accept a caller key;
+`process.write` instead protects each input chunk with its offset and an SDK
+request key, and refuses a caller key. Interrupted complete response bodies are retried with that
+same key; streamed output is never replayed after it reaches your code.
+
+`timeoutMs` covers credential lookup, waiting for a local connection, sending,
+reading the response and automatic retries. `timeoutMs: 0` disables that
+deadline; an `AbortSignal` you pass still cancels the call.
 
 **A create waits for room.** When every trial slot is taken (`trial_busy`), the
 account is at its limit (`quota_exceeded`) or the region is full
@@ -626,8 +723,13 @@ create answers (`readyPort` or `readyCommand`); a Dockerfile's `CMD` and
 `images.followLogs(id, onLog)` and `images.delete(ref)` do the rest, and
 `images.registries.set({ registry, username, password })` stores credentials
 for private images. A rebuild starts from the steps an earlier build shares. A
-stored image is charged on its whole file
-([pricing](./pricing#snapshots-images-and-volumes)); building one is not.
+stored image is charged on its whole file until copied-image accounting has
+been qualified and enabled. Where it is enabled, a verified identical copy
+in your account on the same server adds only its extra storage. The shared
+base and each verified extra allocation count once while a ready copy still
+holds them; an extra allocation transfers only to proven descendants of the
+copy that added it
+([pricing](./pricing#snapshots-images-and-volumes)). Building one is not charged.
 
 A new build leaves running sandboxes alone. `sbx.switchImage("data:v2", { keep: "workspace" })`
 moves one to it, keeping its id, `/workspace` (its home), volumes, environment
@@ -688,10 +790,32 @@ await runtime.snapshots.delete(snapshot.id);
 A running sandbox is paused while a snapshot or fork captures it, then woken before the call
 returns (a snapshot of a fresh sandbox is ready in {{server-snapshot}} on Runtime's servers, longer the more memory it holds); a paused one stays paused. Copies get the source's
 vCPUs, memory, disk and CPU (reserved CPU, or a raised floor), are billed as a
-create with those would be, and run on its host. A snapshot is kept on that
-host and copied off it, encrypted, as soon as it is taken, so it survives the
-loss of the server ([storage and backups](./storage)); a sandbox with volumes
+create with those would be, and run on its host by default. Cross-server
+placement requires [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled) to be enabled. A snapshot is kept on that
+host and copied off it, encrypted, after its final compressed form is ready. It survives loss of the
+server once `backedUp` is `true`, meaning that copy has been checked
+([storage and backups](./storage)); a sandbox with volumes
 cannot be snapshotted.
+
+Snapshots default to `mode: "memory"`, which keeps files, memory and running
+processes. `await base.snapshot({ mode: "disk" })` keeps only the root
+filesystem; each sandbox created from it boots fresh without the saved
+processes. Both modes pause a running source until capture finishes, then wake
+it, and leave an already paused source paused.
+
+Where deferred compression has been qualified and enabled, a memory
+snapshot can be `ready` with `compressionPending: true` and start
+copies on the same server from the captured raw state. Runtime compresses it
+in the background; billing uses its final verified compressed allocation,
+while temporary raw files are not charged. Its off-server copy waits for that
+final form, so `backedUp` remains false while compression is pending. See
+[snapshot storage](./storage#snapshots-survive-their-server).
+
+If a snapshot was captured but waking its source fails, the error keeps the
+original failure and `details.snapshotId`, `details.sourceSandboxId` and
+`details.sourceWakeError`. Read that saved snapshot and wake the source
+explicitly before taking another capture; a failed recovery does not erase the
+snapshot id.
 
 `fork` takes `funding` as `create` does: `"trial"` or `"paid"`. Without it, the
 copies keep the source's funding. A trial copy must fit the trial, so a sandbox
@@ -784,6 +908,13 @@ to refuse every token issued so far, and `previews.delete(port)` to stop sharing
   A token lasts at least that long and at most one step longer (an hour, or a
   24th of a shorter lifetime), so reads within a step return the same token. A
   browser's cookie from the link lasts exactly as long as its token.
+- **Absolute token deadline:** pass `expiresAt` as a timezone-qualified ISO
+  timestamp in `create`, or `previews.get(port, undefined, { expiresAt })`.
+  It must be a minute to a week ahead and rounds down to a whole second.
+  With both fields, the earlier deadline wins. A session's expiry also limits
+  its preview reads. Use the returned `tokenExpiresAt` as the actual deadline.
+  This requires the server's matching absolute-deadline support; an older
+  server refuses the field rather than substituting a relative lifetime.
 - **When the sandbox is not running:** a paused or waking sandbox's preview
   answers 503 with `Retry-After` while it wakes; a stopped one answers 404, and
   a deleted or failed one 410, neither with `Retry-After`.
@@ -979,6 +1110,46 @@ console.log(latest?.cpuPercent, typeof verifyWebhook);
 pushes events and metrics to an OpenTelemetry endpoint. See
 [metrics and webhooks](./observability).
 
+## Account API calls
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const counts = await runtime.usageRequests("7d");
+console.log(counts.calls, counts.errorPercent);
+for (const row of counts.operations) console.log(row.operation, row.serverErrors);
+```
+
+`usageRequests()` defaults to `"24h"`; `"7d"`, `"30d"` and `"90d"` select
+longer windows. Counts are exact decimal strings, and `errorPercent` is null
+when no calls were counted. A key needs the `usage` scope, read-only access or
+all-products access. See [account API calls](./observability#account-api-calls).
+
+### Export settled usage
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+let cursor: string | undefined;
+do {
+  const page = await runtime.usageExport({
+    since: "2026-09-01T00:00:00Z",
+    until: "2026-10-01T00:00:00Z",
+    ...(cursor ? { cursor } : {}),
+  });
+  process.stdout.write(page.csv);
+  cursor = page.nextCursor ?? undefined;
+} while (cursor);
+```
+
+The range includes settlements at `since` and excludes those at `until`;
+pending holds are excluded. Rows cover every visible product, with exact
+amount strings. Concatenate each server CSV page unchanged; the header appears
+only on the first. Each page checks current permissions and reads current
+settlements. See [export settled usage](./api#export-settled-usage).
+
 ## Identity tokens
 
 Inside a sandbox, `Sandbox.identityToken({ audience })` returns a short-lived
@@ -995,7 +1166,8 @@ account's single sign-on. See [identity tokens](./identity-tokens) and
 
 ## Coming from E2B, Daytona, Vercel Sandbox or Blaxel
 
-Code written for their SDKs runs on Runtime after changing one import, in
+Their supported sandbox calls keep the same call shapes on Runtime after
+changing the import, in
 `withruntime` 0.4.0 and later for E2B and 0.5.0 and later for Daytona and
 Vercel Sandbox, and 0.8.0 and later for Blaxel:
 

@@ -19,6 +19,11 @@ export type MetricPoint = {
   cpuCores: number | null;
   /** The busiest interval between two readings in the bucket. */
   cpuPeakPercent: number | null;
+  /** Measured wall-time percentage ready to run while waiting for CPU; null
+   * without two complete readings of the same run. Older servers omit it. */
+  cpuWaitPercent?: number | null;
+  /** Measured wall-time percentage with a thread waiting for memory. */
+  memoryStallPercent?: number | null;
   /** Average resident memory, bytes. */
   memoryBytes: number;
   memoryPeakBytes: number;
@@ -116,6 +121,40 @@ export type OtelExport = {
   exportedPoints: number;
 };
 type List<T> = { data: T[]; nextCursor: string | null };
+
+export type UsageExportQuery = { since: string; until: string; cursor?: string; limit?: number };
+export type UsageExportRow = {
+  intervalId: string;
+  resourceId: string;
+  name: string | null;
+  kind: string;
+  meter: string;
+  fundedBy: "credit" | "trial";
+  startsAt: string;
+  endsAt: string;
+  settledAt: string;
+  billedMilliseconds: string | null;
+  chargedMicros: string;
+  quotedRates: Array<{ component: string; unit: string; rateMicros: string }>;
+  /** Exact JSON text, preserving integers beyond JavaScript's number range. */
+  measurementsJson: string | null;
+  evidence: "measured" | "partial" | "missing" | null;
+};
+export type UsageExportPage = {
+  since: string;
+  until: string;
+  data: UsageExportRow[];
+  nextCursor: string | null;
+  /** Concatenate pages in order; only the first page includes the header. */
+  csv: string;
+};
+/** Top-level cross-product settled usage, selected by UTC settlement timestamps
+ * in [since, until). Pending holds are excluded. Follow nextCursor using the
+ * same range; each page checks current permissions. Pages are live reads. */
+export function usageExport(t: Transport) {
+  return (query: UsageExportQuery, options: RequestOptions = {}) =>
+    t.json<UsageExportPage>({ method: "GET", path: "/v1/usage/export", query, ...options });
+}
 
 /** `sbx.metrics()`: this sandbox's measured CPU and memory. */
 export function sandboxMetrics(t: Transport, sandbox: Sandbox) {

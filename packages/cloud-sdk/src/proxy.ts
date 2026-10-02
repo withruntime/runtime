@@ -86,7 +86,9 @@ export function routeFor(target: string, env: Env = processEnv()): Route {
   try {
     parsed = new URL(proxy);
   } catch {
-    throw invalidProxy(found.name, found.value, "is not an address");
+    // A malformed address cannot be parsed reliably enough to remove its
+    // credentials. Keep the variable name, never its untrusted value.
+    throw invalidProxy(found.name, "invalid address", "is not an address");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
     throw invalidProxy(found.name, `${parsed.protocol}//${parsed.host}`, "is not an HTTP proxy");

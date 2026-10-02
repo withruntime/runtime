@@ -85,13 +85,19 @@ export class CodeInterpreter {
   async #defaultContext(): Promise<string> {
     const env = this.#env();
     if (!Object.keys(env).length) return "python";
-    this.#envContext ??= (async () => {
-      const runtime = await this.#sandbox();
-      const made = await guard("sandbox", () =>
-        runtime.interpreter.contexts.create({ language: "python", cwd: HOME, env }),
-      );
-      return made.id;
-    })();
+    if (!this.#envContext) {
+      const pending = (async () => {
+        const runtime = await this.#sandbox();
+        const made = await guard("sandbox", () =>
+          runtime.interpreter.contexts.create({ language: "python", cwd: HOME, env }),
+        );
+        return made.id;
+      })();
+      this.#envContext = pending;
+      pending.catch(() => {
+        if (this.#envContext === pending) this.#envContext = undefined;
+      });
+    }
     return this.#envContext;
   }
 
@@ -492,11 +498,14 @@ export class Sandbox {
       "Use Runtime's desktop: `await sandbox.withruntime.desktop.start()` (see the desktop guide).",
     );
   }
-  setLabels(): Promise<never> {
-    return refusal(
-      "Changing a sandbox's labels",
-      "Runtime sets labels once, at create: pass labels to daytona.create.",
+  async setLabels(labels: Record<string, string>): Promise<Record<string, string>> {
+    const internal = Object.fromEntries(
+      Object.entries(this.#rt.info.labels).filter(
+        ([key]) => key === "code-toolbox-language" || key.startsWith("compat."),
+      ),
     );
+    await guard("sandbox", () => this.#rt.update({ labels: { ...labels, ...internal } }));
+    return this.labels;
   }
   recover(): Promise<never> {
     return refusal(

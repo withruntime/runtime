@@ -60,10 +60,11 @@ from a page comparing Runtime with E2B, Daytona, Vercel Sandbox or Blaxel, Home
 opens on that switch instead, and by hand it is the key, the install and the
 one import that changes.
 
-**One line, with Node 22.12 or later:**
+**Run a file, with Node 22.12 or later:**
 
 ```bash
-npx withruntime sandbox run --trial -- python3 -c 'print(6 * 7)'
+printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
+npx withruntime sandbox run --trial -- python3 - < invoice.py
 ```
 
 The first time, it connects this machine:
@@ -71,7 +72,7 @@ The first time, it connects this machine:
 1. Your browser opens a Runtime page, or the command prints a link and a code.
 2. You sign in with Google or an email link, check the code and choose
    **Connect agent**.
-3. A fresh sandbox runs the command, prints 42 and stops.
+3. A fresh sandbox runs the command, prints the invoice total, 750, and stops.
 
 Exit code zero means the command succeeded. Confirm cleanup with
 `npx withruntime sandbox ls --json`, and stop the test sandbox if it is still
@@ -88,7 +89,7 @@ For several commands in one sandbox, this shell block stops it on exit:
 (
   id=$(npx withruntime sandbox create --trial) || exit
   trap 'npx withruntime sandbox stop "${id}"' EXIT
-  npx withruntime sandbox exec "${id}" -- python3 -c 'print(6 * 7)'
+  npx withruntime sandbox exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 )
 ```
 
@@ -122,7 +123,8 @@ import { Sandbox } from "withruntime";
 
 const sbx = await Sandbox.create({ funding: "trial" });
 try {
-  const result = await sbx.exec("python3 -c 'print(6 * 7)'", { check: true });
+  await sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  const result = await sbx.exec("python3 /workspace/invoice.py", { check: true });
   console.log(result.stdout);
 } finally {
   await sbx.stop();
@@ -133,7 +135,8 @@ try {
 from withruntime import Sandbox
 
 with Sandbox.create(funding="trial") as sbx:
-    print(sbx.exec("python3 -c 'print(6 * 7)'", check=True).stdout)
+    sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+    print(sbx.exec("python3 /workspace/invoice.py", check=True).stdout)
 ```
 
 - Install with `npm install withruntime` or `pip install withruntime`.

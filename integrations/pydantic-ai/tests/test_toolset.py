@@ -140,3 +140,52 @@ def test_used_outside_a_run_says_why():
 
     with pytest.raises(RuntimeError, match="outside an agent run"):
         asyncio.run(RuntimeToolset(runtime=FakeRuntime()).get_tools(None))
+
+
+async def test_binding_failure_stops_the_guest_and_closes_the_owned_client(monkeypatch):
+    import pydantic_ai_withruntime as adapter
+
+    class OwnedRuntime(FakeRuntime):
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    runtime = OwnedRuntime()
+    monkeypatch.setattr(adapter, "AsyncRuntime", lambda: runtime)
+    toolset = RuntimeToolset()
+
+    def fail_binding(sandbox):
+        raise ValueError("bad binding")
+
+    monkeypatch.setattr(toolset, "_bind", fail_binding)
+    with pytest.raises(ValueError, match="bad binding"):
+        await toolset.__aenter__()
+    assert runtime.made[0].stopped and runtime.closed
+    assert toolset.sandbox is None and toolset._entered == 0
+
+
+async def test_binding_failure_survives_cleanup_failure_and_closes_the_client(monkeypatch):
+    import pydantic_ai_withruntime as adapter
+
+    class OwnedRuntime(FakeRuntime):
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    runtime = OwnedRuntime()
+    monkeypatch.setattr(adapter, "AsyncRuntime", lambda: runtime)
+    toolset = RuntimeToolset()
+
+    def fail_binding(sandbox):
+        async def fail_stop():
+            raise ConnectionError("stop failed")
+
+        sandbox.stop = fail_stop
+        raise ValueError("bad binding")
+
+    monkeypatch.setattr(toolset, "_bind", fail_binding)
+    with pytest.raises(ValueError, match="bad binding"):
+        await toolset.__aenter__()
+    assert runtime.closed and toolset.sandbox is None and toolset._entered == 0

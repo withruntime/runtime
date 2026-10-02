@@ -1,9 +1,8 @@
 import { Page } from "./page.js";
 import type { Query, RequestOptions, Transport } from "./transport.js";
 
-/** A sandbox's whole machine (files, memory, running processes), kept on its
- * host to start new sandboxes from, and copied off the host so it survives
- * losing that host. */
+/** A sandbox's saved machine or disk, used to start new sandboxes. A verified
+ * off-host copy protects it from host loss once `backedUp` is true. */
 export type Snapshot = {
   id: string;
   kind: "snapshot";
@@ -15,13 +14,19 @@ export type Snapshot = {
   sourceSandboxId: string;
   shape: { vcpu: number; memoryMiB: number; diskMiB: number; memoryGuarantee: string };
   retentionDays: number;
+  /** True while raw fork memory awaits verified compression. The snapshot
+   * remains ready for starts on its current host, with no storage charge or
+   * off-host copy until final publication. Absent on older servers. */
+  compressionPending?: boolean;
   /** What it stores, and what storage is metered for: the bytes it alone holds. */
   storedBytes: number | null;
+  /** Zero while compression is pending; final bytes once verified. */
   meteredBytes: number | null;
   /** Whether its copy off the host is made and checked. */
   backedUp: boolean;
   /** Where that copy stands. `restoring`: its host was lost and it is being
-   * restored onto another; forks answer `snapshot_restoring` until it is. */
+   * restored onto another; forks answer `snapshot_restoring` until it is.
+   * `none` also covers temporary fork snapshots and pending compression. */
   durability: {
     state: "none" | "pending" | "durable" | "failed" | "restoring";
     durableAt: string | null;

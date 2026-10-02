@@ -12,13 +12,14 @@ Two ways in, both running in a Runtime sandbox (a Firecracker microVM):
     coder = Agent(model="gemini-flash-latest", name="coder", tools=[RuntimeToolset()])
 
 The sandbox starts on first use and stops when the executor or toolset is
-closed (``Runner.close()`` closes toolsets), when the object is garbage
-collected, or at the end of its lease if the process dies first. The key comes
+closed (``Runner.close()`` closes toolsets), or at the end of its lease if the
+process dies first. Garbage collection also stops the executor's sandbox. The key comes
 from ``RUNTIME_API_KEY`` or this machine's ``withruntime login``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import weakref
 from typing import Any
@@ -116,11 +117,11 @@ class RuntimeCodeExecutor(BaseCodeExecutor):
         invocation_context: Any,
         code_execution_input: CodeExecutionInput,
     ) -> CodeExecutionResult:
-        sandbox = self.sandbox
-        for file in code_execution_input.input_files:
-            path = file.name if file.name.startswith("/") else f"{WORKSPACE}/{file.name}"
-            sandbox.files.write(path, file.content)
         try:
+            sandbox = self.sandbox
+            for file in code_execution_input.input_files:
+                path = file.name if file.name.startswith("/") else f"{WORKSPACE}/{file.name}"
+                sandbox.files.write(path, file.content)
             result = sandbox.exec(
                 ["python3", "-c", code_execution_input.code],
                 cwd=WORKSPACE,
@@ -178,22 +179,35 @@ class RuntimeToolset(BaseToolset):
         self._client: AsyncRuntime | None = None
         self._options = {"root": root, "timeout_seconds": timeout_seconds, "max_output_chars": max_output_chars}
         self._tools: list[BaseTool] | None = None
+        self._lock = asyncio.Lock()
 
     @property
     def sandbox(self) -> AsyncSandbox | None:
         return self._sandbox
 
     async def get_tools(self, readonly_context: ReadonlyContext | None = None) -> list[BaseTool]:
-        if self._tools is None:
-            if self._sandbox is None:
-                if self._runtime is None:
-                    self._client = AsyncRuntime()
-                client = self._runtime or self._client
-                self._sandbox = await client.sandboxes.create(**_create_fields(self._create, "google-adk"))
-            self._tools = [FunctionTool(f) for f in sandbox_tools(self._sandbox, **self._options)]
-        return [tool for tool in self._tools if self._is_tool_selected(tool, readonly_context)]
+        async with self._lock:
+            if self._tools is None:
+                try:
+                    if self._sandbox is None:
+                        if self._runtime is None:
+                            self._client = AsyncRuntime()
+                        client = self._runtime or self._client
+                        self._sandbox = await client.sandboxes.create(**_create_fields(self._create, "google-adk"))
+                    self._tools = [FunctionTool(f) for f in sandbox_tools(self._sandbox, **self._options)]
+                except BaseException:
+                    try:
+                        await self._close_owned()
+                    except Exception as error:  # noqa: BLE001 - preserve the initialization failure
+                        logger.warning("Runtime: could not clean up failed toolset initialization: %s", error)
+                    raise
+            return [tool for tool in self._tools if self._is_tool_selected(tool, readonly_context)]
 
     async def close(self) -> None:
+        async with self._lock:
+            await self._close_owned()
+
+    async def _close_owned(self) -> None:
         sandbox, self._tools = self._sandbox, None
         if self._owned:
             self._sandbox = None

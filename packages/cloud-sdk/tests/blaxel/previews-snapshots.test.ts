@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ResponseError } from "../../src/blaxel/index";
+import type { ResponseError, SandboxForkOptions } from "../../src/blaxel/index";
 import {
   NotSupportedError,
   SandboxInstance,
@@ -7,6 +7,8 @@ import {
   Snapshot,
 } from "../../src/blaxel/index";
 import { BlaxelWorld, requests } from "./fake";
+import { Runtime } from "../../src/index";
+import type { CreatePreview } from "../../src/products/previews";
 
 let world: BlaxelWorld;
 const withruntime = () => ({ client: world.client() });
@@ -14,6 +16,31 @@ const create = (name = "my-sandbox") =>
   SandboxInstance.create({ name, withruntime: withruntime() });
 const fake = (sandbox: SandboxInstance) => world.sandboxes.get(sandbox.withruntime.id)!;
 const realFetch = globalThis.fetch;
+
+async function previewWithNativeReply(sandbox: SandboxInstance, reply: (url: URL) => Response) {
+  const seen: URL[] = [];
+  const client = new Runtime({
+    apiKey: "rtcloud_key",
+    baseUrl: "https://api.example.test",
+    fetch: (async (input: string) => {
+      const url = new URL(input);
+      if (!url.pathname.endsWith("/previews/3000")) return Response.json(fake(sandbox).info);
+      seen.push(url);
+      return reply(url);
+    }) as typeof fetch,
+  });
+  const runtime = await client.sandboxes.get(sandbox.withruntime.id);
+  const preview = new SandboxPreview(
+    { metadata: { name: "p" }, spec: { port: 3000 } },
+    {
+      sandboxName: sandbox.name,
+      run: (work) => work(runtime),
+      labels: () => ({}),
+      setLabels: () => Promise.resolve(),
+    },
+  );
+  return { preview, seen };
+}
 
 beforeEach(() => {
   world = new BlaxelWorld();
@@ -23,6 +50,33 @@ afterEach(() => {
 });
 
 describe("previews", () => {
+  test("a typed native create forwards its absolute deadline and optional relative TTL", async () => {
+    const sandbox = await create();
+    const expiresAt = new Date(Date.now() + 600_999).toISOString();
+    const bodies: unknown[] = [];
+    const client = new Runtime({
+      apiKey: "rtcloud_key",
+      baseUrl: "https://api.example.test",
+      fetch: (async (input: string, init: RequestInit = {}) => {
+        const url = new URL(input);
+        if (url.pathname.endsWith("/previews") && init.method === "POST") {
+          bodies.push(JSON.parse(init.body as string));
+          return Response.json({ token: "deadline-token", tokenExpiresAt: expiresAt });
+        }
+        return Response.json(fake(sandbox).info);
+      }) as typeof fetch,
+    });
+    const runtime = await client.sandboxes.get(sandbox.withruntime.id);
+    const exact = { visibility: "private", expiresAt } satisfies CreatePreview;
+    await runtime.previews.create(3000, exact);
+    const bounded = { ...exact, ttlSeconds: 300 } satisfies CreatePreview;
+    await runtime.previews.create(3000, bounded);
+    expect(bodies).toEqual([
+      { port: 3000, visibility: "private", expiresAt },
+      { port: 3000, visibility: "private", expiresAt, ttlSeconds: 300 },
+    ]);
+  });
+
   test("a private preview: shared by port, named in a label, its address without a trailing slash", async () => {
     const sandbox = await create();
     const from = world.calls.length;
@@ -43,24 +97,69 @@ describe("previews", () => {
     expect(sandbox.metadata.labels).toEqual({});
   });
 
-  test("a token for the time asked, at least a minute; over a week is refused", async () => {
+  test("unsafe token expirations refuse before any native token request", async () => {
     const sandbox = await create();
     const preview = await sandbox.previews.create({
       metadata: { name: "p" },
       spec: { port: 3000 },
     });
-    const token = await preview.tokens.create(new Date(Date.now() + 10 * 60 * 1000));
-    expect(world.called("previews.get").at(-1)).toEqual([3000, 600]);
-    expect(token.value).toBe("tok-3000-600");
-    expect(token.expired).toBe(false);
-    await preview.tokens.create(new Date(Date.now() + 5000));
-    expect(world.called("previews.get").at(-1)).toEqual([3000, 60]);
-    expect(
-      await preview.tokens.create(new Date(Date.now() + 8 * 86_400_000)).catch((e: unknown) => e),
-    ).toBeInstanceOf(NotSupportedError);
+    const now = Date.now();
+    const from = world.calls.length;
+    for (const delta of [-1000, 0, 5000, 59_999, 8 * 86_400_000]) {
+      await expect(preview.tokens.create(new Date(now + delta))).rejects.toMatchObject({
+        code: "not_supported",
+        feature: "A preview token lasting less than a minute or more than a week",
+      });
+      expect(world.calls).toHaveLength(from);
+    }
+    await expect(preview.tokens.create(new Date(Number.NaN))).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(world.calls).toHaveLength(from);
     expect(await preview.tokens.list().catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
     await preview.tokens.delete("token-1");
     expect(world.called("previews.rotate")).toEqual([[3000]]);
+  });
+
+  test("absolute token deadlines use the native query and preserve earlier session caps", async () => {
+    const sandbox = await create();
+    const requested = new Date(Date.now() + 600_999);
+    let issued = Math.floor(requested.getTime() / 1000) * 1000;
+    const { preview, seen } = await previewWithNativeReply(sandbox, () =>
+      Response.json({ token: "deadline-token", tokenExpiresAt: new Date(issued).toISOString() }),
+    );
+    const token = await preview.tokens.create(requested);
+    expect(token.value).toBe("deadline-token");
+    expect(token.expiresAt).toBe(new Date(issued).toISOString());
+    expect(seen[0]!.searchParams.get("expiresAt")).toBe(requested.toISOString());
+    expect(seen[0]!.searchParams.has("ttlSeconds")).toBe(false);
+    issued -= 60_000;
+    expect((await preview.tokens.create(requested)).expiresAt).toBe(new Date(issued).toISOString());
+  });
+
+  test("old-server rejection and unsafe native expiry never trigger a duration fallback", async () => {
+    const sandbox = await create();
+    const requested = new Date(Date.now() + 600_999);
+    for (const mode of ["old-server", "extended", "invalid", "no-token"] as const) {
+      const { preview, seen } = await previewWithNativeReply(sandbox, () => {
+        if (mode === "old-server")
+          return Response.json(
+            { error: { code: "invalid_request", message: "Unknown query field: expiresAt" } },
+            { status: 400 },
+          );
+        return Response.json({
+          token: mode === "no-token" ? null : "must-not-be-returned",
+          tokenExpiresAt:
+            mode === "invalid" ? "bad-date" : new Date(requested.getTime() + 1000).toISOString(),
+        });
+      });
+      await expect(preview.tokens.create(requested)).rejects.toMatchObject(
+        mode === "old-server" ? { status: 400 } : { code: "not_supported" },
+      );
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.searchParams.get("expiresAt")).toBe(requested.toISOString());
+      expect(seen[0]!.searchParams.has("ttlSeconds")).toBe(false);
+    }
   });
 
   test("get, list and delete by name, from a fresh client too", async () => {
@@ -213,6 +312,62 @@ describe("snapshots and forks", () => {
     expect(
       await sandbox.fork("app", { targetType: "application" }).catch((e: unknown) => e),
     ).toBeInstanceOf(NotSupportedError);
+  });
+
+  test("sandbox and snapshot forks preserve environment names matching object properties", async () => {
+    const sandbox = await create();
+    const snapshot = await sandbox.snapshots.create("environment-snapshot");
+    const envs = [
+      { name: "__proto__", value: "literal-prototype-name" },
+      { name: "constructor", value: "literal-constructor-name" },
+      { name: "NORMAL", value: "first" },
+      { name: "NORMAL", value: "last" },
+    ];
+    const forks = [
+      () => sandbox.fork("environment-copy", { envs }),
+      () => sandbox.fork("environment-snapshot-copy", { envs, snapshotId: snapshot.id }),
+      () => snapshot.fork("environment-direct-copy", { envs }),
+    ];
+    for (const fork of forks) {
+      const from = world.called("sandbox.exec").length;
+      await fork();
+      expect(world.called("sandbox.exec")).toHaveLength(from + 1);
+      const [, options] = world.called("sandbox.exec").at(-1)!;
+      const stdin = (options as { stdin: string }).stdin;
+      expect(stdin).toContain("export __proto__='literal-prototype-name'");
+      expect(stdin).toContain("export constructor='literal-constructor-name'");
+      expect(stdin).toContain("export NORMAL='last'");
+      expect(stdin).not.toContain("export NORMAL='first'");
+    }
+  });
+
+  test("fork lifecycle overrides refuse before any lookup, clone or snapshot creation", async () => {
+    const sandbox = await create();
+    const from = world.calls.length;
+    for (const options of [
+      { lifecycle: {} },
+      { lifecycle: { expirationPolicies: [{ type: "ttl-max-age", value: "1d" }] } },
+      { lifecycle: {}, snapshotId: "must-not-be-looked-up" },
+    ] satisfies SandboxForkOptions[]) {
+      const error: unknown = await sandbox
+        .fork("must-not-be-created", options)
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(NotSupportedError);
+      expect(error).toMatchObject({
+        alternative: "Omit lifecycle to use the existing Runtime fork behavior.",
+      });
+      expect(world.calls).toHaveLength(from);
+    }
+  });
+
+  test("an omitted fork lifecycle keeps the existing native fork behavior", async () => {
+    const sandbox = await create();
+    const result = await sandbox.fork("inherited-copy", { lifecycle: undefined });
+    expect(result).toEqual({ name: "inherited-copy", snapshotId: "", type: "sandbox" });
+    expect(world.called("sandbox.fork").at(-1)![1]).toEqual({
+      name: "inherited-copy",
+      labels: {},
+    });
   });
 
   test("Snapshot.create, get, list, fork and delete", async () => {

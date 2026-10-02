@@ -102,9 +102,9 @@ BLAXEL_HINTS = {
     "trial_busy": "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive "
                   "it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
     "public_preview_not_allowed": "On the trial, share the port privately: sandbox.previews.create({\"metadata\": "
-                                  "{\"name\": ...}, \"spec\": {\"port\": ..., \"public\": False}}) and a token "
-                                  "from preview.tokens.create(expires_at). A public preview needs a paid sandbox, "
-                                  "which is the account owner's decision.",
+                                  "{\"name\": ...}, \"spec\": {\"port\": ..., \"public\": False}}) and a Runtime "
+                                  "duration-based token from sandbox.withruntime.previews.get(port, ttl_seconds=seconds). "
+                                  "A public preview needs a paid sandbox, which is the account owner's decision.",
     "busy": _AGAIN,
     "guest_busy": _AGAIN,
     "rate_limited": _AGAIN,
@@ -258,6 +258,52 @@ class _Model:
     def __getitem__(self, key: str) -> Any:
         """Blaxel's generated models also read as ``model["field"]``."""
         return getattr(self, key if hasattr(self, key) else _snake(key))
+
+
+@dataclass
+class PaginationMeta(_Model):
+    """Listing metadata; totals stay unknown when Runtime supplies none."""
+    has_more: Optional[bool] = None
+    next_cursor: Optional[str] = None
+    total: Optional[int] = None
+    total_is_partial: Optional[bool] = None
+    additional_properties: Dict[str, Any] = field(default_factory=dict, init=False)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = dict(self.additional_properties)
+        for name in ("has_more", "next_cursor", "total", "total_is_partial"):
+            value = getattr(self, name)
+            if value is not None and value is not UNSET:
+                out[_camel(name)] = value
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Any:
+        if not data or isinstance(data, cls):
+            return data if isinstance(data, cls) else None
+        values = dict(data)
+        result = cls(has_more=values.pop("hasMore", values.pop("has_more", None)),
+                     next_cursor=values.pop("nextCursor", values.pop("next_cursor", None)),
+                     total=values.pop("total", None),
+                     total_is_partial=values.pop("totalIsPartial", values.pop("total_is_partial", None)))
+        result.additional_properties = values
+        return result
+
+    @property
+    def additional_keys(self) -> List[str]:
+        return list(self.additional_properties)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.additional_properties[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.additional_properties[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self.additional_properties[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.additional_properties
 
 
 def _plain(value: Any) -> Any:

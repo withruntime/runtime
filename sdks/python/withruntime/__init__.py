@@ -21,6 +21,10 @@ from ._version import VERSION
 from .webhooks import WebhookVerificationError, verify_webhook
 
 __version__ = VERSION
+# Explicit names keep imports clear beside Python's built-in exceptions.
+# The original names remain aliases for existing callers.
+RuntimeAPIError = RuntimeError
+RuntimeConnectionError = ConnectionError
 _default: Optional[Runtime] = None
 
 
@@ -99,5 +103,5 @@ __all__ = [
     "Process", "AsyncProcess", "Terminal", "AsyncTerminal", "Page", "AsyncPage", "Feedback", "AsyncFeedback",
     "Support", "AsyncSupport", "Snapshots", "AsyncSnapshots", "CommandResult", "RuntimeError", "AuthenticationError", "PermissionDeniedError",
     "NotFoundError", "ConflictError", "InvalidRequestError", "RateLimitError", "ServiceUnavailableError", "AccountBlockedError", "SecretPartlyStoredError",
-    "ConnectionError", "CommandError", "verify_webhook", "WebhookVerificationError", "PortForward", "AsyncPortForward", "VERSION", "__version__",
+    "ConnectionError", "RuntimeAPIError", "RuntimeConnectionError", "CommandError", "verify_webhook", "WebhookVerificationError", "PortForward", "AsyncPortForward", "VERSION", "__version__",
 ]

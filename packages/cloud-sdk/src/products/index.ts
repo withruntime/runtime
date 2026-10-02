@@ -57,6 +57,17 @@ export const clientExtensions = {
   network,
 } satisfies Record<string, (t: Transport) => unknown>;
 
+/** Canonical CLI product names share the existing factory instance. Account
+ * commands such as secrets, events and billing retain their current names. */
+export const clientProductAliases = {
+  image: "images",
+  volume: "volumes",
+  job: "jobs",
+  domain: "domains",
+  port: "ports",
+  address: "addresses",
+} as const satisfies Record<string, keyof typeof clientExtensions>;
+
 export const sandboxExtensions = {
   interpreter: sandboxInterpreter,
   previews: sandboxPreviews,
@@ -70,6 +81,10 @@ export const sandboxExtensions = {
 
 export type ClientExtensions = {
   readonly [K in keyof typeof clientExtensions]: ReturnType<(typeof clientExtensions)[K]>;
+} & {
+  readonly [K in keyof typeof clientProductAliases]: ReturnType<
+    (typeof clientExtensions)[(typeof clientProductAliases)[K]]
+  >;
 };
 export type SandboxExtensions = {
   readonly [K in keyof typeof sandboxExtensions]: ReturnType<(typeof sandboxExtensions)[K]>;

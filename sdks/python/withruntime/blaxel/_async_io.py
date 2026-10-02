@@ -5,9 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 from typing import Any, Awaitable, Callable, List
 
 from .._http import AsyncHTTP, Origin, within
+
+
+def preview_token_expiration(preview_token: Any) -> Any:
+    """Blaxel's async token exposes the stored expiry text unchanged."""
+    return preview_token.spec.expires_at if preview_token.spec else datetime.now()
 
 
 def start(work: Callable[[], Awaitable[Any]]) -> Any:

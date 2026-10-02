@@ -65,6 +65,7 @@ export {
   type CommandResult,
 } from "./errors.js";
 export type { ConnectionOpts, RuntimeOpts } from "./client.js";
+export { Pty, type PtyCreateOpts, type PtyConnectOpts } from "./pty.js";
 export {
   Template,
   TemplateBase,

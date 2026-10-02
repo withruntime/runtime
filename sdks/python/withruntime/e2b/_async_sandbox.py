@@ -21,6 +21,12 @@ from ._core import (CommandResult, EntryInfo, FileNotFoundException, FileType, I
 _clients: Dict[str, Any] = {}
 
 
+def _refuse_fork_timeout(timeout: Optional[int]) -> None:
+    if timeout is not None:
+        raise NotSupportedException("A timeout for forks (fork timeout)",
+                                    "Fork without it, then call set_timeout(seconds) on each fork.")
+
+
 def _client(api_key: Optional[str], client: Optional[AsyncRuntime], **connection: Any) -> AsyncRuntime:
     core.check_connection(connection)
     if client is not None:
@@ -629,6 +635,7 @@ class AsyncSandbox:
     @classmethod
     async def _cls_fork_sandbox(cls, sandbox_id: str, timeout: Optional[int] = None, count: Optional[int] = None,
                                 **opts: Any) -> List[Any]:
+        _refuse_fork_timeout(timeout)
         source = await cls._cls_connect_sandbox(sandbox_id, **opts)
         return await source.fork(timeout, count)
 
@@ -636,11 +643,8 @@ class AsyncSandbox:
     async def fork(self, timeout: Optional[int] = None, count: Optional[int] = None, **_: Any) -> List[Any]:
         """Copies of this sandbox, memory and all. While Runtime's forks are
         switched off this raises NotSupportedException in Runtime's own words."""
-        if timeout is not None:
-            # A fork's lease is Runtime's to set; one shorter than asked could not
-            # be honoured after the forks exist, so this is refused before any are made.
-            raise NotSupportedException("A timeout for forks (fork timeout)",
-                                        "Fork without it, then call set_timeout(seconds) on each fork.")
+        # Refuse before resource effects, including the class-level reconnect.
+        _refuse_fork_timeout(timeout)
         copies = await _guard("sandbox", lambda: self.runtime.fork(count or 1))
         # Copies keep the source's environment on Runtime's side.
         return [type(self)(copy, self._client) for copy in copies]

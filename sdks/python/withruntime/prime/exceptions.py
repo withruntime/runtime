@@ -70,9 +70,10 @@ def translate(method):
     import functools
     import inspect
     from .._errors import RuntimeError as NativeError
-    def mapped(error, args):
+    def mapped(error, args, kwargs):
         if error.code in ("sandbox_not_running", "sandbox_stopped", "not_running"):
-            return SandboxNotRunningError(args[1] if len(args) > 1 else "", message=str(error))
+            sandbox_id = inspect.signature(method).bind_partial(*args, **kwargs).arguments.get("sandbox_id", "")
+            return SandboxNotRunningError(sandbox_id, message=str(error))
         kind = (UnauthorizedError if error.status == 401 else PaymentRequiredError if error.status == 402 else
                 SandboxFileNotFoundError if error.code == "file_not_found" else
                 SandboxFileTooLargeError if error.status == 413 else
@@ -86,12 +87,12 @@ def translate(method):
             try:
                 return await method(*args, **kwargs)
             except NativeError as error:
-                raise mapped(error, args) from error
+                raise mapped(error, args, kwargs) from error
         return asynchronous
     @functools.wraps(method)
     def synchronous(*args, **kwargs):
         try:
             return method(*args, **kwargs)
         except NativeError as error:
-            raise mapped(error, args) from error
+            raise mapped(error, args, kwargs) from error
     return synchronous

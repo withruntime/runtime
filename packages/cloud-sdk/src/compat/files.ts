@@ -29,8 +29,8 @@ export class GuestFiles {
       return;
     }
     const staging = `/workspace/.runtime-compat/write-${crypto.randomUUID()}`;
-    await sandbox.files.write(staging, bytes, { mode: 0o600, signal: options.signal });
     try {
+      await sandbox.files.write(staging, bytes, { mode: 0o600, signal: options.signal });
       await checked(
         sandbox,
         [
@@ -46,7 +46,9 @@ export class GuestFiles {
         { signal: options.signal },
       );
     } finally {
-      await sandbox.files.remove(staging);
+      // Cleanup must preserve the write's outcome, including its original
+      // failure; a successful destination write must not invite a replay.
+      await sandbox.files.remove(staging).catch(() => undefined);
     }
   }
   writeTextFile(path: string, content: string) {
@@ -65,6 +67,21 @@ export class GuestFiles {
     const sandbox = await this.get();
     if (!overwrite && (await sandbox.files.exists(this.path(to))))
       throw new Error(`Destination exists: ${to}`);
+    if (!overwrite) {
+      // cp -n alone reports success when it skips a raced destination. Stage
+      // privately, then publish without replacement and verify it moved.
+      await checked(sandbox, [
+        "bash",
+        "-c",
+        'set -e; parent=$(dirname -- "$2"); stage="$parent/.runtime-copy-$4"; mkdir -m 700 -- "$stage"; trap \'rm -rf -- "$stage"\' EXIT; if [ "$3" = true ]; then cp -R -n -- "$1" "$stage/item"; else cp -n -- "$1" "$stage/item"; fi; mv -n -T -- "$stage/item" "$2"; if [ -e "$stage/item" ] || [ -L "$stage/item" ]; then printf "Destination exists: %s\\n" "$2" >&2; exit 73; fi',
+        "bash",
+        this.path(from),
+        this.path(to),
+        String(recursive),
+        crypto.randomUUID(),
+      ]);
+      return;
+    }
     await checked(sandbox, [
       "cp",
       ...(recursive ? ["-R"] : []),
@@ -103,8 +120,8 @@ export class GuestFiles {
       return;
     }
     const staging = `/workspace/.runtime-compat/append-${crypto.randomUUID()}`;
-    await sandbox.files.write(staging, bytes, { mode: 0o600 });
     try {
+      await sandbox.files.write(staging, bytes, { mode: 0o600 });
       await checked(sandbox, [
         "bash",
         "-c",
@@ -114,7 +131,8 @@ export class GuestFiles {
         this.path(path),
       ]);
     } finally {
-      await sandbox.files.remove(staging);
+      // A cleanup failure after success must not invite appending twice.
+      await sandbox.files.remove(staging).catch(() => undefined);
     }
   }
 }

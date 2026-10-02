@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -160,6 +160,7 @@
   "bugs": "https://github.com/withruntime/runtime/issues",
   "sideEffects": false,
   "browser": {
+    "./dist/file-source.js": "./dist/browser-stub.js",
     "./dist/tar.js": "./dist/browser-stub.js",
     "./dist/image-context.js": "./dist/browser-stub.js",
     "./dist/credentials.js": "./dist/browser-stub.js",

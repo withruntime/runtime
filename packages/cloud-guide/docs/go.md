@@ -43,7 +43,10 @@ func main() {
 	}
 	defer sbx.Stop(context.Background(), nil)
 
-	result, err := sbx.Exec(ctx, "python3 -c 'print(6 * 7)'", &withruntime.ExecOptions{Check: true})
+	if err := sbx.Files.Write(ctx, "/workspace/invoice.py", []byte("print(sum([125, 250, 375]))\n")); err != nil {
+		log.Fatal(err)
+	}
+	result, err := sbx.Exec(ctx, "python3 /workspace/invoice.py", &withruntime.ExecOptions{Check: true})
 	if err != nil {
 		log.Fatal(err)
 	}

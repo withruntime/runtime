@@ -316,7 +316,11 @@ event per line: each `line`, then `done` with the image.
 
 In your account, [Images](https://withruntime.com/account/images) lists each
 image, and its page shows every version with its tags and the build log, which
-follows a build while it runs.
+follows a build while it runs. **Build image** accepts a Dockerfile with a small
+inline context, a registry image or a package recipe. From an image's detail
+page, start a sandbox, add or remove tags, or delete the selected version.
+Spending and deletion ask for confirmation, using the permissions already
+granted to the console's agent.
 
 A build that fails in one of your steps ends with that step's output in the
 log. A build that fails on our side instead, because its build machine did not
@@ -339,8 +343,17 @@ Dockerfile, and we are alerted; build again in a few minutes.
 
 ## Pricing
 
-A stored image is charged on its whole file
-([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
+A stored image is charged on its whole file until copied-image accounting has
+been qualified and enabled. Where it is enabled, an identical copy verified
+in your account on the same server is charged
+only for the extra storage it adds, which can be zero. The shared base and
+each verified extra allocation count once while a ready copy still holds them.
+Deleting the base's owner transfers it to a remaining ready copy; an extra
+allocation moves only to a copy proven to descend from the one that added it.
+Retained capacity is freed only after the last files holding it are removed.
+Changed images and copies whose storage allocation cannot be verified still keep
+ordinary full-file accounting. Storage
+quotas follow the same allocation ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
 with credit. On the free trial a build counts toward the {{trial-hours}} hours, only for
 the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
 a day. A build that fails through a fault of ours, such as a build machine

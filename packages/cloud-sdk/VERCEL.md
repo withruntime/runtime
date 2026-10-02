@@ -16,9 +16,9 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 from withruntime.vercel.sandbox import sync as sandbox  # was: from vercel.sandbox import sync as sandbox
 ```
 
-The mapping was written against `@vercel/sandbox` 3.5.0 and `vercel-sandbox`
+The mapping was written against `@vercel/sandbox` 3.5.1 and `vercel-sandbox`
 0.7.0 on PyPI (the `vercel.sandbox` module of `vercel` 0.11.4), checked
-23 September 2026.
+30 September 2026.
 
 ## Keys
 
@@ -73,7 +73,7 @@ are ignored.
 | `domain(port)`, `update({ ports })`                                   | The public preview of that port; ports added or removed.                                                                                    |
 | `stop()`, `delete()`, `extendTimeout(ms)`                             | `pause` (persistent) or `stop`; `stop`; `extend`.                                                                                           |
 | `update({ timeout, networkPolicy, snapshotExpiration })`              | `extend` (later only), network rules, retention.                                                                                            |
-| `snapshot()`, `Snapshot.get`, `Snapshot.list`, `snapshot.delete()`    | A Runtime snapshot (files, memory and processes), then the sandbox stops, as in Vercel; `snapshots.get`, `list`, `delete`.                  |
+| `snapshot()`, `Snapshot.get`, `Snapshot.list`, `snapshot.delete()`    | A verified disk-only capture, then the source stops; restored snapshots start fresh processes; `snapshots.get`, `list`, `delete`.           |
 | Error classes                                                         | `APIError` with a `response` whose status is Runtime's and `json` of `{ error: { code, message } }`; also `code`, `hint` and `requestId`.   |
 | Python: `create_sandbox`, `run_process`, `create_process`, `box.fs`   | The same mapping; operations await or work as context managers, which stop and by default destroy the sandbox; readers iterate by line.     |
 
@@ -97,6 +97,16 @@ Each of these throws `NotSupportedError` before anything happens. Its
 | `delete({ deleteOrphanSnapshots: true })`, `Snapshot.tree` | Delete snapshots one by one; `Snapshot.list`.                                                               |
 | `Drive`, `SandboxUser`, `defineSandboxProxy`               | Runtime volumes; `sudo`; `sandbox.withruntime.previews`.                                                    |
 | Listing by time, prefix or cursor (JavaScript)             | List them all and filter the result yourself. (Python applies a name prefix and newest-first order itself.) |
+
+Explicit snapshots require the released native disk-capture capability; a server
+that does not confirm disk-only capture is refused. If capture succeeds but the
+source cannot finish stopping, the error retains `snapshotId` and
+`sourceSandboxId` so the saved filesystem remains recoverable. JavaScript exposes
+them in `error.json.error.details` for API errors and directly on other errors;
+Python exposes them in `error.data` for API errors and directly on other errors.
+`snapshot_source_stop_timeout` means the source is still stopping after its wait;
+a failed stop request keeps its original error code. These contracts remain
+partial; controlled package comparisons do not prove hosted restoration.
 
 Some differences are not refusals:
 

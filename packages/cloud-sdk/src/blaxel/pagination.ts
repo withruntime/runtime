@@ -43,6 +43,7 @@ export async function createPaginatedList<TRaw, TItem, TQuery extends CursorPagi
   fetchPage,
   mapItem,
   query,
+  seenCursors,
 }: {
   response: ListResponse<TRaw>;
   fetchPage: (query?: TQuery) => Promise<ListResponse<TRaw>>;
@@ -50,15 +51,30 @@ export async function createPaginatedList<TRaw, TItem, TQuery extends CursorPagi
   query?: TQuery;
   seenCursors?: Set<string>;
 }): Promise<PaginatedList<TItem, TQuery>> {
-  const meta = !response || Array.isArray(response) ? {} : (response.meta ?? {});
+  const meta =
+    !response || Array.isArray(response)
+      ? { hasMore: false }
+      : (response.meta ?? { hasMore: false });
   const data = await Promise.all(unwrapListData(response).map(mapItem));
-  return build(data, meta.nextCursor || undefined, async (cursor) =>
-    createPaginatedList({
-      response: await fetchPage({ ...(query ?? ({} as TQuery)), cursor }),
-      fetchPage,
-      mapItem,
-      ...(query ? { query: { ...query, cursor } } : {}),
-    }),
+  const cursors = new Set(seenCursors);
+  if (query?.cursor) cursors.add(query.cursor);
+  return build(
+    data,
+    meta.nextCursor || undefined,
+    async (cursor) => {
+      if (cursors.has(cursor)) throw new Error("Pagination returned a repeated cursor");
+      const nextQuery = { ...(query ?? ({} as TQuery)), cursor };
+      const nextSeenCursors = new Set(cursors);
+      nextSeenCursors.add(cursor);
+      return createPaginatedList({
+        response: await fetchPage(nextQuery),
+        fetchPage,
+        mapItem,
+        query: nextQuery,
+        seenCursors: nextSeenCursors,
+      });
+    },
+    meta,
   );
 }
 
@@ -66,10 +82,14 @@ export async function createPaginatedList<TRaw, TItem, TQuery extends CursorPagi
 export function paginate<TRaw, TItem>(
   page: Page<TRaw>,
   map: (item: TRaw) => TItem,
+  seenCursors = new Set<string>(),
 ): PaginatedList<TItem> {
-  return build(page.data.map(map), page.nextCursor ?? undefined, async () => {
-    const next = await guard(() => page.next());
-    return next ? paginate(next, map) : null;
+  return build(page.data.map(map), page.nextCursor ?? undefined, async (cursor) => {
+    if (cursor && seenCursors.has(cursor)) throw new Error("Pagination returned a repeated cursor");
+    const nextSeenCursors = new Set(seenCursors);
+    if (cursor) nextSeenCursors.add(cursor);
+    const next = await guard(() => page.next(cursor));
+    return next ? paginate(next, map, nextSeenCursors) : null;
   });
 }
 
@@ -77,13 +97,24 @@ function build<T>(
   data: T[],
   nextCursor: string | undefined,
   more: (cursor: string) => Promise<PaginatedList<T> | null>,
+  meta: PaginatedListMeta = {
+    hasMore: nextCursor !== undefined,
+    ...(nextCursor ? { nextCursor } : {}),
+  },
 ): PaginatedList<T> {
   const list: PaginatedList<T> = {
     data,
-    meta: { hasMore: nextCursor !== undefined, ...(nextCursor ? { nextCursor } : {}) },
-    hasMore: nextCursor !== undefined,
-    ...(nextCursor ? { nextCursor } : {}),
-    nextPage: async () => (nextCursor ? more(nextCursor) : null),
+    meta,
+    get hasMore() {
+      return Boolean(list.nextCursor);
+    },
+    get nextCursor() {
+      return meta.nextCursor || undefined;
+    },
+    nextPage: async () => {
+      const cursor = list.nextCursor;
+      return cursor ? more(cursor) : null;
+    },
     async autoPagingEach(onItem) {
       for await (const item of list) if ((await onItem(item)) === false) return;
     },

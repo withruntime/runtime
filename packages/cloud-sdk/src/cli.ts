@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import { once } from "node:events";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectionOrigins, connectionStore, resolveCredential } from "./credentials.js";
+import {
+  checkBrowserOrigins,
+  connectionOrigins,
+  connectionStore,
+  resolveCredential,
+} from "./credentials.js";
 import { me, named } from "./cli-name.js";
 import { Runtime } from "./client.js";
 import { Sandbox as SandboxHandle, type Sandbox } from "./sandbox.js";
@@ -22,7 +28,13 @@ import type { InterpreterLanguage } from "./products/interpreter.js";
 
 /* runtime <product> <verb>, and account commands at the top level. */
 
-type Out = { json: boolean; write: (text: string) => void; error: (text: string) => void };
+type Out = {
+  json: boolean;
+  write: (text: string) => void;
+  error: (text: string) => void;
+  /** Wait when an output pipe cannot accept another page yet. */
+  drain?: () => Promise<void>;
+};
 type Args = { positional: string[]; flags: Map<string, string[]>; rest: string[] | undefined };
 
 const HELP = `Runtime Cloud CLI ${VERSION}
@@ -48,6 +60,8 @@ Account
   sso                                          Single sign-on and SCIM directory sync (owner or
                                                admin keys); an owner changes it on the website
   usage [--csv]                                Balance, trial time and charges; --csv, each resource
+  usage export --since <UTC time> --until <UTC time>
+                                               Every settlement in the range as CSV; --json, each page
   limits                                       Whether this key is read-only, and its daily spending limit
   secrets set <NAME> --host <host>... [--header <name> [--format '<text {value}>']]
             [--allow '[GET,HEAD] /path/*']...  Store a secret sandboxes use without seeing it; the
@@ -193,8 +207,8 @@ const SANDBOX_HELP = `runtime sandbox <command>
 
 Examples
   id=$(runtime sandbox create)
-  runtime sandbox exec $id -- python3 -c 'print(6*7)'
-  runtime sandbox cp ./project $id:/workspace/project
+  runtime sandbox cp ./invoice.py $id:/workspace/invoice.py
+  runtime sandbox exec $id -- python3 /workspace/invoice.py
   runtime sandbox stop $id
 `;
 
@@ -251,8 +265,15 @@ function parse(
               `Unknown option ${arg.split("=")[0]}. If it belongs to the command, put the command after --: ${commandAfter}`,
             )
           : unknownOption(name, known);
-      const value = inline ?? (booleans.includes(name) ? "true" : argv[++i]);
-      if (value === undefined) throw usage(`--${name} needs a value.`);
+      const boolean = booleans.includes(name);
+      const value = inline ?? (boolean ? "true" : argv[++i]);
+      if (
+        value === undefined ||
+        (!boolean && inline === undefined && (value === "--" || /^--?[^\d]/.test(value)))
+      )
+        throw usage(`--${name} needs a value.`);
+      if (boolean && value !== "true" && value !== "false")
+        throw usage(`--${name} takes true or false.`);
       flags.set(name, [...(flags.get(name) ?? []), value]);
     } else positional.push(arg);
   }
@@ -287,7 +308,9 @@ const integer = (args: Args, name: string) => {
   const value = flag(args, name);
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value)) throw usage(`--${name} must be a whole number.`);
-  return Number(value);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw usage(`--${name} is too large to represent exactly.`);
+  return parsed;
 };
 /** A flag that takes one of a few words, checked before anything is sent. */
 function oneOf<T extends string>(args: Args, name: string, choices: readonly T[]): T {
@@ -637,8 +660,8 @@ export async function run(
         ? JSON.stringify({ connected, usage: HELP })
         : `Runtime Cloud ${VERSION}. ${start}
 
-  ${me} sandbox run -- python3 -c 'print(6*7)'
-                                   A fresh sandbox runs one command, then stops
+  ${me} sandbox run -- python3 < invoice.py
+                                   Run a local invoice script, then stop the sandbox
   ${me} sandbox create                   A sandbox that stays; prints its id
   ${me} sandbox exec <id> -- <command>   Run in it
   ${me} help                             Everything else
@@ -655,11 +678,11 @@ export async function run(
       rest,
       [...CREATE_FLAGS, "keep"],
       [...CREATE_VALUES, "cwd", "env"],
-      `${me} sandbox run -- python3 -c 'print(6*7)'`,
+      `${me} sandbox run -- python3 < invoice.py`,
     );
     const commandLine = args.rest ?? args.positional;
     if (!commandLine.length)
-      throw usage(`Give the command after --: ${me} sandbox run -- python3 -c 'print(6*7)'`);
+      throw usage(`Give the command after --: ${me} sandbox run -- python3 < invoice.py`);
     const runtime = await client(env);
     const timeout = integer(args, "timeout");
     const { timeoutSeconds: _lease, ...input } = createInput(args);
@@ -764,6 +787,37 @@ export async function run(
     return 0;
   }
   if (command === "usage") {
+    if (rest[0] === "export") {
+      const args = parse(rest.slice(1), [], ["since", "until"]);
+      if (args.positional.length || args.rest)
+        throw usage(`Use ${me} usage export --since <UTC time> --until <UTC time>.`);
+      const since = need(flag(args, "since"), "--since <UTC time>, such as 2026-09-01T00:00:00Z");
+      const until = need(flag(args, "until"), "--until <UTC time>, such as 2026-10-01T00:00:00Z");
+      const rt = await client(env);
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await rt.usageExport({
+          since,
+          until,
+          ...(cursor ? { cursor } : {}),
+          limit: 500,
+        });
+        if (page.nextCursor !== null && cursors.has(page.nextCursor))
+          throw new RuntimeError({
+            code: "usage_export_incomplete",
+            status: 0,
+            message: "The usage export repeated a page cursor and could not finish.",
+            hint: "Run the export again; do not treat the partial output as complete.",
+          });
+        if (out.json) out.write(JSON.stringify(page));
+        else if (page.csv) out.write(page.csv);
+        await out.drain?.();
+        if (page.nextCursor === null) return 0;
+        cursors.add(page.nextCursor);
+        cursor = page.nextCursor;
+      }
+    }
     const csv = rest.includes("--csv");
     const unknown = rest.find((arg) => arg !== "--csv");
     if (unknown) throw usage(`Unknown option ${unknown}: ${me} usage [--csv | --json]`);
@@ -814,7 +868,7 @@ export async function run(
     const page = await rt.events.list({
       ...(sandbox ? { resourceId: await sandboxIdOf(rt, sandbox) } : {}),
       ...(flag(args, "type") ? { type: flag(args, "type") as WebhookEventType } : {}),
-      ...(integer(args, "limit") ? { limit: integer(args, "limit")! } : {}),
+      ...(integer(args, "limit") !== undefined ? { limit: integer(args, "limit")! } : {}),
     });
     print(
       page.data.length
@@ -866,7 +920,7 @@ export async function run(
       await client(env)
     ).audit.list({
       ...(flag(args, "action") ? { action: flag(args, "action")! } : {}),
-      ...(integer(args, "limit") ? { limit: integer(args, "limit")! } : {}),
+      ...(integer(args, "limit") !== undefined ? { limit: integer(args, "limit")! } : {}),
       ...(flag(args, "before") ? { before: flag(args, "before")! } : {}),
     });
     print(
@@ -901,10 +955,17 @@ export async function run(
       () => client(env),
       undefined,
       {
-        open: (input) => openWalletAccount(input, { authUrl: origins.auth }),
-        claim: (code) => claimWalletAccount(code, { authUrl: origins.auth }),
-        save: (key, orgId) =>
-          connectionStore(env).save({
+        open: (input) => {
+          checkBrowserOrigins(origins);
+          return openWalletAccount(input, { authUrl: origins.auth });
+        },
+        claim: (code) => {
+          checkBrowserOrigins(origins);
+          return claimWalletAccount(code, { authUrl: origins.auth });
+        },
+        save: (key, orgId) => {
+          checkBrowserOrigins(origins);
+          return connectionStore(env).save({
             version: 1,
             apiOrigin: origins.api,
             authOrigin: origins.auth,
@@ -912,7 +973,8 @@ export async function run(
             connectionId: "pasted",
             orgId,
             agentName: "Wallet agent",
-          }),
+          });
+        },
       },
     );
   }
@@ -1739,7 +1801,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const sbx = await get(args.positional[0]);
       const snapshot = await sbx.snapshot({
         ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
-        ...(integer(args, "retention") ? { retentionDays: integer(args, "retention")! } : {}),
+        ...(integer(args, "retention") !== undefined
+          ? { retentionDays: integer(args, "retention")! }
+          : {}),
       });
       print(snapshot.id, snapshot);
       return 0;
@@ -1804,7 +1868,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         ...(cost === undefined
           ? {}
           : {
-              maxTotalCostMicros: cost === "none" ? null : Math.round(Number(cost) * 1e6),
+              maxTotalCostMicros: cost === "none" ? null : usdMicros(args, "max-total-cost")!,
             }),
       };
       if (!Object.keys(settings).length)
@@ -1928,7 +1992,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const args = parse(rest, [], ["depth", "glob"]);
       const sbx = await use(args.positional[0]);
       const entries = await sbx.files.list(args.positional[1] ?? "/workspace", {
-        ...(integer(args, "depth") ? { depth: integer(args, "depth")! } : {}),
+        ...(integer(args, "depth") !== undefined ? { depth: integer(args, "depth")! } : {}),
         ...(flag(args, "glob") ? { glob: flag(args, "glob")! } : {}),
       });
       print(
@@ -1986,7 +2050,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const sbx = await use(args.positional[0]);
       const preview = await sbx.previews.create(port, {
         ...(has(args, "public") ? { visibility: "public" as const } : {}),
-        ...(integer(args, "ttl") ? { ttlSeconds: integer(args, "ttl")! } : {}),
+        ...(integer(args, "ttl") !== undefined ? { ttlSeconds: integer(args, "ttl")! } : {}),
       });
       // The link and how to use it, nothing more: the API's `hint` (which
       // carries a referral line) stays in --json, not in the command's words.
@@ -2391,7 +2455,7 @@ async function runCode(sbx: Sandbox, argv: string[], out: Out): Promise<number> 
   const execution = await sbx.interpreter.run(code, {
     language,
     ...(flag(args, "context") ? { context: flag(args, "context")! } : {}),
-    ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
+    ...(timeout !== undefined ? { timeoutMs: timeout * 1000 } : {}),
     ...(out.json
       ? {}
       : {
@@ -2438,8 +2502,8 @@ async function desktop(sbx: Sandbox, argv: string[], out: Out): Promise<number> 
     case "start": {
       const args = parse(rest, [], ["width", "height"]);
       const started = await d.start({
-        ...(integer(args, "width") ? { width: integer(args, "width")! } : {}),
-        ...(integer(args, "height") ? { height: integer(args, "height")! } : {}),
+        ...(integer(args, "width") !== undefined ? { width: integer(args, "width")! } : {}),
+        ...(integer(args, "height") !== undefined ? { height: integer(args, "height")! } : {}),
       });
       print(
         `Desktop ${started.size} on ${started.display}. Watch it: ${started.streamUrl}`,
@@ -2822,9 +2886,13 @@ export async function imageCommand(
           "Give exactly one of a folder with a Dockerfile (or -f <Dockerfile>), --from <image>, or --pip/--apt/--npm.",
         );
       const build = {
-        ...(integer(args, "max-image-mib") ? { maxImageMiB: integer(args, "max-image-mib")! } : {}),
-        ...(integer(args, "disk-mib") ? { diskMiB: integer(args, "disk-mib")! } : {}),
-        ...(integer(args, "timeout") ? { timeoutSeconds: integer(args, "timeout")! } : {}),
+        ...(integer(args, "max-image-mib") !== undefined
+          ? { maxImageMiB: integer(args, "max-image-mib")! }
+          : {}),
+        ...(integer(args, "disk-mib") !== undefined ? { diskMiB: integer(args, "disk-mib")! } : {}),
+        ...(integer(args, "timeout") !== undefined
+          ? { timeoutSeconds: integer(args, "timeout")! }
+          : {}),
       };
       // -t app, -t app:v2 -t app:latest: one name, its tags.
       let name = flag(args, "name");
@@ -2839,9 +2907,11 @@ export async function imageCommand(
       }
       const start = {
         ...(flag(args, "start") ? { command: flag(args, "start")! } : {}),
-        ...(integer(args, "ready-port") ? { readyPort: integer(args, "ready-port")! } : {}),
+        ...(integer(args, "ready-port") !== undefined
+          ? { readyPort: integer(args, "ready-port")! }
+          : {}),
         ...(flag(args, "ready-command") ? { readyCommand: flag(args, "ready-command")! } : {}),
-        ...(integer(args, "ready-timeout")
+        ...(integer(args, "ready-timeout") !== undefined
           ? { readyTimeoutSeconds: integer(args, "ready-timeout")! }
           : {}),
       };
@@ -3128,23 +3198,29 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
             ? { cron, ...(flag(args, "timezone") ? { timezone: flag(args, "timezone")! } : {}) }
             : { at: atTime(at!) },
         command: cwd ? { argv, cwd } : argv,
-        ...(integer(args, "timeout") ? { timeoutSeconds: integer(args, "timeout")! } : {}),
+        ...(integer(args, "timeout") !== undefined
+          ? { timeoutSeconds: integer(args, "timeout")! }
+          : {}),
         compute: {
-          ...(integer(args, "vcpu") ? { vcpu: integer(args, "vcpu")! } : {}),
-          ...(integer(args, "memory") ? { memoryMiB: integer(args, "memory")! } : {}),
-          ...(integer(args, "disk") ? { diskMiB: integer(args, "disk")! } : {}),
+          ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
+          ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
+          ...(integer(args, "disk") !== undefined ? { diskMiB: integer(args, "disk")! } : {}),
           ...(flag(args, "cpu")
             ? { cpuMode: oneOf(args, "cpu", ["shared", "reserved"] as const) }
             : {}),
-          ...(integer(args, "cpu-floor") ? { cpuFloorMillis: integer(args, "cpu-floor")! } : {}),
+          ...(integer(args, "cpu-floor") !== undefined
+            ? { cpuFloorMillis: integer(args, "cpu-floor")! }
+            : {}),
           ...(flag(args, "region") ? { region: flag(args, "region")! } : {}),
-          ...(usdMicros(args, "max-cost") ? { maxCostMicros: usdMicros(args, "max-cost")! } : {}),
+          ...(usdMicros(args, "max-cost") !== undefined
+            ? { maxCostMicros: usdMicros(args, "max-cost")! }
+            : {}),
         },
         ...(attempts !== undefined
           ? { retry: { maxAttempts: attempts, backoffSeconds: backoff ?? 30 } }
           : {}),
         ...(secrets ? { secrets } : {}),
-        ...(usdMicros(args, "max-total-cost")
+        ...(usdMicros(args, "max-total-cost") !== undefined
           ? { maxTotalCostMicros: usdMicros(args, "max-total-cost")! }
           : {}),
       });
@@ -3282,9 +3358,13 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
 
 const VOLUME_HELP = `runtime volume <command>
 
-  create --size-mib <N> [--name n]            A persistent ext4 disk; prints its id
+  create --size-mib <N> [--name n] [--shared]  A persistent disk; prints its id
   ls                                          Your volumes
   get <id>                                    One volume, its backups and where it is attached
+  resize <id> --size-mib <N>                  Grow a detached volume on its current host
+  attach <id> <sandboxId> --path /data        Mount a shared disk in a running sandbox
+  detach <id> <attachmentId>                 Flush and unmount its shared attachment
+  attachment <id> <attachmentId>             Read the attachment's state and error
   rm <id>                                     Delete it and everything on it (its backups stay)
   backup <id> [--retention-days N] [--no-wait]
                                               Back it up now, off its host; prints the backup id
@@ -3295,6 +3375,7 @@ const VOLUME_HELP = `runtime volume <command>
                                               Daily backups on or off, and how long each is kept
   Attach one: runtime sandbox create --volume <id>:/data
   Volumes are backed up off their host daily unless you turn it off.
+  Shared commands work where shared disks are enabled.
 `;
 
 async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<number> {
@@ -3308,10 +3389,11 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
   const api = (await client(env)).volumes;
   switch (verb) {
     case "create": {
-      const args = parse(rest, [], ["size-mib", "name"]);
+      const args = parse(rest, ["shared"], ["size-mib", "name"]);
       const created = await api.create({
         sizeMiB: integer(args, "size-mib") ?? Number(need(undefined, "--size-mib <N>")),
         ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
+        ...(has(args, "shared") ? { shared: true } : {}),
       });
       print(created.id, created);
       return 0;
@@ -3341,6 +3423,41 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
       const found = await api.get(need(rest[0], "a volume id"));
       print(describeRecord(found, table), found);
       return 0;
+    }
+    case "resize": {
+      const args = parse(rest, [], ["size-mib"]);
+      const id = need(args.positional[0], "a volume id");
+      if (args.positional.length !== 1 || args.rest)
+        throw usage(`Use ${me} volume resize <id> --size-mib <N>.`);
+      const sizeMiB = integer(args, "size-mib") ?? Number(need(undefined, "--size-mib <N>"));
+      const resized = await api.resize(id, { sizeMiB });
+      print(describeRecord(resized, table), resized);
+      return resized.resize?.state === "failed" ? 1 : 0;
+    }
+    case "attach": {
+      const args = parse(rest, [], ["path"]);
+      const id = need(args.positional[0], "a volume id");
+      const sandboxId = need(args.positional[1], "a sandbox id");
+      const path = need(flag(args, "path"), "--path /data");
+      if (args.positional.length !== 2 || args.rest)
+        throw usage(`Use ${me} volume attach <id> <sandboxId> --path /data.`);
+      const attachment = await api.attach(id, { sandboxId, path });
+      print(describeRecord(attachment, table), attachment);
+      return attachment.error ? 1 : 0;
+    }
+    case "detach":
+    case "attachment": {
+      const args = parse(rest, [], []);
+      const id = need(args.positional[0], "a volume id");
+      const attachmentId = need(args.positional[1], "an attachment id");
+      if (args.positional.length !== 2 || args.rest)
+        throw usage(`Use ${me} volume ${verb} <id> <attachmentId>.`);
+      const attachment =
+        verb === "detach"
+          ? await api.detach(id, attachmentId)
+          : await api.getAttachment(id, attachmentId);
+      print(describeRecord(attachment, table), attachment);
+      return verb === "detach" && attachment.error ? 1 : 0;
     }
     case "rm":
     case "delete": {
@@ -3426,6 +3543,10 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
     "create",
     "ls",
     "get",
+    "resize",
+    "attach",
+    "detach",
+    "attachment",
     "rm",
     "backup",
     "backups",
@@ -3484,7 +3605,13 @@ function usdMicros(args: Args, name: string): number | undefined {
   const value = flag(args, name);
   if (value === undefined) return undefined;
   if (!/^\d+(\.\d{1,6})?$/.test(value)) throw usage(`--${name} takes dollars, such as 25 or 2.50.`);
-  return Math.round(Number(value) * 1e6);
+  // ARCHITECTURE.md section 10: integer microdollars throughout, with no
+  // floating-point money path or rounding drift.
+  const [whole, fraction = ""] = value.split(".");
+  const micros = BigInt(whole!) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+  if (micros > BigInt(Number.MAX_SAFE_INTEGER))
+    throw usage(`--${name} is too large to represent exactly in microdollars.`);
+  return Number(micros);
 }
 /** A create body from the command line's flags. */
 function createInput(args: Args): CreateSandbox & { wait?: boolean } {
@@ -3504,17 +3631,23 @@ function createInput(args: Args): CreateSandbox & { wait?: boolean } {
     ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
     ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
     ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
-    ...(integer(args, "vcpu") ? { vcpu: integer(args, "vcpu")! } : {}),
-    ...(integer(args, "memory") ? { memoryMiB: integer(args, "memory")! } : {}),
-    ...(integer(args, "disk") ? { diskMiB: integer(args, "disk")! } : {}),
+    ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
+    ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
+    ...(integer(args, "disk") !== undefined ? { diskMiB: integer(args, "disk")! } : {}),
     ...(flag(args, "cpu") ? { cpu: oneOf(args, "cpu", ["shared", "reserved"] as const) } : {}),
-    ...(integer(args, "cpu-floor") ? { cpuFloorMillis: integer(args, "cpu-floor")! } : {}),
+    ...(integer(args, "cpu-floor") !== undefined
+      ? { cpuFloorMillis: integer(args, "cpu-floor")! }
+      : {}),
     ...(flag(args, "region") ? { region: flag(args, "region")! } : {}),
-    ...(usdMicros(args, "max-cost") ? { maxCostMicros: usdMicros(args, "max-cost")! } : {}),
-    ...(usdMicros(args, "max-total-cost")
+    ...(usdMicros(args, "max-cost") !== undefined
+      ? { maxCostMicros: usdMicros(args, "max-cost")! }
+      : {}),
+    ...(usdMicros(args, "max-total-cost") !== undefined
       ? { maxTotalCostMicros: usdMicros(args, "max-total-cost")! }
       : {}),
-    ...(integer(args, "timeout") ? { timeoutSeconds: integer(args, "timeout")! } : {}),
+    ...(integer(args, "timeout") !== undefined
+      ? { timeoutSeconds: integer(args, "timeout")! }
+      : {}),
     ...(flag(args, "on-timeout")
       ? { onLeaseEnd: oneOf(args, "on-timeout", ["pause", "stop"] as const) }
       : {}),
@@ -3551,7 +3684,7 @@ async function execute(
     ...(stdin ? { stdin } : {}),
     ...(flag(args, "cwd") ? { cwd: flag(args, "cwd")! } : {}),
     ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
-    ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
+    ...(timeout !== undefined ? { timeoutMs: timeout * 1000 } : {}),
   };
   // Ctrl-C stops the command in the sandbox too, and says so; without this
   // the CLI exited and the command ran on unseen.
@@ -3621,6 +3754,9 @@ function defaultOut(argv: string[]): Out {
   return {
     json,
     write: (text) => process.stdout.write(text.endsWith("\n") ? text : `${text}\n`),
+    drain: async () => {
+      if (process.stdout.writableNeedDrain) await once(process.stdout, "drain");
+    },
     error: (text) => process.stderr.write(`${text}\n`),
   };
 }
@@ -3689,6 +3825,12 @@ function spark(values: Array<number | null>): string {
 }
 const mib = (bytes: number) => `${Math.round(bytes / 1_048_576).toLocaleString("en-US")} MiB`;
 function metricsText(m: SandboxMetrics): string {
+  const waiting = (value: number | null | undefined) =>
+    value == null ? "not measured" : `${value}%`;
+  const waitingHistory = (field: "cpuWaitPercent" | "memoryStallPercent") =>
+    m.points.some((point) => point[field] != null)
+      ? spark(m.points.map((point) => point[field] ?? null))
+      : "not measured";
   const cpu = m.points.map((p) => p.cpuPercent);
   const memory = m.points.map((p) => p.memoryBytes);
   const peak = Math.max(0, ...m.points.map((p) => p.cpuPeakPercent ?? p.cpuPercent ?? 0));
@@ -3712,7 +3854,11 @@ function metricsText(m: SandboxMetrics): string {
         "memory now",
         still ?? (latest ? `${mib(latest.memoryBytes)} of ${mib(m.memoryLimitBytes)}` : "-"),
       ],
+      ["cpu wait now", still ?? waiting(latest?.cpuWaitPercent)],
+      ["memory stalls now", still ?? waiting(latest?.memoryStallPercent)],
       [`cpu, ${m.range}`, m.points.length ? `${spark(cpu)}  peak ${peak}%` : "no readings"],
+      [`cpu wait, ${m.range}`, waitingHistory("cpuWaitPercent")],
+      [`memory stalls, ${m.range}`, waitingHistory("memoryStallPercent")],
       [
         `memory, ${m.range}`,
         m.points.length
@@ -3837,7 +3983,7 @@ async function webhooksCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out)
     }
     case "deliveries": {
       const page = await hooks.deliveries(id(), {
-        ...(integer(args, "limit") ? { limit: integer(args, "limit")! } : {}),
+        ...(integer(args, "limit") !== undefined ? { limit: integer(args, "limit")! } : {}),
       });
       print(
         page.data.length

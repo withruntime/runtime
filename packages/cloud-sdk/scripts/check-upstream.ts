@@ -13,6 +13,15 @@ export type Upstream = {
   /** A newer release reviewed and declined because it is not the API Runtime
    * implements. npm only; the pin stays the supported version. */
   unsupported?: { version: string; artifacts: Record<string, string>; reason: string };
+  /** Authentic artifacts/source reviewed, but installed consumer qualification
+   * is deferred. This is monitoring evidence, never support for this version. */
+  latestReview?: {
+    version: string;
+    artifacts: Record<string, string>;
+    reviewedAt: string;
+    disposition: "held-for-sdk-qualification";
+    evidence: { sourceUrls: string[]; artifactSha256: Record<string, string>; changes: string[] };
+  };
 };
 export type CompatibilityLock = {
   schemaVersion: number;
@@ -88,6 +97,139 @@ export function compareRelease(pin: Upstream, raw: unknown): Omit<Finding, "prov
 }
 
 const stable = (version: string) => /^\d+\.\d+\.\d+$/.test(version);
+// PyPI stable releases may have fewer numeric components or a post release.
+// Unknown non-prerelease spellings refuse rather than silently hiding a release.
+const pythonStable = (version: string): boolean => {
+  const match = /^(\d+(?:\.\d+)*)(?:(?:\.?post|\.?r|-)(\d+))?$/i.exec(version);
+  if (match) return true;
+  if (
+    /^\d+(?:\.\d+)*(?:a|b|rc|\.?(?:alpha|beta|pre|preview|dev))\d*(?:\.post\d+)?(?:\.dev\d+)?$/i.test(
+      version,
+    )
+  )
+    return false;
+  throw new Error(`Unrecognized Python release version ${version}`);
+};
+const pythonOrder = (left: string, right: string): number => {
+  const split = (version: string) => {
+    const match = /^(\d+(?:\.\d+)*)(?:(?:\.?post|\.?r|-)(\d+))?$/i.exec(version)!;
+    return {
+      parts: match[1]!.split(".").map(Number),
+      post: match[2] === undefined ? -1 : Number(match[2]),
+    };
+  };
+  const a = split(left),
+    b = split(right);
+  for (let i = 0; i < Math.max(a.parts.length, b.parts.length); i++) {
+    const difference = (a.parts[i] ?? 0) - (b.parts[i] ?? 0);
+    if (difference) return difference;
+  }
+  return a.post - b.post;
+};
+
+/** ARCHITECTURE.md: Competitor SDK compatibility. An exact source review can
+ * hold qualification without advancing the supported pin or its claim. Both
+ * subjects remain hash/health watched; npm latest and intervening supported-line
+ * releases remain watched. Python stable release inventories remain watched. */
+export function compareLatestReview(
+  pin: Upstream,
+  raw: unknown,
+  pinnedRaw?: unknown,
+): Omit<Finding, "provider" | "package"> {
+  const reviewed = pin.latestReview;
+  if (!reviewed || pin.unsupported) throw new Error("Missing or conflicting latest review");
+  const data = object(raw);
+  let latestRaw: unknown;
+  let versions: Record<string, unknown>;
+  let latest: string;
+  if (pin.registry === "npm") {
+    latest = string(object(data["dist-tags"]).latest);
+    versions = object(data.versions);
+    pinnedRaw = versions[pin.version];
+    latestRaw = versions[latest];
+  } else {
+    latest = string(object(data.info).version);
+    versions = object(data.releases);
+    latestRaw = data;
+  }
+  if (latest !== reviewed.version)
+    return {
+      status: "review",
+      message: `Pinned ${pin.version}; reviewed ${reviewed.version}, but latest is now ${latest}. Review before releasing.`,
+    };
+  if (pinnedRaw === undefined || latestRaw === undefined)
+    return { status: "review", message: "Pinned or reviewed release is no longer published." };
+  const healthy = (subject: Upstream, raw: unknown) => {
+    const entry = object(raw);
+    if (subject.registry === "npm") {
+      if (entry.deprecated !== undefined && typeof entry.deprecated !== "string")
+        throw new Error("Malformed deprecation field");
+    } else {
+      if (typeof object(entry.info).yanked !== "boolean" || !Array.isArray(entry.urls))
+        throw new Error("Malformed Python release health");
+      const names = new Set<string>();
+      for (const raw of entry.urls) {
+        const file = object(raw);
+        const name = string(file.filename);
+        if (names.has(name) || typeof file.yanked !== "boolean")
+          throw new Error("Duplicate or malformed Python distribution");
+        names.add(name);
+      }
+    }
+    return compareRelease(subject, entry);
+  };
+  const pinned = healthy(pin, pinnedRaw);
+  if (pinned.status !== "current") return pinned;
+  const reviewedResult = healthy(
+    { ...pin, version: reviewed.version, artifacts: reviewed.artifacts },
+    latestRaw,
+  );
+  if (reviewedResult.status !== "current") return reviewedResult;
+  if (versions[pin.version] === undefined || versions[reviewed.version] === undefined)
+    return {
+      status: "review",
+      message: "Pinned or reviewed release is missing from the published version list.",
+    };
+  if (
+    pin.registry === "pypi" &&
+    [pin.version, reviewed.version].some(
+      (version) => !Array.isArray(versions[version]) || !(versions[version] as unknown[]).length,
+    )
+  )
+    throw new Error("Malformed or empty published Python release inventory");
+  if (pin.registry === "pypi") {
+    for (const subject of [
+      pin,
+      { ...pin, version: reviewed.version, artifacts: reviewed.artifacts },
+    ]) {
+      const listed = healthy(subject, {
+        info: { version: subject.version, yanked: false },
+        urls: versions[subject.version],
+      });
+      if (listed.status !== "current") return listed;
+    }
+  }
+  const order = pin.registry === "pypi" ? pythonOrder : Bun.semver.order;
+  const unreviewed = Object.keys(versions).filter(
+    (version) =>
+      (pin.registry === "pypi" ? pythonStable(version) : stable(version)) &&
+      version !== reviewed.version &&
+      order(version, pin.version) > 0 &&
+      // npm's latest tag defines the reviewed release channel. Higher-numbered
+      // historical/other-channel releases do not override that authoritative tag.
+      // Keep watching stable fixes between the supported pin and reviewed latest.
+      (pin.registry === "pypi" || order(version, reviewed.version) < 0),
+  );
+  if (unreviewed.length)
+    return {
+      status: "review",
+      message: `Unreviewed stable release ${unreviewed.sort(order).at(-1)} requires review before releasing.`,
+    };
+  return {
+    status: "current",
+    message: `${pin.version}: supported pin unchanged; latest ${latest} source reviewed, qualification deferred (latest compatibility unqualified).`,
+  };
+}
 
 /** For a pin with a reviewed `unsupported` release, read the registry's full
  * version list: pass only while `latest` is that exact reviewed release, the
@@ -198,6 +340,45 @@ export function validateLock(value: unknown): CompatibilityLock {
         return artifacts;
       };
       hashed(pin.artifacts);
+      if (pin.latestReview !== undefined) {
+        const reviewed = object(pin.latestReview);
+        const reviewedVersion = string(reviewed.version);
+        const artifacts = hashed(reviewed.artifacts);
+        const evidence = object(reviewed.evidence);
+        const byteHashes = object(evidence.artifactSha256);
+        if (
+          pin.unsupported !== undefined ||
+          !stable(version) ||
+          !stable(reviewedVersion) ||
+          Bun.semver.order(reviewedVersion, version) <= 0 ||
+          reviewed.disposition !== "held-for-sdk-qualification" ||
+          typeof reviewed.reviewedAt !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(reviewed.reviewedAt) ||
+          (pin.registry === "npm" && Object.keys(artifacts).join() !== reviewedVersion) ||
+          Object.keys(byteHashes).length !== Object.keys(artifacts).length ||
+          Object.keys(artifacts).some(
+            (file) =>
+              typeof byteHashes[file] !== "string" || !/^[a-f0-9]{64}$/.test(byteHashes[file]),
+          ) ||
+          (pin.registry === "pypi" &&
+            Object.keys(artifacts).some(
+              (file) => artifacts[file] !== `sha256-${string(byteHashes[file])}`,
+            )) ||
+          !Array.isArray(evidence.sourceUrls) ||
+          !evidence.sourceUrls.length ||
+          evidence.sourceUrls.some(
+            (url) =>
+              typeof url !== "string" ||
+              !/^https:\/\/(?:registry\.npmjs\.org|pypi\.org|files\.pythonhosted\.org|github\.com)\//.test(
+                url,
+              ),
+          ) ||
+          !Array.isArray(evidence.changes) ||
+          !evidence.changes.length ||
+          evidence.changes.some((change) => typeof change !== "string" || !change.trim())
+        )
+          throw new Error(`Invalid latest review for ${name}`);
+      }
       if (pin.unsupported !== undefined) {
         const declined = object(pin.unsupported);
         const declinedVersion = string(declined.version);
@@ -230,8 +411,20 @@ export async function checkUpstreams(
       while (next < tasks.length) {
         const task = tasks[next++]!;
         const pin = task.pin;
+        let reviewingMetadata = false;
         try {
-          const line = pin.unsupported !== undefined;
+          if (pin.latestReview !== undefined) {
+            reviewingMetadata = true;
+            validateLock({
+              schemaVersion: 1,
+              checkedAt: lock.checkedAt,
+              providers: [{ id: task.provider, status: "partial", upstreams: [pin] }],
+            });
+            reviewingMetadata = false;
+          }
+          const line =
+            pin.unsupported !== undefined ||
+            (pin.registry === "npm" && pin.latestReview !== undefined);
           const url =
             pin.registry === "pypi"
               ? `https://pypi.org/pypi/${encodeURIComponent(pin.name)}/json`
@@ -245,17 +438,50 @@ export async function checkUpstreams(
             ...(line ? { headers: { accept: "application/vnd.npm.install-v1+json" } } : {}),
           });
           if (!response.ok) throw new Error(`Registry returned HTTP ${response.status}`);
-          const body: unknown = await response.json();
+          const text = pin.latestReview ? await response.text() : undefined;
+          reviewingMetadata = pin.latestReview !== undefined;
+          const body: unknown = text === undefined ? await response.json() : JSON.parse(text);
+          let pinnedBody: unknown;
+          if (pin.registry === "pypi" && pin.latestReview !== undefined) {
+            // Validate the latest document before another network operation can
+            // fail: malformed published metadata must not become an offline warning.
+            const latest = object(body);
+            const preflight = compareLatestReview(pin, body, {
+              info: { version: pin.version, yanked: false },
+              urls: object(latest.releases)[pin.version],
+            });
+            if (preflight.status !== "current") {
+              findings.push({ provider: task.provider, package: pin.name, ...preflight });
+              continue;
+            }
+            reviewingMetadata = false;
+            const pinnedResponse = await fetcher(
+              `https://pypi.org/pypi/${encodeURIComponent(pin.name)}/${encodeURIComponent(pin.version)}/json`,
+              {
+                signal: AbortSignal.timeout(10_000),
+                redirect: "error",
+              },
+            );
+            if (!pinnedResponse.ok)
+              throw new Error(`Pinned registry returned HTTP ${pinnedResponse.status}`);
+            const pinnedText = await pinnedResponse.text();
+            reviewingMetadata = true;
+            pinnedBody = JSON.parse(pinnedText);
+          }
           findings.push({
             provider: task.provider,
             package: pin.name,
-            ...(line ? compareSupportedLine(pin, body) : compareRelease(pin, body)),
+            ...(pin.latestReview
+              ? compareLatestReview(pin, body, pinnedBody)
+              : line
+                ? compareSupportedLine(pin, body)
+                : compareRelease(pin, body)),
           });
         } catch (error) {
           findings.push({
             provider: task.provider,
             package: pin.name,
-            status: "unavailable",
+            status: reviewingMetadata ? "review" : "unavailable",
             message: error instanceof Error ? error.message : "Registry check failed",
           });
         }

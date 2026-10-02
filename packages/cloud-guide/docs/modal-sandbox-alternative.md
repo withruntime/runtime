@@ -116,7 +116,7 @@ Modal:
 import modal
 app = modal.App.lookup("my-app", create_if_missing=True)
 sb = modal.Sandbox.create(app=app)
-process = sb.exec("python3", "-c", "print(6 * 7)")
+process = sb.exec("python3", "-c", "print(sum([125, 250, 375]))")
 print(process.stdout.read())
 sb.terminate()
 ```
@@ -126,7 +126,8 @@ Runtime:
 ```python
 from withruntime import Sandbox
 with Sandbox.create(funding="trial") as box:
-    print(box.exec("python3 -c 'print(6 * 7)'", check=True).stdout)
+    box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+    print(box.exec("python3 /workspace/invoice.py", check=True).stdout)
 ```
 
 ## When Modal may fit better

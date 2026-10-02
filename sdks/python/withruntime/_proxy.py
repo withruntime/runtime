@@ -13,7 +13,8 @@ import base64
 import os
 import re
 import socket
-from typing import Mapping, NamedTuple, Optional, Tuple
+import time
+from typing import Callable, Mapping, NamedTuple, Optional, Tuple
 from urllib.parse import unquote, urlsplit
 
 from ._errors import RuntimeError
@@ -146,17 +147,30 @@ def refused_status(error: BaseException) -> Optional[int]:
     return None
 
 
-def tunnel(route: Route, host: str, port: int, timeout: float) -> socket.socket:
+def tunnel(route: Route, host: str, port: int, timeout: float, *,
+           on_socket: Optional[Callable[[socket.socket], None]] = None) -> socket.socket:
     """A plain socket to host:port through the route's proxy (CONNECT)."""
-    sock = socket.create_connection((route.proxy_host, route.proxy_port), timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    def remaining():
+        if deadline is None:
+            return None
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("The CONNECT deadline expired")
+        return left
+    sock = socket.create_connection((route.proxy_host, route.proxy_port), timeout=remaining())
     try:
+        if on_socket is not None:
+            on_socket(sock)
         authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
         lines = [f"CONNECT {authority} HTTP/1.1", f"Host: {authority}"]
         if route.authorization:
             lines.append(f"Proxy-Authorization: {route.authorization}")
+        sock.settimeout(remaining())
         sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
         head = b""
         while b"\r\n\r\n" not in head:
+            sock.settimeout(remaining())
             chunk = sock.recv(1)
             if not chunk:
                 raise ConnectionResetError("The proxy closed the connection during CONNECT")

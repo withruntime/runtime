@@ -51,8 +51,10 @@ class AsyncSandboxProcess:
         return self._returncode
 
     async def _pump(self):
+        events = None
         try:
-            async for event in self._process.output_bytes():
+            events = self._process.output_bytes()
+            async for event in events:
                 if event["type"] in ("stdout", "stderr"):
                     getattr(self, event["type"])._queue.put_nowait(event["data"])
                 elif event["type"] == "truncated":
@@ -74,6 +76,13 @@ class AsyncSandboxProcess:
             self.stdout._queue.put_nowait(error)
             self.stderr._queue.put_nowait(error)
         finally:
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except BaseException:
+                    # Match Prime's cleanup: retain the original output/exit result.
+                    pass
             self.stdout._queue.put_nowait(_END)
             self.stderr._queue.put_nowait(_END)
 

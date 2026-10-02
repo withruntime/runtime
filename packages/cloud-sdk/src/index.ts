@@ -33,6 +33,11 @@ export { Tunnel, TunnelStream, type PortForward } from "./tunnel.js";
 export { Page } from "./page.js";
 export type { KeyLimits } from "./products/limits.js";
 export type { AuditEvent, AuditPage } from "./products/audit.js";
+export type {
+  UsageExportQuery,
+  UsageExportRow,
+  UsageExportPage,
+} from "./products/observability.js";
 export type { JobSecret, Secret, SecretRule, SecretUse, SetSecret } from "./products/secrets.js";
 export { SecretPartlyStoredError } from "./products/secrets.js";
 export type { McpCatalogEntry, McpGateway, McpServerRequest } from "./products/mcp.js";
@@ -50,7 +55,7 @@ export type {
   TailscaleNode,
   TailscaleStatus,
 } from "./products/tailscale.js";
-export type { Volume, VolumeBackup, CreateVolume } from "./products/volumes.js";
+export type { Volume, VolumeBackup, CreateVolume, VolumeAttachment } from "./products/volumes.js";
 export type {
   CreateJob,
   Job,

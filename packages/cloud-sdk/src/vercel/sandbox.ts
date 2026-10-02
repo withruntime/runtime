@@ -87,7 +87,7 @@ export interface CreateSandboxParams extends Credentials {
   /** Milliseconds a stopped persistent sandbox is kept, as Runtime's
    * retention (whole days, 1 to 365; 0 is 365). */
   snapshotExpiration?: number;
-  /** Accepted: a paused Runtime sandbox keeps exactly its latest state. */
+  /** Refused: Runtime does not enforce snapshot count or eviction policies. */
   keepLastSnapshots?: { count: number; expiration?: number; deleteEvicted?: boolean };
   onResume?: (sandbox: Sandbox) => Promise<void>;
   /** A legacy Vercel runtime (node22, node24, node26, python3.13): Runtime's
@@ -133,6 +133,12 @@ function leaseSeconds(timeoutMs: number): number {
 }
 
 function refuseCreate(params: CreateSandboxParams) {
+  if (params.keepLastSnapshots !== undefined)
+    throw new NotSupportedError(
+      "Snapshot count and eviction policies (keepLastSnapshots)",
+      "Omit it; manage saved snapshots explicitly with Snapshot.list and snapshot.delete.",
+    );
+  if (params.ports !== undefined) validatePorts(params.ports);
   if (params.mounts && Object.keys(params.mounts).length)
     throw new NotSupportedError(
       "Vercel Drives (mounts)",
@@ -153,6 +159,14 @@ function refuseCreate(params: CreateSandboxParams) {
       "Failover regions (failoverRegions)",
       "Remove it: Runtime runs in one US region.",
     );
+}
+
+function validatePorts(ports: number[]): void {
+  if (
+    !Array.isArray(ports) ||
+    ports.some((port) => !Number.isSafeInteger(port) || port < 1 || port > 65_535)
+  )
+    throw new RangeError("ports must contain only integers from 1 to 65535.");
 }
 
 /** Vercel's network policy as Runtime's rules. Header injection and
@@ -351,6 +365,8 @@ export class Sandbox {
     refuseCreate(params);
     const client = clientFor(params);
     const persistent = params.persistent ?? true;
+    if (params.snapshotExpiration !== undefined && persistent)
+      retentionDays(params.snapshotExpiration);
     const vcpus = params.resources?.vcpus ?? DEFAULT_VCPUS;
     const source = await guard(() => resolveImage(client, params));
     const input: RuntimeCreate = {
@@ -432,14 +448,15 @@ export class Sandbox {
       onResume?: (sandbox: Sandbox) => Promise<void>;
     } & Credentials & { withruntime?: WithRuntime },
   ): Promise<Sandbox> {
+    params.signal?.throwIfAborted();
     const client = clientFor(params);
-    const runtime = await guard(() => find(client, params.name), params.name);
+    const runtime = await guard(() => find(client, params.name, params), params.name);
     const sandbox = new Sandbox({
       runtime,
       client,
       params: params.onResume ? { onResume: params.onResume } : {},
     });
-    if (params.resume !== false) await sandbox.#live();
+    if (params.resume !== false) await sandbox.#live(params);
     return sandbox;
   }
 
@@ -468,12 +485,25 @@ export class Sandbox {
     params: Omit<CreateSandboxParams, "source"> & { sourceSandbox: string },
   ): Promise<Sandbox & AsyncDisposable> {
     const unsupported = (
-      ["resources", "ports", "timeout", "networkPolicy", "image", "tags", "env"] as const
+      [
+        "resources",
+        "ports",
+        "timeout",
+        "networkPolicy",
+        "image",
+        "tags",
+        "env",
+        "persistent",
+        "snapshotExpiration",
+        "keepLastSnapshots",
+        "onResume",
+        "runtime",
+      ] as const
     ).find((field) => params[field] !== undefined);
     if (unsupported)
       throw new NotSupportedError(
         `Overriding ${unsupported} on a fork`,
-        "Fork without it; the copy keeps the source's machine, lease and rules.",
+        "Omit the override to use Runtime's existing fork behavior.",
       );
     refuseCreate(params);
     const source = await Sandbox.get({ ...params, name: params.sourceSandbox });
@@ -499,6 +529,7 @@ export class Sandbox {
         withruntime?: WithRuntime;
       } & Record<string, unknown> = {},
   ) {
+    params.signal?.throwIfAborted();
     for (const field of ["since", "until", "cursor", "sortBy", "sortOrder", "namePrefix"])
       if (params[field] !== undefined)
         throw new NotSupportedError(
@@ -507,55 +538,69 @@ export class Sandbox {
         );
     const client = clientFor(params);
     const page = await guard(() =>
-      client.sandboxes.list({
-        ...(params.tags ? { labels: params.tags } : {}),
-        ...(params.limit ? { limit: Math.min(params.limit, 100) } : {}),
-      }),
+      client.sandboxes.list(
+        {
+          ...(params.tags ? { labels: params.tags } : {}),
+          ...(params.limit ? { limit: Math.min(params.limit, 100) } : {}),
+        },
+        signalOf(params),
+      ),
     );
-    return paginate(page);
+    return paginate(page, params.signal);
   }
 
   // ---- commands ---------------------------------------------------------
 
   /** Wakes the sandbox if it was paused (a stopped persistent sandbox, in
    * Vercel's words), as Vercel resumes one on the next call. */
-  async #live(): Promise<RuntimeSandbox> {
+  async #live(opts: { signal?: AbortSignal } = {}): Promise<RuntimeSandbox> {
+    opts.signal?.throwIfAborted();
     if (this.#deleted)
       throw new APIError(new Response(null, { status: 410 }), {
         message: `Sandbox ${this.name} was deleted.`,
         sandboxName: this.name,
       });
     const state = this.#rt.state;
-    if (state === "paused" || state === "pausing") await this.#wake();
+    if (state === "paused" || state === "pausing") await this.#wake(opts);
     return this.#rt;
   }
 
-  async #wake() {
-    await guard(() => this.#rt.wake({}), this.name);
+  async #wake(opts: { signal?: AbortSignal } = {}) {
+    await guard(() => this.#rt.wake(signalOf(opts)), this.name);
     await this.#onResume?.(this);
   }
 
   /** Runs `work` on the live sandbox; if the lease paused it meanwhile, wakes
    * it and runs `work` once more. */
-  async #withResume<T>(work: (runtime: RuntimeSandbox) => Promise<T>): Promise<T> {
-    const runtime = await this.#live();
+  async #withResume<T>(
+    work: (runtime: RuntimeSandbox) => Promise<T>,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<T> {
+    opts.signal?.throwIfAborted();
+    const runtime = await this.#live(opts);
     try {
       return await work(runtime);
     } catch (error) {
       if (!(error instanceof RuntimeError && error.code === "sandbox_paused"))
         throw translate(error, this.name);
-      await guard(() => runtime.refresh(), this.name);
-      await this.#wake();
+      await guard(() => runtime.refresh(signalOf(opts)), this.name);
+      await this.#wake(opts);
       return guard(() => work(this.#rt), this.name);
     }
   }
 
-  async #linkHome(text: string) {
+  async #linkHome(text: string, opts: { signal?: AbortSignal } = {}) {
+    opts.signal?.throwIfAborted();
     if (this.#linked || !text.includes(HOME)) return this.#linked;
     this.#linked = (async () => {
-      await this.#rt.exec(HOME_LINK).catch(() => undefined);
+      await this.#rt.exec(HOME_LINK, signalOf(opts)).catch(() => opts.signal?.throwIfAborted());
     })();
-    return this.#linked;
+    try {
+      await this.#linked;
+    } catch (error) {
+      this.#linked = undefined;
+      throw error;
+    }
   }
 
   /** Runs a command. It waits and resolves with a CommandFinished (a
@@ -584,20 +629,22 @@ export class Sandbox {
     ];
     const cwd = params.cwd === undefined ? RUNTIME_HOME : toRuntimePath(params.cwd);
     const env = { ...this.#env, ...params.env };
-    await this.#live();
+    await this.#live(params);
     await this.#linkHome(
       `${argv.join(" ")}\n${params.cwd ?? ""}\n${Object.values(env).join("\n")}`,
+      params,
     );
     const timeoutMs = params.timeoutMs ?? LONGEST_MS;
     const common = {
       cwd,
       ...(Object.keys(env).length ? { env } : {}),
       timeoutMs,
+      ...signalOf(params),
     };
     const startedAt = Date.now();
     const vercelCwd = params.cwd === undefined ? HOME : toVercelPath(params.cwd);
     if (params.detached) {
-      const process = await this.#withResume((runtime) => runtime.spawn(argv, common));
+      const process = await this.#withResume((runtime) => runtime.spawn(argv, common), params);
       const command = new Command({
         id: process.id,
         cwd: vercelCwd,
@@ -613,13 +660,14 @@ export class Sandbox {
       lines.push({ stream, data });
       writer?.write(data);
     };
-    const result = await this.#withResume((runtime) =>
-      runtime.exec(argv, {
-        ...common,
-        onStdout: record("stdout", params.stdout),
-        onStderr: record("stderr", params.stderr),
-        ...signalOf(params),
-      }),
+    const result = await this.#withResume(
+      (runtime) =>
+        runtime.exec(argv, {
+          ...common,
+          onStdout: record("stdout", params.stdout),
+          onStderr: record("stderr", params.stderr),
+        }),
+      params,
     );
     return new CommandFinished(
       {
@@ -635,8 +683,11 @@ export class Sandbox {
   }
 
   /** A command started earlier, by its cmdId. */
-  async getCommand(cmdId: string, _opts: { signal?: AbortSignal } = {}): Promise<Command> {
-    const process = await this.#withResume((runtime) => runtime.processes.get(cmdId));
+  async getCommand(cmdId: string, opts: { signal?: AbortSignal } = {}): Promise<Command> {
+    const process = await this.#withResume(
+      (runtime) => runtime.processes.get(cmdId, signalOf(opts)),
+      opts,
+    );
     return new Command({
       id: process.id,
       cwd: process.info.cwd,
@@ -648,9 +699,12 @@ export class Sandbox {
 
   // ---- files ------------------------------------------------------------
 
-  async mkDir(path: string, _opts: { signal?: AbortSignal } = {}): Promise<void> {
+  async mkDir(path: string, opts: { signal?: AbortSignal } = {}): Promise<void> {
     const target = toRuntimePath(path);
-    await this.#withResume((runtime) => runtime.files.mkdir(target, { parents: true }));
+    await this.#withResume(
+      (runtime) => runtime.files.mkdir(target, { parents: true, ...signalOf(opts) }),
+      opts,
+    );
   }
 
   /** The file's bytes as a Node stream, or null when there is no file. */
@@ -672,7 +726,7 @@ export class Sandbox {
     const target = toRuntimePath(file.path, file.cwd);
     try {
       return Buffer.from(
-        await this.#withResume((runtime) => runtime.files.read(target, signalOf(opts))),
+        await this.#withResume((runtime) => runtime.files.read(target, signalOf(opts)), opts),
       );
     } catch (error) {
       if (error instanceof APIError && error.response.status === 404) return null;
@@ -688,11 +742,13 @@ export class Sandbox {
   ): Promise<string | null> {
     const buffer = await this.readFileToBuffer(src, opts);
     if (buffer === null) return null;
+    opts.signal?.throwIfAborted();
     const { mkdir, writeFile } = await import("node:fs/promises");
     const paths = await import("node:path");
     const target = paths.resolve(dst.cwd ?? process.cwd(), dst.path);
+    opts.signal?.throwIfAborted();
     if (opts.mkdirRecursive) await mkdir(paths.dirname(target), { recursive: true });
-    await writeFile(target, buffer);
+    await writeFile(target, buffer, signalOf(opts));
     return target;
   }
 
@@ -700,31 +756,32 @@ export class Sandbox {
    * working directory; `mode` sets permissions. */
   async writeFiles(
     files: { path: string; content: string | Uint8Array; mode?: number }[],
-    _opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal } = {},
   ): Promise<void> {
     const modes: string[] = [];
     await this.#withResume(async (runtime) => {
       for (const file of files) {
         const target = toRuntimePath(file.path);
-        await runtime.files.write(target, file.content);
+        await runtime.files.write(target, file.content, signalOf(opts));
         if (file.mode !== undefined) modes.push(file.mode.toString(8), target);
       }
       if (!modes.length) return;
       const script = 'while [ "$#" -gt 0 ]; do chmod "$1" "$2" || exit 1; shift 2; done';
-      const result = await runtime.exec(["sh", "-c", script, "sh", ...modes]);
+      const result = await runtime.exec(["sh", "-c", script, "sh", ...modes], signalOf(opts));
       if (result.exitCode !== 0)
         throw new APIError(new Response(null, { status: 400 }), {
           message: `Setting file modes failed: ${result.stderr.trim()}`,
           sandboxName: this.name,
         });
-    });
+    }, opts);
   }
 
   // ---- ports ------------------------------------------------------------
 
-  async #share(port: number) {
+  async #share(port: number, opts: { signal?: AbortSignal } = {}) {
+    opts.signal?.throwIfAborted();
     const preview = await guard(
-      () => this.#rt.previews.create(port, { visibility: "public" }),
+      () => this.#rt.previews.create(port, { visibility: "public" }, signalOf(opts)),
       this.name,
     );
     this.#routes.set(port, preview.url.replace(/\/$/, ""));
@@ -781,13 +838,17 @@ export class Sandbox {
   async extendTimeout(duration: number, opts: { signal?: AbortSignal } = {}): Promise<void> {
     if (!Number.isFinite(duration) || duration <= 0)
       throw new RangeError(`duration must be a positive number of milliseconds, not ${duration}.`);
-    await this.#withResume((runtime) => runtime.extend(Math.ceil(duration / 1000), signalOf(opts)));
+    await this.#withResume(
+      (runtime) => runtime.extend(Math.ceil(duration / 1000), signalOf(opts)),
+      opts,
+    );
   }
 
   /** Replaces the network rules; returns the policy given. */
-  async updateNetworkPolicy(networkPolicy: NetworkPolicy, _opts: { signal?: AbortSignal } = {}) {
+  async updateNetworkPolicy(networkPolicy: NetworkPolicy, opts: { signal?: AbortSignal } = {}) {
+    opts.signal?.throwIfAborted();
     const rules = networkRules(networkPolicy);
-    await this.#withResume((runtime) => runtime.network.set(rules));
+    await this.#withResume((runtime) => runtime.network.set(rules, signalOf(opts)), opts);
     return networkPolicy;
   }
 
@@ -801,8 +862,9 @@ export class Sandbox {
       networkPolicy?: NetworkPolicy;
       snapshotExpiration?: number;
     } & Record<string, unknown>,
-    _opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal } = {},
   ): Promise<void> {
+    opts.signal?.throwIfAborted();
     const allowed = new Set(["timeout", "ports", "networkPolicy", "snapshotExpiration"]);
     const other = Object.keys(params).find((key) => params[key] !== undefined && !allowed.has(key));
     if (other)
@@ -810,6 +872,14 @@ export class Sandbox {
         `Changing ${other} on an existing sandbox`,
         "Create a new sandbox with it (Runtime cannot change a sandbox's machine, persistence, tags or region after creation).",
       );
+    const rules =
+      params.networkPolicy === undefined ? undefined : networkRules(params.networkPolicy);
+    const retention =
+      params.snapshotExpiration === undefined
+        ? undefined
+        : retentionDays(params.snapshotExpiration);
+    if (params.ports !== undefined) validatePorts(params.ports);
+    const wanted = params.ports === undefined ? undefined : new Set(params.ports);
     if (params.timeout !== undefined) {
       const current = this.timeout;
       if (params.timeout < current)
@@ -817,35 +887,70 @@ export class Sandbox {
           "Shortening a sandbox's timeout",
           "Runtime leases only move later. Call stop() when the work is done.",
         );
-      if (params.timeout > current) await this.extendTimeout(params.timeout - current);
+      if (params.timeout > current) await this.extendTimeout(params.timeout - current, opts);
     }
-    if (params.networkPolicy !== undefined) await this.updateNetworkPolicy(params.networkPolicy);
-    if (params.snapshotExpiration !== undefined)
-      await guard(
-        () => this.#rt.setRetention(retentionDays(params.snapshotExpiration!)),
-        this.name,
-      );
-    if (params.ports !== undefined) {
-      const wanted = new Set(params.ports);
+    if (rules !== undefined)
+      await this.#withResume((runtime) => runtime.network.set(rules, signalOf(opts)), opts);
+    if (retention !== undefined)
+      await guard(() => this.#rt.setRetention(retention, signalOf(opts)), this.name);
+    if (wanted !== undefined) {
       for (const port of [...this.#routes.keys()])
         if (!wanted.has(port)) {
-          await guard(() => this.#rt.previews.delete(port), this.name);
+          await guard(() => this.#rt.previews.delete(port, signalOf(opts)), this.name);
           this.#routes.delete(port);
         }
-      for (const port of wanted) if (!this.#routes.has(port)) await this.#share(port);
+      for (const port of wanted) if (!this.#routes.has(port)) await this.#share(port, opts);
     }
   }
 
-  /** Keeps the sandbox's whole machine as a Runtime snapshot (files, memory
-   * and running processes), then stops the sandbox, as Vercel does. Start
+  /** Keeps the sandbox's filesystem as a disk-only snapshot, then stops
+   * the source. Restoring it starts fresh processes, as Vercel does. Start
    * from it with `Sandbox.create({ source: { type: "snapshot", snapshotId } })`. */
   async snapshot(opts: { expiration?: number; signal?: AbortSignal } = {}): Promise<Snapshot> {
-    const taken = await this.#withResume((runtime) =>
-      runtime.snapshot({
-        ...(opts.expiration !== undefined ? { retentionDays: retentionDays(opts.expiration) } : {}),
-      }),
+    opts.signal?.throwIfAborted();
+    const retention = opts.expiration === undefined ? undefined : retentionDays(opts.expiration);
+    const taken = await this.#withResume(
+      (runtime) =>
+        runtime.snapshot({
+          mode: "disk",
+          ...(retention !== undefined ? { retentionDays: retention } : {}),
+          ...signalOf(opts),
+        }),
+      opts,
     );
-    await guard(() => this.#rt.stop({ wait: false }), this.name);
+    try {
+      await guard(() => this.#rt.stop(signalOf(opts)), this.name);
+      if (this.#rt.state !== "stopped")
+        await guard(() => this.#rt.waitFor("stopped", signalOf(opts)), this.name);
+    } catch (error) {
+      const recovery = { snapshotId: taken.id, sourceSandboxId: this.#rt.id };
+      if (error instanceof APIError) {
+        const json = error.json as { error?: Record<string, unknown> } | undefined;
+        error.json = {
+          ...json,
+          error: {
+            ...json?.error,
+            details: { ...((json?.error?.details as object) ?? {}), ...recovery },
+          },
+        };
+      } else if (error instanceof Error && Object.isExtensible(error)) {
+        Object.assign(error, recovery);
+      }
+      throw error;
+    }
+    if (this.#rt.state !== "stopped") {
+      const code = "snapshot_source_stop_timeout";
+      const message = `Snapshot ${taken.id} was saved, but sandbox ${this.name} did not finish stopping.`;
+      const error = new APIError(new Response(null, { status: 409 }), {
+        message,
+        sandboxName: this.name,
+        json: {
+          error: { code, message, details: { snapshotId: taken.id, sourceSandboxId: this.#rt.id } },
+        },
+      });
+      error.code = code;
+      throw error;
+    }
     return new Snapshot(taken, this.#client);
   }
 
@@ -914,6 +1019,10 @@ function usersRefused(): Promise<never> {
 /** Milliseconds as whole days for Runtime's retention: 1 to 365, and 0 (no
  * expiration) as 365. */
 export function retentionDays(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0)
+    throw new RangeError(
+      `Snapshot expiration must be a nonnegative finite number of milliseconds, not ${ms}.`,
+    );
   if (ms === 0) return 365;
   return Math.min(365, Math.max(1, Math.ceil(ms / 86_400_000)));
 }
@@ -929,10 +1038,16 @@ async function pipe(command: Command, params: RunCommandParams) {
 
 /** The newest live sandbox with this name, or the sandbox with this Runtime
  * id. A 404 when there is none. */
-async function find(client: Runtime, name: string): Promise<RuntimeSandbox> {
-  if (UUID.test(name)) return client.sandboxes.get(name);
-  const page = await client.sandboxes.list({ name });
+async function find(
+  client: Runtime,
+  name: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<RuntimeSandbox> {
+  opts.signal?.throwIfAborted();
+  if (UUID.test(name)) return client.sandboxes.get(name, signalOf(opts));
+  const page = await client.sandboxes.list({ name }, signalOf(opts));
   const all = await page.toArray(1000);
+  opts.signal?.throwIfAborted();
   const found = all.filter((one) => one.state !== "stopped").at(-1);
   if (!found)
     throw new RuntimeError({
@@ -979,20 +1094,29 @@ function itemOf(runtime: RuntimeSandbox): ListItem {
 
 /** Vercel's paginator over a Runtime page: the first page's fields, async
  * iteration over every item, `pages()` and `toArray()`. */
-function paginate(first: Page<RuntimeSandbox>) {
+function paginate(first: Page<RuntimeSandbox>, signal?: AbortSignal) {
   const toPage = (page: Page<RuntimeSandbox>) => ({
     sandboxes: page.data.map(itemOf),
     pagination: { count: page.data.length, next: page.nextCursor },
   });
   return Object.assign(toPage(first), {
     async *pages() {
-      for await (const page of first.pages()) yield toPage(page);
+      for await (const page of first.pages()) {
+        signal?.throwIfAborted();
+        yield toPage(page);
+      }
     },
     async *[Symbol.asyncIterator]() {
-      for await (const item of first) yield itemOf(item);
+      for await (const item of first) {
+        signal?.throwIfAborted();
+        yield itemOf(item);
+      }
     },
     async toArray() {
-      return (await first.toArray()).map(itemOf);
+      signal?.throwIfAborted();
+      const items = await first.toArray();
+      signal?.throwIfAborted();
+      return items.map(itemOf);
     },
   });
 }

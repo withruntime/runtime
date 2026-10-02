@@ -111,11 +111,31 @@ storage is still charged from the moment it paused, as above.
 Storage has been charged since 23 September 2026. An item made before then is
 charged only from that date.
 
-| What you keep                                | Rate                                                                                                            | Charged on                                                                           |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [Snapshot](./javascript#snapshots-and-forks) | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | The bytes the snapshot alone stores; a block two of your snapshots share counts once |
-| [Image](./javascript#custom-images)          | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | The whole image file, shared base image included                                     |
-| [Volume](./javascript#volumes)               | **{{volume-rate-micros}} microdollars per GiB-hour**, about {{volume-month}} per GiB per 30-day month           | The full size you create it with, written or not                                     |
+| What you keep                                | Rate                                                                                                            | Charged on                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [Snapshot](./javascript#snapshots-and-forks) | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | The bytes the snapshot alone stores; a block two of your snapshots share counts once  |
+| [Image](./javascript#custom-images)          | **{{paused-storage-rate}} per decimal GB per 30-day month**, {{snapshot-rate-micros}} microdollars per GiB-hour | Whole image file; qualified and enabled copy accounting counts verified extra storage |
+| [Volume](./javascript#volumes)               | **{{volume-rate-micros}} microdollars per GiB-hour**, about {{volume-month}} per GiB per 30-day month           | The full size you create it with, written or not                                      |
+
+Where deferred compression has been qualified and enabled, a memory
+capture can be ready for same-server starts while
+`compressionPending: true`. Raw preparation files are Runtime overhead;
+snapshot billing uses the final verified compressed allocation from its ready
+time, within existing prepaid bounds. A paused source uses its final measured
+size from the original freeze only if it is still paused when that measurement
+arrives; waking or deleting it before then does not charge the unmeasured
+parked interval. See [snapshot storage](./storage#snapshots-survive-their-server).
+
+Where copied-image accounting has been qualified and enabled, an identical
+image copy verified in your account on the same server adds
+only its extra storage to billing and quota. The shared base and each verified
+extra allocation count once while a ready copy still holds them. Deleting the
+base's owner moves it to a remaining ready copy; an extra allocation moves
+only to a proven descendant of the copy that added it. Retained capacity is
+freed only after the last files holding it are removed.
+Deleting and recreating owners preserves accrued charges; it does not reset
+the meter. Until that accounting is enabled, all images keep full-file
+accounting; changed images and unverified copies keep it afterward too.
 
 The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole

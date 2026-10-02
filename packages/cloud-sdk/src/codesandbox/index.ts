@@ -92,6 +92,12 @@ const metadata = (s: NativeSandbox) => ({
         : (s.info.labels["cs.privacy"] ?? "private"),
   tags: JSON.parse(s.info.labels["cs.tags"] ?? "[]") as string[],
 });
+
+function validateHibernationTimeout(seconds: number | undefined): void {
+  if (seconds !== undefined && (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > 86_400))
+    throw new RangeError("hibernationTimeoutSeconds must be an integer from 0 to 86400.");
+}
+
 export class Sandboxes {
   constructor(private readonly runtime: Runtime) {}
   async create(options: CreateSandboxOpts = {}): Promise<Sandbox> {
@@ -104,6 +110,7 @@ export class Sandboxes {
       "vmTier",
       "hibernationTimeoutSeconds",
     ]);
+    validateHibernationTimeout(options.hibernationTimeoutSeconds);
     const labels = {
       "compat.provider": "codesandbox",
       "cs.tags": JSON.stringify([...new Set([...(options.tags ?? []), "sdk"])]),
@@ -155,6 +162,7 @@ export class Sandboxes {
   }
   async restart(id: string, options: { hibernationTimeoutSeconds?: number } = {}) {
     only("CodeSandbox restart", options, ["hibernationTimeoutSeconds"]);
+    validateHibernationTimeout(options.hibernationTimeoutSeconds);
     const s = await this.runtime.sandboxes.get(id);
     await s.stop();
     await s.restart();
@@ -188,7 +196,17 @@ export class Sandboxes {
     ]);
     if (options.orderBy === "updated_at")
       throw new CompatibilityError("CodeSandbox", "sorting by updated_at");
-    let sandboxes = (await all(this.runtime, "codesandbox"))
+    const limit = options.limit ?? 50;
+    let currentPage = options.pagination?.page ?? 1;
+    const pageSize = options.pagination?.pageSize ?? limit;
+    for (const [name, value] of [
+      ["limit", limit],
+      ["page", currentPage],
+      ["pageSize", pageSize],
+    ] as const)
+      if (!Number.isSafeInteger(value) || value <= 0)
+        throw new RangeError(`${name} must be a positive safe integer.`);
+    const sandboxes = (await all(this.runtime, "codesandbox"))
       .filter(
         (s) =>
           (!options.status || s.state === "running") &&
@@ -199,16 +217,21 @@ export class Sandboxes {
       (a, b) =>
         (a.createdAt.getTime() - b.createdAt.getTime()) * (options.direction === "desc" ? -1 : 1),
     );
-    const totalCount = sandboxes.length,
-      page = options.pagination?.page ?? 1,
-      pageSize = options.pagination?.pageSize ?? options.limit ?? 50;
-    sandboxes = sandboxes.slice((page - 1) * pageSize, page * pageSize);
-    const hasMore = page * pageSize < totalCount;
+    const totalCount = sandboxes.length;
+    const selected: typeof sandboxes = [];
+    let nextPage: number | null;
+    for (;;) {
+      const offset = (currentPage - 1) * pageSize;
+      selected.push(...sandboxes.slice(offset, offset + pageSize));
+      nextPage = offset + pageSize < totalCount ? currentPage + 1 : null;
+      if (nextPage === null || selected.length >= limit) break;
+      currentPage = nextPage;
+    }
     return {
-      sandboxes,
+      sandboxes: selected,
       totalCount,
-      hasMore,
-      pagination: { currentPage: page, nextPage: hasMore ? page + 1 : null, pageSize },
+      hasMore: totalCount > selected.length,
+      pagination: { currentPage, nextPage, pageSize },
     };
   }
 }
@@ -532,6 +555,7 @@ export class SandboxClient {
     };
     this.ports = {
       get: async (port: number) => {
+        this.assertConnected();
         if (native.info.labels["cs.privacy"] === "private")
           throw new CompatibilityError(
             "CodeSandbox",
@@ -541,9 +565,15 @@ export class SandboxClient {
         this.previewURLs.set(port, p.urlWithToken ?? p.url);
         return { port, host: new URL(p.urlWithToken ?? p.url).host };
       },
-      getAll: async () =>
-        (await native.previews.list()).map((p) => ({ port: p.port, host: new URL(p.url).host })),
+      getAll: async () => {
+        this.assertConnected();
+        return (await native.previews.list()).map((p) => ({
+          port: p.port,
+          host: new URL(p.url).host,
+        }));
+      },
       waitForPort: async (port: number, options: { timeoutMs?: number } = {}) => {
+        this.assertConnected();
         if (!Number.isInteger(port) || port < 1 || port > 65535)
           throw new TypeError("Invalid port");
         await native.exec(
@@ -662,6 +692,8 @@ export class Tasks {
     this.managed = new ManagedTasks(native);
   }
   getAll(): Promise<Task[]> {
+    if (this.client.state !== "CONNECTED")
+      return Promise.reject(new Error("Sandbox client is disconnected."));
     return (this.cached ??= this.load().catch((error: unknown) => {
       this.cached = undefined;
       throw error;

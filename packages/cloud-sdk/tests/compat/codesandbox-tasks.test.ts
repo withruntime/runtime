@@ -3,6 +3,8 @@ import { SandboxClient } from "../../src/codesandbox/index.js";
 import { localSandbox } from "./codesandbox-local.js";
 import { ManagedTasks } from "../../src/codesandbox/guest-service.js";
 import { chmod } from "node:fs/promises";
+import { quote } from "../../src/compat/core.js";
+import { spawnSync } from "node:child_process";
 
 async function until<T>(read: () => Promise<T>, accepts: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5000;
@@ -17,6 +19,120 @@ async function until<T>(read: () => Promise<T>, accepts: (value: T) => boolean):
     await Bun.sleep(10);
   }
 }
+
+test.each(["exit", "stop"])(
+  "CodeSandbox task %s kills descendants that ignore TERM and HUP",
+  async (ending) => {
+    const world = await localSandbox();
+    let descendant: number | undefined;
+    const source = `import os,signal,time
+pid=os.fork()
+if pid==0:
+ signal.signal(signal.SIGTERM,signal.SIG_IGN)
+ signal.signal(signal.SIGHUP,signal.SIG_IGN)
+ with open('descendant','w') as f: f.write(str(os.getpid()))
+ while True: time.sleep(0.02)
+while not os.path.exists('finish'): time.sleep(0.02)
+os._exit(7)
+`;
+    try {
+      await world.native.files.write(
+        "/project/sandbox/.codesandbox/tasks.json",
+        JSON.stringify({
+          tasks: {
+            dev: { name: "dev", command: `python3 -c ${quote(source)}` },
+            keeper: { name: "keeper", command: "exec sleep 30" },
+          },
+        }),
+      );
+      const client = new SandboxClient(world.native, {});
+      const task = (await client.tasks.get("dev"))!;
+      const keeper = (await client.tasks.get("keeper"))!;
+      await keeper.run();
+      await task.run();
+      descendant = await until(
+        async () => Number(await world.native.files.readText("/project/sandbox/descendant")),
+        (pid) => Number.isSafeInteger(pid) && pid > 0,
+      );
+      expect(Number.isSafeInteger(descendant) && descendant > 0).toBe(true);
+      if (ending === "stop") await task.stop();
+      else await world.native.files.write("/project/sandbox/finish", "ready");
+      const control = new ManagedTasks(world.native);
+      const run = await until(
+        () => control.call<{ state: string; exitCode: number }>({ op: "get", taskId: "dev" }),
+        (value) => value.state === "exited",
+      );
+      expect(run.exitCode).toBe(ending === "stop" ? -15 : 7);
+      await until(async () => {
+        // kill(pid, 0) also succeeds for a dead orphan awaiting PID1's reap.
+        // Inspect its actual state instead of mistaking that zombie for work.
+        const state = spawnSync("ps", ["-o", "stat=", "-p", String(descendant)], {
+          encoding: "utf8",
+        });
+        if (state.status === 0 && state.stdout.trim().startsWith("Z")) return true;
+        try {
+          process.kill(descendant!, 0);
+          return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+          throw error;
+        }
+      }, Boolean);
+      descendant = undefined;
+      expect<unknown>(await control.call({ op: "ping" })).toEqual({ ok: true });
+      const untouched = await control.call<{ state: string; pid: number }>({
+        op: "get",
+        taskId: "keeper",
+      });
+      expect(untouched.state).toBe("running");
+      expect(() => process.kill(untouched.pid, 0)).not.toThrow();
+      await keeper.stop();
+      await client.disconnect();
+    } finally {
+      if (descendant) {
+        try {
+          process.kill(descendant, "SIGKILL");
+        } catch {
+          /* Already exited. */
+        }
+      }
+      await world.close();
+    }
+  },
+);
+
+test("CodeSandbox a closed terminal does not kill its running task or block stop", async () => {
+  const world = await localSandbox();
+  try {
+    const source =
+      "import os,time; open('terminal-closed','w').close(); os.close(0); os.close(1); os.close(2); time.sleep(30)";
+    await world.native.files.write(
+      "/project/sandbox/.codesandbox/tasks.json",
+      JSON.stringify({
+        tasks: {
+          dev: { name: "dev", command: `python3 -c ${quote(source)}` },
+        },
+      }),
+    );
+    const client = new SandboxClient(world.native, {});
+    const task = (await client.tasks.get("dev"))!;
+    await task.run();
+    await until(() => world.native.files.exists("/project/sandbox/terminal-closed"), Boolean);
+    const control = new ManagedTasks(world.native);
+    expect<unknown>(await control.call({ op: "get", taskId: "dev" })).toMatchObject({
+      state: "running",
+    });
+    expect<unknown>(await control.call({ op: "ping" })).toEqual({ ok: true });
+    await task.stop();
+    expect(await control.call({ op: "get", taskId: "dev" })).toMatchObject({
+      state: "exited",
+      exitCode: -15,
+    });
+    await client.disconnect();
+  } finally {
+    await world.close();
+  }
+});
 
 test("CodeSandbox configured tasks restart and reconnect across clients using real processes", async () => {
   const world = await localSandbox();
