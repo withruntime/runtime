@@ -1,17 +1,17 @@
 import type { Process } from "../sandbox.js";
-import type { ProcessInfo as RuntimeProcessInfo } from "../types.js";
+import type { OutputEvent, ProcessInfo as RuntimeProcessInfo } from "../types.js";
 import type { RequestOptions } from "../transport.js";
 import type { RuntimeSandbox } from "./client.js";
 import {
   CommandExitError,
   guard,
   InvalidArgumentError,
-  NotSupportedError,
   SandboxError,
   TimeoutError,
   translate,
   type CommandResult,
 } from "./errors.js";
+import { commandAs, runAs } from "./users.js";
 
 export type { CommandResult };
 export type Username = "user" | "root" | (string & {});
@@ -23,9 +23,9 @@ export interface CommandRequestOpts {
 export interface CommandStartOpts extends CommandRequestOpts {
   background?: boolean;
   cwd?: string;
-  /** Only the default user. Runtime runs commands as `runtime`, the sandbox's
-   * owner, with passwordless sudo; E2B's `root` is refused rather than
-   * silently run as someone else. */
+  /** "user" (the default) is the sandbox's own user, `runtime`; any other
+   * user that exists in the sandbox, `root` included, runs it through
+   * `sudo -u`. An unknown user is refused, never created. */
   user?: Username;
   envs?: Record<string, string>;
   onStdout?: (data: string) => void | Promise<void>;
@@ -60,6 +60,9 @@ export interface SandboxContext {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+/** How long a command may run on Runtime: a day, E2B's longest sandbox. E2B's
+ * own `timeoutMs` bounds only the connection, so the process gets this. */
+const PROCESS_LIFETIME_MS = 86_400_000;
 
 /** E2B's pids are numbers; Runtime's process ids are strings. The number is a
  * 31-bit FNV-1a hash of the id, so every client derives the same one. */
@@ -70,14 +73,6 @@ export function pidOf(processId: string): number {
     hash = Math.imul(hash, 0x01000193);
   }
   return hash >>> 1 || 1;
-}
-
-export function refuseUser(user: Username | undefined) {
-  if (user !== undefined && user !== "user")
-    throw new NotSupportedError(
-      `Running as the user "${user}"`,
-      'Runtime runs commands as its sandbox owner, with passwordless sudo: prefix the command with "sudo" to run it as root.',
-    );
 }
 
 export function timeoutFor(timeoutMs: number | undefined) {
@@ -233,17 +228,73 @@ export class Commands {
   ): Promise<CommandHandle | CommandResult>;
   async run(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle | CommandResult> {
     const opening = connectionRequest(opts, this.#ctx.requestTimeoutMs);
-    refuseUser(opts.user);
     const handle = await (async () => {
+      const user = await runAs(this.#ctx, opts.user, opening.request);
       await this.#ctx.ensureHome(`${cmd}\n${opts.cwd ?? ""}`, opening.request);
       opening.request.signal?.throwIfAborted();
-      return this.#start(cmd, opts, opening.timeoutMs, opening.request, opening.deadline);
+      const command = user ? commandAs(user, cmd, opts.cwd !== undefined) : cmd;
+      // A command waited on here is read from its first byte by the request
+      // that starts it, so Runtime holds a fast writer back rather than
+      // dropping what it printed before the first read: the result is whole.
+      return opts.background || opts.stdin
+        ? this.#start(command, opts, opening.timeoutMs, opening.request, opening.deadline)
+        : this.#stream(command, opts, opening.timeoutMs, opening.request, opening.deadline);
     })().catch(opening.failure);
     return opts.background ? handle : handle.wait();
   }
 
+  async #stream(
+    cmd: string | string[],
+    opts: CommandStartOpts,
+    timeoutMs: number,
+    request: RequestOptions,
+    deadline?: number,
+  ) {
+    const abort = new AbortController();
+    const signal = opts.signal ? AbortSignal.any([opts.signal, abort.signal]) : abort.signal;
+    const stopOpening = () => abort.abort(request.signal?.reason);
+    request.signal?.addEventListener("abort", stopOpening, { once: true });
+    const stream = this.#ctx.runtime.execStream(cmd, {
+      ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
+      ...this.#env(opts.envs),
+      timeoutMs: PROCESS_LIFETIME_MS,
+      signal,
+    });
+    const events = stream[Symbol.asyncIterator]();
+    try {
+      const first = await guard("sandbox", () => events.next());
+      if (first.done || first.value.type !== "start")
+        throw new SandboxError("The command's output began without a start.");
+      const runtime = this.#ctx.runtime;
+      const processId = first.value.processId;
+      return new CommandHandle(
+        {
+          started: true,
+          id: processId,
+          events,
+          abort,
+          process: () =>
+            runtime.processes.get(processId, commandRequest({}, this.#ctx.requestTimeoutMs)),
+        },
+        {
+          stdin: false,
+          timeoutMs,
+          deadline,
+          requestTimeoutMs: this.#ctx.requestTimeoutMs,
+          ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
+          ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
+        },
+      );
+    } catch (error) {
+      abort.abort();
+      throw error;
+    } finally {
+      request.signal?.removeEventListener("abort", stopOpening);
+    }
+  }
+
   async #start(
-    cmd: string,
+    cmd: string | string[],
     opts: CommandStartOpts,
     timeoutMs: number,
     request: RequestOptions,
@@ -349,16 +400,28 @@ async function deliver(signal: AbortSignal, callback: () => void | Promise<void>
   }
 }
 
+/** A command whose output this handle reads from the request that started
+ * it: its process id, the rest of its events, the controller that ends the
+ * read, and the Runtime process, fetched only when something needs it. */
+export interface StartedStream {
+  started: true;
+  id: string;
+  events: AsyncIterator<OutputEvent>;
+  abort: AbortController;
+  process: () => Promise<Process>;
+}
+
 /** A command started in the background: E2B's CommandHandle over a Runtime
  * process. Output streams into `stdout`/`stderr` and the callbacks as it
  * arrives. */
 export class CommandHandle {
   readonly pid: number;
-  readonly #process: Process;
+  readonly #source: Process | StartedStream;
+  #process: Promise<Process> | undefined;
   readonly #stdin: boolean;
   readonly #timeoutMs: number;
   readonly #requestTimeoutMs: number | undefined;
-  readonly #abort = new AbortController();
+  readonly #abort: AbortController;
   readonly #done: Promise<void>;
   #stdout = "";
   #stderr = "";
@@ -369,7 +432,7 @@ export class CommandHandle {
   #deadline: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
-    process: Process,
+    source: Process | StartedStream,
     options: {
       stdin: boolean;
       timeoutMs: number;
@@ -383,8 +446,9 @@ export class CommandHandle {
       deadline?: number;
     },
   ) {
-    this.#process = process;
-    this.pid = pidOf(process.id);
+    this.#source = source;
+    this.#abort = "started" in source ? source.abort : new AbortController();
+    this.pid = pidOf(source.id);
     this.#stdin = options.stdin;
     this.#timeoutMs = options.timeoutMs;
     this.#requestTimeoutMs = options.requestTimeoutMs;
@@ -416,14 +480,18 @@ export class CommandHandle {
     const signal = options.signal
       ? AbortSignal.any([options.signal, this.#abort.signal])
       : this.#abort.signal;
+    const source = this.#source;
     try {
       const outputOptions = {
         ...(options.cursor ? { cursor: options.cursor } : {}),
         signal,
       };
-      const output = options.pty
-        ? this.#process.outputBytes(outputOptions)
-        : this.#process.output(outputOptions);
+      const output: AsyncIterable<OutputEvent | { type: string; data: unknown }> =
+        "started" in source
+          ? { [Symbol.asyncIterator]: () => source.events }
+          : options.pty
+            ? source.outputBytes(outputOptions)
+            : source.output(outputOptions);
       for await (const event of output) {
         if (this.#disconnected) break;
         signal.throwIfAborted();
@@ -441,7 +509,8 @@ export class CommandHandle {
         } else if (event.type === "truncated") {
           this.#truncated = true;
         } else if (event.type === "exit") {
-          this.#exit = { exitCode: event.exitCode, timedOut: event.timedOut };
+          const exit = event as Extract<OutputEvent, { type: "exit" }>;
+          this.#exit = { exitCode: exit.exitCode, timedOut: exit.timedOut };
         }
       }
     } catch (error) {
@@ -507,12 +576,22 @@ export class CommandHandle {
     await Promise.resolve();
   }
 
+  /** The Runtime process, fetched once when a started stream needs it. */
+  #runtimeProcess(): Promise<Process> {
+    const source = this.#source;
+    if (!("started" in source)) return Promise.resolve(source);
+    this.#process ??= guard("sandbox", source.process);
+    this.#process.catch(() => (this.#process = undefined));
+    return this.#process;
+  }
+
   /** Kills the command with SIGKILL. False when it had already ended. */
   async kill(): Promise<boolean> {
     if (this.#exit) return false;
     try {
+      const process = await this.#runtimeProcess();
       await guard("sandbox", () =>
-        this.#process.kill("SIGKILL", commandRequest({}, this.#requestTimeoutMs)),
+        process.kill("SIGKILL", commandRequest({}, this.#requestTimeoutMs)),
       );
       return true;
     } catch (error) {
@@ -527,13 +606,15 @@ export class CommandHandle {
       throw new InvalidArgumentError(
         "The command was not started with stdin: true, so its input is closed.",
       );
-    await guard("sandbox", () => this.#process.write(data, request));
+    const process = await this.#runtimeProcess();
+    await guard("sandbox", () => process.write(data, request));
   }
 
   async closeStdin(opts: CommandRequestOpts = {}): Promise<void> {
     const request = commandRequest(opts, this.#requestTimeoutMs);
     if (!this.#stdin)
       throw new InvalidArgumentError("The command was not started with stdin: true.");
-    await guard("sandbox", () => this.#process.write("", { ...request, eof: true }));
+    const process = await this.#runtimeProcess();
+    await guard("sandbox", () => process.write("", { ...request, eof: true }));
   }
 }

@@ -182,7 +182,8 @@ sbx.stop
 ```
 
 A preview is private by default; `visibility: "public"` shares it with anyone
-who has the address. Addresses are under `runtimehost.com`.
+who has the address, on a paid sandbox only (a trial sandbox's previews stay
+private). Addresses are under `runtimehost.com`.
 
 ## Images, volumes, network rules and secrets
 

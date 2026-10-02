@@ -3,6 +3,7 @@ API is generated from this file by scripts/generate_dropin_sync.py; edit this
 one."""
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 import time
@@ -12,7 +13,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from .._async_client import AsyncRuntime
 
 from . import _core as core
-from ._async_io import operation
+from ._async_io import later, operation
 from ._core import (CompletedProcess, DirectoryEntry, NotSupportedError, ProcessStatus, SandboxApiError,
                     SandboxPathNotFoundError, SandboxResources, SandboxRoute, SandboxStatus, SandboxStreamError,
                     translate)
@@ -415,8 +416,17 @@ class AsyncSandbox:
     Runtime sandbox underneath, for anything Vercel has no name for."""
 
     def __init__(self, runtime: Any, client: AsyncRuntime, env: Optional[Mapping[str, str]] = None,
-                 persistent: Optional[bool] = None) -> None:
+                 persistent: Optional[bool] = None, time_limit: Optional[float] = None) -> None:
         self.withruntime = runtime
+        # The execution time limit asked for, which may pass Runtime's
+        # hour-long lease: the lease is renewed toward it while this lives.
+        self._limit = time_limit
+        self._session_start = (time.time() if time_limit is not None else
+                               core.epoch(runtime.info.get("expiresAt"))
+                               - float(runtime.info.get("timeoutSeconds") or 0))
+        self._timer: Any = None
+        self._keeping = False
+        self._kept_until_end = False
         self._client = client
         self._env = dict(env or {})
         self._persistent = persistent if persistent is not None else runtime.info.get("onLeaseEnd") != "stop"
@@ -464,7 +474,60 @@ class AsyncSandbox:
 
     @property
     def execution_time_limit(self) -> timedelta:
+        if self._limit is not None:
+            return timedelta(seconds=self._limit)
         return timedelta(seconds=int(self.withruntime.info.get("timeoutSeconds") or 0))
+
+    def _until(self) -> float:
+        return self._session_start + self.execution_time_limit.total_seconds()
+
+    async def _keep(self, force: bool = False) -> None:
+        """Renews the lease toward the execution time limit when less than
+        ten minutes (or half the limit) is left, or now with ``force``; then
+        looks again in a minute while the limit runs past the lease."""
+        runtime = self.withruntime
+        if self._kept_until_end or runtime.state != "running":
+            return
+        margin = math.inf if force else min(600.0, self.execution_time_limit.total_seconds() / 2)
+        extra = core.extension_seconds(core.epoch(runtime.info.get("expiresAt")), self._until(), time.time(), margin)
+        if extra >= 1:
+            try:
+                await runtime.extend(extra)
+            except Exception as error:  # noqa: BLE001
+                # The lease may have ended since it was read; the next call says
+                # what state the sandbox is in.
+                if getattr(error, "status", None) != 409:
+                    raise translate(error, "sandbox") from error
+                try:
+                    await runtime.refresh()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._schedule()
+
+    def _schedule(self) -> None:
+        if self._kept_until_end or self._timer is not None:
+            return
+        expires = core.epoch(self.withruntime.info.get("expiresAt"))
+        if not math.isfinite(expires) or self._until() <= expires:
+            return
+        try:
+            self._timer = later(60, self._tick)
+        except RuntimeError:  # no running event loop: the next call renews instead
+            self._timer = None
+
+    async def _tick(self) -> None:
+        self._timer = None
+        try:
+            await self._keep()
+        except Exception:  # noqa: BLE001 - the next call through the adapter reports it
+            pass
+
+    def _end_keeping(self) -> None:
+        """Stops renewing: after stop() of a sandbox that ends, or destroy()."""
+        self._kept_until_end = True
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
 
     @property
     def tags(self) -> Dict[str, str]:
@@ -485,6 +548,9 @@ class AsyncSandbox:
             raise core.SandboxInvalidHandleError(f"Sandbox {self.name} was destroyed.")
         if self.withruntime.state in ("paused", "pausing"):
             await _guard("sandbox", lambda: self.withruntime.wake())
+            if self._limit is not None:
+                self._session_start = time.time()
+        await self._keep()
         return self.withruntime
 
     async def _resuming(self, work: Callable[[Any], Any]) -> Any:
@@ -633,11 +699,13 @@ class AsyncSandbox:
             if self._persistent:
                 await _guard("sandbox", lambda: self.withruntime.pause())
             else:
+                self._end_keeping()
                 await _guard("sandbox", lambda: self.withruntime.stop())
         return self
 
     async def destroy(self) -> None:
         """Ends the sandbox for good."""
+        self._end_keeping()
         await _guard("sandbox", lambda: self.withruntime.refresh())
         if self.withruntime.state != "stopped":
             await _guard("sandbox", lambda: self.withruntime.stop(wait=False))
@@ -666,11 +734,14 @@ class AsyncSandbox:
         return operation(acquire, "stop")
 
     async def extend_execution_time_limit(self, duration: Any) -> "AsyncSandbox":
-        """Moves the end ``duration`` later (at most an hour ahead of now)."""
+        """Moves the end ``duration`` later. Past an hour from now, the lease
+        follows while this object lives."""
         total = core.seconds(duration) or 0
         if total < 1:
             raise ValueError("duration must be at least one second.")
-        await self._resuming(lambda box: box.extend(int(total + 0.999)))
+        self._limit = self.execution_time_limit.total_seconds() + math.ceil(total)
+        await self._live()
+        await self._keep(force=True)
         return self
 
     async def update_network_policy(self, policy: Any) -> Any:
@@ -692,14 +763,13 @@ class AsyncSandbox:
         rules = core.network_rules(network_policy) if network_policy is not None else None
         retention = core.retention_days(snapshot_expiration) if snapshot_expiration is not None else None
         if execution_time_limit is not None:
-            core.lease_seconds(execution_time_limit)
-            wanted = core.seconds(execution_time_limit) or 0
-            current = int(self.withruntime.info.get("timeoutSeconds") or 0)
-            if wanted < current:
-                raise NotSupportedError("Shortening a sandbox's time limit",
+            wanted = core.time_limit(execution_time_limit)
+            if self._session_start + wanted < core.epoch(self.withruntime.info.get("expiresAt")) - 1:
+                raise NotSupportedError("A time limit that ends earlier than the current lease",
                                         "Runtime leases only move later. Call stop() when the work is done.")
-            if wanted > current:
-                await self.extend_execution_time_limit(wanted - current)
+            self._limit = wanted
+            await self._live()
+            await self._keep(force=True)
         if rules is not None:
             await self._resuming(lambda box: box.network.set(**rules))
         if retention is not None:
@@ -787,10 +857,12 @@ async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[
         fields["network"] = core.network_rules(network_policy)
     fields.update(runtime_create or {})
     runtime = await _guard("sandbox", lambda: client.sandboxes.create(**fields))
-    box = AsyncSandbox(runtime, client, env, keep)
+    box = AsyncSandbox(runtime, client, env, keep, core.time_limit(execution_time_limit))
+    box._schedule()
     try:
         await box._setup(source, ports, snapshot_expiration)
     except BaseException as original:
+        box._end_keeping()
         try:
             await runtime.stop(wait=False)
         except BaseException as cleanup:
@@ -821,7 +893,7 @@ def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, s
     ports = _validated_ports(ports)
     if snapshot_expiration is not None:
         core.retention_days(snapshot_expiration)
-    core.lease_seconds(execution_time_limit)
+    core.time_limit(execution_time_limit)
     if network_policy is not None:
         core.network_rules(network_policy)
     runtime_client = _client(token, client)
@@ -884,10 +956,13 @@ def fork_sandbox(*, source_sandbox: str, name: Optional[str] = None, destroy: bo
 async def query_sandboxes(query: Any = None, *, page_size: Optional[int] = None, cursor: Optional[str] = None,
                           project_id: Optional[str] = None, token: Optional[str] = None,
                           client: Optional[AsyncRuntime] = None) -> Any:
-    """Live and stopped (paused) sandboxes. A name prefix and newest-first
-    order are applied here, over the whole list."""
-    if cursor is not None:
-        raise NotSupportedError("Starting a query from a saved cursor", "Iterate the whole query.")
+    """Live and stopped (paused) sandboxes, sorted and filtered as the query
+    says (by name, creation, status change or snapshot; newest first unless
+    ``sort_order="asc"``) over the whole list. ``page_size`` is how many
+    each request fetches; every match is yielded. ``cursor`` continues a
+    query (this adapter's cursors read ``rt.<n>``)."""
+    start = core.cursor_offset(cursor)
+    key, newest_first = core.query_order(query)
     runtime_client = _client(token, client)
     tag = getattr(query, "tag", None)
     listing = await _guard("other", lambda: runtime_client.sandboxes.list(
@@ -896,9 +971,8 @@ async def query_sandboxes(query: Any = None, *, page_size: Optional[int] = None,
     prefix = getattr(query, "name_prefix", None)
     if prefix:
         found = [one for one in found if str(one.info.get("name") or "").startswith(prefix)]
-    if getattr(query, "sort_order", "asc") == "desc":
-        found.reverse()
-    for runtime in found:
+    found.sort(key=key, reverse=newest_first)
+    for runtime in found[start:]:
         yield AsyncSandbox(runtime, runtime_client)
 
 

@@ -71,6 +71,29 @@ export class NotSupportedError extends SandboxError {
   }
 }
 
+/** Runtime's addition, for `getHost` and `getPublicHost`: a free-trial
+ * sandbox shares a port only privately, so a request needs the port's token,
+ * and a host name alone cannot carry one. The message says what works. A
+ * NotSupportedError, so code that catches those catches this too. */
+export class PublicPreviewNotAllowedError extends NotSupportedError {
+  constructor(sandboxId: string, port: number | undefined, message?: string) {
+    const where = port === undefined ? "<port>" : String(port);
+    const alternative =
+      `For an address that works on the trial, use (await sandbox.runtime.previews.create(${where})).urlWithToken: ` +
+      "it carries the token, in a browser, fetch or curl. For other paths on it, send the token as the " +
+      "x-runtime-preview-token header or the runtime_preview_token query parameter. A public host needs a paid " +
+      "sandbox, which is the account owner's decision.";
+    super(
+      "A public address on a free-trial sandbox",
+      alternative,
+      message ??
+        `Sandbox ${sandboxId} runs on the free trial, where a shared port is private: every request needs the ` +
+          `port's token, and a host name alone cannot carry one. ${alternative}`,
+    );
+    this.code = "public_preview_not_allowed";
+  }
+}
+
 /** What `commands.run` resolves with, as in E2B. */
 export interface CommandResult {
   exitCode: number;
@@ -127,6 +150,9 @@ export function translate(error: unknown, subject: Subject = "other"): unknown {
     // A product switched off on purpose (forks, previews): Runtime's own words
     // say what is off and what to use meanwhile.
     out = new NotSupportedError(error.code.replace(/_unavailable$/, ""), error.hint ?? "", message);
+  else if (error.code === "public_preview_not_allowed")
+    // A 403 that is about the sandbox's funding, not the key.
+    out = new PublicPreviewNotAllowedError("", undefined, message);
   else if (error.status === 401 || error.status === 403) out = new AuthenticationError(message);
   else if (error.code === "file_not_found" || (error.status === 404 && subject === "file"))
     out = new FileNotFoundError(message);

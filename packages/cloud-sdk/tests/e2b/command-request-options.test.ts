@@ -157,6 +157,13 @@ test("cancelled home preparation never starts a command and can be retried", asy
     fetch: (async (input, init) => {
       const request = new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (path.endsWith(":exec") && (await request.clone().json()).stream === true) {
+        // The command itself: read from its start by the request that runs it.
+        starts++;
+        return new Response(
+          '{"type":"start","processId":"request-process"}\n{"type":"exit","exitCode":0,"state":"exited","timedOut":false}\n',
+        );
+      }
       if (path.endsWith(":exec")) {
         links++;
         if (links === 1)

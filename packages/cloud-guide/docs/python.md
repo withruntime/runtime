@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.10.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.11.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -199,7 +199,7 @@ from withruntime import Sandbox
 
 with Sandbox.create() as sbx:
     server = sbx.spawn("python3 -m http.server 8000", cwd="/workspace")
-    print(server.id, server.info["state"])
+    print(server)  # Process(id=..., command=..., state='running', exit_code=None)
 
     repl = sbx.spawn(["python3", "-i", "-q"], stdin="pipe")
     repl.write("print(sum([125, 250, 375]))\n")
@@ -454,6 +454,11 @@ for sbx in runtime.sandboxes.list(labels={"team": "search"}, state=["running"]):
 Every list returns a page: `page.data`, `page.has_more`, `page.next_page()`,
 `page.to_list()`, and a `for` loop walks every item on every page.
 
+`runtime.sandboxes.stop_all(labels={"team": "search"})` stops every live
+sandbox with all those labels, eight at a time, and returns
+`{"stopped": [...], "failed": [...]}`: one failure does not stop the rest. It
+needs at least one label.
+
 ## Delete a sandbox
 
 `sbx.delete()`, or `runtime.sandboxes.delete(sandbox_id)` without reading it
@@ -641,7 +646,9 @@ username=..., password=...)` for private images do the rest; see
 [custom images](./images). `sbx.switch_image("data:v2", keep="workspace")` moves
 a running sandbox to a new build, keeping its id, `/workspace` (its home),
 volumes, environment and previews; its processes restart and the rest of its
-old disk is lost ([move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version)). A volume lives on one server and is backed up off it
+old disk is lost ([move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version)).
+When enabled, `sbx.resize(memory_mib=4096, vcpu=2, restart=True)` restarts it at
+a new size on the same server, keeping its whole disk; its programs stop. A volume lives on one server and is backed up off it
 daily; `volumes.backup(id)` and `volumes.restore(backup_id)` make and restore a
 backup ([storage and backups](./storage)). `sbx.mounts.add(provider="s3", bucket=..., path=..., secret=...)`,
 `list()` and `remove(path)` mount your own bucket without the sandbox holding
@@ -699,6 +706,8 @@ functions, types and imports and runs each cell as a program. R plots and
 matplotlib charts come back as PNG images; pandas and R data frames as tables.
 R, Java and Go are installed in the sandbox the first time you use them
 (30 to 90 seconds, once), or bake them into an image with `apt`.
+A package `pip install` adds, from a cell or from `sbx.exec`, imports in a
+context that is already running, even in the cell that installed it.
 
 ```python check
 from withruntime import Runtime
@@ -725,8 +734,8 @@ from withruntime import Sandbox
 
 with Sandbox.create() as sbx:
     sbx.spawn("python3 -m http.server 3000")
-    preview = sbx.previews.create(3000, visibility="public")
-    print(preview["url"])
+    preview = sbx.previews.create(3000)  # private: the link carries its token
+    print(preview["urlWithToken"])
 
     sbx.desktop.start(width=1280, height=800)  # the first start installs it
     sbx.desktop.open("https://example.com")
@@ -740,6 +749,10 @@ with Sandbox.create() as sbx:
     with open("demo.mp4", "wb") as file:
         file.write(sbx.desktop.recordings.download(recording["id"]))
 ```
+
+A preview is private by default: open `urlWithToken`, or send `token` as the
+`x-runtime-preview-token` header. `visibility="public"` gives an address anyone
+can open, on a paid sandbox only; a trial sandbox's previews stay private.
 
 `embed_origins=["https://app.example.com"]` on `create` names the sites that
 may show the preview in an iframe (up to {{embed-origins}}); any other site's

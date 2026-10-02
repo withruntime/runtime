@@ -1,4 +1,5 @@
 import type { RequestOptions, Transport } from "../transport.js";
+import { privateNetwork } from "./private-network.js";
 
 /* Custom domains, public TCP ports, dedicated outbound addresses and the
  * WireGuard tunnel into your sandboxes. Paid accounts only: an account that
@@ -245,6 +246,8 @@ export type SetUpstreamProxy = {
 export function network(t: Transport) {
   const path = "/v1/network/upstream-proxy";
   return {
+    /** Your sandboxes reaching each other by name (`private-network.ts`). */
+    private: privateNetwork(t),
     upstreamProxy: {
       /** Send outbound connections through your proxy, replacing any set before. */
       set: (input: SetUpstreamProxy, options?: RequestOptions) =>

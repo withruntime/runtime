@@ -243,6 +243,40 @@ export class Sandboxes {
       options,
     );
   }
+  /** Stops every live sandbox whose labels all match, eight at a time, and
+   * says which stopped and which failed; one failure does not stop the rest.
+   * Needs at least one label, so stopping everything is never one call. */
+  async stopAll(
+    filter: { labels: Record<string, string> },
+    options: RequestOptions = {},
+  ): Promise<{ stopped: string[]; failed: { id: string; error: unknown }[] }> {
+    if (!filter?.labels || Object.keys(filter.labels).length === 0)
+      throw new RuntimeError({
+        message: "stopAll needs at least one label to match.",
+        code: "invalid_request",
+        status: 0,
+        hint: "Stop one sandbox with sandbox.stop(), or label the ones to stop together.",
+      });
+    const live = await (
+      await this.list({ labels: filter.labels, limit: 100 }, options)
+    ).toArray(Infinity);
+    // One key cannot name several stops: each stop makes its own.
+    const { idempotencyKey: _one, ...each } = options;
+    // In list order, oldest first, whichever finishes first.
+    const errors: unknown[] = new Array(live.length);
+    let next = 0;
+    const worker = async () => {
+      for (let at = next++; at < live.length; at = next++)
+        await live[at]!.stop(each).catch((error: unknown) => (errors[at] = error ?? "failed"));
+    };
+    await Promise.all(Array.from({ length: Math.min(8, live.length) }, worker));
+    return {
+      stopped: live.filter((_, at) => errors[at] === undefined).map((sbx) => sbx.id),
+      failed: live.flatMap((sbx, at) =>
+        errors[at] === undefined ? [] : [{ id: sbx.id, error: errors[at] }],
+      ),
+    };
+  }
 }
 
 export class FeedbackApi {

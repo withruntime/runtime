@@ -2,7 +2,8 @@
 import sync as sandbox`` then ``with sandbox.create_sandbox() as box``."""
 from .._core import (CompletedProcess, DirectoryEntry, GitSource, NetworkPolicy, NetworkPolicyRule,
                      NetworkPolicySubnets, NetworkPolicyTransform, NotSupportedError, ProcessStatus, SandboxApiError,
-                     SandboxCredentialsError, SandboxError, SandboxPathNotFoundError, SandboxQueryByCreatedAt,
+                     SandboxCredentialsError, SandboxError, SandboxPathNotFoundError, SandboxQueryByCreatedAt, SandboxQueryByCurrentSnapshotId,
+                     SandboxQueryByStatusUpdatedAt,
                      SandboxQueryByName, SandboxResources, SandboxRoute, SandboxStatus, SandboxTimeoutError,
                      SnapshotRetention, SnapshotSource, TagFilter, TarballSource)
 from .._sync_sandbox import (Batch, FileHandle, Process, Sandbox, SandboxFilesystem, Snapshot, TextReader,
@@ -21,6 +22,7 @@ __all__ = [
     "FileHandle", "Batch", "CompletedProcess", "DirectoryEntry", "GitSource", "TarballSource", "SnapshotSource",
     "SnapshotRetention", "NetworkPolicy", "NetworkPolicyRule", "NetworkPolicySubnets", "NetworkPolicyTransform",
     "SandboxResources", "SandboxRoute", "SandboxStatus", "ProcessStatus", "SandboxQueryByName",
-    "SandboxQueryByCreatedAt", "TagFilter", "SandboxError", "SandboxApiError", "SandboxCredentialsError",
+    "SandboxQueryByCreatedAt", "SandboxQueryByStatusUpdatedAt",
+    "SandboxQueryByCurrentSnapshotId", "TagFilter", "SandboxError", "SandboxApiError", "SandboxCredentialsError",
     "SandboxPathNotFoundError", "SandboxTimeoutError", "NotSupportedError",
 ]

@@ -121,8 +121,8 @@ export function sandboxDesktop(t: Transport, sandbox: Sandbox) {
       (await act<{ windows: DesktopWindow[] }>({ action: "windows" }, options)).windows,
     focus: (windowId: string, options?: RequestOptions) =>
       act({ action: "focus", windowId }, options),
-    /** Opens `url` in Firefox on the desktop. Right after a sandbox's first
-     * start, Firefox may still be installing; this waits for it. */
+    /** Opens `url` in Chromium on the desktop. Right after a sandbox's first
+     * start, Chromium may still be installing; this waits for it. */
     async open(url: string, options?: RequestOptions) {
       const deadline = Date.now() + 600_000;
       for (;;) {

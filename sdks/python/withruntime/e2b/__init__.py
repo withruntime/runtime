@@ -8,9 +8,9 @@ from ._async_sandbox import (AsyncCommandHandle, AsyncCommands, AsyncFilesystem,
                              AsyncSandboxPaginator)
 from ._core import (AuthenticationException, CommandExitException, CommandResult, EntryInfo,
                     FileNotFoundException, FileType, FilesystemEvent, FilesystemEventType, InvalidArgumentException, NotEnoughSpaceException,
-                    NotFoundException, NotSupportedException, ProcessInfo, PtySize, RateLimitException, SandboxException,
+                    NotFoundException, NotSupportedException, PublicPreviewNotAllowedException, ProcessInfo, PtySize, RateLimitException, SandboxException,
                     SandboxInfo, SandboxInfoLifecycle, SandboxNotFoundException, SandboxQuery,
-                    ServiceBusyException, SnapshotInfo, TemplateException, TimeoutException, WriteInfo)
+                    ServiceBusyException, SnapshotInfo, TemplateException, TimeoutException, WriteInfo, HttpVersion)
 from ._core import unsupported as _unsupported
 from ._sync_sandbox import CommandHandle, Commands, Filesystem, Pty, Sandbox, SandboxPaginator
 
@@ -51,7 +51,7 @@ __all__ = [
     "EntryInfo", "WriteInfo", "FileType", "FilesystemEvent", "FilesystemEventType", "ProcessInfo", "SandboxInfo", "SandboxInfoLifecycle", "SandboxQuery",
     "SnapshotInfo", "SandboxException", "TimeoutException", "InvalidArgumentException", "NotEnoughSpaceException",
     "NotFoundException", "FileNotFoundException", "SandboxNotFoundException", "AuthenticationException",
-    "TemplateException", "RateLimitException", "ServiceBusyException", "NotSupportedException", "Template",
+    "TemplateException", "RateLimitException", "ServiceBusyException", "NotSupportedException", "PublicPreviewNotAllowedException", "HttpVersion", "Template",
     "AsyncTemplate", "Volume", "AsyncVolume", "Secret", "AsyncSecret", "wait_for_port", "wait_for_url",
     "wait_for_process", "wait_for_file", "wait_for_timeout",
 ]

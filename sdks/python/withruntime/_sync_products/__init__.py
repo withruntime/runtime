@@ -2,6 +2,7 @@
 from typing import Any
 
 from .audit import Audit
+from .browser import Browser
 from .desktop import Desktop
 from .images import Images
 from .jobs import Jobs
@@ -46,6 +47,7 @@ SANDBOX["interpreter"] = Interpreter
 SANDBOX["previews"] = Previews
 SANDBOX["network"] = Network
 SANDBOX["desktop"] = Desktop
+SANDBOX["browser"] = Browser
 SANDBOX["mounts"] = Mounts
 SANDBOX["tailscale"] = Tailscale
 SANDBOX["metrics"] = Metrics

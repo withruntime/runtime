@@ -27,6 +27,7 @@ export {
   type Signal,
 } from "./command.js";
 export { FileSystem, Stats, Dirent } from "./filesystem.js";
+export { SandboxUser, SandboxUserAlreadyExistsError } from "./sandbox-user.js";
 export { Snapshot } from "./snapshot.js";
 export { APIError, StreamError, AuthenticationError, NotSupportedError } from "./errors.js";
 export type { Credentials, WithRuntime } from "./client.js";
@@ -64,11 +65,6 @@ export const Session = unsupportedExport(
   "Session",
   "A Runtime sandbox is its own session: call the methods on the sandbox.",
 );
-export const SandboxUser = unsupportedExport(
-  "SandboxUser",
-  "Commands run as the sandbox owner with passwordless sudo; create users with `sudo useradd` in runCommand.",
-);
-export class SandboxUserAlreadyExistsError extends Error {}
 export const defineSandboxProxy = unsupportedExport(
   "sandbox proxy (defineSandboxProxy)",
   "Share a port with sandbox.withruntime.previews.create(port) instead.",

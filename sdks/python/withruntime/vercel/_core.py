@@ -11,6 +11,7 @@ from datetime import timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
+from .._compat_lease import epoch, extension_seconds  # noqa: F401 - the adapter's names for them
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Vercel's names --------------------------------------------------
@@ -208,15 +209,55 @@ class TagFilter:
 
 @dataclass
 class SandboxQueryByName:
-    sort_order: str = "asc"
+    """Sandboxes by name, newest name first unless ``sort_order="asc"``."""
+    sort_order: str = "desc"
     name_prefix: Optional[str] = None
     tag: Optional[TagFilter] = None
 
 
 @dataclass
 class SandboxQueryByCreatedAt:
-    sort_order: str = "asc"
+    sort_order: str = "desc"
     tag: Optional[TagFilter] = None
+
+
+@dataclass
+class SandboxQueryByStatusUpdatedAt:
+    sort_order: str = "desc"
+
+
+@dataclass
+class SandboxQueryByCurrentSnapshotId:
+    """By the snapshot a sandbox started from (none sorts first)."""
+    sort_order: str = "desc"
+
+
+def query_order(query: Any) -> tuple:
+    """How a Vercel sandbox query sorts Runtime sandboxes: a key and whether
+    it runs newest (largest) first."""
+    order = getattr(query, "sort_order", "desc") or "desc"
+    if order not in ("asc", "desc"):
+        raise ValueError(f'sort_order is "asc" or "desc", not {order!r}.')
+    if isinstance(query, SandboxQueryByName):
+        key: Callable[[Any], Any] = lambda one: str(one.info.get("name") or one.id)  # noqa: E731
+    elif isinstance(query, SandboxQueryByStatusUpdatedAt):
+        key = lambda one: epoch(one.info.get("pausedAt") or one.info.get("readyAt")  # noqa: E731
+                                or one.info.get("createdAt"))
+    elif isinstance(query, SandboxQueryByCurrentSnapshotId):
+        key = lambda one: str(one.info.get("snapshot") or "")  # noqa: E731
+    else:
+        key = lambda one: epoch(one.info.get("createdAt"))  # noqa: E731
+    return key, order == "desc"
+
+
+def cursor_offset(cursor: Optional[str]) -> int:
+    """Where a query continues from: this adapter's cursors are ``rt.<n>``."""
+    if cursor is None:
+        return 0
+    found = re.fullmatch(r"rt\.(\d+)", cursor)
+    if not found:
+        raise ValueError(f"The cursor {cursor!r} was not made by this adapter: pass one it returned, or none.")
+    return int(found.group(1))
 
 
 @dataclass
@@ -281,16 +322,19 @@ def seconds(value: Any) -> Optional[float]:
     return float(value)
 
 
-def lease_seconds(value: Any) -> int:
+def time_limit(value: Any) -> float:
+    """An execution time limit in seconds, at least a minute. Past an hour the
+    adapter renews Runtime's lease (an hour at most) while the sandbox object
+    lives."""
     total = DEFAULT_TIMEOUT if value is None else seconds(value)
-    if total is None or total <= 0:
+    if total is None or not math.isfinite(total) or total <= 0:
         raise ValueError(f"execution_time_limit must be positive, not {value}.")
-    whole = math.ceil(total)
-    if whole > MAX_LEASE:
-        raise NotSupportedError(f"An execution time limit of {total:g} s (over one hour)",
-                                "Runtime leases last up to an hour; call extend_execution_time_limit(...) before "
-                                "it ends, as often as needed.")
-    return max(whole, MIN_LEASE)
+    return max(float(math.ceil(total)), float(MIN_LEASE))
+
+
+def lease_seconds(value: Any) -> int:
+    """The first lease for an execution time limit: the limit, up to an hour."""
+    return int(min(time_limit(value), MAX_LEASE))
 
 
 def retention_days(value: Any) -> int:

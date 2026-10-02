@@ -13,6 +13,7 @@ import {
   guard,
   InvalidArgumentError,
   NotSupportedError,
+  PublicPreviewNotAllowedError,
   SandboxError,
   SandboxNotFoundError,
   TemplateError,
@@ -32,6 +33,8 @@ export const DEFAULT_TIMEOUT_MS = 300_000;
 /** Runtime's lease bounds (MAX_TIMEOUT_SECONDS in the API). */
 const MIN_LEASE_SECONDS = 60;
 const MAX_LEASE_SECONDS = 3600;
+/** E2B's longest sandbox timeout, 24 hours (its Pro plan). */
+const LONGEST_TIMEOUT_MS = 86_400_000;
 /** E2B template names that mean "the stock environment": Runtime's default image. */
 const STOCK_TEMPLATES = new Set(["base", "code-interpreter-v1", "code-interpreter"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,8 +54,9 @@ export interface SandboxOpts extends ConnectionOpts {
   /** The sandbox's own environment: every command, terminal and code run in it
    * gets these, whoever connects. Values are never shown again. */
   envs?: Record<string, string>;
-  /** Default 300 000. Runtime's leases run 60 s to 1 hour; shorter rounds up
-   * to 60 s (with a warning), longer is refused. */
+  /** Default 300 000, at most 24 hours. Runtime's leases run 60 s to 1 hour:
+   * shorter rounds up to 60 s (with a warning); longer gets an hour, moved on
+   * while this process runs, up to the time asked for. */
   timeoutMs?: number;
   /** Accepted and ignored, as E2B ignores it. */
   secure?: boolean;
@@ -111,15 +115,18 @@ export type SandboxListOpts = SandboxApiOpts & {
 
 let warnedShortLease = false;
 
+/** E2B's own bound since 2.52.0: refused before anything happens. */
+const MAX_FORK_COUNT = 20;
+function checkForkCount(count: number | undefined) {
+  if (count !== undefined && (!Number.isInteger(count) || count < 1 || count > MAX_FORK_COUNT))
+    throw new InvalidArgumentError(`count must be an integer between 1 and ${MAX_FORK_COUNT}`);
+}
+
+/** The first lease for `timeoutMs`: up to an hour; `keepUntil` carries a
+ * longer timeout on from there. */
 function leaseSeconds(timeoutMs: number): number {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
-    throw new InvalidArgumentError(`timeoutMs must be a positive number, not ${timeoutMs}.`);
-  const seconds = Math.ceil(timeoutMs / 1000);
-  if (seconds > MAX_LEASE_SECONDS)
-    throw new NotSupportedError(
-      `A sandbox timeout of ${timeoutMs} ms (over one hour)`,
-      "Runtime leases last up to an hour (3_600_000 ms); call sandbox.setTimeout(...) before it ends to keep going, as often as needed.",
-    );
+  checkTimeout(timeoutMs);
+  const seconds = Math.min(Math.ceil(timeoutMs / 1000), MAX_LEASE_SECONDS);
   if (seconds < MIN_LEASE_SECONDS) {
     if (!warnedShortLease && typeof process !== "undefined") {
       warnedShortLease = true;
@@ -131,6 +138,90 @@ function leaseSeconds(timeoutMs: number): number {
     return MIN_LEASE_SECONDS;
   }
   return seconds;
+}
+
+function checkTimeout(timeoutMs: number) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    throw new InvalidArgumentError(`timeoutMs must be a positive number, not ${timeoutMs}.`);
+  if (timeoutMs > LONGEST_TIMEOUT_MS)
+    throw new InvalidArgumentError(
+      `timeoutMs is at most 24 hours (86_400_000 ms), as on E2B, not ${timeoutMs}.`,
+    );
+}
+
+/* Timeouts over an hour. Runtime's lease reaches at most an hour ahead of
+   now, and E2B's timeout up to a day. While this process runs, the adapter
+   moves the lease on every five minutes, as far as an hour ahead and never
+   past the end asked for. One keeper per sandbox, whichever object asked.
+   If the process ends first, the sandbox ends when its lease does, at most
+   an hour later; it is never kept past the time asked for. */
+const KEEP_EVERY_MS = 5 * 60_000;
+/** Kept under the API's hour, for the clocks and the trip. */
+const KEEP_AHEAD_MS = (MAX_LEASE_SECONDS - 30) * 1000;
+type Keeper = { until: number; runtime: RuntimeSandbox; timer?: ReturnType<typeof setTimeout> };
+const keepers = new Map<string, Keeper>();
+let warnedKeeper = false;
+
+/** Keeps `runtime` until `until` (epoch ms), or stops keeping it when that
+ * is within the hour its lease can already reach. */
+function keepUntil(runtime: RuntimeSandbox, until: number) {
+  const keeper = keepers.get(runtime.id);
+  if (until - Date.now() <= MAX_LEASE_SECONDS * 1000) return stopKeeping(runtime.id);
+  if (keeper) {
+    keeper.until = until;
+    keeper.runtime = runtime;
+    return;
+  }
+  const made: Keeper = { until, runtime };
+  keepers.set(runtime.id, made);
+  schedule(made);
+}
+
+function stopKeeping(sandboxId: string) {
+  const keeper = keepers.get(sandboxId);
+  if (keeper?.timer !== undefined) clearTimeout(keeper.timer);
+  keepers.delete(sandboxId);
+}
+
+function schedule(keeper: Keeper) {
+  keeper.timer = setTimeout(() => void renew(keeper), KEEP_EVERY_MS);
+  // Never what keeps a Node or Bun process running.
+  (keeper.timer as { unref?: () => void }).unref?.();
+}
+
+async function renew(keeper: Keeper) {
+  const id = keeper.runtime.id;
+  if (keepers.get(id) !== keeper) return;
+  try {
+    await keeper.runtime.refresh();
+    const current = state(keeper.runtime);
+    if (current === "stopped") return stopKeeping(id);
+    if (current === "running") {
+      const end = Date.parse(keeper.runtime.info.expiresAt);
+      const want = Math.min(keeper.until, Date.now() + KEEP_AHEAD_MS);
+      const later = Math.floor((want - end) / 1000);
+      if (later >= 1) await keeper.runtime.extend(later);
+      if (Date.parse(keeper.runtime.info.expiresAt) >= keeper.until - 1000) return stopKeeping(id);
+    }
+  } catch (error) {
+    if (!warnedKeeper && typeof process !== "undefined" && process.emitWarning) {
+      warnedKeeper = true;
+      process.emitWarning(
+        `Could not extend sandbox ${id}'s lease toward its timeout: ${error instanceof Error ? error.message : String(error)}. Trying again in five minutes.`,
+        { code: "RUNTIME_E2B_LEASE" },
+      );
+    }
+  }
+  if (keepers.get(id) === keeper) schedule(keeper);
+}
+
+/** Test hook: renew every kept lease now, as the five-minute timer would. */
+export async function renewLeases(): Promise<void> {
+  await Promise.all([...keepers.values()].map((keeper) => renew(keeper)));
+}
+/** Test hook: the end each kept sandbox is kept until. */
+export function keptLeases(): Map<string, number> {
+  return new Map([...keepers].map(([id, keeper]) => [id, keeper.until]));
 }
 
 function onLeaseEnd(lifecycle: SandboxLifecycle | undefined): "pause" | "stop" {
@@ -352,6 +443,7 @@ export class Sandbox {
     options.signal?.throwIfAborted();
     refuseCreate(opts);
     const client = clientFor(opts);
+    const asked = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const input: RuntimeCreate = {
       timeoutSeconds: leaseSeconds(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       onLeaseEnd: onLeaseEnd(opts.lifecycle),
@@ -374,6 +466,7 @@ export class Sandbox {
       ...opts.runtime?.create,
     };
     const runtime = await guard("sandbox", () => client.sandboxes.create(create, options));
+    keepUntil(runtime, asked);
     return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
@@ -407,6 +500,7 @@ export class Sandbox {
   /** Stops the sandbox. False when it was not found or had already ended. */
   static async kill(sandboxId: string, opts: SandboxApiOpts = {}): Promise<boolean> {
     const client = clientFor(opts);
+    stopKeeping(sandboxId);
     try {
       const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
       return await stop(runtime, opts);
@@ -416,6 +510,7 @@ export class Sandbox {
     }
   }
   async kill(opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal"> = {}): Promise<boolean> {
+    stopKeeping(this.sandboxId);
     try {
       return await stop(this.#runtime, opts);
     } catch (error) {
@@ -424,8 +519,9 @@ export class Sandbox {
     }
   }
 
-  /** Sets the sandbox to end `timeoutMs` from now. Runtime leases only move
-   * later: a shorter timeout than the one it has is refused. */
+  /** Sets the sandbox to end `timeoutMs` from now, up to 24 hours; past an
+   * hour the lease is moved on while this process runs. Runtime cannot end a
+   * lease early, so an end sooner than the lease's is refused. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: SandboxApiOpts = {}) {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
@@ -489,6 +585,7 @@ export class Sandbox {
     sandboxId: string,
     opts: SandboxApiOpts & { count?: number; timeoutMs?: number } = {},
   ): Promise<Array<InstanceType<S> | Error>> {
+    checkForkCount(opts.count);
     const { count: _count, timeoutMs: _timeoutMs, ...connection } = opts;
     const source = await this.connect(sandboxId, connection);
     return source.fork(opts);
@@ -503,6 +600,7 @@ export class Sandbox {
         "A timeout for forks (fork timeoutMs)",
         "Fork without it, then call setTimeout(ms) on each fork.",
       );
+    checkForkCount(opts.count);
     const copies = await guard("sandbox", () =>
       this.#runtime.fork({ count: opts.count ?? 1, ...request(opts) }),
     );
@@ -550,6 +648,10 @@ export class Sandbox {
   getHost(port: number): string {
     if (!Number.isInteger(port) || port < 1 || port > 65_535)
       throw new InvalidArgumentError(`port must be a whole number from 1 to 65535, not ${port}.`);
+    // A trial sandbox's ports are private: a host alone would answer 404 or
+    // 401 to everyone. Say so now, with the address that works.
+    if (this.#runtime.info.funding === "trial")
+      throw new PublicPreviewNotAllowedError(this.sandboxId, port);
     void this.#share(port).catch((error: unknown) => {
       if (typeof process !== "undefined" && process.emitWarning)
         process.emitWarning(
@@ -563,6 +665,8 @@ export class Sandbox {
    * its host, `<port>-<id>.<domain>`, once the share has landed. Anyone with
    * the address can reach it; a browser sees a one-time page naming Runtime. */
   async getPublicHost(port: number): Promise<string> {
+    if (this.#runtime.info.funding === "trial")
+      throw new PublicPreviewNotAllowedError(this.sandboxId, port);
     return this.#share(port);
   }
   #share(port: number): Promise<string> {
@@ -633,6 +737,7 @@ async function resume(runtime: RuntimeSandbox, opts: SandboxConnectOpts) {
     );
   const current = state(runtime);
   if (current === "stopped") throw new SandboxNotFoundError(`Sandbox ${runtime.id} has ended.`);
+  const asked = opts.timeoutMs === undefined ? undefined : Date.now() + opts.timeoutMs;
   if (current === "paused") {
     await guard("sandbox", () =>
       runtime.wake({
@@ -640,13 +745,14 @@ async function resume(runtime: RuntimeSandbox, opts: SandboxConnectOpts) {
         ...request(opts),
       }),
     );
-    return;
-  }
-  if (opts.timeoutMs !== undefined) {
-    const later = Date.now() + opts.timeoutMs - Date.parse(runtime.info.expiresAt);
+  } else if (opts.timeoutMs !== undefined) {
+    checkTimeout(opts.timeoutMs);
+    const later = Math.min(asked!, Date.now() + KEEP_AHEAD_MS) - Date.parse(runtime.info.expiresAt);
     if (later > 1000)
       await guard("sandbox", () => runtime.extend(Math.ceil(later / 1000), request(opts)));
   }
+  if (asked !== undefined && asked > (keepers.get(runtime.id)?.until ?? 0))
+    keepUntil(runtime, asked);
 }
 
 async function stop(
@@ -663,16 +769,18 @@ async function extendTo(
   timeoutMs: number,
   opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal">,
 ) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
-    throw new InvalidArgumentError(`timeoutMs must be a positive number, not ${timeoutMs}.`);
-  const later = Date.now() + timeoutMs - Date.parse(runtime.info.expiresAt);
-  if (later < -1000)
+  checkTimeout(timeoutMs);
+  const asked = Date.now() + timeoutMs;
+  const end = Date.parse(runtime.info.expiresAt);
+  if (asked - end < -1000)
     throw new NotSupportedError(
-      "Shortening a sandbox's timeout",
-      "Runtime leases only move later. Call kill() when the work is done.",
+      "Ending a sandbox sooner than its lease (a shorter setTimeout)",
+      "Runtime cannot end a lease early. Call kill() when the work is done.",
     );
+  const later = Math.min(asked, Date.now() + KEEP_AHEAD_MS) - end;
   if (later > 1000)
     await guard("sandbox", () => runtime.extend(Math.ceil(later / 1000), request(opts)));
+  keepUntil(runtime, asked);
 }
 
 async function pause(runtime: RuntimeSandbox, opts: SandboxApiOpts & { keepMemory?: boolean }) {
@@ -691,54 +799,60 @@ async function pause(runtime: RuntimeSandbox, opts: SandboxApiOpts & { keepMemor
 const RUNNING = ["starting", "running", "resuming"] as const;
 const PAUSED = ["pausing", "paused"] as const;
 
-/** E2B's paginator: `while (p.hasNext) items.push(...(await p.nextItems()))`. */
+/** E2B's paginator: `while (p.hasNext) items.push(...(await p.nextItems()))`.
+ * Runtime filters by state and metadata itself. A template, `startedAfter`,
+ * newest-first order or a saved `nextToken` are done here: every match is
+ * read once, then served a page at a time. */
 export class SandboxPaginator {
   readonly #client: Runtime;
   readonly #request: RequestOptions;
   readonly #filter: Parameters<Runtime["sandboxes"]["list"]>[0];
+  readonly #opts: SandboxListOpts;
+  readonly #pageSize: number;
+  readonly #local: boolean;
   #page: Awaited<ReturnType<Runtime["sandboxes"]["list"]>> | undefined;
+  #all: SandboxInfo[] | undefined;
+  #offset: number;
   #hasNext = true;
 
   constructor(client: Runtime, opts: SandboxListOpts) {
     this.#client = client;
     this.#request = request(opts);
+    this.#opts = opts;
     const query = opts.query ?? {};
-    if (query.template !== undefined && !STOCK_TEMPLATES.has(query.template))
-      throw new NotSupportedError(
-        "Listing by template",
-        "Filter by metadata instead: give sandboxes a metadata key when you create them.",
-      );
-    if (query.startedAfter !== undefined)
-      throw new NotSupportedError(
-        "Listing by start time (startedAfter)",
-        "List them all and filter on getInfo().startedAt.",
-      );
-    if (opts.order === "desc")
-      throw new NotSupportedError(
-        "Newest-first listing (order: 'desc')",
-        "Runtime lists oldest first; reverse the list yourself.",
-      );
-    if (opts.nextToken !== undefined)
-      throw new NotSupportedError(
-        "Starting a list from a saved nextToken",
-        "Keep the paginator and call nextItems() again.",
-      );
+    if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 1))
+      throw new InvalidArgumentError(`limit must be a positive whole number, not ${opts.limit}.`);
+    this.#pageSize = opts.limit ?? 100;
+    this.#offset = opts.nextToken === undefined ? 0 : tokenOffset(opts.nextToken);
+    this.#local =
+      query.template !== undefined ||
+      query.startedAfter !== undefined ||
+      opts.order === "desc" ||
+      opts.nextToken !== undefined;
     const states = query.state?.length ? query.state : (["running", "paused"] as const);
     this.#filter = {
       state: states.flatMap((one) => (one === "running" ? [...RUNNING] : [...PAUSED])),
       ...(query.metadata && Object.keys(query.metadata).length ? { labels: query.metadata } : {}),
-      ...(opts.limit ? { limit: Math.min(opts.limit, 100) } : {}),
+      limit: this.#local ? 100 : Math.min(this.#pageSize, 100),
     };
   }
   get hasNext(): boolean {
     return this.#hasNext;
   }
+  /** Where the next page starts; `Sandbox.list({ nextToken })` resumes there. */
   get nextToken(): string | undefined {
-    return this.#page?.nextCursor ?? undefined;
+    return this.#hasNext && this.#offset > 0 ? `runtime:${this.#offset}` : undefined;
   }
   async nextItems(): Promise<SandboxInfo[]> {
     this.#request.signal?.throwIfAborted();
     if (!this.#hasNext) throw new SandboxError("No more items to fetch.");
+    if (this.#local) {
+      const all = (this.#all ??= await guard("other", () => this.#everyMatch()));
+      const items = all.slice(this.#offset, this.#offset + this.#pageSize);
+      this.#offset += items.length;
+      this.#hasNext = this.#offset < all.length;
+      return items;
+    }
     const previous = this.#page;
     const page = await guard("other", async () =>
       previous
@@ -747,8 +861,55 @@ export class SandboxPaginator {
     );
     this.#page = page ?? undefined;
     this.#hasNext = Boolean(page?.hasMore);
-    return (page?.data ?? []).map(infoOf);
+    const items = (page?.data ?? []).map(infoOf);
+    this.#offset += items.length;
+    return items;
   }
+
+  async #everyMatch(): Promise<SandboxInfo[]> {
+    const query = this.#opts.query ?? {};
+    const templates =
+      query.template === undefined
+        ? undefined
+        : await templateIds(this.#client, query.template, this.#request);
+    const after = query.startedAfter?.getTime();
+    const all: SandboxInfo[] = [];
+    let page: Awaited<ReturnType<Runtime["sandboxes"]["list"]>> | null =
+      await this.#client.sandboxes.list(this.#filter, this.#request);
+    while (page) {
+      for (const one of page.data) {
+        const info = infoOf(one);
+        if (templates && !templates.has(info.templateId)) continue;
+        if (after !== undefined && info.startedAt.getTime() < after) continue;
+        all.push(info);
+      }
+      page = page.hasMore ? await page.next() : null;
+    }
+    const sign = this.#opts.order === "desc" ? -1 : 1;
+    return all.sort((a, b) => sign * (a.startedAt.getTime() - b.startedAt.getTime()));
+  }
+}
+
+function tokenOffset(token: string): number {
+  const match = /^runtime:(\d+)$/.exec(token);
+  if (!match)
+    throw new InvalidArgumentError(
+      `"${token}" is not a nextToken this package gave; pass the paginator's own nextToken.`,
+    );
+  return Number(match[1]);
+}
+
+/** The template ids a template name stands for: "base" for the stock names,
+ * the id itself for a UUID, and every Runtime image of that name. */
+async function templateIds(
+  client: Runtime,
+  template: string,
+  options: RequestOptions,
+): Promise<Set<string>> {
+  if (STOCK_TEMPLATES.has(template)) return new Set(["base"]);
+  if (UUID.test(template)) return new Set([template]);
+  const page = await client.images.list({ name: template, limit: 100 }, options);
+  return new Set(page.data.map((image) => image.id));
 }
 
 type MetricsOpts = { start?: Date | number; end?: Date | number };

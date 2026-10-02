@@ -1,5 +1,6 @@
 import type { Writable } from "node:stream";
 import type { Runtime } from "../client.js";
+import { extensionSeconds, LeaseKeeper, LEASE_MAX_SECONDS } from "../compat/lease.js";
 import { RuntimeError } from "../errors.js";
 import type { Page } from "../page.js";
 import {
@@ -13,6 +14,12 @@ import {
 import { Command, CommandFinished, exitCodeOf, type LogOutputLine } from "./command.js";
 import { APIError, guard, NotSupportedError, translate } from "./errors.js";
 import { FileSystem } from "./filesystem.js";
+import {
+  rootOrThrow,
+  SandboxUser,
+  SandboxUserAlreadyExistsError,
+  validateName,
+} from "./sandbox-user.js";
 import { Snapshot } from "./snapshot.js";
 
 /* Vercel Sandbox's `Sandbox` over Runtime's. Every call is one or a few calls
@@ -26,7 +33,8 @@ export const MEMORY_MIB_PER_VCPU = 2048;
 /** Vercel's default timeout, 5 minutes. */
 export const DEFAULT_TIMEOUT_MS = 300_000;
 const MIN_LEASE_SECONDS = 60;
-const MAX_LEASE_SECONDS = 3600;
+/** Extend a long timeout's lease when less than this is left. */
+const LEASE_MARGIN_MS = 600_000;
 /** Commands without a timeout run until the sandbox ends: Runtime's longest. */
 const LONGEST_MS = 86_400_000;
 /** Vercel's working directory; `/workspace` on Runtime. */
@@ -68,7 +76,9 @@ export interface CreateSandboxParams extends Credentials {
   /** Shared at public HTTPS addresses (Runtime previews); `domain(port)`
    * answers from them. */
   ports?: number[];
-  /** Milliseconds. Default 300 000; 60 s to 1 hour on Runtime. */
+  /** Milliseconds. Default 300 000, at least 60 s. Over an hour, the
+   * sandbox's hour-long lease is extended while this object lives, up to the
+   * timeout (`sandbox.timeout`). */
   timeout?: number;
   resources?: { vcpus: number };
   networkPolicy?: NetworkPolicy;
@@ -120,16 +130,15 @@ export interface SandboxRoute {
   url: string;
 }
 
-function leaseSeconds(timeoutMs: number): number {
+function checkTimeout(timeoutMs: number): number {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
     throw new RangeError(`timeout must be a positive number of milliseconds, not ${timeoutMs}.`);
-  const seconds = Math.ceil(timeoutMs / 1000);
-  if (seconds > MAX_LEASE_SECONDS)
-    throw new NotSupportedError(
-      `A sandbox timeout of ${timeoutMs} ms (over one hour)`,
-      "Runtime leases last up to an hour (3_600_000 ms); call sandbox.extendTimeout(ms) before it ends to keep going, as often as needed.",
-    );
-  return Math.max(seconds, MIN_LEASE_SECONDS);
+  return Math.max(timeoutMs, MIN_LEASE_SECONDS * 1000);
+}
+
+/** The first lease for a timeout: all of it, or the hour a lease may run. */
+function leaseSeconds(timeoutMs: number): number {
+  return Math.min(Math.ceil(checkTimeout(timeoutMs) / 1000), LEASE_MAX_SECONDS);
 }
 
 function refuseCreate(params: CreateSandboxParams) {
@@ -265,6 +274,12 @@ export class Sandbox {
   readonly #persistent: boolean;
   readonly #routes = new Map<number, string>();
   readonly #onResume: ((sandbox: Sandbox) => Promise<void>) | undefined;
+  readonly #keeper: LeaseKeeper;
+  /** Epoch ms the current session started, as the timeout counts from it. */
+  #sessionStart: number;
+  /** Vercel's timeout, when this object was given one or extended it. */
+  #timeoutMs: number | undefined;
+  #defaultUser: Promise<{ username: string; group: string }> | undefined;
   #linked: Promise<void> | undefined;
   #deleted = false;
 
@@ -275,6 +290,17 @@ export class Sandbox {
     this.#env = { ...resolved.params.env };
     this.#persistent = resolved.params.persistent ?? resolved.runtime.info.onLeaseEnd !== "stop";
     this.#onResume = resolved.params.onResume;
+    const timeout = resolved.params.timeout;
+    this.#timeoutMs = timeout === undefined ? undefined : checkTimeout(timeout);
+    this.#sessionStart =
+      timeout === undefined
+        ? Date.parse(this.#rt.info.expiresAt) - this.#rt.info.timeoutSeconds * 1000
+        : Date.now();
+    this.#keeper = new LeaseKeeper({
+      sandbox: () => this.#rt,
+      until: () => this.#until(),
+      marginMs: () => Math.min(LEASE_MARGIN_MS, this.timeout / 2),
+    });
     this.fs = new FileSystem({
       name: this.name,
       files: async () => (await this.#live()).files,
@@ -340,9 +366,14 @@ export class Sandbox {
   get status(): "pending" | "running" | "stopping" | "stopped" {
     return statusOf(this.#rt.state);
   }
-  /** Milliseconds. */
+  /** Milliseconds from the start of the session: the timeout given at
+   * create, with every extension, or the lease of a sandbox found by name. */
   get timeout(): number {
-    return this.#rt.info.timeoutSeconds * 1000;
+    return this.#timeoutMs ?? this.#rt.info.timeoutSeconds * 1000;
+  }
+  /** Epoch ms the session should end: its start plus the timeout. */
+  #until(): number {
+    return this.#sessionStart + this.timeout;
   }
   get expiresAt(): Date {
     return new Date(this.#rt.info.expiresAt);
@@ -380,10 +411,17 @@ export class Sandbox {
       ...params.withruntime?.create,
     };
     const runtime = await guard(() => client.sandboxes.create(input, signalOf(params)));
-    const sandbox = new Sandbox({ runtime, client, params: { ...params, persistent } });
+    const sandbox = new Sandbox({
+      runtime,
+      client,
+      params: { ...params, persistent, timeout: params.timeout ?? DEFAULT_TIMEOUT_MS },
+    });
     try {
       await sandbox.#setUp(params);
+      // Starts renewing at once when the timeout runs past the first lease.
+      await sandbox.#keeper.check();
     } catch (error) {
+      sandbox.#keeper.end();
       await runtime.stop({ wait: false }).catch(() => undefined);
       throw translate(error, sandbox.name);
     }
@@ -519,24 +557,31 @@ export class Sandbox {
   }
 
   /** Running and stopped (paused) sandboxes, oldest first, with Vercel's
-   * paginator: `for await (const s of await Sandbox.list())`. */
+   * paginator: `for await (const s of await Sandbox.list())`. A name prefix,
+   * creation-time bounds (`since`, `until`, epoch ms), `sortBy` and
+   * `sortOrder`, and a `cursor` from an earlier page are applied here, over
+   * every sandbox the key sees. */
   static async list(
     params: {
       tags?: Record<string, string>;
       limit?: number;
+      namePrefix?: string;
+      sortBy?: "createdAt" | "name" | "statusUpdatedAt";
+      sortOrder?: "asc" | "desc";
+      cursor?: string;
+      since?: number | Date;
+      until?: number | Date;
       signal?: AbortSignal;
     } & Credentials & {
         withruntime?: WithRuntime;
-      } & Record<string, unknown> = {},
+      } = {},
   ) {
     params.signal?.throwIfAborted();
-    for (const field of ["since", "until", "cursor", "sortBy", "sortOrder", "namePrefix"])
-      if (params[field] !== undefined)
-        throw new NotSupportedError(
-          `Listing sandboxes by ${field}`,
-          "List them all (oldest first) and filter the result yourself.",
-        );
     const client = clientFor(params);
+    const local = (["namePrefix", "sortBy", "sortOrder", "cursor", "since", "until"] as const).some(
+      (field) => params[field] !== undefined,
+    );
+    if (local) return listHere(client, params);
     const page = await guard(() =>
       client.sandboxes.list(
         {
@@ -562,11 +607,15 @@ export class Sandbox {
       });
     const state = this.#rt.state;
     if (state === "paused" || state === "pausing") await this.#wake(opts);
+    await guard(() => this.#keeper.check(), this.name);
     return this.#rt;
   }
 
+  /** A woken sandbox starts a new session, whose timeout counts from now,
+   * as Vercel's resumed sessions do. */
   async #wake(opts: { signal?: AbortSignal } = {}) {
     await guard(() => this.#rt.wake(signalOf(opts)), this.name);
+    if (this.#timeoutMs !== undefined) this.#sessionStart = Date.now();
     await this.#onResume?.(this);
   }
 
@@ -810,6 +859,7 @@ export class Sandbox {
       if (this.#persistent) await guard(() => this.#rt.pause(signalOf(opts)), this.name);
       else await guard(() => this.#rt.stop(signalOf(opts)), this.name);
     }
+    if (!this.#persistent) this.#keeper.end();
     return { name: this.name, status: this.status };
   }
 
@@ -826,6 +876,7 @@ export class Sandbox {
     if (this.#rt.state !== "stopped")
       await guard(() => this.#rt.stop({ wait: false, ...signalOf(opts) }), this.name);
     this.#deleted = true;
+    this.#keeper.end();
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -833,15 +884,27 @@ export class Sandbox {
     await this.stop().catch(() => undefined);
   }
 
-  /** Moves the end `duration` milliseconds later (at most an hour ahead of
-   * now on Runtime). */
+  /** Moves the end `duration` milliseconds later. The lease moves at once
+   * as far as it may (an hour ahead of now); past that it is extended while
+   * this object lives. */
   async extendTimeout(duration: number, opts: { signal?: AbortSignal } = {}): Promise<void> {
     if (!Number.isFinite(duration) || duration <= 0)
       throw new RangeError(`duration must be a positive number of milliseconds, not ${duration}.`);
-    await this.#withResume(
-      (runtime) => runtime.extend(Math.ceil(duration / 1000), signalOf(opts)),
-      opts,
+    await this.#withResume(async (runtime) => {
+      this.#timeoutMs = this.timeout + duration;
+      await this.#leaseToTimeout(runtime, opts);
+    }, opts);
+  }
+
+  /** Extends the lease now toward the timeout, an hour ahead at most. */
+  async #leaseToTimeout(runtime: RuntimeSandbox, opts: { signal?: AbortSignal }) {
+    const seconds = extensionSeconds(
+      Date.parse(runtime.info.expiresAt),
+      this.#until(),
+      Date.now(),
+      Infinity,
     );
+    if (seconds >= 1) await runtime.extend(seconds, signalOf(opts));
   }
 
   /** Replaces the network rules; returns the policy given. */
@@ -881,13 +944,18 @@ export class Sandbox {
     if (params.ports !== undefined) validatePorts(params.ports);
     const wanted = params.ports === undefined ? undefined : new Set(params.ports);
     if (params.timeout !== undefined) {
-      const current = this.timeout;
-      if (params.timeout < current)
+      const timeout = checkTimeout(params.timeout);
+      // A shorter timeout is kept when the lease has not reached it yet: the
+      // lease then stops being extended there. Runtime cannot end a lease
+      // earlier than it was given.
+      if (this.#sessionStart + timeout < Date.parse(this.#rt.info.expiresAt) - 1000)
         throw new NotSupportedError(
-          "Shortening a sandbox's timeout",
-          "Runtime leases only move later. Call stop() when the work is done.",
+          "A timeout that ends earlier than the current lease",
+          `The lease runs to ${this.#rt.info.expiresAt}; call stop() when the work is done, or pass a timeout that ends after it.`,
         );
-      if (params.timeout > current) await this.extendTimeout(params.timeout - current, opts);
+      const longer = timeout > this.timeout;
+      this.#timeoutMs = timeout;
+      if (longer) await this.#withResume((runtime) => this.#leaseToTimeout(runtime, opts), opts);
     }
     if (rules !== undefined)
       await this.#withResume((runtime) => runtime.network.set(rules, signalOf(opts)), opts);
@@ -956,6 +1024,9 @@ export class Sandbox {
 
   // ---- what Runtime does differently -----------------------------------
 
+  /** Refused: Vercel hands back a token scoped to this one shell, and
+   * Runtime's terminal opens with the account key, which must not leave the
+   * server. */
   openInteractive(): Promise<never> {
     return Promise.reject(
       new NotSupportedError(
@@ -964,23 +1035,98 @@ export class Sandbox {
       ),
     );
   }
-  getDefaultUser(): Promise<{ username: string; group: string }> {
-    return Promise.resolve({ username: "runtime", group: "runtime" });
+  /** The user commands run as, `runtime`, and its group. */
+  getDefaultUser(
+    _opts: { signal?: AbortSignal } = {},
+  ): Promise<{ username: string; group: string }> {
+    this.#defaultUser ??= Promise.resolve({ username: "runtime", group: "runtime" });
+    return this.#defaultUser;
   }
-  createUser(): Promise<never> {
-    return usersRefused();
+  /** Makes a Linux user with its own home, as Vercel does: `useradd -m`,
+   * then the home given to the user and the sandbox's group, mode 770. */
+  async createUser(username: string, opts: { signal?: AbortSignal } = {}): Promise<SandboxUser> {
+    validateName(username, "username");
+    const { group } = await this.getDefaultUser(opts);
+    const signal = opts.signal;
+    const useradd = await this.runCommand({
+      cmd: "useradd",
+      args: ["-m", "-s", "/bin/bash", username],
+      sudo: true,
+      ...(signal ? { signal } : {}),
+    });
+    if (useradd.exitCode !== 0) {
+      if (useradd.exitCode === 9) throw new SandboxUserAlreadyExistsError(username);
+      throw new Error(`Failed to create user "${username}": ${await useradd.stderr()}`);
+    }
+    const home = `/home/${username}`;
+    await rootOrThrow(
+      this,
+      "chown",
+      [`${username}:${group}`, home],
+      signal,
+      () => `Failed to set ownership on ${home}`,
+    );
+    await rootOrThrow(
+      this,
+      "chmod",
+      ["770", home],
+      signal,
+      () => `Failed to set permissions on ${home}`,
+    );
+    return new SandboxUser({ sandbox: this, username });
   }
-  asUser(): never {
-    throw usersError();
+  /** A handle for an existing user, such as `root`. */
+  asUser(username: "root" | (string & {})): SandboxUser {
+    validateName(username, "username");
+    return new SandboxUser({ sandbox: this, username });
   }
-  createGroup(): Promise<never> {
-    return usersRefused();
+  /** Makes a group and its shared directory, `/shared/<group>`, setgid 2770. */
+  async createGroup(
+    groupname: string,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<{ groupname: string; sharedDir: string }> {
+    validateName(groupname, "group name");
+    const { username } = await this.getDefaultUser(opts);
+    const sharedDir = `/shared/${groupname}`;
+    const steps: Array<[string, string[], string]> = [
+      ["groupadd", [groupname], `Failed to create group "${groupname}"`],
+      ["mkdir", ["-p", sharedDir], `Failed to create shared directory ${sharedDir}`],
+      ["chown", [`${username}:${groupname}`, sharedDir], `Failed to set ownership on ${sharedDir}`],
+      ["chmod", ["2770", sharedDir], `Failed to set permissions on ${sharedDir}`],
+    ];
+    for (const [cmd, args, what] of steps)
+      await rootOrThrow(this, cmd, args, opts.signal, () => what);
+    return { groupname, sharedDir };
   }
-  addUserToGroup(): Promise<never> {
-    return usersRefused();
+  async addUserToGroup(
+    username: string,
+    groupname: string,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    validateName(username, "username");
+    validateName(groupname, "group name");
+    await rootOrThrow(
+      this,
+      "usermod",
+      ["-aG", groupname, username],
+      opts.signal,
+      () => `Failed to add "${username}" to group "${groupname}"`,
+    );
   }
-  removeUserFromGroup(): Promise<never> {
-    return usersRefused();
+  async removeUserFromGroup(
+    username: string,
+    groupname: string,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    validateName(username, "username");
+    validateName(groupname, "group name");
+    await rootOrThrow(
+      this,
+      "gpasswd",
+      ["-d", username, groupname],
+      opts.signal,
+      () => `Failed to remove "${username}" from group "${groupname}"`,
+    );
   }
   currentSession(): never {
     throw new NotSupportedError(
@@ -1004,16 +1150,6 @@ export class Sandbox {
       ),
     );
   }
-}
-
-function usersError() {
-  return new NotSupportedError(
-    "Extra Linux users and groups (createUser, asUser, groups)",
-    "Commands run as the sandbox owner with passwordless sudo; run `sudo useradd ...` and `sudo -u <user> ...` with runCommand.",
-  );
-}
-function usersRefused(): Promise<never> {
-  return Promise.reject(usersError());
 }
 
 /** Milliseconds as whole days for Runtime's retention: 1 to 365, and 0 (no
@@ -1090,6 +1226,96 @@ function itemOf(runtime: RuntimeSandbox): ListItem {
     expiresAt: Date.parse(info.expiresAt),
     tags: { ...info.labels },
   };
+}
+
+const CURSOR = /^rt\.([0-9]+)$/;
+
+/** Sandbox.list with a name prefix, time bounds, sorting or a cursor:
+ * applied here over every sandbox the key sees, since Runtime's list filters
+ * only by labels and name. The cursor is this adapter's own, an offset into
+ * the same query. */
+async function listHere(
+  client: Runtime,
+  params: {
+    tags?: Record<string, string>;
+    limit?: number;
+    namePrefix?: string;
+    sortBy?: "createdAt" | "name" | "statusUpdatedAt";
+    sortOrder?: "asc" | "desc";
+    cursor?: string;
+    since?: number | Date;
+    until?: number | Date;
+    signal?: AbortSignal;
+  },
+) {
+  let offset = 0;
+  if (params.cursor !== undefined) {
+    const match = CURSOR.exec(params.cursor);
+    if (!match)
+      throw new RangeError(
+        `The cursor "${params.cursor}" was not made by Sandbox.list here; pass pagination.next from an earlier page of the same query.`,
+      );
+    offset = Number(match[1]);
+  }
+  if (
+    params.sortBy !== undefined &&
+    !["createdAt", "name", "statusUpdatedAt"].includes(params.sortBy)
+  )
+    throw new RangeError("sortBy must be createdAt, name or statusUpdatedAt.");
+  if (params.sortOrder !== undefined && !["asc", "desc"].includes(params.sortOrder))
+    throw new RangeError("sortOrder must be asc or desc.");
+  const page = await guard(() =>
+    client.sandboxes.list(params.tags ? { labels: params.tags } : {}, signalOf(params)),
+  );
+  const all = (await guard(() => page.toArray(10_000))).map(itemOf);
+  params.signal?.throwIfAborted();
+  const time = (value: number | Date | undefined) =>
+    value === undefined ? undefined : value instanceof Date ? value.getTime() : value;
+  const since = time(params.since);
+  const until = time(params.until);
+  const items = all.filter(
+    (one) =>
+      (params.namePrefix === undefined || one.name.startsWith(params.namePrefix)) &&
+      (since === undefined || one.createdAt >= since) &&
+      (until === undefined || one.createdAt <= until),
+  );
+  const by = params.sortBy ?? "createdAt";
+  const key = (one: ListItem) =>
+    by === "name" ? one.name : by === "statusUpdatedAt" ? one.updatedAt : one.createdAt;
+  const direction = params.sortOrder === "desc" ? -1 : 1;
+  items.sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return (x < y ? -1 : x > y ? 1 : 0) * direction;
+  });
+  const size = Math.max(1, Math.min(params.limit ?? 50, 100));
+  const pageAt = (from: number) => {
+    const sandboxes = items.slice(from, from + size);
+    return {
+      sandboxes,
+      pagination: {
+        count: sandboxes.length,
+        next: from + size < items.length ? `rt.${from + size}` : null,
+      },
+    };
+  };
+  return Object.assign(pageAt(offset), {
+    async *pages() {
+      for (let from = offset; from === offset || from < items.length; from += size) {
+        params.signal?.throwIfAborted();
+        yield pageAt(from);
+      }
+    },
+    async *[Symbol.asyncIterator]() {
+      for (const item of items.slice(offset)) {
+        params.signal?.throwIfAborted();
+        yield item;
+      }
+    },
+    async toArray() {
+      params.signal?.throwIfAborted();
+      return items.slice(offset);
+    },
+  });
 }
 
 /** Vercel's paginator over a Runtime page: the first page's fields, async

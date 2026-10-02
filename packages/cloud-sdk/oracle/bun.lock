@@ -4,11 +4,11 @@
   "workspaces": {
     "": {
       "dependencies": {
-        "@blaxel/core": "0.3.24",
+        "@blaxel/core": "0.3.25",
         "@daytona/sdk": "0.220.0",
         "@e2b/code-interpreter": "2.8.0",
         "@vercel/sandbox": "3.5.1",
-        "e2b": "2.51.0",
+        "e2b": "2.52.0",
       },
     },
   },
@@ -51,7 +51,7 @@
 
     "@aws/lambda-invoke-store": ["@aws/lambda-invoke-store@0.3.0", "", {}, "sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ=="],
 
-    "@blaxel/core": ["@blaxel/core@0.3.24", "", { "dependencies": { "@hey-api/client-fetch": "^0.10.0", "@modelcontextprotocol/sdk": "^1.20.0", "archiver": "^7.0.1", "axios": "^1.9.0", "dockerfile-ast": "^0.7.1", "dotenv": "^17.4.2", "form-data": "^4.0.2", "jwt-decode": "^4.0.0", "smol-toml": "^1.8.0", "uuid": "^11.1.0", "ws": "^8.18.2", "yaml": "^2.7.1", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-zF1S7vx+mYHDbK9F4FQbdobz3N+YIlNqHCyOC7R7QpbQ4nP9laeCuQRaN1OTfJVZcRwFvFQ5Nx1lh0su+esd7g=="],
+    "@blaxel/core": ["@blaxel/core@0.3.25", "", { "dependencies": { "@hey-api/client-fetch": "^0.10.0", "@modelcontextprotocol/sdk": "^1.20.0", "archiver": "^7.0.1", "axios": "^1.9.0", "dockerfile-ast": "^0.7.1", "dotenv": "^17.4.2", "form-data": "^4.0.2", "jwt-decode": "^4.0.0", "smol-toml": "^1.8.0", "uuid": "^11.1.0", "ws": "^8.18.2", "yaml": "^2.7.1", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-K6aGUyIpgrPnkpwMOI/U/gbZwveOMu1Am04pkawZQjkp7NUa/roG0HC6NJPBp3AVVJY3CQtkGSWpAJ2DV4ZKpw=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.16.0", "", {}, "sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q=="],
 
@@ -385,7 +385,7 @@
 
     "dunder-proto": ["dunder-proto@1.0.1", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.1", "es-errors": "^1.3.0", "gopd": "^1.2.0" } }, "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A=="],
 
-    "e2b": ["e2b@2.51.0", "", { "dependencies": { "@bufbuild/protobuf": "^2.14.1", "@connectrpc/connect": "^2.2.0", "@connectrpc/connect-web": "^2.2.0", "chalk": "^5.3.0", "compare-versions": "^6.1.0", "dockerfile-ast": "^0.7.1", "glob": "^13.0.6", "openapi-fetch": "^0.14.1", "platform": "^1.3.6", "tar": "^7.5.22", "undici": "^7.29.1" }, "optionalDependencies": { "undici8": "npm:undici@8.10.2" } }, "sha512-P+50lx1nOYpgCFyE1xuz6JVN/TqJivMUiH7v+RW0CUSfb4+NCu8IkC5KruT2sNPgp6aexddQQ77+OZKGpZZJ+Q=="],
+    "e2b": ["e2b@2.52.0", "", { "dependencies": { "@bufbuild/protobuf": "^2.15.0", "@connectrpc/connect": "^2.2.0", "@connectrpc/connect-web": "^2.2.0", "chalk": "^5.6.2", "compare-versions": "^6.1.0", "dockerfile-ast": "^0.7.1", "glob": "^13.0.6", "openapi-fetch": "^0.17.0", "platform": "^1.3.6", "tar": "^7.5.22", "undici": "^7.29.1" }, "optionalDependencies": { "undici8": "npm:undici@8.10.2" } }, "sha512-TmUZlAvQq8BbguodpA+BBdawR/x5uILMQtHcLkdaLUqevsDjDdh46IYYU8ZRYKsQ4OhWr4xhsFIPSg1kgf+O0w=="],
 
     "eastasianwidth": ["eastasianwidth@0.2.0", "", {}, "sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA=="],
 
@@ -597,9 +597,9 @@
 
     "open": ["open@11.0.0", "", { "dependencies": { "default-browser": "^5.4.0", "define-lazy-prop": "^3.0.0", "is-in-ssh": "^1.0.0", "is-inside-container": "^1.0.0", "powershell-utils": "^0.1.0", "wsl-utils": "^0.3.0" } }, "sha512-smsWv2LzFjP03xmvFoJ331ss6h+jixfA4UUV/Bsiyuu4YJPfN+FIQGOIiv4w9/+MoHkfkJ22UIaQWRVFRfH6Vw=="],
 
-    "openapi-fetch": ["openapi-fetch@0.14.1", "", { "dependencies": { "openapi-typescript-helpers": "^0.0.15" } }, "sha512-l7RarRHxlEZYjMLd/PR0slfMVse2/vvIAGm75/F7J6MlQ8/b9uUQmUF2kCPrQhJqMXSxmYWObVgeYXbFYzZR+A=="],
+    "openapi-fetch": ["openapi-fetch@0.17.0", "", { "dependencies": { "openapi-typescript-helpers": "^0.1.0" } }, "sha512-PsbZR1wAPcG91eEthKhN+Zn92FMHxv+/faECIwjXdxfTODGSGegYv0sc1Olz+HYPvKOuoXfp+0pA2XVt2cI0Ig=="],
 
-    "openapi-typescript-helpers": ["openapi-typescript-helpers@0.0.15", "", {}, "sha512-opyTPaunsklCBpTK8JGef6mfPhLSnyy5a0IN9vKtx3+4aExf+KxEqYwIy3hqkedXIB97u357uLMJsOnm3GVjsw=="],
+    "openapi-typescript-helpers": ["openapi-typescript-helpers@0.1.0", "", {}, "sha512-OKTGPthhivLw/fHz6c3OPtg72vi86qaMlqbJuVJ23qOvQ+53uw1n7HdmkJFibloF7QEjDrDkzJiOJuockM/ljw=="],
 
     "os-paths": ["os-paths@4.4.0", "", {}, "sha512-wrAwOeXp1RRMFfQY8Sy7VaGVmPocaLwSFOYCGKSyo8qmJ+/yaafCl5BCA1IQZWqFSRBrKDYFeR9d/VyQzfH/jg=="],
 

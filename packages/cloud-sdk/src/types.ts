@@ -42,8 +42,9 @@ export type SandboxInfo = {
   /** The names of its own environment variables (`env`), on a create, an
    * update and a read of one sandbox. Values are never shown. */
   envNames?: string[];
-  /** On a create from an image with a start command: whether it started,
-   * became ready (readyMs), timed out, or exited first. The create's answer
+  /** On a create from an image with a start command: whether it started
+   * (and was still running half a second later), became ready (readyMs),
+   * timed out, or exited first (exitCode, and stderr's last lines). The create's answer
    * alone carries it, and the Sandbox that create returned keeps it through
    * later reads; `sandboxes.get` and `list` have none, because the API keeps
    * no record of it. */
@@ -52,6 +53,8 @@ export type SandboxInfo = {
     processId?: string;
     exitCode?: number | null;
     readyMs?: number;
+    /** With exited: the last lines the start command wrote to stderr. */
+    stderr?: string;
   };
   /** Present and true when getOrCreate answered a sandbox that already held the name. */
   reused?: boolean;

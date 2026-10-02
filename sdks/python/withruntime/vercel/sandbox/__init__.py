@@ -8,7 +8,8 @@ from .._async_sandbox import (AsyncBatch, AsyncFileHandle, AsyncProcess, AsyncSa
 from .._core import (CompletedProcess, DirectoryEntry, GitSource, NetworkPolicy, NetworkPolicyRule,
                      NetworkPolicySubnets, NetworkPolicyTransform, NotSupportedError, ProcessStatus, SandboxApiError,
                      SandboxCredentialsError, SandboxError, SandboxFilesystemError, SandboxInvalidHandleError,
-                     SandboxPathNotFoundError, SandboxQueryByCreatedAt, SandboxQueryByName, SandboxResources,
+                     SandboxPathNotFoundError, SandboxQueryByCreatedAt, SandboxQueryByCurrentSnapshotId,
+                     SandboxQueryByStatusUpdatedAt, SandboxQueryByName, SandboxResources,
                      SandboxRoute, SandboxStatus, SandboxStreamError, SandboxTerminalStateError, SandboxTimeoutError,
                      SnapshotRetention, SnapshotSource, TagFilter, TarballSource)
 from .._core import unsupported as _unsupported
@@ -49,7 +50,8 @@ __all__ = [
     "AsyncSnapshot", "AsyncSandboxFilesystem", "AsyncTextReader", "AsyncFileHandle", "AsyncBatch",
     "CompletedProcess", "DirectoryEntry", "GitSource", "TarballSource", "SnapshotSource", "SnapshotRetention",
     "NetworkPolicy", "NetworkPolicyRule", "NetworkPolicySubnets", "NetworkPolicyTransform", "SandboxResources",
-    "SandboxRoute", "SandboxStatus", "ProcessStatus", "SandboxQueryByName", "SandboxQueryByCreatedAt", "TagFilter",
+    "SandboxRoute", "SandboxStatus", "ProcessStatus", "SandboxQueryByName", "SandboxQueryByCreatedAt", "SandboxQueryByStatusUpdatedAt",
+    "SandboxQueryByCurrentSnapshotId", "TagFilter",
     "SandboxError", "SandboxApiError", "SandboxCredentialsError", "SandboxPathNotFoundError", "SandboxTimeoutError",
     "SandboxStreamError", "SandboxTerminalStateError", "SandboxInvalidHandleError", "SandboxFilesystemError",
     "NotSupportedError", "Drive", "DriveMount", "SandboxClient", "SandboxServiceOptions", "sync",

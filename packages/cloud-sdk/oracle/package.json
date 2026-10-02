@@ -1,10 +1,10 @@
 {
   "private": true,
   "dependencies": {
-    "e2b": "2.51.0",
+    "e2b": "2.52.0",
     "@e2b/code-interpreter": "2.8.0",
     "@daytona/sdk": "0.220.0",
     "@vercel/sandbox": "3.5.1",
-    "@blaxel/core": "0.3.24"
+    "@blaxel/core": "0.3.25"
   }
 }

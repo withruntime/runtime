@@ -40,6 +40,19 @@ public final class Volumes {
         .query("cursor", cursor);
   }
 
+  /**
+   * Grows a volume no sandbox holds to {@code sizeMiB}, on its host, and waits (up to 10 seconds)
+   * for it. {@link Volume#resize()} shows how far it has got; {@code idempotencyKey} may be null.
+   */
+  public Volume resize(String id, int sizeMiB, String idempotencyKey) {
+    return new Volume(
+        t.object(
+            new Transport.Call("POST", "/v1/volumes/" + Transport.segment(id) + ":resize")
+                .body(Map.of("sizeMiB", sizeMiB))
+                .key(idempotencyKey)
+                .waitSeconds(10)));
+  }
+
   /** Deletes a volume and everything on it. */
   public Volume delete(String id) {
     return new Volume(

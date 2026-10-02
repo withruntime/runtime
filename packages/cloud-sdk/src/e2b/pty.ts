@@ -3,13 +3,13 @@ import {
   commandRequest,
   connectionRequest,
   killProcess,
-  refuseUser,
   resolveProcess,
   type CommandRequestOpts,
   type SandboxContext,
   type Username,
 } from "./commands.js";
 import { guard, InvalidArgumentError, NotSupportedError } from "./errors.js";
+import { runAs, shellAs } from "./users.js";
 
 export interface PtyCreateOpts extends CommandRequestOpts {
   cols: number;
@@ -34,16 +34,18 @@ export class Pty {
   constructor(private readonly ctx: SandboxContext) {}
 
   async create(opts: PtyCreateOpts): Promise<CommandHandle> {
-    refuseUser(opts.user);
     const pty = dimensions(opts);
     const opening = connectionRequest(opts, this.ctx.requestTimeoutMs);
     if (typeof opts.onData !== "function")
       throw new InvalidArgumentError("onData must be a function.");
     const env = { TERM: "xterm-256color", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", ...opts.envs };
     const process = await guard("sandbox", async () => {
+      // Another user's terminal is a login shell of theirs, through sudo -u.
+      const user = await runAs(this.ctx, opts.user, opening.request);
       await this.ctx.ensureHome(opts.cwd, opening.request);
       opening.request.signal?.throwIfAborted();
-      return this.ctx.runtime.spawn(["/bin/bash", "-i", "-l"], {
+      const shell = user ? shellAs(user, opts.cwd !== undefined) : ["/bin/bash", "-i", "-l"];
+      return this.ctx.runtime.spawn(shell, {
         pty,
         stdin: "pipe",
         outputEncoding: "base64",

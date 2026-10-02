@@ -1,3 +1,4 @@
+import { RuntimeError } from "../errors.js";
 import { Page } from "../page.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
@@ -355,11 +356,25 @@ export function images(t: Transport) {
         ...options,
       });
     },
-    /** Delete one version (by id, name:tag or name@version) and its tags. */
+    /** Delete one version (by id, name:tag or name@version) and its tags. A
+     * bare name deletes its latest tag's version, or its only version when
+     * it has one and no latest tag; with several, the error names its tags. */
     async delete(ref: string, options?: RequestOptions) {
+      const id = await idOf(ref, options).catch(async (error: unknown) => {
+        if (
+          !(error instanceof RuntimeError && error.code === "image_not_found") ||
+          /[:@]/.test(ref)
+        )
+          throw error;
+        const live = (await list({ name: ref, limit: 100 }, options)).data.filter(
+          (image) => image.state !== "deleted" && image.state !== "deleting",
+        );
+        if (live.length !== 1) throw error;
+        return live[0]!.id;
+      });
       return t.json<Image>({
         method: "POST",
-        path: `/v1/images/${enc(await idOf(ref, options))}:delete`,
+        path: `/v1/images/${enc(id)}:delete`,
         body: {},
         ...options,
       });

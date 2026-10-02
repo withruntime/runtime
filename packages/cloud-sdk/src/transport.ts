@@ -1,7 +1,7 @@
 import { ConnectionError, DELIBERATE, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.10.0";
+export const VERSION = "0.11.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs

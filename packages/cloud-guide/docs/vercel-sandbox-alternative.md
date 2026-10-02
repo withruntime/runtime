@@ -125,9 +125,12 @@ timeout, and persistence, so `stop()` pauses a sandbox and the next call or
 and `domain(port)` answers from them. They use the free trial while the account
 has trial time, then prepaid credit.
 
-A call Runtime handles differently, such as Drives, other regions or a timeout
-over an hour, throws `NotSupportedError` before anything happens and names what
-to use instead. `VERCEL.md` in the package lists every mapping.
+A timeout over an hour works: the sandbox object renews Runtime's hour-long
+lease toward it while your program runs. Users and groups (`createUser`,
+`asUser`) and list filters, sorting and cursors work as on Vercel. A call
+Runtime handles differently, such as Drives or other regions, throws
+`NotSupportedError` before anything happens and names what to use instead.
+`VERCEL.md` in the package lists every mapping.
 
 ### Or port the calls
 

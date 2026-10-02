@@ -13,8 +13,8 @@ import time
 from types import SimpleNamespace
 import unittest
 
-from withruntime._sync_client import _Transport, Process
-from withruntime._async_client import _Transport as AsyncTransport, AsyncProcess
+from withruntime._sync_client import _Transport, Process, Sandbox
+from withruntime._async_client import _Transport as AsyncTransport, AsyncProcess, AsyncSandbox
 from withruntime.e2b._sync_sandbox import Commands
 from withruntime.e2b._async_sandbox import AsyncCommands
 from withruntime.e2b import TimeoutException
@@ -50,8 +50,29 @@ class Deadline(unittest.TestCase):
                     pass
             def do_POST(self):
                 owner.requests.append(("POST", self.path))
-                self.send_response(500)
+                if not self.path.endswith(":exec"):
+                    self.send_response(500)
+                    self.end_headers()
+                    return
+                # A command waited on is started by a streamed exec, read from
+                # its first byte; the same child as a spawned one.
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                owner.start_child()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.send_header("Connection", "close")
                 self.end_headers()
+                self.wfile.write((json.dumps({"type": "start", "processId": "local-process"}) + "\n").encode())
+                self.wfile.flush()
+                if not owner.completed.wait(3):
+                    return
+                try:
+                    for event in [{"type": "stdout", "data": owner.payload.decode(), "offset": 0},
+                                  {"type": "exit", "exitCode": owner.job.returncode, "timedOut": False}]:
+                        self.wfile.write((json.dumps(event) + "\n").encode())
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Peer)
         self.server_thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01))
         self.server_thread.start()
@@ -84,6 +105,12 @@ class Deadline(unittest.TestCase):
                 owner.spawn_options = options
                 self.process_handle = (AsyncProcess if asynchronous else Process)(transport, "local-sandbox", owner.start_child())
                 return self.process_handle
+            def exec_stream(self, command, **options):
+                owner.spawn_options = options
+                self.process_handle = (AsyncProcess if asynchronous else Process)(
+                    transport, "local-sandbox", {"id": "local-process", "state": "running"})
+                return (AsyncSandbox if asynchronous else Sandbox)(transport, {"id": "local-sandbox"}).exec_stream(
+                    command, **options)
             def processes(self): return [self.process_handle.info]
             def process(self, process_id): return self.process_handle
         class NativeAsync(Native):
@@ -96,9 +123,11 @@ class Deadline(unittest.TestCase):
         return (AsyncCommands if asynchronous else Commands)(sandbox), transport
 
     def assert_not_killed(self):
+        # E2B's timeout is the connection's, never the process's: a waited-on
+        # command is given Runtime's longest life (a day), a background one none.
         self.assertIsNone(self.job.poll())
-        self.assertNotIn("timeout_ms", self.spawn_options)
-        self.assertFalse(any(method == "POST" for method, _ in self.requests))
+        self.assertIn(self.spawn_options.get("timeout_ms"), (None, 86_400_000))
+        self.assertFalse(any(method == "POST" and not path.endswith(":exec") for method, path in self.requests))
 
     def test_sync_timeout_disconnects_and_reconnect_completes(self):
         commands, transport = self.commands()
@@ -108,7 +137,7 @@ class Deadline(unittest.TestCase):
             self.assert_not_killed()
             result = commands.connect(pid_of("local-process"), timeout=0).wait()
             self.assertEqual((result.stdout, result.exit_code), ("finished\n", 0))
-            self.assertFalse(any(method == "POST" for method, _ in self.requests))
+            self.assert_not_killed() if self.job.poll() is None else None
         finally:
             transport.close()
 

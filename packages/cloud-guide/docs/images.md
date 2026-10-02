@@ -74,7 +74,9 @@ run as the sandbox user, uid 1000, with passwordless `sudo` as in the base
 image: an image with its own `sudo` keeps it, and one without gets Runtime's.
 A command that names no directory starts in
 the last `WORKDIR` when it is inside `/workspace`, and in `/workspace`
-otherwise.
+otherwise. The image's start and ready commands (`CMD`, `ENTRYPOINT`,
+`HEALTHCHECK`) run in the last `WORKDIR` wherever it is, as Docker runs them;
+a `WORKDIR` outside `/workspace` stays readable.
 
 Names resolve through Runtime's resolver in every image: the image's own
 `/etc/resolv.conf` is replaced, in each `RUN` step and in the sandbox, as
@@ -226,12 +228,15 @@ const sbx = await runtime.sandboxes.create({ image: "api" });
 console.log(sbx.info.start); // { state: "ready", readyMs: ... }
 ```
 
-The start command runs once, in the background, as the sandbox user. The create
-call answers when the ready check passes: `readyPort` is being listened on, or
-`readyCommand` exits 0. It answers with `start.state` set to `ready`,
-`started` (no ready check), `timeout` (the check did not pass within
-`readyTimeoutSeconds`, 60 by default and at most 300, within the SDKs' own five-minute call deadline), or `exited` (the start
-command ended first). `start: null` drops what the Dockerfile said.
+The start command runs once, in the background, as the sandbox user, in the
+image's `WORKDIR` (or `start.cwd`). The create call answers when the ready
+check passes: `readyPort` is being listened on, or `readyCommand` exits 0. It
+answers with `start.state` set to `ready`, `started` (no ready check, and
+still running half a second after it began), `timeout` (the check did not
+pass within `readyTimeoutSeconds`, 60 by default and at most 300, within the
+SDKs' own five-minute call deadline), or `exited` (the start command ended
+first; `start.exitCode` and `start.stderr`, its last lines of error output,
+say why). `start: null` drops what the Dockerfile said.
 
 Only the create's answer carries `start`, and the sandbox object it returned
 keeps it through later reads. The API keeps no record of it, so a sandbox read

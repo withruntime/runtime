@@ -1,6 +1,7 @@
 import type { Runtime } from "../client.js";
-import { RuntimeError } from "../errors.js";
+import { LeaseKeeper } from "../compat/lease.js";
 import type { RuntimeSandbox } from "./client.js";
+import { ComputerUse } from "./computer-use.js";
 import { HOME, HOME_LINK, type SandboxContext } from "./context.js";
 import { DaytonaError, DaytonaNotFoundError, guard, NotSupportedError } from "./errors.js";
 import { FileSystem } from "./filesystem.js";
@@ -13,9 +14,14 @@ import { Process } from "./process.js";
 
 /** How the sandbox's lease follows Daytona's lifecycle settings. */
 export interface Lifecycle {
-  /** Seconds without a call from this client before the sandbox pauses
-   * (Daytona's autoStopInterval), 60 to 3600. */
+  /** The lease each call renews, 60 to 3600 seconds: Runtime's longest
+   * lease is an hour. */
   windowSeconds: number;
+  /** Seconds without a call from this client before the sandbox pauses
+   * (Daytona's autoStopInterval); Infinity for 0, never. Past an hour the
+   * lease is renewed an hour at a time while this object lives. When
+   * absent, windowSeconds. */
+  idleSeconds?: number;
   /** Epoch ms past which the lease is never extended (ttlMinutes). */
   deadline?: number;
   /** stop() ends the sandbox instead of pausing it (ephemeral, or
@@ -32,6 +38,8 @@ export interface SandboxOptions {
   public: boolean;
   lifecycle: Lifecycle;
   snapshot?: string;
+  /** create's `user`, when not the sandbox owner. */
+  user?: string;
 }
 
 export type SandboxState =
@@ -182,6 +190,10 @@ export class Sandbox {
   readonly #options: SandboxOptions;
   #home: Promise<void> | undefined;
   #pausedByPause = false;
+  #computerUse: ComputerUse | undefined;
+  /** When this client last made a call: autoStopInterval counts from it. */
+  #lastActive = Date.now();
+  readonly #keeper: LeaseKeeper;
 
   /** Use daytona.create or daytona.get. */
   constructor(runtime: RuntimeSandbox, client: Runtime, options: SandboxOptions) {
@@ -191,9 +203,23 @@ export class Sandbox {
     this.env = { ...options.env };
     this.public = options.public;
     this.snapshot = options.snapshot;
+    this.#keeper = new LeaseKeeper({
+      sandbox: () => this.#rt,
+      until: () => {
+        const lifecycle = this.#options.lifecycle;
+        return Math.min(
+          this.#lastActive + (lifecycle.idleSeconds ?? lifecycle.windowSeconds) * 1000,
+          lifecycle.deadline ?? Infinity,
+        );
+      },
+      // Renewed when less than half the window is left, so a run of calls
+      // costs one extend per half window.
+      marginMs: () => this.#options.lifecycle.windowSeconds * 500,
+    });
     const ctx = {
       live: () => this.#live(),
       language: options.language,
+      ...(options.user ? { user: options.user } : {}),
       ensureHome: (text: string | undefined) => this.#ensureHome(text),
     } as unknown as SandboxContext;
     // A getter, so the modules see the environment updateEnv sets.
@@ -222,9 +248,10 @@ export class Sandbox {
     return "";
   }
   /** Daytona's user name, so `/home/${sandbox.user}` leads to the working
-   * directory. Commands run as Runtime's sandbox owner, with passwordless sudo. */
+   * directory, and commands run as Runtime's sandbox owner, with passwordless
+   * sudo; or the user given at create, whose commands run through sudo. */
   get user(): string {
-    return "daytona";
+    return this.#options.user ?? "daytona";
   }
   get labels(): Record<string, string> {
     return { ...this.#rt.info.labels };
@@ -287,24 +314,12 @@ export class Sandbox {
 
   /** The sandbox, its lease moved on when less than half of the autoStop
    * window is left: every call through this object counts as activity, as
-   * Daytona's API calls do. */
+   * Daytona's API calls do. An autoStopInterval past an hour, or 0, is kept
+   * by renewing the lease while this object lives. */
   async #live(force = false): Promise<RuntimeSandbox> {
-    const lifecycle = this.#options.lifecycle;
     if (this.#rt.state !== "running") return this.#rt;
-    const left = Date.parse(this.#rt.info.expiresAt) - Date.now();
-    if (!force && left > lifecycle.windowSeconds * 500) return this.#rt;
-    let seconds = Math.ceil(lifecycle.windowSeconds - left / 1000);
-    if (lifecycle.deadline !== undefined)
-      seconds = Math.min(seconds, Math.floor((lifecycle.deadline - Date.now() - left) / 1000));
-    if (seconds < 1) return this.#rt;
-    try {
-      await this.#rt.extend(seconds);
-    } catch (error) {
-      // The lease may have ended since this object last looked; the call
-      // itself then says what state the sandbox is in.
-      if (!(error instanceof RuntimeError && error.status === 409)) throw error;
-      await this.#rt.refresh().catch(() => undefined);
-    }
+    this.#lastActive = Date.now();
+    await this.#keeper.check(force);
     return this.#rt;
   }
 
@@ -339,6 +354,7 @@ export class Sandbox {
     const state = this.#rt.state;
     if (state === "stopped" || state === "stopping") return;
     if (this.#options.lifecycle.ephemeral) {
+      this.#keeper.end();
       await guard("sandbox", () => this.#rt.stop());
       return;
     }
@@ -361,6 +377,7 @@ export class Sandbox {
 
   /** Ends the sandbox for good. */
   async delete(_timeout?: number): Promise<void> {
+    this.#keeper.end();
     await guard("sandbox", () => this.#rt.refresh());
     if (this.#rt.state !== "stopped") await guard("sandbox", () => this.#rt.stop({ wait: false }));
   }
@@ -385,11 +402,12 @@ export class Sandbox {
   }
 
   /** The sandbox pauses after `interval` minutes without a call from this
-   * client (1 to 60; 0 is 60). */
+   * client; 0 never. Past an hour, while this object lives. */
   async setAutostopInterval(interval: number): Promise<void> {
     const lifecycle = this.#options.lifecycle;
     lifecycle.autoStopInterval = interval;
     lifecycle.windowSeconds = windowSeconds(interval);
+    lifecycle.idleSeconds = idleSeconds(interval);
     await guard("sandbox", () => this.#live());
   }
   setAutoPauseInterval(interval: number): Promise<void> {
@@ -492,11 +510,11 @@ export class Sandbox {
 
   // ---- what Runtime does differently -----------------------------------------
 
-  get computerUse(): never {
-    throw new NotSupportedError(
-      "Daytona's computer use",
-      "Use Runtime's desktop: `await sandbox.withruntime.desktop.start()` (see the desktop guide).",
-    );
+  /** Daytona's computer use over Runtime's desktop: `await
+   * sandbox.computerUse.start()`, then the mouse, keyboard and screenshots. */
+  get computerUse(): ComputerUse {
+    this.#computerUse ??= new ComputerUse(() => this.#live());
+    return this.#computerUse;
   }
   async setLabels(labels: Record<string, string>): Promise<Record<string, string>> {
     const internal = Object.fromEntries(
@@ -582,6 +600,13 @@ export class Sandbox {
 export function windowSeconds(autoStopMinutes: number): number {
   if (autoStopMinutes <= 0) return 3600;
   return Math.min(3600, Math.max(60, Math.round(autoStopMinutes * 60)));
+}
+
+/** Daytona's autoStopInterval (minutes; 0 is never) as seconds without a
+ * call before the sandbox pauses. */
+export function idleSeconds(autoStopMinutes: number): number {
+  if (autoStopMinutes <= 0) return Infinity;
+  return Math.max(60, Math.round(autoStopMinutes * 60));
 }
 
 /** Minutes as Runtime's retention: whole days, 1 to 365. */

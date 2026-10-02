@@ -132,9 +132,11 @@ pausing after 15 minutes without calls. `stop()` pauses a sandbox with its
 files and its memory, and `start()` carries on. They use the free trial while
 the account has trial time, then prepaid credit.
 
-A call Runtime handles differently, such as GPUs, PTY sessions or computer use,
-throws `NotSupportedError` before anything happens and names what to use
-instead. `DAYTONA.md` in the package lists every mapping.
+PTY sessions, computer use, a `user` from your image, an `autoStopInterval`
+over an hour (or `0`), and list filters and sorting work as on Daytona. A call
+Runtime handles differently, such as GPUs or other regions, throws
+`NotSupportedError` before anything happens and names what to use instead.
+`DAYTONA.md` in the package lists every mapping.
 
 ### Or port the calls
 

@@ -37,11 +37,17 @@ volume on its current server while the volume is detached; shrinking and
 shared volumes are refused.
 
 Use `runtime volume resize <id> --size-mib <N>`,
-`runtime.volumes.resize(id, { sizeMiB })` in JavaScript, or
-`runtime.volumes.resize(volume_id, size_mib)` in Python. The volume stays
+`runtime.volumes.resize(id, { sizeMiB })` in JavaScript,
+`runtime.volumes.resize(volume_id, size_mib)` in Python,
+`client.Volumes.Resize(ctx, id, ResizeVolumeOptions{SizeMiB: n})` in Go,
+`runtime.volumes().resize(id, sizeMiB, null)` in Java or
+`runtime.volumes.resize(id, size_mib: n)` in Ruby. The volume stays
 `ready`, while `resize.state` tracks `pending`, `running`, `completed` or
-`failed`. Poll the volume if the request returns before completion. Attachments
-and deletion wait while the operation is active.
+`failed`. Poll the volume if the request returns before completion. Attachments,
+deletion and new backups wait while the operation is active. A backup that is
+still being copied off the server holds growth back: resize once it is ready.
+Sending the same request again with the same idempotency key returns the same
+operation rather than starting another.
 
 The old disk and confirmed size remain until the grown copy has been checked.
 The larger size is billed only after completion, at the volume's existing

@@ -144,8 +144,9 @@ error handling keeps working. If any output was lost before it was read, the
 result's `truncated` is set and a warning says so.
 
 A call Runtime handles differently, such as E2B templates, workload identity or
-a single lease over an hour, throws `NotSupportedError` before anything happens
-and names what to use instead. `E2B.md` in the package lists every mapping.
+ending a sandbox earlier than its lease, throws `NotSupportedError` before
+anything happens and names what to use instead. `E2B.md` in the package lists
+every mapping.
 
 ### Or port the calls
 

@@ -9,6 +9,7 @@ import {
   NotSupportedError,
   TimeoutError,
 } from "./errors.js";
+import { FilesAs, runAs } from "./users.js";
 
 export enum FileType {
   FILE = "file",
@@ -61,7 +62,8 @@ export type WriteEntry = { path: string; data: string | ArrayBuffer | Blob | Rea
 export interface FilesystemRequestOpts {
   requestTimeoutMs?: number;
   signal?: AbortSignal;
-  /** Only the default user; see CommandStartOpts.user. */
+  /** "user" (the default) acts as the sandbox's own user through Runtime's
+   * file API; any other existing user, `root` included, through `sudo -u`. */
   user?: Username;
 }
 export interface FilesystemReadOpts extends FilesystemRequestOpts {
@@ -88,11 +90,6 @@ function absolute(path: string) {
 }
 
 function refuse(opts: FilesystemRequestOpts & { metadata?: Record<string, string> }) {
-  if (opts.user !== undefined && opts.user !== "user")
-    throw new NotSupportedError(
-      `File access as the user "${opts.user}"`,
-      "Runtime's file calls act as the sandbox owner; use commands.run('sudo ...') for root-owned paths.",
-    );
   if (opts.metadata && Object.keys(opts.metadata).length)
     throw new NotSupportedError(
       "File metadata (user.e2b.* extended attributes)",
@@ -158,6 +155,13 @@ export class Filesystem {
     opts.signal?.throwIfAborted();
     return absolute(path);
   }
+  /** The calls as another Linux user, or undefined for the sandbox's own. */
+  async #as(opts: FilesystemRequestOpts): Promise<FilesAs | undefined> {
+    if (opts.user === undefined || opts.user === "user") return undefined;
+    const options = request(opts);
+    const user = await runAs(this.#ctx, opts.user, options);
+    return user ? new FilesAs(this.#ctx, user, options) : undefined;
+  }
 
   read(path: string, opts?: FilesystemReadOpts & { format?: "text" }): Promise<string>;
   read(path: string, opts: FilesystemReadOpts & { format: "bytes" }): Promise<Uint8Array>;
@@ -171,10 +175,14 @@ export class Filesystem {
     opts: FilesystemReadOpts & { format?: "text" | "bytes" | "blob" | "stream" } = {},
   ): Promise<string | Uint8Array | Blob | ReadableStream<Uint8Array>> {
     const file = await this.#path(path, opts);
+    const as = await this.#as(opts);
     // A real stream, any size, never the whole file held first.
-    if (opts.format === "stream")
+    if (opts.format === "stream" && !as)
       return guard("file", () => this.#files.readStream(file, request(opts)));
-    const bytes = await guard("file", () => this.#files.read(file, request(opts)));
+    const bytes = as
+      ? await as.read(file)
+      : await guard("file", () => this.#files.read(file, request(opts)));
+    if (opts.format === "stream") return new Blob([bytes as Uint8Array<ArrayBuffer>]).stream();
     switch (opts.format) {
       case "bytes":
         return bytes;
@@ -219,14 +227,18 @@ export class Filesystem {
     opts: FilesystemWriteOpts,
   ): Promise<WriteInfo> {
     const file = await this.#path(path, opts);
+    const as = await this.#as(opts);
     const bytes = await bytesOf(data);
-    await guard("file", () => this.#files.write(file, bytes, request(opts)));
+    if (as) await as.write(file, bytes);
+    else await guard("file", () => this.#files.write(file, bytes, request(opts)));
     return { name: basename(file), type: FileType.FILE, path: file };
   }
 
   /** A directory's entries, hidden ones included; `depth` goes deeper. */
   async list(path: string, opts: FilesystemListOpts = {}): Promise<EntryInfo[]> {
     const dir = await this.#path(path, opts);
+    const as = await this.#as(opts);
+    if (as) return (await as.list(dir, opts.depth ?? 1)).map(entryInfo);
     const entries = await guard("file", () =>
       this.#files.list(dir, { depth: opts.depth ?? 1, hidden: true, ...request(opts) }),
     );
@@ -236,6 +248,8 @@ export class Filesystem {
   /** Makes a directory and its parents. False when it already existed. */
   async makeDir(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     const dir = await this.#path(path, opts);
+    const as = await this.#as(opts);
+    if (as) return as.makeDir(dir);
     if (await guard("file", () => this.#files.exists(dir, request(opts)))) return false;
     await guard("file", () => this.#files.mkdir(dir, { parents: true, ...request(opts) }));
     return true;
@@ -245,23 +259,34 @@ export class Filesystem {
   async rename(oldPath: string, newPath: string, opts: FilesystemRequestOpts = {}) {
     const from = await this.#path(oldPath, opts);
     const to = await this.#path(newPath, opts);
-    await guard("file", () => this.#files.rename(from, to, { overwrite: true, ...request(opts) }));
+    const as = await this.#as(opts);
+    if (as) await as.rename(from, to);
+    else
+      await guard("file", () =>
+        this.#files.rename(from, to, { overwrite: true, ...request(opts) }),
+      );
     return this.getInfo(to, opts);
   }
 
   /** Removes a file, or a directory with everything in it. */
   async remove(path: string, opts: FilesystemRequestOpts = {}): Promise<void> {
     const target = await this.#path(path, opts);
+    const as = await this.#as(opts);
+    if (as) return as.remove(target);
     await guard("file", () => this.#files.remove(target, { recursive: true, ...request(opts) }));
   }
 
   async exists(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     const target = await this.#path(path, opts);
+    const as = await this.#as(opts);
+    if (as) return as.exists(target);
     return guard("file", () => this.#files.exists(target, request(opts)));
   }
 
   async getInfo(path: string, opts: FilesystemRequestOpts = {}): Promise<EntryInfo> {
     const target = await this.#path(path, opts);
+    const as = await this.#as(opts);
+    if (as) return entryInfo(await as.stat(target));
     const stat = await guard("file", () => this.#files.stat(target, request(opts)));
     if (!stat.exists) throw new FileNotFoundError(`${target} does not exist.`);
     return entryInfo(stat);
@@ -275,6 +300,11 @@ export class Filesystem {
     opts: WatchOpts & { onExit?: (err?: Error) => void | Promise<void> } = {},
   ): Promise<E2BWatchHandle> {
     opts.signal?.throwIfAborted();
+    if (opts.user !== undefined && opts.user !== "user")
+      throw new NotSupportedError(
+        `Watching a directory as the user "${opts.user}"`,
+        "Watch it as the sandbox's own user (leave user out); Runtime's watch reports changes made by anyone.",
+      );
     if (opts.allowNetworkMounts)
       throw new NotSupportedError(
         "Watching network mounts",

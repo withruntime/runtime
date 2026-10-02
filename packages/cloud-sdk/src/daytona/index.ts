@@ -42,6 +42,11 @@ export {
 export {
   Process,
   CodeRunParams,
+  PtyHandle,
+  type PtyConnectOptions,
+  type PtyCreateOptions,
+  type PtyResult,
+  type PtySessionInfo,
   type Command,
   type ExecuteResponse,
   type Session,
@@ -64,6 +69,25 @@ export {
   type UploadStreamOptions,
 } from "./filesystem.js";
 export { Git, type GitStatus, type ListBranchResponse } from "./git.js";
+export {
+  Accessibility,
+  ComputerUse,
+  Display,
+  Keyboard,
+  Mouse,
+  RecordingService,
+  Screenshot,
+  type ComputerUseStartResponse,
+  type ComputerUseStatusResponse,
+  type ComputerUseStopResponse,
+  type DisplayInfo,
+  type ListRecordingsResponse,
+  type Recording,
+  type ScreenshotOptions,
+  type ScreenshotRegion,
+  type ScreenshotResponse,
+  type WindowInfo,
+} from "./computer-use.js";
 export { Image } from "./image.js";
 export { resolvePath } from "./context.js";
 export type { DaytonaConfig, WithRuntime } from "./client.js";
@@ -102,12 +126,6 @@ function unsupportedExport(name: string, alternative: string) {
   };
 }
 
-const DESKTOP = "Use Runtime's desktop: `await sandbox.withruntime.desktop.start()`.";
-export const ComputerUse = unsupportedExport("computer use", DESKTOP);
-export const Mouse = unsupportedExport("computer use (Mouse)", DESKTOP);
-export const Keyboard = unsupportedExport("computer use (Keyboard)", DESKTOP);
-export const Screenshot = unsupportedExport("computer use (Screenshot)", DESKTOP);
-export const Display = unsupportedExport("computer use (Display)", DESKTOP);
 export const LspLanguageId = unsupportedExport(
   "language servers",
   "Start one in a session with process.executeSessionCommand(..., { runAsync: true }).",

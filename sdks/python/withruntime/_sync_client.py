@@ -540,6 +540,25 @@ class Process:
     def id(self) -> str:
         return self.info["id"]
 
+    @property
+    def command(self) -> Optional[str]:
+        """The command line as the sandbox reports it."""
+        return self.info.get("command")
+
+    @property
+    def state(self) -> Optional[str]:
+        """As of the last answer: spawn, wait() or refresh()."""
+        return self.info.get("state")
+
+    @property
+    def exit_code(self) -> Optional[int]:
+        """None while it runs, and when it was killed or timed out."""
+        return self.info.get("exitCode")
+
+    def __repr__(self) -> str:
+        return (f"{type(self).__name__}(id={self.id!r}, sandbox_id={self.sandbox_id!r}, command={self.command!r}, "
+                f"state={self.state!r}, exit_code={self.exit_code!r})")
+
     def _path(self, suffix: str = "") -> str:
         return f"/v1/sandboxes/{_enc(self.sandbox_id)}/processes/{_enc(self.id)}{suffix}"
 
@@ -622,6 +641,8 @@ class Process:
                 dropped = True
             elif event["type"] == "exit":
                 exit_event = event
+        if exit_event:
+            self.info = {**self.info, "state": exit_event.get("state"), "exitCode": exit_event.get("exitCode")}
         return CommandResult(exit_code=exit_event.get("exitCode"), stdout=out["stdout"], stderr=out["stderr"],
                              timed_out=bool(exit_event.get("timedOut")), stdout_truncated=dropped,
                              stderr_truncated=dropped, process_id=self.id)
@@ -1228,6 +1249,26 @@ class Sandbox:
                                        wait=120, idempotency_key=idempotency_key)
         return self
 
+    def resize(self, *, restart: bool, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
+                     idempotency_key: Optional[str] = None) -> "Sandbox":
+        """Gives it more or fewer vCPUs or more or less memory by a restart:
+        its id, whole disk, volumes, environment, name and previews stay, and
+        its programs stop, which ``restart=True`` says you know (snapshot it
+        first to keep its memory too). A running sandbox is paused, or stopped
+        if it is persistent, and comes back running at the new size on the
+        same server; a paused or stopped one is started. Memory bills on the
+        new size from then. Refused, with nothing changed, when the server has
+        no room (``no_capacity``), above your quota or the trial's 2 vCPU and
+        4 GiB, or while a snapshot or fork of it is being taken."""
+        body: dict[str, Any] = {"restart": restart}
+        if vcpu is not None:
+            body["vcpu"] = vcpu
+        if memory_mib is not None:
+            body["memoryMiB"] = memory_mib
+        self.info = self._t.json("POST", self._path(":resize"), body=body, wait=120,
+                                       idempotency_key=idempotency_key)
+        return self
+
     def delete(self, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Deletes it for good: stops it if it runs or is paused, deletes its
         disk and paused memory, revokes its previews and ports, and removes it
@@ -1484,6 +1525,26 @@ class Sandboxes:
             body = self._t.json("GET", "/v1/sandboxes", query={**query, "cursor": cursor})
             return Page([Sandbox(self._t, info) for info in body["data"]], body.get("nextCursor"), fetch)
         return fetch(None)
+
+    def stop_all(self, *, labels: dict[str, str]) -> dict[str, Any]:
+        """Stops every live sandbox whose labels all match, eight at a time:
+        ``{"stopped": [ids], "failed": [{"id", "error"}]}``, in list order. One
+        failure does not stop the rest. Needs at least one label, so stopping
+        everything is never one call."""
+        if not labels:
+            raise RuntimeError("stop_all needs at least one label to match.", code="invalid_request",
+                               hint="Stop one sandbox with sandbox.stop(), or label the ones to stop together.")
+        live = [sandbox for sandbox in self.list(labels=labels, limit=100)]
+        errors: dict[int, BaseException] = {}
+
+        def stop(at: int) -> None:
+            try:
+                live[at].stop()
+            except Exception as error:  # noqa: BLE001 - reported per sandbox, the rest go on
+                errors[at] = error
+        parallel(stop, range(len(live)), 8)
+        return {"stopped": [s.id for at, s in enumerate(live) if at not in errors],
+                "failed": [{"id": s.id, "error": errors[at]} for at, s in enumerate(live) if at in errors]}
 
 
 class Snapshots:

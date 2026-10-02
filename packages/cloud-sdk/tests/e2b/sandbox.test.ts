@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import {
   AuthenticationError,
   CommandExitError,
@@ -20,6 +20,8 @@ import {
   type SandboxOpts,
 } from "../../src/e2b/index";
 import { pickKey } from "../../src/e2b/client";
+import { keptLeases, renewLeases } from "../../src/e2b/sandbox";
+import { PublicPreviewNotAllowedError } from "../../src/e2b/index";
 import { FakeWorld, type FakeSandbox } from "./fake";
 
 let world: FakeWorld;
@@ -77,7 +79,6 @@ describe("Sandbox.create", () => {
 
   test("refuses what it cannot honour, before creating anything", async () => {
     const cases: Array<[SandboxOpts, RegExp]> = [
-      [{ timeoutMs: 2 * 3_600_000 }, /over one hour/],
       [{ lifecycle: { onTimeout: { action: "pause", keepMemory: false } } }, /files-only pause/],
       [{ mcp: {} }, /MCP gateway/],
       [{ network: { denyOut: ["0.0.0.0/0"] } }, /network rules/],
@@ -92,6 +93,57 @@ describe("Sandbox.create", () => {
       expect((error as Error).message).toMatch(message);
       expect((error as NotSupportedError).alternative.length).toBeGreaterThan(0);
     }
+    expect(world.called("sandboxes.create")).toEqual([]);
+  });
+
+  test("a timeout over an hour gets an hour's lease, carried on up to the time asked", async () => {
+    // 2 October 2026: an E2B timeout over an hour was refused.
+    const start = Date.now();
+    try {
+      const sbx = await create({ timeoutMs: 90 * 60_000 });
+      expect(lastCreate().timeoutSeconds).toBe(3600);
+      const asked = keptLeases().get(sbx.sandboxId)!;
+      expect(Math.abs(asked - (start + 90 * 60_000))).toBeLessThan(2000);
+      // Five minutes on, with 55 minutes of lease left: moved on to an hour ahead.
+      setSystemTime(new Date(start + 5 * 60_000));
+      fake(sbx).info.expiresAt = new Date(start + 60 * 60_000).toISOString();
+      await renewLeases();
+      const [, first] = world.called("sandbox.extend").at(-1)!;
+      expect(first as number).toBeGreaterThan(5 * 60 - 40);
+      expect(first as number).toBeLessThanOrEqual(5 * 60);
+      expect(keptLeases().has(sbx.sandboxId)).toBe(true);
+      // Forty minutes in: the end asked is within the hour, so the lease is
+      // moved to it exactly, never past it, and the sandbox is let go.
+      setSystemTime(new Date(start + 40 * 60_000));
+      await renewLeases();
+      expect(Math.abs(Date.parse(fake(sbx).info.expiresAt) - asked)).toBeLessThan(2000);
+      expect(keptLeases().has(sbx.sandboxId)).toBe(false);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("kill lets a kept sandbox go; setTimeout and connect keep one past an hour", async () => {
+    const sbx = await create({ timeoutMs: 2 * 3_600_000 });
+    expect(keptLeases().has(sbx.sandboxId)).toBe(true);
+    await sbx.kill();
+    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
+    const other = await create();
+    await other.setTimeout(5 * 3_600_000);
+    expect(keptLeases().get(other.sandboxId)! - Date.now()).toBeGreaterThan(4.9 * 3_600_000);
+    // The lease itself goes no further than an hour ahead.
+    expect(Date.parse(fake(other).info.expiresAt) - Date.now()).toBeLessThanOrEqual(3_600_000);
+    const third = await create();
+    await Sandbox.connect(third.sandboxId, { ...runtime(), timeoutMs: 3 * 3_600_000 });
+    expect(keptLeases().has(third.sandboxId)).toBe(true);
+    await Sandbox.kill(third.sandboxId, runtime());
+    await other.kill();
+    expect(keptLeases().size).toBe(0);
+  });
+
+  test("a timeout over 24 hours is refused, as E2B refuses it", async () => {
+    const error = await create({ timeoutMs: 25 * 3_600_000 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidArgumentError);
     expect(world.called("sandboxes.create")).toEqual([]);
   });
 
@@ -198,9 +250,12 @@ describe("commands.run", () => {
     });
     expect(result).toEqual({ exitCode: 0, error: "", stdout: "ran echo hi\n", stderr: "" });
     expect(seen).toEqual(["ran echo hi\n"]);
-    const [command, options] = world.called("sandbox.spawn").at(-1)!;
+    // Read from byte 0 by the request that starts it, so nothing printed
+    // before the first read is dropped (2 October 2026: output was cut).
+    expect(world.called("sandbox.spawn")).toEqual([]);
+    const [command, options] = world.called("sandbox.execStream").at(-1)!;
     expect(command).toBe("echo hi");
-    expect(options).toMatchObject({ cwd: "/tmp", env: { B: "3" } });
+    expect(options).toMatchObject({ cwd: "/tmp", env: { B: "3" }, timeoutMs: 86_400_000 });
   });
 
   test("returns the whole output, past the 64 KiB an exec result holds, as E2B does", async () => {
@@ -270,7 +325,8 @@ describe("commands.run", () => {
     ).toBeInstanceOf(TimeoutError);
     world.exec = () => ({ exitCode: 0 });
     await sbx.commands.run("true", { timeoutMs: 0 });
-    expect(world.called("sandbox.spawn").at(-1)![1]).not.toHaveProperty("timeoutMs");
+    // E2B's timeout bounds the wait, never the process: it gets a day.
+    expect(world.called("sandbox.execStream").at(-1)![1]).toMatchObject({ timeoutMs: 86_400_000 });
   });
 
   test("a command killed by a signal exits -1", async () => {
@@ -282,24 +338,61 @@ describe("commands.run", () => {
     expect([error.exitCode, error.error]).toEqual([-1, "terminated by a signal"]);
   });
 
-  test("refuses another user rather than running as someone else", async () => {
+  test("runs as another user through sudo -u, and refuses one the sandbox lacks", async () => {
+    // 2 October 2026: user: "root" was refused.
     const sbx = await create();
-    expect(await sbx.commands.run("id", { user: "root" }).catch((e: unknown) => e)).toBeInstanceOf(
-      NotSupportedError,
-    );
+    await sbx.commands.run("whoami", { user: "root" });
+    expect(world.called("sandbox.execStream").at(-1)![0]).toEqual([
+      "sudo",
+      "-n",
+      "-E",
+      "-H",
+      "-u",
+      "root",
+      "--",
+      "/bin/bash",
+      "-c",
+      "cd ~ 2>/dev/null\nwhoami",
+    ]);
+    // root needs no check; another user is checked once.
+    expect(world.called("sandbox.exec")).toEqual([]);
+    await sbx.commands.run("whoami", { user: "app", cwd: "/srv" });
+    await sbx.commands.run("whoami", { user: "app" });
+    expect(world.called("sandbox.exec").map(([argv]) => argv)).toEqual([["id", "-u", "--", "app"]]);
+    expect(world.called("sandbox.execStream").at(-2)![0]).toEqual([
+      "sudo",
+      "-n",
+      "-E",
+      "-H",
+      "-u",
+      "app",
+      "--",
+      "/bin/bash",
+      "-c",
+      "whoami",
+    ]);
+    world.exec = (command) =>
+      Array.isArray(command) && command[0] === "id" ? { exitCode: 1 } : { exitCode: 0 };
+    const before = world.called("sandbox.execStream").length;
+    const error = await sbx.commands.run("whoami", { user: "ghost" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidArgumentError);
+    expect((error as Error).message).toContain('no user "ghost"');
+    expect(world.called("sandbox.execStream")).toHaveLength(before);
+    expect(world.calls.some(([, argv]) => String(argv).includes("useradd"))).toBe(false);
     await sbx.commands.run("id", { user: "user" });
+    expect(world.called("sandbox.execStream").at(-1)![0]).toBe("id");
   });
 
   test("links /home/user to /workspace once, when something names it", async () => {
     const sbx = await create();
     await sbx.commands.run("ls");
-    expect(world.called("sandbox.spawn").map(([command]) => command)).toEqual(["ls"]);
+    expect(world.called("sandbox.execStream").map(([command]) => command)).toEqual(["ls"]);
     expect(world.called("sandbox.exec")).toHaveLength(0);
     await sbx.commands.run("cat /home/user/a.txt");
     await sbx.files.write("/home/user/b.txt", "b");
     await sbx.commands.run("ls", { cwd: "/home/user" });
     const commands = world.calls
-      .filter(([method]) => method === "sandbox.exec" || method === "sandbox.spawn")
+      .filter(([method]) => method === "sandbox.exec" || method === "sandbox.execStream")
       .map(([, command]) => command);
     expect(commands.filter((command) => String(command).includes("ln -s"))).toEqual([
       "[ -e /home/user ] || sudo ln -s /workspace /home/user",
@@ -475,10 +568,57 @@ describe("files", () => {
     expect(world.called("files.watch.stop")).toEqual([["/workspace/app"]]);
   });
 
-  test("refuses other users and metadata", async () => {
+  test("acts as another user through sudo -u, and refuses metadata", async () => {
+    // 2 October 2026: files with user: "root" were refused.
     const sbx = await create();
+    const stored = new Map<string, string>();
+    world.exec = (command, options) => {
+      const argv = command as unknown as string[];
+      if (argv[0] !== "sudo") return { exitCode: 0 };
+      const [path] = argv.slice(9);
+      const text = argv[7]!;
+      if (text.includes("base64 -d >")) {
+        stored.set(
+          path!,
+          (stored.get(path!) ?? "") +
+            Buffer.from(String(options.stdin), "base64").toString("latin1"),
+        );
+        return { exitCode: 0 };
+      }
+      if (text.includes("base64 -w 0"))
+        return stored.has(path!)
+          ? { exitCode: 0, stdout: Buffer.from(stored.get(path!)!, "latin1").toString("base64") }
+          : { exitCode: 44 };
+      if (text.includes("find"))
+        return {
+          exitCode: 0,
+          stdout: `f\x003\x00600\x00root\x00root\x001790000000.5\x00${path}\x00\x00`,
+        };
+      return { exitCode: 0 };
+    };
+    await sbx.files.write("/etc/app.conf", "a=1", { user: "root" });
+    const write = world.called("sandbox.exec").at(-1)!;
+    expect((write[0] as string[]).slice(0, 5)).toEqual(["sudo", "-n", "-u", "root", "--"]);
+    expect(write[1]).toMatchObject({ stdin: Buffer.from("a=1").toString("base64") });
+    expect(world.called("files.write")).toEqual([]);
+    expect(await sbx.files.read("/etc/app.conf", { user: "root" })).toBe("a=1");
+    const bytes = new Uint8Array([0, 255, 128, 7]);
+    await sbx.files.write("/root/b.bin", bytes.buffer, { user: "root" });
+    expect(await sbx.files.read("/root/b.bin", { user: "root", format: "bytes" })).toEqual(bytes);
     expect(
-      await sbx.files.read("/etc/shadow", { user: "root" }).catch((e: unknown) => e),
+      await sbx.files.read("/root/missing", { user: "root" }).catch((e: unknown) => e),
+    ).toBeInstanceOf(FileNotFoundError);
+    expect(await sbx.files.getInfo("/etc/app.conf", { user: "root" })).toMatchObject({
+      name: "app.conf",
+      type: FileType.FILE,
+      size: 3,
+      mode: 0o600,
+      permissions: "rw-------",
+      owner: "root",
+    });
+    expect(world.called("files.stat")).toEqual([]);
+    expect(
+      await sbx.files.watchDir("/root", () => undefined, { user: "root" }).catch((e: unknown) => e),
     ).toBeInstanceOf(NotSupportedError);
     expect(
       await sbx.files.write("/workspace/a", "a", { metadata: { k: "v" } }).catch((e: unknown) => e),
@@ -567,14 +707,49 @@ describe("Sandbox.list", () => {
     });
   });
 
-  test("refuses filters Runtime does not have", () => {
-    expect(() => Sandbox.list({ ...runtime(), query: { template: "mine" } })).toThrow(
-      NotSupportedError,
-    );
-    expect(() => Sandbox.list({ ...runtime(), order: "desc" })).toThrow(NotSupportedError);
-    expect(() => Sandbox.list({ ...runtime(), query: { startedAfter: new Date() } })).toThrow(
-      NotSupportedError,
-    );
+  test("filters by template and start time, sorts newest first and resumes from a token", async () => {
+    // 2 October 2026: these were refused.
+    world.images.push({ id: "11111111-1111-4111-8111-111111111111", name: "mine", state: "ready" });
+    const a = await create();
+    const b = await create({ template: "mine" });
+    const c = await create({ template: "mine" });
+    fake(a).info.createdAt = "2026-10-01T00:00:00.000Z";
+    fake(b).info.createdAt = "2026-10-02T00:00:00.000Z";
+    fake(c).info.createdAt = "2026-10-03T00:00:00.000Z";
+    const all = async (paginator: ReturnType<typeof Sandbox.list>) => {
+      const seen = [];
+      while (paginator.hasNext) seen.push(...(await paginator.nextItems()));
+      return seen.map((one) => one.sandboxId);
+    };
+    expect(await all(Sandbox.list({ ...runtime(), query: { template: "mine" } }))).toEqual([
+      b.sandboxId,
+      c.sandboxId,
+    ]);
+    expect(await all(Sandbox.list({ ...runtime(), query: { template: "base" } }))).toEqual([
+      a.sandboxId,
+    ]);
+    expect(await all(Sandbox.list({ ...runtime(), query: { template: "none" } }))).toEqual([]);
+    expect(
+      await all(Sandbox.list({ ...runtime(), query: { startedAfter: new Date("2026-10-02") } })),
+    ).toEqual([b.sandboxId, c.sandboxId]);
+    const newest = Sandbox.list({ ...runtime(), order: "desc", limit: 2 });
+    expect((await newest.nextItems()).map((one) => one.sandboxId)).toEqual([
+      c.sandboxId,
+      b.sandboxId,
+    ]);
+    expect(newest.hasNext).toBe(true);
+    const token = newest.nextToken!;
+    expect(
+      await all(Sandbox.list({ ...runtime(), order: "desc", limit: 2, nextToken: token })),
+    ).toEqual([a.sandboxId]);
+    // A token from Runtime's own paging resumes the same way.
+    const plain = Sandbox.list({ ...runtime(), limit: 1 });
+    await plain.nextItems();
+    expect(await all(Sandbox.list({ ...runtime(), nextToken: plain.nextToken! }))).toEqual([
+      b.sandboxId,
+      c.sandboxId,
+    ]);
+    expect(() => Sandbox.list({ ...runtime(), nextToken: "abc" })).toThrow(InvalidArgumentError);
   });
 });
 
@@ -599,6 +774,34 @@ describe("forks, snapshots and ports", () => {
     expect(await Sandbox.deleteSnapshot(snapshot.snapshotId, runtime())).toBe(false);
   });
 
+  test("e2b 2.52.0's bounds: a fork's count is 1 to 20, httpVersion is 1.1 or 2", async () => {
+    const sbx = await create({ httpVersion: "1.1" });
+    const lookedUp = world.called("sandboxes.get").length;
+    for (const count of [0, 21, 1.5]) {
+      const error = await sbx.fork({ count }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InvalidArgumentError);
+      expect((error as Error).message).toBe("count must be an integer between 1 and 20");
+      expect(
+        await Sandbox.fork(sbx.sandboxId, { ...runtime(), count }).catch((e: unknown) => e),
+      ).toBeInstanceOf(InvalidArgumentError);
+    }
+    expect(world.called("sandbox.fork")).toEqual([]);
+    expect(world.called("sandboxes.get")).toHaveLength(lookedUp);
+    expect(await sbx.fork({ count: 20 })).toHaveLength(20);
+    const wrong = { httpVersion: "3" } as unknown as { httpVersion: "2" };
+    expect(await create(wrong).catch((e: unknown) => e)).toBeInstanceOf(InvalidArgumentError);
+    const before = process.env.E2B_HTTP_VERSION;
+    process.env.E2B_HTTP_VERSION = "h3";
+    try {
+      const error = await create().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InvalidArgumentError);
+      expect((error as Error).message).toContain("E2B_HTTP_VERSION");
+    } finally {
+      if (before === undefined) delete process.env.E2B_HTTP_VERSION;
+      else process.env.E2B_HTTP_VERSION = before;
+    }
+  });
+
   test("while they are off, they say so in Runtime's words", async () => {
     world.forksEnabled = false;
     const sbx = await create();
@@ -619,6 +822,37 @@ describe("forks, snapshots and ports", () => {
     expect(await sbx.getPublicHost(3000)).toBe(host);
     expect(world.called("previews.create")).toEqual([[3000, { visibility: "public" }]]);
     expect(() => sbx.getHost(0)).toThrow(/1 to 65535/);
+  });
+
+  test("on a trial sandbox getHost says at once what works, never a host that 404s", async () => {
+    // 2 October 2026, live: getHost on a trial returned a host answering 404
+    // "Nothing is shared on port 8080", after a warning nobody saw.
+    const sbx = await create({ runtime: { create: { funding: "trial" } } });
+    const error = (() => {
+      try {
+        sbx.getHost(8080);
+      } catch (caught) {
+        return caught;
+      }
+    })() as PublicPreviewNotAllowedError;
+    expect(error).toBeInstanceOf(PublicPreviewNotAllowedError);
+    expect(error).toBeInstanceOf(NotSupportedError);
+    expect(error.code).toBe("public_preview_not_allowed");
+    expect(error.message).toContain("previews.create(8080)");
+    expect(error.message).toContain("urlWithToken");
+    expect(await sbx.getPublicHost(8080).catch((e: unknown) => e)).toBeInstanceOf(
+      PublicPreviewNotAllowedError,
+    );
+    expect(world.called("previews.create")).toEqual([]);
+  });
+
+  test("Runtime's refusal of a public share is not read as a bad key", async () => {
+    const sbx = await create();
+    // Runtime refuses the public share though the sandbox read as paid.
+    fake(sbx).refusePublic = true;
+    const error = await sbx.getPublicHost(3000).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PublicPreviewNotAllowedError);
+    expect(error).not.toBeInstanceOf(AuthenticationError);
   });
 });
 

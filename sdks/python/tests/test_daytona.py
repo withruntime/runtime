@@ -105,7 +105,6 @@ class Create(Base):
         cases = [(CreateSandboxFromSnapshotParams(resources=Resources(gpu=1)), "GPUs"),
                  (CreateSandboxFromSnapshotParams(spot=True), "Spot"),
                  (CreateSandboxFromSnapshotParams(secrets={"A": "s"}), "secrets"),
-                 (CreateSandboxFromSnapshotParams(os_user="root"), 'user "root"'),
                  (CreateSandboxFromSnapshotParams(language="rust"), "language rust")]
         for params, text in cases:
             with self.assertRaises(NotSupportedError) as caught:
@@ -233,11 +232,6 @@ class Process(Base):
         with self.assertRaises(DaytonaNotFoundError):
             sandbox.process.get_session("s1")
 
-    def test_ptys_are_refused(self):
-        sandbox = self.daytona.create()
-        with self.assertRaises(NotSupportedError):
-            sandbox.process.create_pty_session()
-
     def test_refusals_point_at_what_runtime_has(self):
         sandbox = self.daytona.create()
         for call, text in ((sandbox.update_secrets, "withruntime secrets set"),
@@ -338,7 +332,9 @@ class ErrorsAndGaps(Base):
     def test_gaps(self):
         sandbox = self.daytona.create()
         for refuse in (sandbox.resize, sandbox.get_metrics, sandbox.create_signed_preview_url,
-                       sandbox.create_ssh_access, sandbox.upload_url, lambda: sandbox.computer_use,
+                       sandbox.create_ssh_access, sandbox.upload_url,
+                       sandbox.computer_use.accessibility.get_tree,
+                       lambda: sandbox.computer_use.screenshot.take_region(None),
                        lambda: self.daytona.volume.create("v"),
                        lambda: sandbox.code_interpreter.run_code("1", envs={"A": "1"})):
             with self.assertRaises(NotSupportedError) as caught:

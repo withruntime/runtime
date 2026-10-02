@@ -16,6 +16,8 @@ from __future__ import annotations
 from typing import Any, Optional, TypedDict, Literal
 from urllib.parse import quote
 
+from .private_network import PrivateNetwork
+
 
 class NetworkFunding(TypedDict):
     """False funding disables traffic but keeps the reservation until release.
@@ -199,3 +201,4 @@ class AccountNetwork:
 
     def __init__(self, t: Any) -> None:
         self.upstream_proxy = UpstreamProxy(t)
+        self.private = PrivateNetwork(t)

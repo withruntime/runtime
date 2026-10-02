@@ -71,6 +71,12 @@ module WithRuntime
 
     def list(state: nil, name: nil, limit: nil) = page("/v1/volumes", { "state" => state, "name" => name, "limit" => limit })
 
+    # Grows a volume no sandbox holds to +size_mib+, on its host, and waits
+    # (up to +wait+ seconds) for it. The answer's +resize+ shows how far it got.
+    def resize(id, size_mib:, wait: 10, idempotency_key: nil)
+      Record.new(@t.json("POST", "/v1/volumes/#{seg(id)}:resize", body: Fields.body(size_mib: size_mib), wait: wait, key: idempotency_key))
+    end
+
     # Deletes a volume and everything on it.
     def delete(id) = Record.new(@t.json("POST", "/v1/volumes/#{seg(id)}:delete", body: {}))
   end

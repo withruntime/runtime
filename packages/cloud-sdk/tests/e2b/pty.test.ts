@@ -186,3 +186,45 @@ test("a stalled PTY callback cannot block reader cancellation or its deadline", 
     expect(calls.filter(([method]) => method === "kill")).toEqual([]);
   }
 });
+
+test("a PTY as another user is that user's login shell, through sudo -u", async () => {
+  // 2 October 2026: pty.create({ user: "root" }) was refused.
+  const { pty, calls, ctx } = fixture();
+  const checks: unknown[] = [];
+  (ctx.runtime as unknown as { exec: (argv: unknown) => Promise<unknown> }).exec = async (argv) => {
+    checks.push(argv);
+    return { exitCode: argv && (argv as string[])[3] === "ghost" ? 1 : 0, stdout: "", stderr: "" };
+  };
+  await pty.create({ cols: 80, rows: 24, onData: () => undefined, user: "root" });
+  expect(calls.find(([kind]) => kind === "spawn")![1]).toEqual([
+    "sudo",
+    "-n",
+    "-E",
+    "-H",
+    "-u",
+    "root",
+    "--",
+    "/bin/bash",
+    "-c",
+    "cd ~ 2>/dev/null\nexec /bin/bash -i -l",
+  ]);
+  expect(checks).toEqual([]);
+  await pty.create({ cols: 80, rows: 24, onData: () => undefined, user: "app", cwd: "/srv" });
+  expect(calls.filter(([kind]) => kind === "spawn").at(-1)![1]).toEqual([
+    "sudo",
+    "-n",
+    "-E",
+    "-H",
+    "-u",
+    "app",
+    "--",
+    "/bin/bash",
+    "-c",
+    "exec /bin/bash -i -l",
+  ]);
+  const spawns = calls.filter(([kind]) => kind === "spawn").length;
+  await expect(
+    pty.create({ cols: 80, rows: 24, onData: () => undefined, user: "ghost" }),
+  ).rejects.toThrow('no user "ghost"');
+  expect(calls.filter(([kind]) => kind === "spawn")).toHaveLength(spawns);
+});

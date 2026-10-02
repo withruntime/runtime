@@ -56,3 +56,10 @@ class _Operation:
 
 def operation(make: Callable[[], Awaitable[Any]], mode: str) -> Any:
     return _Operation(make, mode)
+
+
+def later(delay: float, work: Callable[[], Awaitable[Any]]) -> Any:
+    """Runs ``work`` beside the caller after ``delay`` seconds; ``cancel()``
+    stops it. It never keeps the program from ending."""
+    loop = asyncio.get_running_loop()
+    return loop.call_later(delay, lambda: asyncio.ensure_future(work()))

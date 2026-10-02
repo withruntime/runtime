@@ -49,6 +49,8 @@ class World:
         self.images: List[Dict[str, Any]] = []
         self.snapshots: set = set()
         self.forks_enabled = True
+        self.funding = "paid"  # "trial" refuses public previews, as Runtime does
+        self.refuse_public = False  # Runtime refuses though the sandbox read as paid
         self.exec: Callable[[str, Dict[str, Any]], Result] = lambda command, _: Result(0, f"ran {command}\n")
         self.output: Callable[[str], List[Dict[str, Any]]] = lambda command: [
             {"type": "stdout", "data": f"ran {command}\n", "offset": 0},
@@ -272,6 +274,9 @@ class FakePreviews:
 
     def create(self, port: int, **options: Any) -> Dict[str, Any]:
         self._w.record("previews.create", port, options)
+        if options.get("visibility") == "public" and (self._s.info.get("funding") == "trial" or self._w.refuse_public):
+            raise withruntime.PermissionDeniedError(
+                "A trial sandbox's previews are private.", code="public_preview_not_allowed", status=403)
         return {"url": f"https://{port}-{self._s.id.replace('-', '')}.runtimehost.com/"}  # as the API names it
 
 
@@ -287,7 +292,7 @@ class FakeSandbox:
             "id": sandbox_id, "state": "running", "labels": dict(fields.get("labels") or {}),
             "vcpu": fields.get("vcpu", 2), "memoryMiB": fields.get("memory_mib", 4096),
             "onLeaseEnd": fields.get("on_lease_end", "pause"), "createdAt": "2026-09-23T00:00:00.000Z",
-            "expiresAt": _iso(time.time() + timeout)}
+            "expiresAt": _iso(time.time() + timeout), "funding": world.funding}
         for key in ("image", "snapshot"):
             if key in fields:
                 self.info[key] = fields[key]
@@ -320,6 +325,17 @@ class FakeSandbox:
         if options.get("on_stdout") and result.stdout:
             options["on_stdout"](result.stdout)
         return result
+
+    def exec_stream(self, command: Any, **options: Any) -> Any:
+        """As the SDK's exec_stream: a start event, then the command's output
+        read from its first byte, so nothing is dropped before a read."""
+        self._w.record("sandbox.exec_stream", command, options)
+        process = FakeProcess(self._w, f"proc-{len(self.process_list) + 1}", str(command), False,
+                              self._w.output(command if isinstance(command, str) else command[-1]))
+        self.process_list.append(process)
+        yield {"type": "start", "processId": process.id}
+        for event in process.output():
+            yield event
 
     def spawn(self, command: str, **options: Any) -> FakeProcess:
         self._w.record("sandbox.spawn", command, options)

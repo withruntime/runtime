@@ -236,6 +236,8 @@ export class FakeSandbox {
     expiresAt: string;
   };
   readonly fileMap = new Map<string, Uint8Array>();
+  /** Runtime refuses a public share, whatever the funding reads. */
+  refusePublic = false;
   watchEvents: { type: string; path: string; isDir: boolean }[] = [];
   readonly processList: FakeProcess[] = [];
   readonly contexts = new Map<string, Record<string, unknown>>();
@@ -252,7 +254,7 @@ export class FakeSandbox {
       name: null,
       labels: (input.labels as Record<string, string>) ?? {},
       state: "running",
-      funding: "trial",
+      funding: input.funding ?? "paid",
       vcpu: input.vcpu ?? 2,
       memoryMiB: input.memoryMiB ?? 4096,
       onLeaseEnd: input.onLeaseEnd ?? "pause",
@@ -398,11 +400,22 @@ export class FakeSandbox {
     };
   }
   get previews() {
+    const sandbox = this;
     const world = this.world;
     const id = this.id;
     return {
-      async create(port: number, input: unknown) {
+      async create(port: number, input: { visibility?: string }) {
         world.record("previews.create", port, input);
+        if (
+          (sandbox.info.funding === "trial" || sandbox.refusePublic) &&
+          input.visibility === "public"
+        )
+          throw new RuntimeError({
+            message:
+              "A trial sandbox shares a port privately, with a token; public previews need a paid sandbox.",
+            code: "public_preview_not_allowed",
+            status: 403,
+          });
         // As the API names it: the id without dashes.
         return { url: `https://${port}-${id.replaceAll("-", "")}.runtimehost.com/`, token: null };
       },
@@ -489,6 +502,27 @@ export class FakeSandbox {
     if (typeof options.onStderr === "function" && result.stderr)
       (options.onStderr as (text: string) => void)(result.stderr);
     return result;
+  }
+  /** As the SDK's execStream: start, then the output, read from byte 0. */
+  async *execStream(command: string | string[], options: Record<string, unknown> = {}) {
+    this.world.record("sandbox.execStream", command, { ...options, signal: undefined });
+    const text = Array.isArray(command) ? command.join(" ") : command;
+    const events = this.world.output(text, options);
+    const process = new FakeProcess(
+      this.world,
+      `proc-${this.processList.length + 1}`,
+      text,
+      false,
+      events,
+    );
+    this.processList.push(process);
+    yield { type: "start" as const, processId: process.id };
+    for (const event of events) {
+      await Promise.resolve();
+      if ((options.signal as AbortSignal | undefined)?.aborted) return;
+      yield event;
+      if (event.type === "exit") process.info.state = "exited";
+    }
   }
   async spawn(command: string, options: Record<string, unknown>) {
     this.world.record("sandbox.spawn", command, options);

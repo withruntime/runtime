@@ -16,6 +16,7 @@ auth, retries, idempotency keys and typed errors.
 from typing import Any
 
 from .audit import AsyncAudit
+from .browser import AsyncBrowser
 from .desktop import AsyncDesktop
 from .images import AsyncImages
 from .jobs import AsyncJobs
@@ -60,6 +61,7 @@ SANDBOX["interpreter"] = AsyncInterpreter
 SANDBOX["previews"] = AsyncPreviews
 SANDBOX["network"] = AsyncNetwork
 SANDBOX["desktop"] = AsyncDesktop
+SANDBOX["browser"] = AsyncBrowser
 SANDBOX["mounts"] = AsyncMounts
 SANDBOX["tailscale"] = AsyncTailscale
 SANDBOX["metrics"] = AsyncMetrics

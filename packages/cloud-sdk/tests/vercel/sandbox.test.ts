@@ -141,7 +141,6 @@ describe("Sandbox.create", () => {
 
   test("refuses what it cannot honour, before creating anything", async () => {
     const cases: Array<[CreateSandboxParams, RegExp]> = [
-      [{ timeout: 2 * 3_600_000 }, /over one hour/],
       [{ mounts: { "/data": {} } }, /Drives/],
       [{ networkId: "net_1" }, /Secure Compute/],
       [{ region: "fra1" }, /fra1/],
@@ -490,9 +489,6 @@ describe("lifecycle", () => {
     expect(result.pagination).toEqual({ count: 1, next: null });
     const all = await (await Sandbox.list({ withruntime: withruntime() })).toArray();
     expect(all.map((one) => one.name)).toEqual(["a", "b"]);
-    expect(
-      await Sandbox.list({ since: 1, withruntime: withruntime() }).catch((e: unknown) => e),
-    ).toBeInstanceOf(NotSupportedError);
   });
 });
 
@@ -501,10 +497,8 @@ describe("gaps", () => {
     const sandbox = await create();
     const refusals = [
       () => sandbox.openInteractive(),
-      () => sandbox.createUser(),
       () => sandbox.listSessions(),
       () => sandbox.listSnapshots(),
-      () => Promise.resolve().then(() => sandbox.asUser()),
       () => Promise.resolve().then(() => sandbox.currentSession()),
       () => Promise.resolve().then(() => new Drive()),
       () => sandbox.delete({ deleteOrphanSnapshots: true }),

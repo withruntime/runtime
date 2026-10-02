@@ -6,8 +6,11 @@ and set RUNTIME_API_KEY (or put a Runtime key in DAYTONA_API_KEY), or run
 `npx withruntime login` once. A Daytona key is never sent anywhere. What
 Runtime cannot do the way Daytona does raises NotSupportedError, naming what
 to use."""
-from ._async_daytona import (AsyncCodeInterpreter, AsyncDaytona, AsyncFileSystem, AsyncGit, AsyncProcess,
-                             AsyncSandbox, AsyncSnapshotService, AsyncVolumeService)
+from ._async_daytona import (AsyncAccessibility, AsyncCodeInterpreter, AsyncComputerUse, AsyncDaytona, AsyncDisplay,
+                             AsyncFileSystem, AsyncGit, AsyncKeyboard, AsyncMouse, AsyncProcess,
+                             AsyncRecordingService, AsyncSandbox, AsyncScreenshot, AsyncSnapshotService,
+                             AsyncVolumeService)
+from ._async_io import AsyncPtyHandle
 from ._core import (CodeLanguage, CodeRunParams, Command, CreateSandboxBaseParams, CreateSandboxFromImageParams,
                     CreateSandboxFromSnapshotParams, CreateSnapshotParams, DaytonaAuthenticationError,
                     DaytonaAuthorizationError, DaytonaBadGatewayError, DaytonaBadRequestError,
@@ -21,12 +24,14 @@ from ._core import (CodeLanguage, CodeRunParams, Command, CreateSandboxBaseParam
                     DaytonaValidationError, ExecuteResponse, ExecutionArtifacts, ExecutionError, ExecutionResult,
                     FileDownloadRequest, FileDownloadResponse, FileInfo, FileUpload, GitCommitResponse, GitStatus,
                     Image, InterpreterContext, ListBranchResponse, ListSandboxesQuery, Match, NotSupportedError,
-                    OutputMessage, PaginatedSnapshots, PortPreviewUrl, ReplaceResult, Resources, SandboxState,
+                    OutputMessage, PaginatedSnapshots, PortPreviewUrl, PtyResult, PtySessionInfo, PtySize,
+                    ReplaceResult, Resources, SandboxState, ScreenshotOptions, ScreenshotRegion,
                     SearchFilesResponse, Session, SessionCommandLogsResponse, SessionExecuteRequest,
                     SessionExecuteResponse, Snapshot, Volume, VolumeMount)
 from ._core import unsupported as _unsupported
-from ._sync_daytona import (CodeInterpreter, Daytona, FileSystem, Git, Process, Sandbox, SnapshotService,
-                            VolumeService)
+from ._sync_daytona import (Accessibility, CodeInterpreter, ComputerUse, Daytona, Display, FileSystem, Git, Keyboard,
+                            Mouse, Process, RecordingService, Sandbox, Screenshot, SnapshotService, VolumeService)
+from ._sync_io import PtyHandle
 
 __version__ = "0.1.0"
 
@@ -47,10 +52,7 @@ class _Unsupported:
         return self._refuse()
 
 
-_DESKTOP = "Use Runtime's desktop through sandbox.withruntime.desktop."
-ComputerUse = AsyncComputerUse = _Unsupported("computer use", _DESKTOP)
 LspLanguageId = _Unsupported("language servers", "Start one in a session with run_async=True.")
-PtySize = _Unsupported("PTY sessions", "Use sandbox.withruntime.terminal(cols=..., rows=...).")
 
 __all__ = [
     "Daytona", "AsyncDaytona", "DaytonaConfig", "Sandbox", "AsyncSandbox", "Process", "AsyncProcess", "FileSystem",
@@ -70,5 +72,8 @@ __all__ = [
     "DaytonaProcessExecutionTimeoutError", "DaytonaProcessNotFoundError", "DaytonaRateLimitError",
     "DaytonaServiceUnavailableError", "DaytonaSessionEndedError", "DaytonaTimeoutError",
     "DaytonaUnprocessableEntityError", "DaytonaValidationError", "NotSupportedError", "ComputerUse",
-    "AsyncComputerUse", "LspLanguageId", "PtySize",
+    "AsyncComputerUse", "Mouse", "AsyncMouse", "Keyboard", "AsyncKeyboard", "Screenshot", "AsyncScreenshot",
+    "Display", "AsyncDisplay", "RecordingService", "AsyncRecordingService", "Accessibility", "AsyncAccessibility",
+    "ScreenshotOptions", "ScreenshotRegion", "LspLanguageId", "PtySize", "PtyResult", "PtySessionInfo", "PtyHandle",
+    "AsyncPtyHandle",
 ]

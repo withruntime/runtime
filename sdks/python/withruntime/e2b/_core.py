@@ -11,7 +11,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 from .._errors import RuntimeError as _SDKError
 
@@ -82,6 +82,24 @@ class NotSupportedException(SandboxException):
         self.feature = feature
         self.alternative = alternative
         self.code = "not_supported"
+
+
+class PublicPreviewNotAllowedException(NotSupportedException):
+    """Runtime's addition, for ``get_host`` and ``get_public_host``: a free-trial
+    sandbox shares a port only privately, so a request needs the port's token,
+    and a host name alone cannot carry one. The message says what works."""
+
+    def __init__(self, sandbox_id: str, port: Optional[int], message: Optional[str] = None):
+        where = "<port>" if port is None else str(port)
+        alternative = (
+            f"For an address that works on the trial, use sandbox.runtime.previews.create({where})['urlWithToken']: "
+            "it carries the token, in a browser, fetch or curl. For other paths on it, send the token as the "
+            "x-runtime-preview-token header or the runtime_preview_token query parameter. A public host needs a "
+            "paid sandbox, which is the account owner's decision.")
+        super().__init__("A public address on a free-trial sandbox", alternative, message or (
+            f"Sandbox {sandbox_id} runs on the free trial, where a shared port is private: every request needs the "
+            f"port's token, and a host name alone cannot carry one. {alternative}"))
+        self.code = "public_preview_not_allowed"
 
 
 class FilesystemEventType(Enum):
@@ -214,6 +232,15 @@ DEFAULT_MEMORY_MIB = 512
 DEFAULT_TIMEOUT = 300
 """E2B's default sandbox timeout, in seconds."""
 MIN_LEASE, MAX_LEASE = 60, 3600
+LONGEST_TIMEOUT = 86_400
+"""E2B's longest sandbox timeout, 24 hours (its Pro plan), in seconds."""
+KEEP_EVERY = 300
+"""How often a timeout over an hour has its lease moved on, in seconds."""
+KEEP_AHEAD = MAX_LEASE - 30
+"""How far ahead a kept lease is moved: under the API's hour, for the clocks and the trip."""
+PROCESS_LIFETIME_MS = 86_400_000
+"""How long a command may run: a day, E2B's longest sandbox. E2B's own
+timeout bounds only the connection."""
 COMMAND_TIMEOUT = 60
 LONGEST_MS = 86_400_000
 
@@ -262,6 +289,25 @@ REFUSED_CONNECTION = {
     "proxy": "Set HTTPS_PROXY in the environment instead.",
 }
 IGNORED_CONNECTION = {"retries", "validate_api_key", "logger", "secure"}
+HttpVersion = Literal["1.1", "2"]
+"""E2B's HTTP version (e2b 2.52.0): checked as E2B checks it, then left to
+Runtime's SDK, which picks its own transport."""
+MAX_FORK_COUNT = 20
+
+
+def check_http_version(value: Optional[str]) -> None:
+    source, version = ("http_version", value) if value is not None else (
+        "E2B_HTTP_VERSION", os.getenv("E2B_HTTP_VERSION") or None)
+    if version is not None and version not in ("1.1", "2"):
+        raise InvalidArgumentException(f"{source} must be '1.1' or '2', got {version!r}")
+
+
+def check_fork_count(count: Any) -> None:
+    """E2B's own bound since 2.52.0, refused before anything happens."""
+    if count is None:
+        return
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > MAX_FORK_COUNT:
+        raise InvalidArgumentException(f"count must be an integer between 1 and {MAX_FORK_COUNT}")
 
 
 def request_seconds(owner: Any, value: Optional[float]) -> float:
@@ -273,7 +319,10 @@ def request_seconds(owner: Any, value: Optional[float]) -> float:
 
 
 def check_connection(opts: Dict[str, Any]) -> None:
+    check_http_version(opts.get("http_version"))
     for name, value in opts.items():
+        if name == "http_version":
+            continue
         if name == "request_timeout":
             from .._request_scope import limits
             limits(value)
@@ -289,16 +338,19 @@ def check_connection(opts: Dict[str, Any]) -> None:
         raise InvalidArgumentException(f"Unknown option {name!r}.")
 
 
-def lease_seconds(timeout: Union[int, float]) -> int:
-    global _warned_short
-    if timeout is None or timeout <= 0:
+def check_timeout(timeout: Union[int, float]) -> None:
+    if timeout is None or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise InvalidArgumentException(f"timeout must be a positive number of seconds, not {timeout}.")
-    seconds = math.ceil(timeout)
-    if seconds > MAX_LEASE:
-        raise NotSupportedException(
-            f"A sandbox timeout of {timeout} s (over one hour)",
-            "Runtime leases last up to an hour (3600 s); call sandbox.set_timeout(...) before it ends to keep "
-            "going, as often as needed.")
+    if timeout > LONGEST_TIMEOUT:
+        raise InvalidArgumentException(f"timeout is at most 24 hours (86400 s), as on E2B, not {timeout}.")
+
+
+def lease_seconds(timeout: Union[int, float]) -> int:
+    """The first lease for ``timeout``: up to an hour; a longer timeout is
+    carried on from there while the process runs."""
+    global _warned_short
+    check_timeout(timeout)
+    seconds = min(math.ceil(timeout), MAX_LEASE)
     if seconds < MIN_LEASE:
         if not _warned_short:
             _warned_short = True
@@ -346,11 +398,88 @@ def template_missing(template: str) -> TemplateException:
     return error
 
 
-def refuse_user(user: Optional[str]) -> None:
-    if user is not None and user != "user":
-        raise NotSupportedException(
-            f'Running as the user "{user}"',
-            'Runtime runs as its sandbox owner, with passwordless sudo: prefix the command with "sudo".')
+# ---- E2B's ``user``: "user" (or none) is the sandbox's own user, `runtime`;
+# any other user that exists runs through ``sudo -u``. None is ever created.
+
+_USER_NAME = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.I)
+MISSING, NOT_DIRECTORY, IS_DIRECTORY, EXISTS = 44, 45, 46, 47
+WRITE_CHUNK = 786_432
+"""Base64 text per exec: under the 1 MiB an exec's input may carry."""
+FIND_FIELDS = "%y\\0%s\\0%m\\0%u\\0%g\\0%T@\\0%p\\0%l\\0"
+
+
+def other_user(user: Optional[str]) -> Optional[str]:
+    """The user to run as, or None for the sandbox's own; a bad name is refused."""
+    if user is None or user == "user":
+        return None
+    if not isinstance(user, str) or not _USER_NAME.match(user):
+        raise InvalidArgumentException(f'"{user}" is not a Linux user name.')
+    return user
+
+
+def no_such_user(user: str) -> InvalidArgumentException:
+    return InvalidArgumentException(
+        f'This sandbox has no user "{user}", and Runtime never creates one for you. Make it first, as root: '
+        f'sandbox.commands.run("useradd -m {user}", user="root"). "user" is the sandbox\'s own user and "root" is root.')
+
+
+def command_as(user: str, script: str, cwd_given: bool) -> List[str]:
+    """``bash -c script`` as ``user``, keeping the environment Runtime gives the
+    command; without a cwd it starts in the user's home, as E2B's does."""
+    return ["sudo", "-n", "-E", "-H", "-u", user, "--", "/bin/bash", "-c",
+            script if cwd_given else f"cd ~ 2>/dev/null\n{script}"]
+
+
+def shell_as(user: str, cwd_given: bool) -> List[str]:
+    return command_as(user, "exec /bin/bash -i -l", cwd_given)
+
+
+def user_script(user: str, text: str, *args: str) -> List[str]:
+    """One ``sh -c`` script as ``user``, its arguments passed apart, never pasted in."""
+    return ["sudo", "-n", "-u", user, "--", "/bin/sh", "-c", text, "sh", *args]
+
+
+USER_FILE_SCRIPTS = {
+    "read": f'[ -e "$1" ] || exit {MISSING}; [ -d "$1" ] && exit {IS_DIRECTORY}; exec base64 -w 0 -- "$1"',
+    "write": 'mkdir -p -- "$(dirname -- "$1")" && base64 -d > "$1"',
+    "append": 'base64 -d >> "$1"',
+    "list": (f'[ -e "$1" ] || exit {MISSING}; [ -d "$1" ] || exit {NOT_DIRECTORY}; '
+             f'exec find "$1" -mindepth 1 -maxdepth "$2" -printf \'{FIND_FIELDS}\''),
+    "stat": f'[ -e "$1" ] || [ -L "$1" ] || exit {MISSING}; exec find "$1" -maxdepth 0 -printf \'{FIND_FIELDS}\'',
+    "exists": '[ -e "$1" ] || [ -L "$1" ]',
+    "make_dir": f'[ -d "$1" ] && exit {EXISTS}; mkdir -p -- "$1"',
+    "rename": f'[ -e "$1" ] || [ -L "$1" ] || exit {MISSING}; mv -fT -- "$1" "$2"',
+    "remove": 'rm -rf -- "$1"',
+}
+
+
+def user_file_failure(user: str, path: str, exit_code: Optional[int], stderr: str) -> BaseException:
+    if exit_code == MISSING:
+        return FileNotFoundException(f"{path} does not exist.")
+    if exit_code == NOT_DIRECTORY:
+        return InvalidArgumentException(f"{path} is not a directory.")
+    if exit_code == IS_DIRECTORY:
+        return InvalidArgumentException(f"{path} is a directory.")
+    return SandboxException(f'As the user "{user}": {stderr.strip() or f"exit status {exit_code}"}')
+
+
+_FIND_TYPES = {"f": "file", "d": "directory", "l": "symlink"}
+
+
+def found_entries(output: str) -> List[Dict[str, Any]]:
+    """``find -printf`` output, eight NUL-ended fields an entry, as the files API's entries."""
+    fields = output.split("\0")
+    out = []
+    for i in range(0, len(fields) - 7, 8):
+        kind, size, mode, owner, group, mtime, path, link = fields[i:i + 8]
+        entry: Dict[str, Any] = {
+            "name": [part for part in path.split("/") if part][-1] if path.strip("/") else path,
+            "path": path, "type": _FIND_TYPES.get(kind, "other"), "size": int(size or 0), "mode": f"0{mode}",
+            "mtimeMs": round(float(mtime or 0) * 1000), "owner": owner, "group": group}
+        if kind == "l" and link:
+            entry["symlinkTarget"] = link
+        out.append(entry)
+    return out
 
 
 def command_timeout_ms(timeout: Optional[float]) -> int:
@@ -409,9 +538,7 @@ def absolute(path: str) -> str:
 
 
 def refuse_file_user(user: Optional[str], metadata: Optional[Dict[str, str]] = None) -> None:
-    if user is not None and user != "user":
-        raise NotSupportedException(f'File access as the user "{user}"',
-                                    "Runtime's file calls act as the sandbox owner; use commands.run('sudo ...').")
+    other_user(user)
     if metadata:
         raise NotSupportedException("File metadata (user.e2b.* extended attributes)",
                                     "Keep the metadata beside the file, for example in a JSON file.")
@@ -481,26 +608,39 @@ def seconds_later(info: Dict[str, Any], timeout: float) -> float:
 
 def list_filter(query: Optional[SandboxQuery], limit: Optional[int], next_token: Optional[str],
                 order: Optional[str]) -> Dict[str, Any]:
+    """Runtime filters by state and metadata itself; a template, start time,
+    newest-first order or a saved next_token are done here (``local``)."""
     query = query or SandboxQuery()
-    if query.template is not None and query.template not in STOCK_TEMPLATES:
-        raise NotSupportedException("Listing by template",
-                                    "Filter by metadata instead: give sandboxes a metadata key when you create them.")
-    if query.started_after is not None:
-        raise NotSupportedException("Listing by start time (started_after)",
-                                    "List them all and filter on get_info().started_at.")
-    if order == "desc":
-        raise NotSupportedException("Newest-first listing (order='desc')",
-                                    "Runtime lists oldest first; reverse the list yourself.")
-    if next_token is not None:
-        raise NotSupportedException("Starting a list from a saved next_token",
-                                    "Keep the paginator and call next_items() again.")
+    if limit is not None and (not isinstance(limit, int) or limit < 1):
+        raise InvalidArgumentException(f"limit must be a positive whole number, not {limit}.")
     states = query.state or ["running", "paused"]
-    out: Dict[str, Any] = {"state": [s for one in states for s in (RUNNING if one == "running" else PAUSED)]}
+    server: Dict[str, Any] = {"state": [s for one in states for s in (RUNNING if one == "running" else PAUSED)]}
     if query.metadata:
-        out["labels"] = dict(query.metadata)
-    if limit:
-        out["limit"] = min(limit, 100)
-    return out
+        server["labels"] = dict(query.metadata)
+    local = (query.template is not None or query.started_after is not None or order == "desc"
+             or next_token is not None)
+    server["limit"] = 100 if local else min(limit or 100, 100)
+    return {"server": server, "local": local, "page_size": limit or 100, "offset": token_offset(next_token),
+            "template": query.template, "started_after": query.started_after, "order": order}
+
+
+def token_offset(token: Optional[str]) -> int:
+    if token is None:
+        return 0
+    match = re.match(r"^runtime:(\d+)$", token)
+    if not match:
+        raise InvalidArgumentException(
+            f'"{token}" is not a next_token this package gave; pass the paginator\'s own next_token.')
+    return int(match.group(1))
+
+
+def matching(infos: List[SandboxInfo], templates: Optional[set], filters: Dict[str, Any]) -> List[SandboxInfo]:
+    after = filters["started_after"]
+    if after is not None and after.tzinfo is None:
+        after = after.replace(tzinfo=timezone.utc)
+    kept = [info for info in infos if (templates is None or info.template_id in templates)
+            and (after is None or info.started_at >= after)]
+    return sorted(kept, key=lambda info: info.started_at, reverse=filters["order"] == "desc")
 
 
 def file_timeout(error: BaseException) -> BaseException:
@@ -527,6 +667,9 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
     out: BaseException
     if status == 503 and code.endswith("_unavailable"):
         out = NotSupportedException(code[: -len("_unavailable")], error.hint or "", message)
+    elif code == "public_preview_not_allowed":
+        # A 403 about the sandbox's funding, not the key.
+        out = PublicPreviewNotAllowedException("", None, message)
     elif status in (401, 403):
         out = AuthenticationException(message)
     elif code == "file_not_found" or (status == 404 and subject in ("file", "file_http")):

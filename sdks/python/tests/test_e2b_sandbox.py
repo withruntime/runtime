@@ -17,6 +17,7 @@ from withruntime.e2b import (AsyncSandbox, AuthenticationException, CommandExitE
                              FileType, InvalidArgumentException, NotSupportedException, Sandbox, SandboxQuery,
                              SandboxException, SandboxNotFoundException, TemplateException, TimeoutException)
 from withruntime.e2b._core import pick_key, pid_of  # noqa: E402
+from withruntime.e2b import _sync_sandbox as sync_sandbox  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,6 +35,40 @@ def output_events(result):
             offset += len(data.encode())
     events.append({"type": "exit", "exitCode": result.exit_code, "timedOut": result.timed_out})
     return events
+
+
+def as_users(files, users=("app",)):
+    """World.exec for calls made as another Linux user: ``id -u`` knows
+    ``users`` (and root), and the file scripts act on ``files``."""
+    import base64
+    from withruntime.e2b._core import USER_FILE_SCRIPTS
+    names = {text: name for name, text in USER_FILE_SCRIPTS.items()}
+
+    def run(command, options):
+        if isinstance(command, list) and command[:3] == ["id", "-u", "--"]:
+            known = command[3] in users
+            return Result(0 if known else 1, "1001\n" if known else "", "" if known else "id: no such user\n")
+        if isinstance(command, list) and command[0] == "sudo" and command[5:7] == ["/bin/sh", "-c"]:
+            name, args = names[command[7]], command[9:]
+            path = args[0]
+            if name == "read":
+                return Result(0, base64.b64encode(files[path]).decode()) if path in files else Result(44)
+            if name in ("write", "append"):
+                data = base64.b64decode(options.get("stdin") or "")
+                files[path] = (files.get(path, b"") if name == "append" else b"") + data
+                return Result(0)
+            if name == "stat":
+                if path not in files:
+                    return Result(44)
+                return Result(0, "\0".join(["f", str(len(files[path])), "600", "root", "root", "1790000000.5",
+                                            path, ""]) + "\0")
+            if name == "exists":
+                return Result(0 if path in files else 1)
+            if name == "remove":
+                files.pop(path, None)
+                return Result(0)
+        return Result(0, f"ran {command}\n")
+    return run
 
 
 class Base(unittest.TestCase):
@@ -81,7 +116,6 @@ class Create(Base):
 
     def test_refusals_before_anything_happens(self):
         cases = [
-            ({"timeout": 7200}, "over one hour"),
             ({"lifecycle": {"on_timeout": {"action": "pause", "keep_memory": False}}}, "files-only"),
             ({"mcp": {}}, "MCP"),
             ({"network": {"deny_out": ["0.0.0.0/0"]}}, "network rules"),
@@ -100,6 +134,38 @@ class Create(Base):
             self.create(timeout=0)
         with self.assertRaises(InvalidArgumentException):
             self.create(nonsense=1)
+        # E2B's longest timeout is a day; past it is refused before anything happens.
+        with self.assertRaises(InvalidArgumentException):
+            self.create(timeout=86_401)
+        self.assertEqual(self.world.called("sandboxes.create"), [])
+
+    def test_a_timeout_over_an_hour_is_carried_on(self):
+        # Refused before 2 October 2026; Runtime's lease reaches an hour ahead,
+        # so the adapter moves it on toward the end asked for.
+        import time
+        sbx = self.create(timeout=7200)
+        self.assertEqual(self.last_create()["timeout_seconds"], 3600)
+        until = sync_sandbox.kept_leases()[sbx.sandbox_id]
+        self.assertAlmostEqual(until, time.time() + 7200, delta=5)
+        sync_sandbox.renew_leases()
+        self.assertEqual(self.world.called("sandbox.extend"), [])  # still an hour ahead: nothing to do
+        from unittest import mock
+        from e2b_fake import _iso
+        fake, start = self.fake(sbx), time.time()
+        fake.info["expiresAt"] = _iso(start + 600)  # ten minutes left
+        sync_sandbox.renew_leases()
+        seconds = self.world.called("sandbox.extend")[-1][1]
+        self.assertTrue(2900 <= seconds <= 2990, seconds)  # back to about an hour ahead
+        with mock.patch("time.time", return_value=start + 4000):  # an hour and six minutes on
+            fake.info["expiresAt"] = _iso(start + 4300)
+            sync_sandbox.renew_leases()
+            seconds = self.world.called("sandbox.extend")[-1][1]
+            self.assertTrue(2890 <= seconds <= 2910, seconds)  # to the end asked for, never past it
+            self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())  # reached: no more keeping
+        other = self.create(timeout=7200)
+        self.assertIn(other.sandbox_id, sync_sandbox.kept_leases())
+        other.kill()
+        self.assertNotIn(other.sandbox_id, sync_sandbox.kept_leases())
 
     def test_templates(self):
         self.create("base")
@@ -154,8 +220,11 @@ class Commands(Base):
         result = sbx.commands.run("echo hi", cwd="/tmp", envs={"B": "3"}, on_stdout=seen.append)
         self.assertEqual((result.exit_code, result.stdout, result.stderr, result.error), (0, "ran echo hi\n", "", None))
         self.assertEqual(seen, ["ran echo hi\n"])
-        self.assertEqual(self.world.called("sandbox.spawn")[-1],
-                         ("echo hi", {"cwd": "/tmp", "env": {"B": "3"}, "stdin": None}))
+        # Read from its first byte by the request that starts it, so Runtime
+        # holds a fast writer back instead of dropping output before a read.
+        self.assertEqual(self.world.called("sandbox.exec_stream")[-1],
+                         ("echo hi", {"cwd": "/tmp", "env": {"B": "3"}, "timeout_ms": 86_400_000}))
+        self.assertEqual(self.world.called("sandbox.spawn"), [])
 
     def test_whole_output_past_the_64_kib_an_exec_result_holds(self):
         # The judge panel's reproduction: python3 -c 'print("x"*70000)'.
@@ -204,16 +273,31 @@ class Commands(Base):
             sbx.commands.run("sleep 9", timeout=1)
         self.world.exec = lambda *_: Result(0)
         sbx.commands.run("true", timeout=0)
-        self.assertNotIn("timeout_ms", self.world.called("sandbox.spawn")[-1][1])
+        self.assertEqual(self.world.called("sandbox.exec_stream")[-1][1]["timeout_ms"], 86_400_000)
         self.world.exec = lambda *_: Result(None)
         with self.assertRaises(CommandExitException) as caught:
             sbx.commands.run("kill -9 $$")
         self.assertEqual((caught.exception.exit_code, caught.exception.error), (-1, "terminated by a signal"))
 
     def test_users_and_home(self):
+        self.world.exec = as_users({})
         sbx = self.create()
-        with self.assertRaises(NotSupportedException):
-            sbx.commands.run("id", user="root")
+        sbx.commands.run("id", user="root")
+        self.assertEqual(self.world.called("sandbox.exec_stream")[-1][0],
+                         ["sudo", "-n", "-E", "-H", "-u", "root", "--", "/bin/bash", "-c", "cd ~ 2>/dev/null\nid"])
+        sbx.commands.run("id", user="app", cwd="/srv")
+        self.assertEqual(self.world.called("sandbox.exec_stream")[-1][0][-1], "id")
+        sbx.commands.run("id", user="app")
+        self.assertEqual([call[0] for call in self.world.called("sandbox.exec")].count(["id", "-u", "--", "app"]), 1)
+        with self.assertRaises(InvalidArgumentException) as caught:
+            sbx.commands.run("id", user="ghost")
+        self.assertIn('no user "ghost"', str(caught.exception))
+        self.assertIn("useradd", str(caught.exception))
+        with self.assertRaises(InvalidArgumentException):
+            sbx.commands.run("id", user="a b")
+        handle = sbx.commands.run("serve", user="root", background=True)
+        self.assertEqual(self.world.called("sandbox.spawn")[-1][0][:6], ["sudo", "-n", "-E", "-H", "-u", "root"])
+        handle.kill()
         sbx.commands.run("id", user="user")
         sbx.commands.run("cat /home/user/a")
         sbx.files.write("/home/user/b", "b")
@@ -292,10 +376,28 @@ class Files(Base):
         self.assertEqual((caught.exception.code, caught.exception.request_id), ("file_not_found", "req_1"))
         with self.assertRaises(FileNotFoundException):
             sbx.files.get_info("/workspace/none")
-        for call in (lambda: sbx.files.read("/etc/x", user="root"),
-                     lambda: sbx.files.write("/workspace/a", "a", metadata={"k": "v"})):
-            with self.assertRaises(NotSupportedException):
-                call()
+        with self.assertRaises(NotSupportedException):
+            sbx.files.write("/workspace/a", "a", metadata={"k": "v"})
+
+    def test_files_as_another_user(self):
+        # Refused before 2 October 2026; now run with sudo -u, creating no one.
+        files = {"/etc/secret": b"s3cret"}
+        self.world.exec = as_users(files)
+        sbx = self.create()
+        self.assertEqual(sbx.files.read("/etc/secret", user="root"), "s3cret")
+        self.assertEqual(sbx.files.read("/etc/secret", format="bytes", user="root"), bytearray(b"s3cret"))
+        with self.assertRaises(FileNotFoundException):
+            sbx.files.read("/etc/none", user="root")
+        info = sbx.files.write("/root/a.txt", "hello", user="root")
+        self.assertEqual((info.path, files["/root/a.txt"]), ("/root/a.txt", b"hello"))
+        entry = sbx.files.get_info("/root/a.txt", user="root")
+        self.assertEqual((entry.name, entry.type, entry.size, entry.owner), ("a.txt", FileType.FILE, 5, "root"))
+        self.assertTrue(sbx.files.exists("/root/a.txt", user="root"))
+        sbx.files.remove("/root/a.txt", user="root")
+        self.assertFalse(sbx.files.exists("/root/a.txt", user="root"))
+        self.assertEqual(self.world.called("files.read") + self.world.called("files.write"), [])
+        with self.assertRaises(InvalidArgumentException):
+            sbx.files.read("/etc/secret", user="ghost")
 
 
 class Lifecycle(Base):
@@ -357,9 +459,33 @@ class Listing(Base):
                                                                          (c.sandbox_id, "paused")])
         self.assertEqual(self.world.called("sandboxes.list")[0][0]["state"],
                          ["starting", "running", "resuming", "pausing", "paused"])
-        for kwargs in ({"query": SandboxQuery(template="mine")}, {"order": "desc"}, {"next_token": "t"}):
-            with self.assertRaises(NotSupportedException):
-                Sandbox.list(client=self.world.client(), **kwargs)
+        with self.assertRaises(InvalidArgumentException):
+            Sandbox.list(next_token="t", client=self.world.client())
+
+    def test_template_start_order_and_next_token(self):
+        # Refused before 2 October 2026; Runtime's list has none of these, so
+        # the adapter reads every match once and filters, sorts and pages here.
+        from datetime import datetime, timezone
+        self.world.images.append({"id": "img-1", "name": "mine", "state": "ready"})
+        a = self.create()
+        b = self.create("mine")
+        c = self.create("mine")
+        self.fake(a).info["createdAt"] = "2026-09-01T00:00:00.000Z"
+        self.fake(b).info["createdAt"] = "2026-09-02T00:00:00.000Z"
+        self.fake(c).info["createdAt"] = "2026-09-03T00:00:00.000Z"
+
+        def ids(**kwargs):
+            paginator = Sandbox.list(client=self.world.client(), **kwargs)
+            return [one.sandbox_id for one in paginator.next_items()], paginator
+
+        self.assertEqual(ids(query=SandboxQuery(template="mine"))[0], [b.sandbox_id, c.sandbox_id])
+        self.assertEqual(ids(query=SandboxQuery(template="base"))[0], [a.sandbox_id])
+        self.assertEqual(ids(query=SandboxQuery(started_after=datetime(2026, 9, 2, tzinfo=timezone.utc)))[0],
+                         [b.sandbox_id, c.sandbox_id])
+        self.assertEqual(ids(order="desc")[0], [c.sandbox_id, b.sandbox_id, a.sandbox_id])
+        first, paginator = ids(order="desc", limit=2)
+        self.assertEqual((first, paginator.has_next), ([c.sandbox_id, b.sandbox_id], True))
+        self.assertEqual(ids(order="desc", limit=2, next_token=paginator.next_token)[0], [a.sandbox_id])
 
 
 class ForksPortsAndGaps(Base):
@@ -381,6 +507,27 @@ class ForksPortsAndGaps(Base):
                 call()
             self.assertEqual(caught.exception.code, "fork_unavailable")
 
+    def test_e2b_2_52_fork_count_and_http_version(self):
+        # e2b 2.52.0 (1 October 2026) bounds a fork's count to 1..20 before
+        # sending, and takes http_version ("1.1" or "2", or E2B_HTTP_VERSION).
+        from unittest import mock
+        sbx = self.create(http_version="1.1")
+        looked_up = len(self.world.called("sandboxes.get"))
+        for bad in (0, 21, 1.5, True):
+            with self.assertRaises(InvalidArgumentException) as caught:
+                sbx.fork(count=bad)
+            self.assertEqual(str(caught.exception), "count must be an integer between 1 and 20")
+            with self.assertRaises(InvalidArgumentException):
+                Sandbox.fork(sbx.sandbox_id, count=bad, client=self.world.client())
+        self.assertEqual((self.world.called("sandbox.fork"), len(self.world.called("sandboxes.get"))), ([], looked_up))
+        self.assertEqual(len(sbx.fork(count=20)), 20)
+        with self.assertRaises(InvalidArgumentException):
+            self.create(http_version="3")
+        with mock.patch.dict(os.environ, {"E2B_HTTP_VERSION": "h3"}):
+            with self.assertRaises(InvalidArgumentException) as caught:
+                self.create()
+            self.assertIn("E2B_HTTP_VERSION", str(caught.exception))
+
     def test_ports(self):
         # 25 September 2026: get_host raised, so E2B code did not run unchanged.
         sbx = self.create()
@@ -391,6 +538,28 @@ class ForksPortsAndGaps(Base):
         self.assertEqual(len(self.world.called("previews.create")), 1)
         with self.assertRaises(e2b.InvalidArgumentException):
             sbx.get_host(0)
+
+    def test_get_host_on_the_trial_names_the_address_that_works(self):
+        # Live, 2 October 2026: on a trial sandbox get_host raised
+        # AuthenticationException (the 403 refusing a public share), while
+        # Node warned and handed back a host that answered 404.
+        self.world.funding = "trial"
+        sbx = self.create()
+        for call in (sbx.get_host, sbx.get_public_host):
+            with self.assertRaises(e2b.PublicPreviewNotAllowedException) as caught:
+                call(3000)
+            self.assertIsInstance(caught.exception, NotSupportedException)
+            self.assertNotIsInstance(caught.exception, AuthenticationException)
+            self.assertIn("urlWithToken", str(caught.exception))
+        self.assertEqual(self.world.called("previews.create"), [])
+
+    def test_a_refused_public_share_is_not_an_authentication_error(self):
+        # The sandbox's funding changed after it was read: Runtime's 403 is
+        # still the trial refusal, not a bad key.
+        self.world.refuse_public = True
+        sbx = self.create()
+        with self.assertRaises(e2b.PublicPreviewNotAllowedException):
+            sbx.get_public_host(3000)
 
     def test_gaps(self):
         sbx = self.create()
@@ -450,6 +619,32 @@ class Async(unittest.TestCase):
             self.assertEqual(world.called("sandboxes.create")[0][0]["env"], {"A": "1"})
             self.assertIsNone(world.called("sandbox.spawn")[0][1]["env"])
 
+        asyncio.run(scenario())
+
+    def test_async_users_long_timeouts_and_the_trial_host(self):
+        from withruntime.e2b import PtySize
+        from withruntime.e2b import _async_sandbox as async_sandbox
+        world = World()
+        world.funding = "trial"
+        world.exec = as_users({"/etc/secret": b"s3cret"})
+        world.output = lambda command: output_events(Result(0, "ran\n"))
+
+        async def scenario():
+            sbx = await AsyncSandbox.create(timeout=7200, client=world.async_client())
+            self.assertEqual(world.called("sandboxes.create")[0][0]["timeout_seconds"], 3600)
+            self.assertIn(sbx.sandbox_id, async_sandbox.kept_leases())
+            self.assertEqual((await sbx.commands.run("id", user="root")).stdout, "ran\n")
+            self.assertEqual(world.called("sandbox.exec_stream")[-1][0][:6], ["sudo", "-n", "-E", "-H", "-u", "root"])
+            self.assertEqual(await sbx.files.read("/etc/secret", user="root"), "s3cret")
+            with self.assertRaises(InvalidArgumentException):
+                await sbx.commands.run("id", user="ghost")
+            await sbx.pty.create(PtySize(20, 80), lambda _: None, user="app", cwd="/srv")
+            self.assertEqual(world.called("sandbox.spawn")[-1][0],
+                             ["sudo", "-n", "-E", "-H", "-u", "app", "--", "/bin/bash", "-c", "exec /bin/bash -i -l"])
+            with self.assertRaises(e2b.PublicPreviewNotAllowedException):
+                sbx.get_host(3000)
+            await sbx.kill()
+            self.assertNotIn(sbx.sandbox_id, async_sandbox.kept_leases())
         asyncio.run(scenario())
 
     def test_disconnect(self):

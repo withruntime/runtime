@@ -18,7 +18,8 @@ const connectTool = {
 /** Bridges an MCP client that speaks stdio to Runtime's hosted MCP endpoint.
  * Newline-delimited JSON-RPC in, the same out; every message is forwarded as
  * it is, so the server's tools, schemas and `instructions` reach the client
- * unchanged, and nothing here keeps a second catalogue. Starting it costs a
+ * unchanged, and nothing here keeps a second catalogue. The one change: the
+ * initialize answer's serverInfo.version is this package's. Starting it costs a
  * process and one TLS connection (undici loads only behind a proxy).
  *
  * With no key on this machine it does not fail: it serves one tool,
@@ -83,8 +84,13 @@ export async function serveMcp(
       } else if (text.trim()) messages.push(JSON.parse(text) as unknown);
     }
     for (const reply of messages) {
-      const result = (reply as { result?: { protocolVersion?: string } }).result;
+      const result = (
+        reply as { result?: { protocolVersion?: string; serverInfo?: { version?: string } } }
+      ).result;
       if (result?.protocolVersion) protocolVersion = result.protocolVersion;
+      // The client runs this package: it reports the package's version, as
+      // before connecting, not the hosted API's contract version (0.2.0).
+      if (result?.serverInfo) result.serverInfo.version = VERSION;
     }
     return { status: response.status, messages, text };
   }

@@ -30,6 +30,8 @@ It never spends paid credit, and it never touches your old provider's account.
   and preview URLs that are private by default.
 - **No API key to copy.** One browser approval connects the CLI, SDKs and MCP.
 - **Test it free.** {{trial-hours}} sandbox hours, no card, up to eight running at once.
+  A trial sandbox reaches ports 80 and 443 and shares previews privately, with
+  a token; other outbound ports and public previews need paid credit.
 
 The [comparison pages](./e2b-alternative) work through the cost of the same job
 on each provider.
@@ -141,7 +143,12 @@ Runtime handles differently, such as drives or schedules, throws
 `commands.run` throws `CommandExitError` (Python `CommandExitException`) on a
 non-zero exit and `TimeoutError` (Python `TimeoutException`) past its timeout,
 so keep your `try`/`catch`. A call Runtime handles differently throws
-`NotSupportedError` naming what to use instead.
+`NotSupportedError` naming what to use instead. On the trial a shared port is
+private, so `getHost(port)` throws `PublicPreviewNotAllowedError` (Python
+`PublicPreviewNotAllowedException`) rather than hand back a host nobody can
+reach: while you test, open
+`(await sandbox.runtime.previews.create(port)).urlWithToken` instead, or send
+its token in the `x-runtime-preview-token` header.
 
 ### Map the calls
 
@@ -166,7 +173,7 @@ docs.
 | E2B `lifecycle.autoResume`, Blaxel standby                                                                                                                                                                                                         | On by default: a request to a paused sandbox wakes it (`autoWake`)                                                                 |
 | Cloudflare 0.x `getSandbox(env, name)`, Modal `Sandbox.from_name`, Blaxel `createIfNotExists`, Sprites by name                                                                                                                                     | `Sandbox.getOrCreate(name)`                                                                                                        |
 | A code interpreter (`run_code`)                                                                                                                                                                                                                    | `sbx.interpreter.run(code)`                                                                                                        |
-| A public URL for a port (`getHost`, `get_preview_link`, `domain`)                                                                                                                                                                                  | `sbx.previews.create(port)`                                                                                                        |
+| A public URL for a port (`getHost`, `get_preview_link`, `domain`)                                                                                                                                                                                  | `sbx.previews.create(port)`, private with a token; `visibility: "public"` on paid                                                  |
 | A PTY or terminal                                                                                                                                                                                                                                  | `sbx.terminal()`                                                                                                                   |
 
 ### From Runtime 0.1.0

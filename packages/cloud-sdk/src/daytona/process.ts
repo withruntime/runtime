@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Process as RuntimeProcess } from "../sandbox.js";
+import type { Process as RuntimeProcess, Terminal } from "../sandbox.js";
+import type { ProcessInfo } from "../types.js";
 import {
   HOME,
   LONGEST_MS,
   quote,
   resolvePath,
+  runAs,
   WHOLE_OUTPUT,
   type SandboxContext,
 } from "./context.js";
@@ -12,6 +14,7 @@ import {
   DaytonaCommandAlreadyCompletedError,
   DaytonaConflictError,
   DaytonaConnectionError,
+  DaytonaError,
   DaytonaNotFoundError,
   DaytonaProcessExecutionTimeoutError,
   DaytonaSessionEndedError,
@@ -111,6 +114,8 @@ class ShellSession {
 export class Process {
   readonly #ctx: SandboxContext;
   readonly #sessions = new Map<string, ShellSession>();
+  /** What only this client knows of its PTY sessions: envs and size. */
+  readonly #ptys = new Map<string, { envs: Record<string, string>; cols: number; rows: number }>();
   constructor(ctx: SandboxContext) {
     this.#ctx = ctx;
   }
@@ -118,6 +123,18 @@ export class Process {
   #env(extra?: Record<string, string>) {
     const merged = { ...this.#ctx.env, ...extra };
     return Object.keys(merged).length ? { env: merged } : {};
+  }
+
+  /** A command and its environment option as Runtime runs them: as given
+   * for the sandbox owner, through sudo for create's `user`. */
+  #as(
+    command: string | string[],
+    extra?: Record<string, string>,
+  ): [string | string[], { env?: Record<string, string> }] {
+    const user = this.#ctx.user;
+    if (!user) return [command, this.#env(extra)];
+    const argv = typeof command === "string" ? ["bash", "-c", command] : command;
+    return [runAs(user, argv, { ...this.#ctx.env, ...extra }).argv, {}];
   }
 
   /** Runs a shell command and resolves with its exit code and output. A
@@ -133,10 +150,11 @@ export class Process {
     await this.#ctx.ensureHome(`${command}\n${cwd ?? ""}`);
     const runtime = await this.#ctx.live();
     const timeoutMs = timeout ? timeout * 1000 : LONGEST_MS;
+    const [run, environment] = this.#as(`{ ${command}\n} 2>&1`, env);
     const result = await guard("sandbox", () =>
-      runtime.exec(`{ ${command}\n} 2>&1`, {
+      runtime.exec(run, {
         cwd: cwd === undefined ? HOME : resolvePath(cwd),
-        ...this.#env(env),
+        ...environment,
         timeoutMs,
         ...WHOLE_OUTPUT,
       }),
@@ -173,10 +191,14 @@ export class Process {
           ? ["bun", "-e", code]
           : ["node", "-e", code];
     const timeoutMs = timeout ? timeout * 1000 : LONGEST_MS;
+    const [run, environment] = this.#as(
+      ["sh", "-c", 'exec "$@" 2>&1', "sh", ...interpreter, ...(params.argv ?? [])],
+      params.env,
+    );
     const result = await guard("sandbox", () =>
-      runtime.exec(["sh", "-c", 'exec "$@" 2>&1', "sh", ...interpreter, ...(params.argv ?? [])], {
+      runtime.exec(run, {
         cwd: HOME,
-        ...this.#env(params.env),
+        ...environment,
         timeoutMs,
         ...WHOLE_OUTPUT,
       }),
@@ -206,10 +228,17 @@ export class Process {
     if (this.#sessions.has(sessionId) || (await this.#discover(sessionId)))
       throw new DaytonaConflictError(`Session ${sessionId} already exists.`, 409);
     const runtime = await this.#ctx.live();
+    const [run, environment] = this.#as([
+      "bash",
+      "--noprofile",
+      "--norc",
+      "-s",
+      `${TAG}${sessionId}`,
+    ]);
     const process = await guard("sandbox", () =>
-      runtime.spawn(["bash", "--noprofile", "--norc", "-s", `${TAG}${sessionId}`], {
+      runtime.spawn(run, {
         cwd: HOME,
-        ...this.#env(),
+        ...environment,
         stdin: "pipe",
         timeoutMs: LONGEST_MS,
       }),
@@ -457,24 +486,263 @@ export class Process {
 
   // ---- terminals ---------------------------------------------------------
 
-  createPty(): Promise<never> {
-    return pty();
+  /** Starts an interactive shell on a terminal (a PTY) that outlives this
+   * connection: disconnect() leaves it running, connectPty(id) attaches
+   * again, killPtySession(id) ends it. On Runtime it is a process started
+   * with a terminal, found again by its id among the sandbox's processes. */
+  async createPty(options: PtyCreateOptions & Partial<PtyConnectOptions>): Promise<PtyHandle> {
+    const id = options?.id;
+    if (!id) throw new DaytonaError("A PTY session needs an id.", 400);
+    if (await this.#findPty(id))
+      throw new DaytonaConflictError(`PTY session ${id} already exists.`, 409);
+    const cols = options.cols ?? 80;
+    const rows = options.rows ?? 24;
+    await this.#ctx.ensureHome(options.cwd);
+    const cwd = options.cwd === undefined ? HOME : resolvePath(options.cwd);
+    const envs = { ...options.envs };
+    const runtime = await this.#ctx.live();
+    const [run, environment] = this.#as(["bash", "-l", "-i", "-s", ptyTag(id), `${cols}x${rows}`], {
+      TERM: "xterm-256color",
+      ...envs,
+    });
+    const process = await guard("sandbox", () =>
+      runtime.spawn(run, { cwd, ...environment, pty: { cols, rows }, timeoutMs: LONGEST_MS }),
+    );
+    this.#ptys.set(id, { envs, cols, rows });
+    try {
+      return await this.#attach(id, process.id, options.onData);
+    } catch (error) {
+      await process.kill("SIGKILL").catch(() => undefined);
+      throw error;
+    }
   }
-  connectPty(): Promise<never> {
-    return pty();
+
+  /** Attaches to a running PTY session. Output it printed before arrives
+   * first, then what it prints from now on. */
+  async connectPty(sessionId: string, options?: Partial<PtyConnectOptions>): Promise<PtyHandle> {
+    const found = await this.#findPty(sessionId);
+    if (!found) throw new DaytonaNotFoundError(`PTY session ${sessionId} was not found.`, 404);
+    return this.#attach(sessionId, found.id, options?.onData);
   }
-  listPtySessions(): Promise<never> {
-    return pty();
+
+  async listPtySessions(): Promise<PtySessionInfo[]> {
+    const latest = new Map<string, ProcessInfo>();
+    for (const info of await this.#ptyProcesses()) latest.set(ptyOf(info.command)!.id, info);
+    return [...latest.values()].map((info) => this.#ptyInfo(info));
   }
-  getPtySessionInfo(): Promise<never> {
-    return pty();
+
+  async getPtySessionInfo(sessionId: string): Promise<PtySessionInfo> {
+    const found = (await this.#ptyProcesses())
+      .filter((info) => ptyOf(info.command)!.id === sessionId)
+      .at(-1);
+    if (!found) throw new DaytonaNotFoundError(`PTY session ${sessionId} was not found.`, 404);
+    return this.#ptyInfo(found);
   }
-  killPtySession(): Promise<never> {
-    return pty();
+
+  /** Ends the session's shell and everything it runs. */
+  async killPtySession(sessionId: string): Promise<void> {
+    const process = await this.#ptyProcess(sessionId);
+    await guard("process", () => process.kill("SIGKILL"));
   }
-  resizePtySession(): Promise<never> {
-    return pty();
+
+  async resizePtySession(sessionId: string, cols: number, rows: number): Promise<PtySessionInfo> {
+    const process = await this.#ptyProcess(sessionId);
+    await guard("process", () => process.resize(cols, rows));
+    const known = this.#ptys.get(sessionId);
+    this.#ptys.set(sessionId, { envs: known?.envs ?? {}, cols, rows });
+    return this.#ptyInfo({ ...process.info, state: "running" });
   }
+
+  /** Terminal processes this adapter started, a killed one gone as on
+   * Daytona; an exited one stays, inactive. */
+  async #ptyProcesses(): Promise<ProcessInfo[]> {
+    const runtime = await this.#ctx.live();
+    const list = await guard("sandbox", () => runtime.processes.list());
+    return list.filter((info) => info.state !== "killed" && ptyOf(info.command));
+  }
+
+  async #findPty(sessionId: string): Promise<ProcessInfo | undefined> {
+    return (await this.#ptyProcesses()).find(
+      (info) => info.state === "running" && ptyOf(info.command)!.id === sessionId,
+    );
+  }
+
+  async #ptyProcess(sessionId: string): Promise<RuntimeProcess> {
+    const found = await this.#findPty(sessionId);
+    if (!found) throw new DaytonaNotFoundError(`PTY session ${sessionId} was not found.`, 404);
+    const runtime = await this.#ctx.live();
+    return guard("process", () => runtime.processes.get(found.id));
+  }
+
+  #ptyInfo(info: ProcessInfo): PtySessionInfo {
+    const tag = ptyOf(info.command)!;
+    const known = this.#ptys.get(tag.id);
+    return {
+      active: info.state === "running",
+      cols: known?.cols ?? tag.cols,
+      createdAt: info.startedAt,
+      cwd: info.cwd,
+      envs: { ...known?.envs },
+      id: tag.id,
+      lazyStart: false,
+      rows: known?.rows ?? tag.rows,
+    };
+  }
+
+  async #attach(
+    sessionId: string,
+    processId: string,
+    onData: PtyConnectOptions["onData"] | undefined,
+  ): Promise<PtyHandle> {
+    const runtime = await this.#ctx.live();
+    const terminal = await guard("sandbox", () =>
+      runtime.terminal({
+        processId,
+        ...(onData
+          ? {
+              onData: (data: Uint8Array) =>
+                void Promise.resolve()
+                  .then(() => onData(data))
+                  .catch(() => undefined),
+            }
+          : {}),
+      }),
+    );
+    return new PtyHandle(
+      terminal,
+      sessionId,
+      (cols, rows) => this.resizePtySession(sessionId, cols, rows),
+      () => this.killPtySession(sessionId),
+    );
+  }
+}
+
+/** Daytona's PtyCreateOptions. */
+export interface PtyCreateOptions {
+  id: string;
+  cwd?: string;
+  envs?: Record<string, string>;
+  cols?: number;
+  rows?: number;
+}
+/** Daytona's PtyConnectOptions. */
+export interface PtyConnectOptions {
+  onData: (data: Uint8Array) => void | Promise<void>;
+}
+/** Daytona's PtyResult. */
+export interface PtyResult {
+  exitCode?: number;
+  error?: string;
+}
+/** Daytona's PtySessionInfo. */
+export interface PtySessionInfo {
+  active: boolean;
+  cols: number;
+  createdAt: string;
+  cwd: string;
+  envs: Record<string, string>;
+  id: string;
+  lazyStart: boolean;
+  rows: number;
+}
+
+/** One connection to a PTY session, Daytona's PtyHandle over Runtime's
+ * terminal WebSocket. */
+export class PtyHandle {
+  readonly sessionId: string;
+  readonly #terminal: Terminal;
+  readonly #resize: (cols: number, rows: number) => Promise<PtySessionInfo>;
+  readonly #kill: () => Promise<void>;
+  readonly #result: Promise<PtyResult>;
+  #connected = true;
+  #disconnected = false;
+  #exitCode: number | undefined;
+  #error: string | undefined;
+
+  /** Use process.createPty or process.connectPty. */
+  constructor(
+    terminal: Terminal,
+    sessionId: string,
+    resize: (cols: number, rows: number) => Promise<PtySessionInfo>,
+    kill: () => Promise<void>,
+  ) {
+    this.sessionId = sessionId;
+    this.#terminal = terminal;
+    this.#resize = resize;
+    this.#kill = kill;
+    this.#result = terminal.exited.then((code) => {
+      this.#connected = false;
+      if (code !== null) this.#exitCode = code;
+      else
+        this.#error = this.#disconnected
+          ? "Disconnected; the PTY session keeps running. connectPty() attaches again."
+          : "The PTY session was ended by a signal.";
+      return {
+        ...(this.#exitCode === undefined ? {} : { exitCode: this.#exitCode }),
+        ...(this.#error === undefined ? {} : { error: this.#error }),
+      };
+    });
+  }
+
+  get exitCode(): number | undefined {
+    return this.#exitCode;
+  }
+  get error(): string | undefined {
+    return this.#error;
+  }
+  isConnected(): boolean {
+    return this.#connected;
+  }
+  /** Resolves at once: the handle is returned connected. */
+  async waitForConnection(): Promise<void> {
+    if (!this.#connected && this.#exitCode === undefined)
+      throw new DaytonaConnectionError(this.#error ?? "Connection closed");
+  }
+  async sendInput(data: string | Uint8Array): Promise<void> {
+    if (!this.#connected) throw new DaytonaConnectionError("PTY is not connected");
+    try {
+      this.#terminal.write(data);
+    } catch (error) {
+      throw new DaytonaConnectionError(
+        `Failed to send input to PTY: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  resize(cols: number, rows: number): Promise<PtySessionInfo> {
+    return this.#resize(cols, rows);
+  }
+  /** Closes this connection; the session keeps running. */
+  async disconnect(): Promise<void> {
+    if (!this.#connected) return;
+    this.#disconnected = true;
+    this.#terminal.close();
+  }
+  /** Resolves when the session ends (or this connection closes) with its
+   * exit code, or `error` saying why there is none. */
+  wait(): Promise<PtyResult> {
+    return this.#result;
+  }
+  kill(): Promise<void> {
+    return this.#kill();
+  }
+}
+
+const PTY_TAG = "daytona-pty:";
+/** A session id as one word of the shell's command line, found again by
+ * listPtySessions in any client. */
+function ptyTag(id: string): string {
+  return PTY_TAG + Buffer.from(id).toString("base64url");
+}
+function ptyOf(command: string): { id: string; cols: number; rows: number } | undefined {
+  const words = String(command).split(" ");
+  const at = words.findIndex((word) => word.startsWith(PTY_TAG));
+  if (at < 0) return undefined;
+  const size = /^(\d+)x(\d+)$/.exec(words[at + 1] ?? "");
+  return {
+    id: Buffer.from(words[at]!.slice(PTY_TAG.length), "base64url").toString(),
+    cols: Number(size?.[1] ?? 80),
+    rows: Number(size?.[2] ?? 24),
+  };
 }
 
 function describe(command: SessionCommand): Command {
@@ -483,15 +751,6 @@ function describe(command: SessionCommand): Command {
     command: command.command,
     ...(command.exitCode === undefined ? {} : { exitCode: command.exitCode }),
   };
-}
-
-function pty(): Promise<never> {
-  return Promise.reject(
-    new NotSupportedError(
-      "Daytona's PTY sessions",
-      "Use `await sandbox.withruntime.terminal({ cols, rows, onData })` for an interactive terminal, or a session for commands.",
-    ),
-  );
 }
 
 function entrypoint(): Promise<never> {

@@ -34,7 +34,7 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
   sandbox runs as long as you extend its lease, or stays up with
   `persistent: true`, and a paused one keeps its memory for 1 to 365 days.
 - **Fork a running machine.** A Runtime fork copies a sandbox as it is now,
-  memory and processes included, into up to 10 running copies.
+  memory and processes included, into up to {{fork-copies}} running copies.
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).

@@ -49,3 +49,13 @@ def operation(make: Callable[[], Any], mode: str) -> Any:
     box = make()
     box._exit_mode = mode
     return box
+
+
+def later(delay: float, work: Callable[[], Any]) -> Any:
+    """Runs ``work`` on a daemon thread after ``delay`` seconds; ``cancel()``
+    stops it. It never keeps the program from ending."""
+    import threading
+    timer = threading.Timer(delay, work)
+    timer.daemon = True
+    timer.start()
+    return timer

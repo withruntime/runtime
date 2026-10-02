@@ -9,32 +9,9 @@
         {
           "registry": "npm",
           "name": "e2b",
-          "version": "2.51.0",
+          "version": "2.52.0",
           "artifacts": {
-            "2.51.0": "sha512-P+50lx1nOYpgCFyE1xuz6JVN/TqJivMUiH7v+RW0CUSfb4+NCu8IkC5KruT2sNPgp6aexddQQ77+OZKGpZZJ+Q=="
-          },
-          "latestReview": {
-            "version": "2.52.0",
-            "artifacts": {
-              "2.52.0": "sha512-TmUZlAvQq8BbguodpA+BBdawR/x5uILMQtHcLkdaLUqevsDjDdh46IYYU8ZRYKsQ4OhWr4xhsFIPSg1kgf+O0w=="
-            },
-            "reviewedAt": "2026-10-01",
-            "disposition": "held-for-sdk-qualification",
-            "evidence": {
-              "sourceUrls": [
-                "https://registry.npmjs.org/e2b/2.52.0",
-                "https://registry.npmjs.org/e2b/-/e2b-2.52.0.tgz"
-              ],
-              "artifactSha256": {
-                "2.52.0": "facbc53fa42757d94aa2be3433d779c7ab6b0afc780d4821a12a6d6815848c8e"
-              },
-              "changes": [
-                "dist/index.d.ts/index.mjs: HTTP1.1/2 selection, E2B_HTTP_VERSION, retry502/503 and connection failures, fork integer count 1..20, Dockerignore matching/precedence and invalid-pattern behavior changed. package.json changes protobuf/chalk/openapi-fetch floors. Installed transport/retry/fork/filesystem consumers not qualified; supported 2.51.0 unchanged.",
-                "Source digest dist/index.d.ts: 304acc9c8bbec8aeb69296719eb34986f987256e758aa7e220b551b9a7dcbd30 -> fa2e6eb09b6c6d3489056ee948248812e8879a23b6865561e5152f243bf6ca40.",
-                "Source digest dist/index.mjs: b75feeedb6543fee003533270b0f07fc1a9eb40315dfc0c44510e2dd8854b896 -> 343a41249ea8d48fe0a70fc986066d3ef97b6da2b71267211d21f77036efafea.",
-                "Source digest package.json: a2c759c4681b91b824aea7919f4661e498ec0e0b68d6cc333f4967f7b2b63f7b -> c5b699f80831b621178c83ea477d096bc1167e0083b6ba7a51d17f564207255f."
-              ]
-            }
+            "2.52.0": "sha512-TmUZlAvQq8BbguodpA+BBdawR/x5uILMQtHcLkdaLUqevsDjDdh46IYYU8ZRYKsQ4OhWr4xhsFIPSg1kgf+O0w=="
           }
         },
         {
@@ -48,72 +25,19 @@
         {
           "registry": "pypi",
           "name": "e2b",
-          "version": "2.51.0",
+          "version": "2.52.0",
           "artifacts": {
-            "e2b-2.51.0-py3-none-any.whl": "sha256-951d0fd069f017e760b338a435bdb83589b4bfb9574fc5203a7f777e9cb994c2",
-            "e2b-2.51.0.tar.gz": "sha256-902ee861b30c8ec3e46e7f84db8c993f30695872c7b4490efaad1627ec6e08ba"
-          },
-          "latestReview": {
-            "version": "2.52.0",
-            "artifacts": {
-              "e2b-2.52.0-py3-none-any.whl": "sha256-6f4b5084b09986db43e99c7405bae6b14dc56984a69bbb1dc0687f1c71515cfb",
-              "e2b-2.52.0.tar.gz": "sha256-58c0042609513799341d4c1837e2581a4a5e73d3d62c9f1c57495c5e23eedee2"
-            },
-            "reviewedAt": "2026-10-01",
-            "disposition": "held-for-sdk-qualification",
-            "evidence": {
-              "sourceUrls": [
-                "https://pypi.org/pypi/e2b/2.52.0/json",
-                "https://files.pythonhosted.org/packages/53/71/1a01b7e4486b5962eaade7dba7026876a1b4569e49b464e82912d8801e38/e2b-2.52.0-py3-none-any.whl",
-                "https://files.pythonhosted.org/packages/3c/c4/560e7de54cece3573086f09d304e595729964aa18593b437125d9f8bd926/e2b-2.52.0.tar.gz"
-              ],
-              "artifactSha256": {
-                "e2b-2.52.0-py3-none-any.whl": "6f4b5084b09986db43e99c7405bae6b14dc56984a69bbb1dc0687f1c71515cfb",
-                "e2b-2.52.0.tar.gz": "58c0042609513799341d4c1837e2581a4a5e73d3d62c9f1c57495c5e23eedee2"
-              },
-              "changes": [
-                "e2b/connection_config.py/retry.py: HTTP1.1/2 selection and E2B_HTTP_VERSION; retries 502/503 and eligible network failures, excluding unsafe resource-creating replay. e2b/api clients replace pool shards with bounded least-in-flight shared pools, defaults 100 streams / 200 connections.",
-                "Fork count validation1..20 and template/dockerignore/fileIgnorePatterns matching/precedence changed. Installed sync/async transport/cleanup/retry/fork/filesystem consumers not qualified; supported 2.51.0 unchanged.",
-                "Source digest e2b/api/__init__.py: 00b09a79f25d01594c4b1ec5f14d3d0cc3ccc319958a2e1ca34ba91cdbf114b3 -> 640233a615a3c68752a2f2cecb1af919aebfc5e895bd4f09003aee61da38c7c0.",
-                "Source digest e2b/connection_config.py: 284aa3e7cc319432ca9147ddb7d9ab8cd315cf35283da7699eebe877375758a4 -> c165948133a2f174b5a490afa9502301d038d8097f91203b2c2174f451accf83.",
-                "Source digest e2b/retry.py: aa54aa8873fd44027a9c3ff790594d4583d2f415c0d3bd858566d2f0e15fa71f -> 40b1d7ea0732a721d77b31483e54f9f190e444cb798c54fc141856f52685e208.",
-                "Source digest e2b/template/dockerignore.py: None -> cba4ff9d7efa5ae987c4c0114770c114b5aefe2c18847e55d2bd811b9a1a088c."
-              ]
-            }
+            "e2b-2.52.0-py3-none-any.whl": "sha256-6f4b5084b09986db43e99c7405bae6b14dc56984a69bbb1dc0687f1c71515cfb",
+            "e2b-2.52.0.tar.gz": "sha256-58c0042609513799341d4c1837e2581a4a5e73d3d62c9f1c57495c5e23eedee2"
           }
         },
         {
           "registry": "pypi",
           "name": "e2b-code-interpreter",
-          "version": "2.10.0",
+          "version": "2.10.1",
           "artifacts": {
-            "e2b_code_interpreter-2.10.0-py3-none-any.whl": "sha256-6ba776122086261875bc6033ef2dc42ac6b6e22cefdffdfd19d30e93bb09786f",
-            "e2b_code_interpreter-2.10.0.tar.gz": "sha256-57fb7f9b9ad99ebbdf407619786fdb84e31537c2fbc8358c394aa0f0cbc1af28"
-          },
-          "latestReview": {
-            "version": "2.10.1",
-            "artifacts": {
-              "e2b_code_interpreter-2.10.1-py3-none-any.whl": "sha256-f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d",
-              "e2b_code_interpreter-2.10.1.tar.gz": "sha256-94e504667788c6cbb175e5deaf1f68e8df474b670343fe1d72e2496b49d5a666"
-            },
-            "reviewedAt": "2026-10-01",
-            "disposition": "held-for-sdk-qualification",
-            "evidence": {
-              "sourceUrls": [
-                "https://pypi.org/pypi/e2b-code-interpreter/2.10.1/json",
-                "https://files.pythonhosted.org/packages/27/1f/0f9a4c4d9669afd5389e91bd96099a8eb1d1a32f9c67871cc56c4a8556b7/e2b_code_interpreter-2.10.1-py3-none-any.whl",
-                "https://files.pythonhosted.org/packages/38/e6/b01e60524e7e4d2e8ce634b3be6d00fe09c606f3d24a448b4a5c087d3bda/e2b_code_interpreter-2.10.1.tar.gz"
-              ],
-              "artifactSha256": {
-                "e2b_code_interpreter-2.10.1-py3-none-any.whl": "f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d",
-                "e2b_code_interpreter-2.10.1.tar.gz": "94e504667788c6cbb175e5deaf1f68e8df474b670343fe1d72e2496b49d5a666"
-              },
-              "changes": [
-                "code_interpreter_{sync,async}.py: Jupyter get_transport argument changes from http2=False to http_version=\"1.1\". pyproject.toml and PKG-INFO raise e2b floor to 2.52.0,<3.0.0. Installed Jupyter cancellation/base SDK consumers not qualified; supported 2.10.0 unchanged.",
-                "Source digest e2b_code_interpreter/code_interpreter_sync.py: 298d832fe93e488300ac3174f2de590cc16d3563bdcc4ec31439d28265b66426 -> a88ff6a0df5163bceea545d077be090dbc78c96e48354e304677b02799eec17e.",
-                "Source digest pyproject.toml: 6c395fdf75ddc89acabb94fd0e419fc31317e6f3fa297894cbe7e766f090322c -> ef2b569a82f2e6edf722939ab27ca476a292886655c2af8f9e75eb9cae287941."
-              ]
-            }
+            "e2b_code_interpreter-2.10.1-py3-none-any.whl": "sha256-f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d",
+            "e2b_code_interpreter-2.10.1.tar.gz": "sha256-94e504667788c6cbb175e5deaf1f68e8df474b670343fe1d72e2496b49d5a666"
           }
         }
       ]

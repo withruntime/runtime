@@ -521,6 +521,32 @@ export class Sandbox implements AsyncDisposable {
     );
     return this;
   }
+  /** Gives it more or fewer vCPUs or more or less memory by a restart: its id,
+   * whole disk, volumes, environment, name and previews stay, and its
+   * programs stop, which `restart: true` says you know (snapshot it first to
+   * keep its memory too). A running sandbox is paused, or stopped if it is
+   * persistent, and comes back running at the new size on the same server; a
+   * paused or stopped one is started. Memory bills on the new size from then.
+   * Refused, with nothing changed, when the server has no room
+   * (`no_capacity`), above your quota or the trial's 2 vCPU and 4 GiB, or
+   * while a snapshot or fork of it is being taken. */
+  async resize(
+    size: { vcpu?: number; memoryMiB?: number },
+    options: RequestOptions & { restart: true },
+  ): Promise<this> {
+    const { restart, ...rest } = options;
+    this.#keep(
+      await this.#t.json<SandboxInfo>({
+        method: "POST",
+        path: `/v1/sandboxes/${enc(this.id)}:resize`,
+        body: { ...size, restart },
+        // A pause or stop and a cold boot.
+        wait: 120,
+        ...pick(rest),
+      }),
+    );
+    return this;
+  }
   /** Keeps a running sandbox's lease ahead of now, in the background, until
    * stop() or the returned function ends it: every `everySeconds` (60) it
    * extends the lease so that `marginSeconds` (600) remain, never more than
@@ -982,6 +1008,30 @@ export class Process {
   get id(): string {
     return this.info.id;
   }
+  /** The command line as the sandbox reports it. */
+  get command(): string {
+    return this.info.command;
+  }
+  /** As of the last answer: spawn, `wait()` or `refresh()`. */
+  get state(): ProcessInfo["state"] {
+    return this.info.state;
+  }
+  /** null while it runs, and when it was killed or timed out. */
+  get exitCode(): number | null {
+    return this.info.exitCode;
+  }
+  toJSON(): ProcessInfo {
+    return this.info;
+  }
+  /** console.log shows what the process is, not the client inside it. */
+  [Symbol.for("nodejs.util.inspect.custom")](
+    _depth: number,
+    options: object,
+    show: (value: unknown, options: object) => string,
+  ): string {
+    const { id, sandboxId, command, state, exitCode } = this;
+    return `Process ${show({ id, sandboxId, command, state, exitCode }, options)}`;
+  }
   /** Every output event from the start (or `cursor`) until exit. */
   output(options: { cursor?: number; signal?: AbortSignal } = {}): AsyncGenerator<OutputEvent> {
     return new Processes(this.t, this.sandboxId).follow(this.id, options);
@@ -1024,6 +1074,12 @@ export class Process {
       if (event.type === "truncated") dropped = true;
       if (event.type === "exit") exit = event;
     }
+    if (exit)
+      this.info = {
+        ...this.info,
+        state: exit.state as ProcessInfo["state"],
+        exitCode: exit.exitCode,
+      };
     return {
       exitCode: exit?.exitCode ?? null,
       ...out,

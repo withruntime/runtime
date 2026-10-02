@@ -111,7 +111,7 @@ Observability
                                                Events and metrics to an OpenTelemetry endpoint
 
 Products
-  sandbox   Linux microVMs: exec, shell, files, code, previews, network, desktop
+  sandbox   Linux microVMs: exec, shell, files, code, previews, network, desktop, browser
   snapshot  Saved sandboxes, disk and memory, to start or fork from
   image     Custom images from a Dockerfile, any public or private image, or a package list
   volume    Persistent disks to attach to sandboxes
@@ -120,7 +120,7 @@ Products
   port      A public TCP port to a sandbox: databases, game servers
   address   A dedicated outbound address, for allow-lists
   tunnel    A WireGuard tunnel from your own network into your sandboxes
-  network   Account-wide network settings: send outbound traffic through your own proxy
+  network   Account-wide network settings: your own proxy, sandboxes reaching each other by name
   Each has its own help: \`runtime sandbox help\`, \`runtime image help\`...
 
 Every command takes --json. Keys: RUNTIME_API_KEY, or the connection from \`runtime login\`.
@@ -155,11 +155,15 @@ const SANDBOX_HELP = `runtime sandbox <command>
   cat <id> <path>                             Print a file
   files <id> [path] [--depth 1] [--glob '**/*.py']
   stop <id> | pause <id> | wake <id> | restart <id>
+  stop --label k=v [--label k=v]...           Stop every live sandbox with all those labels
   rm <id>                                     Delete it for good: stops it, deletes its disk and
                                               paused memory, revokes its previews; snapshots stay
   switch-image <id> <image> --keep-workspace  Move it to another image, keeping /workspace (your home),
                                               volumes, env and previews; processes restart, the rest of
                                               its disk is lost (snapshot it first to keep everything)
+  resize <id> [--vcpu 2] [--memory 4096] --restart
+                                              Change its size by a restart: the whole disk stays,
+                                              programs stop (snapshot it first to keep memory)
   extend <id> <seconds>                       More time before the lease ends
   update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
@@ -204,6 +208,8 @@ const SANDBOX_HELP = `runtime sandbox <command>
                | type <text> | press <keys> | windows
   desktop <id> record start [--fps 10] [--max-seconds 1800] [--max-mib 512] | record stop <recId>
                | record ls | record fetch <recId> [file.mp4] | record rm <recId>
+  browser <id> start [--headed] [--width 1280] [--height 800] | get | stop
+                                              Chromium for CDP agents: prints its cdpUrl
 
 Examples
   id=$(runtime sandbox create)
@@ -454,6 +460,7 @@ const SANDBOX_VERBS = [
   "rm",
   "delete",
   "switch-image",
+  "resize",
   "pause",
   "wake",
   "restart",
@@ -481,6 +488,7 @@ const SANDBOX_VERBS = [
   "session",
   "network",
   "desktop",
+  "browser",
   "metrics",
   "watch",
   "mcp",
@@ -1691,6 +1699,28 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       print(describe(sbx.info), sbx.info);
       return 0;
     }
+    case "resize": {
+      const args = parse(rest, ["restart"], ["vcpu", "memory"]);
+      const sbx = await use(
+        need(
+          args.positional[0],
+          `a sandbox, e.g. ${me} sandbox resize <id> --memory 4096 --restart`,
+        ),
+      );
+      const size = {
+        ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
+        ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
+      };
+      if (size.vcpu === undefined && size.memoryMiB === undefined)
+        throw usage(`Name a new size, e.g. ${me} sandbox resize ${sbx.id} --memory 4096 --restart`);
+      if (!args.flags.has("restart"))
+        throw usage(
+          `A resize restarts it: its whole disk stays and its programs stop. Add --restart to say so, or snapshot it first (${me} sandbox snapshot ${sbx.id}) to keep its memory too.`,
+        );
+      await sbx.resize(size, { restart: true });
+      print(describe(sbx.info), sbx.info);
+      return 0;
+    }
     case "rm":
     case "delete": {
       const sbx = await use(need(rest[0], `a sandbox, e.g. ${me} sandbox rm <id>`));
@@ -1702,6 +1732,25 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     case "pause":
     case "wake":
     case "restart": {
+      if (verb === "stop" && rest.some((word) => /^--label(=|$)/.test(word))) {
+        const args = parse(rest, [], ["label"]);
+        if (args.positional.length) throw usage("Give a sandbox id or --label, not both.");
+        const { stopped, failed } = await runtime.sandboxes.stopAll({
+          labels: pairs(args, "label"),
+        });
+        const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
+        print(
+          [
+            stopped.length || failed.length
+              ? `${stopped.length} stopped${failed.length ? `, ${failed.length} failed` : ""}.`
+              : "No live sandbox has those labels.",
+            ...stopped.map((id) => `${id} stopped`),
+            ...failed.map((f) => `${f.id} failed: ${said(f.error)}`),
+          ].join("\n"),
+          { stopped, failed: failed.map((f) => ({ id: f.id, error: said(f.error) })) },
+        );
+        return failed.length ? 1 : 0;
+      }
       const sbx = await get(rest[0]);
       await sbx[verb]();
       print(`${sbx.id} ${sbx.state}`, sbx.info);
@@ -2161,6 +2210,8 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     }
     case "desktop":
       return desktop(await use(rest[0]), rest.slice(1), out);
+    case "browser":
+      return browser(await use(rest[0]), rest.slice(1), out);
     case "watch":
       return (await import("./cli-extras.js")).watchCommand(
         await use(rest[0]),
@@ -2548,6 +2599,43 @@ async function desktop(sbx: Sandbox, argv: string[], out: Out): Promise<number> 
   throw usage(
     `${me} sandbox desktop <id> start|stop|screenshot|open|click|type|press|windows|record`,
   );
+}
+
+async function browser(sbx: Sandbox, argv: string[], out: Out): Promise<number> {
+  const [action, ...rest] = argv;
+  const print = (human: string, value: unknown) =>
+    out.write(out.json ? JSON.stringify(value) : human);
+  switch (action) {
+    case "start": {
+      const args = parse(rest, ["headed"], ["width", "height"]);
+      const started = await sbx.browser.start({
+        ...(args.flags.has("headed") ? { headless: false } : {}),
+        ...(integer(args, "width") !== undefined ? { width: integer(args, "width")! } : {}),
+        ...(integer(args, "height") !== undefined ? { height: integer(args, "height")! } : {}),
+      });
+      print(
+        `${started.version}${started.headless ? "" : `, on the desktop: ${started.streamUrl}`}\n` +
+          `CDP: ${started.cdpUrl}\n(private; it expires ${started.expiresAt ?? "never"})`,
+        started,
+      );
+      return 0;
+    }
+    case "get":
+    case undefined: {
+      const state = await sbx.browser.get();
+      print(
+        state.running ? `${state.version}\nCDP: ${state.cdpUrl}` : "No browser running.",
+        state,
+      );
+      return 0;
+    }
+    case "stop": {
+      const stopped = await sbx.browser.stop();
+      print(stopped.stopped ? "Browser stopped." : "No browser was running.", stopped);
+      return 0;
+    }
+  }
+  throw usage(`${me} sandbox browser <id> start [--headed]|get|stop`);
 }
 
 const KEYS_HELP = `runtime keys <command>

@@ -199,7 +199,7 @@ until `:wake`. A wake that cannot be paid for fails with the refusal, such as
 
 **Names.** A name is unique in the account while its sandbox can still run:
 starting, running, paused, or stopped and persistent. A create that names a
-held name fails with `409 name_taken`; `details.sandboxId` names the holder
+held name fails with `name_taken` (409); `details.sandboxId` names the holder
 when your key can reach it. With `getOrCreate: true` the create answers the
 holder instead, woken if paused and restarted if stopped and persistent, with
 `reused: true`; the other fields apply only when it creates one. A sandbox that
@@ -227,17 +227,17 @@ restarts. A command's own `env` is put over them. `:update` with `env` changes
 them: a value sets a variable, `null` removes it, and the rest stay; commands
 started after the change get it, and running ones keep what they started with.
 At most {{sandbox-env-vars}} variables and {{sandbox-env-size}} of names and values; past that the answer is
-`400 env_too_large`, and a name that is not a letter or underscore followed by
-letters, digits and underscores is `400 invalid_env`. A command whose own `env`
+`env_too_large` (400), and a name that is not a letter or underscore followed by
+letters, digits and underscores is `invalid_env` (400). A command whose own `env`
 and the sandbox's together pass what one command can carry is refused with
-`400 env_too_large` before it runs. Values are write-only: answers carry only `envNames`, and no
+`env_too_large` (400) before it runs. Values are write-only: answers carry only `envNames`, and no
 list, log or audit entry holds a value. They are stored encrypted, and the
 request fingerprint an `Idempotency-Key` is checked against holds a keyed hash
 of them, never the values. Copies made by `:fork` keep them, because they are
 the same machine and its processes already hold them; a sandbox created from a
 snapshot takes only its own `env`. An SSH session gets every variable whose
 value has no double quote, backslash or line break. A deployment that cannot
-store them answers `503 env_unavailable` and creates nothing.
+store them answers `env_unavailable` (503) and creates nothing.
 
 **Deleting a sandbox.** `DELETE /v1/sandboxes/{id}` works in any state. It
 stops the sandbox if it runs or is paused, deletes its disk and its paused
@@ -259,16 +259,37 @@ keeps its id and name, `/workspace` (its home: dotfiles, `pip install` and
 processes restart, and the new image's start command runs as at create.
 Everything else on its old disk is lost (`sudo` and apt installs, `/etc`), so
 `keep` must be `"workspace"`; without it the answer is
-`400 switch_keeps_workspace_only` and nothing changes. Snapshot it first to
+`switch_keeps_workspace_only` (400) and nothing changes. Snapshot it first to
 keep everything. A running sandbox is paused first; a paused one, or a stopped
 persistent one, is switched as it is; a stopped ordinary one kept no disk
-(`409 switch_needs_disk`). It is charged as a wake. The answer comes once the
+(`switch_needs_disk`, 409). It is charged as a wake. The answer comes once the
 sandbox runs the new image. If anything fails, the switch is undone and the
-answer is `409 switch_undone`: the sandbox is paused or stopped on its old image
+answer is `switch_undone` (409): the sandbox is paused or stopped on its old image
 with its files and memory as they were. The image must be ready, on the
-sandbox's server (`409 image_on_another_host`), different from the one it runs
-(`409 image_unchanged`) and fit its disk (`409 disk_too_small`); copying
+sandbox's server (`image_on_another_host`, 409), different from the one it runs
+(`image_unchanged`, 409) and fit its disk (`disk_too_small`, 409); copying
 `/workspace` may take up to {{switch-copy-time}}.
+
+**Changing its size, when enabled.** This is disabled by default and omitted
+from OpenAPI and MCP until enabled; until then it answers
+`resize_unavailable` (503). `POST /v1/sandboxes/{id}:resize` with
+`{"vcpu": 2, "memoryMiB": 4096, "restart": true}` (either size, or both) gives a
+sandbox a new size by a restart. It keeps its id and name, its whole disk,
+volumes, environment, labels, previews and ports; its programs stop and its
+image's start command runs again. `restart` must be `true`; without it the
+answer is `resize_needs_restart` (400) and nothing changes. Snapshot it first to
+keep its memory too. A running sandbox is paused first, or stopped if it is
+persistent; a sandbox that can do neither is refused before anything stops
+(`resize_needs_disk`, 409), and one that does not get there is left as it is
+(`resize_not_halted`, 409). The answer comes once it runs at the new size, on
+the same server. Memory is charged on the new size from then, at the same
+rates. Nothing changes when the server has no room (`no_capacity`, 409), the
+size is above your quota (`quota_exceeded`) or the trial's 2 vCPU and 4 GiB
+(`invalid_trial`, 400), it is the size it has (`size_unchanged`, 409), or a
+snapshot or fork of it is being taken (`resize_during_snapshot`, 409; retry).
+If the server cannot boot it at the new size, it stays paused or stopped with
+its disk and the new size (`resize_not_started`, 409), and its next wake or
+restart starts it at that size.
 
 **On your tailnet.** A paid sandbox can join your own Tailscale network.
 Store an auth key for jobs (`printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs`),
@@ -328,7 +349,7 @@ a sandbox's page at withruntime.com offers a ticket instead:
 `Sec-WebSocket-Protocol: runtime.terminal.v1, runtime.ticket.<ticket>`. The
 server answers with `runtime.terminal.v1`. A ticket is accepted only from a page
 on withruntime.com, opens one terminal in one sandbox and lasts 60 seconds; a
-refused one answers `401 unauthorized` or `403 forbidden` and says why. Your
+refused one answers `unauthorized` (401) or `forbidden` (403) and says why. Your
 own code uses the bearer header. See
 [the browser terminal](./security#the-browser-terminal).
 
@@ -439,8 +460,8 @@ exact origins, `https://host[:port]` or `http://localhost[:port]`.
 Send the token as the bearer: `Authorization: Bearer rtsess_...`. It is served
 the sandbox's routes under `:exec`, `/processes`, `/files`, `/uploads`,
 `/interpreter`, `GET /v1/sandboxes/{id}` and `GET /v1/sandboxes/{id}/previews`,
-for its own sandbox only; everything else answers `403 forbidden`, and an ended
-session `401 unauthorized`. A preview token it is handed ends when it does.
+for its own sandbox only; everything else answers `forbidden` (403), and an ended
+session `unauthorized` (401). A preview token it is handed ends when it does.
 
 The API answers CORS only for a session's own origins: a preflight from a page
 some session of that sandbox lists, and the answers to that session's
@@ -456,7 +477,7 @@ A replay of a create with the same `Idempotency-Key` answers the session with
 `expiresAt` fields. `GET /v1/sandboxes/{id}/previews/{port}` accepts them as
 query parameters; `runtime_sandbox_previews_create` accepts the same fields.
 `expiresAt` is an ISO timestamp with a timezone, at least a minute and at most
-a week ahead. Invalid deadlines answer `400 invalid_request` before changing
+a week ahead. Invalid deadlines answer `invalid_request` (400) before changing
 the preview.
 
 With `expiresAt` alone, the token ends by that deadline. With both fields, it
@@ -469,32 +490,34 @@ no fresh token. Sessions still cannot create or rotate previews, or use MCP.
 
 ## Other products
 
-| Method and path                                                                                                                                                                                                                        | Product                |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `POST /v1/sandboxes/{id}/interpreter:run`, `…/interpreter/contexts` (`language`: python, javascript, typescript, r, java, bash, go), `…/contexts/{context}:restart`, `:interrupt`, `DELETE`, `GET …/contexts/{context}/results/{file}` | Code interpreter       |
-| `POST`, `GET /v1/sandboxes/{id}/mounts`, `…/mounts:unmount`                                                                                                                                                                            | Bucket mounts          |
-| `POST`, `GET`, `DELETE /v1/sandboxes/{id}/tailscale`                                                                                                                                                                                   | Your Tailscale network |
-| `POST`, `GET /v1/sandboxes/{id}/previews`, `…/previews/{port}`, `…/previews/{port}:rotate`                                                                                                                                             | Previews               |
-| `POST /v1/sandboxes/{id}/desktop:start`, `:stop`, `:act`, `GET …/desktop/screenshot`                                                                                                                                                   | Desktop                |
-| `POST`, `GET /v1/sandboxes/{id}/desktop/recordings`, `GET …/recordings/{recordingId}`, `…/video`, `:stop`, `DELETE`                                                                                                                    | Desktop recordings     |
-| `GET /v1/mcp/catalog`; `POST`, `GET`, `DELETE /v1/sandboxes/{id}/mcp`                                                                                                                                                                  | MCP servers            |
-| `GET`, `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                | Network rules          |
-| `GET /v1/egress-secrets`, `PUT`, `DELETE /v1/egress-secrets/{name}`                                                                                                                                                                    | Secrets                |
-| `GET`, `PUT`, `DELETE /v1/network/upstream-proxy`                                                                                                                                                                                      | Your own proxy         |
-| `POST`, `GET /v1/feedback`                                                                                                                                                                                                             | Feedback               |
-| `POST /v1/support/messages`, `GET /v1/support/conversations/{id}`                                                                                                                                                                      | Support                |
-| `GET /v1/me`, `GET /v1/usage`, `GET /v1/usage/requests?range=24h`, `GET /v1/limits`, `GET /v1/audit`                                                                                                                                   | Account                |
-| `GET /v1/sso`                                                                                                                                                                                                                          | Single sign-on         |
-| `GET`, `POST /v1/identity/token?audience=` (from inside a sandbox, with its request token)                                                                                                                                             | Identity tokens        |
-| `GET /v1/usage/compare?provider=e2b&days=30`, `GET /v1/switching`, `POST /v1/switching`                                                                                                                                                | Switching              |
-| `POST`, `GET /v1/images`, `GET /v1/images/{id}`, `…/logs?follow=true`, `:tag`, `:untag`, `:delete`, `GET /v1/images/resolve?ref=`                                                                                                      | Custom images          |
-| `POST /v1/images/context/missing`, `PUT /v1/images/context/{digest}`                                                                                                                                                                   | Image build contexts   |
-| `GET`, `POST /v1/images/registries`, `POST /v1/images/registries:delete`                                                                                                                                                               | Private registries     |
-| `POST`, `GET /v1/volumes`, `GET /v1/volumes/{id}`, `:delete`, `:backup`, `:backup-policy`; `GET /v1/volume-backups`, `…/{id}`, `:delete`                                                                                               | Volumes and backups    |
-| `POST /v1/sandboxes/{id}:fork`, `POST /v1/sandboxes/{id}:snapshot`, `GET /v1/snapshots`, `…/{id}`, `:update` (name, labels), `:extend`, `:delete`                                                                                      | Forks and snapshots    |
-| `GET /v1/sandboxes/{id}/metrics?range=1h`, `GET /v1/events`                                                                                                                                                                            | Metrics and events     |
-| `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry`                                                                         | Webhooks               |
-| `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                                                                                            | OpenTelemetry export   |
+| Method and path                                                                                                                                                                                                                        | Product                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `POST /v1/sandboxes/{id}/interpreter:run`, `…/interpreter/contexts` (`language`: python, javascript, typescript, r, java, bash, go), `…/contexts/{context}:restart`, `:interrupt`, `DELETE`, `GET …/contexts/{context}/results/{file}` | Code interpreter                                                                               |
+| `POST`, `GET /v1/sandboxes/{id}/mounts`, `…/mounts:unmount`                                                                                                                                                                            | Bucket mounts                                                                                  |
+| `POST`, `GET`, `DELETE /v1/sandboxes/{id}/tailscale`                                                                                                                                                                                   | Your Tailscale network                                                                         |
+| `POST`, `GET /v1/sandboxes/{id}/previews`, `…/previews/{port}`, `…/previews/{port}:rotate`                                                                                                                                             | Previews                                                                                       |
+| `POST /v1/sandboxes/{id}/browser:start`, `GET /v1/sandboxes/{id}/browser`, `POST /v1/sandboxes/{id}/browser:stop`                                                                                                                      | A Chromium browser and its private CDP address ([JavaScript](./javascript#a-browser-over-cdp)) |
+| `POST /v1/sandboxes/{id}/desktop:start`, `:stop`, `:act`, `GET …/desktop/screenshot`                                                                                                                                                   | Desktop                                                                                        |
+| `POST`, `GET /v1/sandboxes/{id}/desktop/recordings`, `GET …/recordings/{recordingId}`, `…/video`, `:stop`, `DELETE`                                                                                                                    | Desktop recordings                                                                             |
+| `GET /v1/mcp/catalog`; `POST`, `GET`, `DELETE /v1/sandboxes/{id}/mcp`                                                                                                                                                                  | MCP servers                                                                                    |
+| `GET`, `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                | Network rules                                                                                  |
+| `GET /v1/egress-secrets`, `PUT`, `DELETE /v1/egress-secrets/{name}`                                                                                                                                                                    | Secrets                                                                                        |
+| `GET`, `PUT`, `DELETE /v1/network/upstream-proxy`                                                                                                                                                                                      | Your own proxy                                                                                 |
+| `GET`, `PUT /v1/network/private`                                                                                                                                                                                                       | Your sandboxes reach each other by name                                                        |
+| `POST`, `GET /v1/feedback`                                                                                                                                                                                                             | Feedback                                                                                       |
+| `POST /v1/support/messages`, `GET /v1/support/conversations/{id}`                                                                                                                                                                      | Support                                                                                        |
+| `GET /v1/me`, `GET /v1/usage`, `GET /v1/usage/requests?range=24h`, `GET /v1/limits`, `GET /v1/audit`                                                                                                                                   | Account                                                                                        |
+| `GET /v1/sso`                                                                                                                                                                                                                          | Single sign-on                                                                                 |
+| `GET`, `POST /v1/identity/token?audience=` (from inside a sandbox, with its request token)                                                                                                                                             | Identity tokens                                                                                |
+| `GET /v1/usage/compare?provider=e2b&days=30`, `GET /v1/switching`, `POST /v1/switching`                                                                                                                                                | Switching                                                                                      |
+| `POST`, `GET /v1/images`, `GET /v1/images/{id}`, `…/logs?follow=true`, `:tag`, `:untag`, `:delete`, `GET /v1/images/resolve?ref=`                                                                                                      | Custom images                                                                                  |
+| `POST /v1/images/context/missing`, `PUT /v1/images/context/{digest}`                                                                                                                                                                   | Image build contexts                                                                           |
+| `GET`, `POST /v1/images/registries`, `POST /v1/images/registries:delete`                                                                                                                                                               | Private registries                                                                             |
+| `POST`, `GET /v1/volumes`, `GET /v1/volumes/{id}`, `:delete`, `:backup`, `:backup-policy`; `GET /v1/volume-backups`, `…/{id}`, `:delete`                                                                                               | Volumes and backups                                                                            |
+| `POST /v1/sandboxes/{id}:fork`, `POST /v1/sandboxes/{id}:snapshot`, `GET /v1/snapshots`, `…/{id}`, `:update` (name, labels), `:extend`, `:delete`                                                                                      | Forks and snapshots                                                                            |
+| `GET /v1/sandboxes/{id}/metrics?range=1h`, `GET /v1/events`                                                                                                                                                                            | Metrics and events                                                                             |
+| `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry`                                                                         | Webhooks                                                                                       |
+| `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                                                                                            | OpenTelemetry export                                                                           |
 
 **Shared volumes, when enabled.** This feature is disabled by default and
 omitted from OpenAPI and MCP until enabled. Enabled deployments accept
@@ -518,8 +541,10 @@ See [shared volumes](./storage#shared-volumes-when-enabled).
 omitted from OpenAPI and MCP until enabled. `POST /v1/volumes/{id}:resize`
 accepts `{sizeMiB}` and grows a detached ordinary volume on its current server.
 It refuses shrinking or shared volumes with `invalid_request` (400), live
-attachments with `volume_attached` (409), and an active operation with
-`operation_pending` (409). When disabled it answers `unavailable` (503).
+attachments with `volume_attached` (409), and an active operation or a backup
+still being copied off the server with `operation_pending` (409). A backup
+asked for while the volume grows is refused with `volume_not_ready` (409).
+When disabled it answers `unavailable` (503).
 
 The volume remains `ready`; its nullable `resize` record contains `id`,
 `operationId`, `sizeMiB`, `state`, `generation` and `error`. Follow the record's

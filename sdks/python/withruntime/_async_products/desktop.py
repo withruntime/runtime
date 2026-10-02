@@ -143,8 +143,8 @@ class AsyncDesktop:
         return await self._act({"action": "focus", "windowId": window_id})
 
     async def open(self, url: str) -> Any:
-        """Opens ``url`` in Firefox on the desktop. Right after a sandbox's first
-        start, Firefox may still be installing; this waits for it."""
+        """Opens ``url`` in Chromium on the desktop. Right after a sandbox's first
+        start, Chromium may still be installing; this waits for it."""
         deadline = time.monotonic() + 600
         while True:
             try:

@@ -177,6 +177,9 @@ runtime sandbox kill "${id}" "${pid}"
 runtime sandbox stop "${id}"
 ```
 
+`runtime sandbox stop --label team=search` stops every live sandbox with all
+the labels given, and exits 1 if any of them failed to stop.
+
 ```bash no-run
 runtime sandbox shell "${id}"               # an interactive terminal, like ssh
 runtime sandbox shell "${id}" --command zsh # another program than the default bash -l
@@ -236,6 +239,12 @@ and previews. Its processes restart and the rest of its old disk is lost, so
 the flag is required; snapshot it first to keep everything
 ([images](./images#move-a-sandbox-to-a-new-version)).
 
+When enabled, `runtime sandbox resize <id> --vcpu 2 --memory 4096 --restart`
+gives a sandbox a new size by a restart, on the same server. Its whole disk,
+volumes, environment and previews stay; its programs stop, so the flag is
+required. Snapshot it first to keep its memory too. Memory is charged on the
+new size from then.
+
 `runtime sandbox rm <id>` (or `delete`) removes a sandbox for good, in any
 state: it stops it, deletes its disk and paused memory, revokes its previews
 and ports, and takes it out of every list. Its snapshots stay. Running it again
@@ -264,7 +273,8 @@ runtime sandbox run-code "${id}" analysis.py --out-dir charts   # a notebook cel
 runtime sandbox run-code "${id}" model.R                        # R, by the file's extension
 runtime sandbox run-code "${id}" - --lang go < main.go          # Python, JavaScript, TypeScript, R, Java, Bash or Go
 runtime sandbox run-code "${id}" step2.py --context "${ctx}"   # a context you made, not the language's default
-runtime sandbox preview "${id}" 3000 --public                  # an HTTPS address for a port
+runtime sandbox preview "${id}" 3000                           # an HTTPS address for a port, private with a token
+runtime sandbox preview "${id}" 3000 --public                  # public, no token: paid sandboxes only
 runtime sandbox previews "${id}"
 runtime sandbox preview rotate "${id}" 3000                   # withruntime 0.7.0: refuse every token so far
 runtime sandbox unshare "${id}" 3000
@@ -281,6 +291,9 @@ runtime sandbox desktop "${id}" screenshot screen.png
 runtime sandbox desktop "${id}" record start --fps 10 --max-mib 256 --max-seconds 600   # prints the recording id
 runtime sandbox desktop "${id}" record stop "${rec}"
 runtime sandbox desktop "${id}" record fetch "${rec}" demo.mp4
+runtime sandbox browser "${id}" start                          # Chromium; prints its private CDP address
+runtime sandbox browser "${id}" start --headed --width 1280 --height 800   # on the desktop, to watch
+runtime sandbox browser "${id}" stop
 ```
 
 A session lets your own web page reach one sandbox's commands, files and
@@ -618,12 +631,14 @@ runtime tunnel create
 runtime tunnel peer add office --route 10.0.0.0/16  # writes runtime.conf
 sudo wg-quick up ./runtime.conf
 runtime network upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
+runtime network private on                          # your sandboxes reach each other as <name>.sandbox.internal
 runtime domain ls; runtime domain get app.example.com; runtime address ls
 runtime tunnel get                                  # its peers and each sandbox's address
 runtime tunnel rm                                   # the tunnel and every peer
 ```
 
-`runtime network upstream-proxy` arrived in 0.7.0. Each has
+`runtime network upstream-proxy` arrived in 0.7.0. `runtime network private on|off|status` lets
+your sandboxes reach each other by name, paid accounts only. Each has
 its own help: `runtime domain help`, `runtime port help`,
 `runtime address help`, `runtime tunnel help`, `runtime network help`.
 

@@ -2,6 +2,7 @@ import type { Transport } from "../transport.js";
 import type { Sandbox } from "../sandbox.js";
 import { images } from "./images.js";
 import { sandboxDesktop } from "./desktop.js";
+import { sandboxBrowser } from "./browser.js";
 import { sandboxInterpreter } from "./interpreter.js";
 import { sandboxNetwork } from "./network.js";
 import { addresses, domains, network, ports, tunnel } from "./network-products.js";
@@ -73,6 +74,7 @@ export const sandboxExtensions = {
   previews: sandboxPreviews,
   network: sandboxNetwork,
   desktop: sandboxDesktop,
+  browser: sandboxBrowser,
   mounts: sandboxMounts,
   tailscale: sandboxTailscale,
   metrics: sandboxMetrics,

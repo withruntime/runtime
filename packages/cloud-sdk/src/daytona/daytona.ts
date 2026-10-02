@@ -11,6 +11,7 @@ import {
 import { DaytonaError, DaytonaNotFoundError, guard, NotSupportedError } from "./errors.js";
 import type { Image } from "./image.js";
 import {
+  idleSeconds,
   networkRules,
   notFound,
   retentionDays,
@@ -34,6 +35,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STOCK_SNAPSHOT = /^daytona(io)?[-/:]|^daytona$/;
 /** Daytona's label for a sandbox's code language. */
 export const LANGUAGE_LABEL = "code-toolbox-language";
+/** The Linux user given at create, so get() and list() run as it too. */
+export const USER_LABEL = "compat.daytona-user";
+/** The sandbox owner's names: Daytona's and Runtime's. */
+const OWNER = new Set(["daytona", "runtime"]);
 
 export enum CodeLanguage {
   PYTHON = "python",
@@ -90,10 +95,28 @@ export type CreateSandboxFromSnapshotParams = CreateSandboxBaseParams & {
 };
 export type ForkSandboxParams = { name?: string };
 export interface ListSandboxesQuery {
+  /** Daytona's page size; every sandbox is still listed. */
   limit?: number;
+  sort?: "name" | "cpu" | "memoryGib" | "diskGib" | "lastActivityAt" | "createdAt";
+  order?: "asc" | "desc";
+  /** An id prefix, any case. */
+  id?: string;
+  /** A name prefix, any case. */
   name?: string;
   labels?: Record<string, string>;
   states?: SandboxState[];
+  targets?: string[];
+  minCpu?: number;
+  maxCpu?: number;
+  minMemoryGib?: number;
+  maxMemoryGib?: number;
+  minDiskGib?: number;
+  maxDiskGib?: number;
+  isRecoverable?: boolean;
+  createdAtAfter?: Date;
+  createdAtBefore?: Date;
+  lastActivityAfter?: Date;
+  lastActivityBefore?: Date;
   [other: string]: unknown;
 }
 
@@ -372,12 +395,15 @@ export class Daytona implements AsyncDisposable {
     const network = networkRules(params);
     // Daytona keeps the language in this label, so a sandbox found later with
     // get() or list() runs codeRun in the language it was made for.
-    const labels =
-      params.language && params.language !== "python"
-        ? { ...params.labels, [LANGUAGE_LABEL]: params.language }
-        : params.labels && Object.keys(params.labels).length
-          ? params.labels
-          : undefined;
+    const user = params.user !== undefined && !OWNER.has(params.user) ? params.user : undefined;
+    const tagged = {
+      ...params.labels,
+      ...(params.language && params.language !== "python"
+        ? { [LANGUAGE_LABEL]: params.language }
+        : {}),
+      ...(user ? { [USER_LABEL]: user } : {}),
+    };
+    const labels = Object.keys(tagged).length ? tagged : undefined;
     const input: RuntimeCreate = {
       ...(source.snapshot
         ? {}
@@ -402,6 +428,7 @@ export class Daytona implements AsyncDisposable {
       ...params.withruntime?.create,
     };
     const runtime = await guard("sandbox", () => client.sandboxes.create(input));
+    if (user) await asUser(runtime, user);
     if (lifecycle.autoDeleteInterval > 0)
       await guard("sandbox", () =>
         runtime.setRetention(retentionDays(lifecycle.autoDeleteInterval)),
@@ -421,6 +448,7 @@ export class Daytona implements AsyncDisposable {
       public: params.public ?? false,
       lifecycle,
       ...("snapshot" in params && params.snapshot ? { snapshot: params.snapshot } : {}),
+      ...(user ? { user } : {}),
     });
   }
 
@@ -485,12 +513,15 @@ export class Daytona implements AsyncDisposable {
 
   #adopt(runtime: RuntimeSandbox): Sandbox {
     const onLeaseEnd = runtime.info.onLeaseEnd;
+    const user = runtime.info.labels[USER_LABEL];
     return new Sandbox(runtime, this.#client, {
       env: {},
       language: runtime.info.labels[LANGUAGE_LABEL] ?? "python",
       public: false,
+      ...(user ? { user } : {}),
       lifecycle: {
         windowSeconds: runtime.info.timeoutSeconds,
+        idleSeconds: runtime.info.timeoutSeconds,
         ephemeral: onLeaseEnd === "stop",
         autoStopInterval: Math.round(runtime.info.timeoutSeconds / 60),
         autoArchiveInterval: 0,
@@ -508,13 +539,18 @@ export class Daytona implements AsyncDisposable {
       page: number;
       totalPages: number;
     }> {
-    const known = new Set(["limit", "name", "labels", "states"]);
-    const other = Object.keys(query).find((key) => query[key] !== undefined && !known.has(key));
+    const other = Object.keys(query).find((key) => query[key] !== undefined && !LISTED.has(key));
     if (other)
       throw new NotSupportedError(
         `Listing sandboxes by ${other}`,
-        "Filter by name, labels or states, and sort or narrow the result yourself.",
+        other === "isPublic"
+          ? "Runtime previews are public or private per port: filter by a label you set at create."
+          : "Filter by a label you set at create, or narrow the result yourself.",
       );
+    if (query.sort !== undefined && !SORTS[query.sort])
+      throw new RangeError(`sort is one of ${Object.keys(SORTS).join(", ")}.`);
+    if (query.order !== undefined && query.order !== "asc" && query.order !== "desc")
+      throw new RangeError('order is "asc" or "desc".');
     const states = query.states?.flatMap((state): RuntimeSandbox["state"][] =>
       state === "started"
         ? ["running"]
@@ -526,15 +562,25 @@ export class Daytona implements AsyncDisposable {
               ? ["paused"]
               : [],
     );
-    const client = this.#client;
-    const adopt = (runtime: RuntimeSandbox) => this.#adopt(runtime);
     const filter = {
       ...(query.labels ? { labels: query.labels } : {}),
-      ...(query.name ? { name: query.name } : {}),
       ...(states ? { state: states } : {}),
       ...(query.limit ? { limit: Math.min(query.limit, 100) } : {}),
     };
+    const here = Object.keys(query).some(
+      (key) => query[key] !== undefined && !["limit", "labels", "states"].includes(key),
+    );
+    const client = this.#client;
+    const adopt = (runtime: RuntimeSandbox) => this.#adopt(runtime);
+    const everything = async () => {
+      const page = await guard("other", () => client.sandboxes.list(filter));
+      return arrange(await page.toArray(10_000), query);
+    };
     async function* iterate() {
+      if (here) {
+        for (const runtime of await everything()) yield adopt(runtime);
+        return;
+      }
       const page = await guard("other", () => client.sandboxes.list(filter));
       for await (const runtime of page) yield adopt(runtime);
     }
@@ -552,8 +598,7 @@ export class Daytona implements AsyncDisposable {
         onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
       ): PromiseLike<A | B> {
         const all = (async () => {
-          const page = await guard("other", () => client.sandboxes.list(filter));
-          const items = (await page.toArray(10_000)).map(adopt);
+          const items = (await everything()).map(adopt);
           return { items, total: items.length, page: 1, totalPages: 1 };
         })();
         return all.then(onFulfilled, onRejected);
@@ -621,11 +666,8 @@ function refuseCreate(params: CreateSandboxBaseParams & { resources?: Resources 
   ];
   for (const [field, feature, alternative] of refusals)
     if (params[field] !== undefined) throw new NotSupportedError(feature, alternative);
-  if (params.user !== undefined && params.user !== "daytona")
-    throw new NotSupportedError(
-      `Running as the user "${params.user}"`,
-      'Commands run as the sandbox owner with passwordless sudo: prefix a command with "sudo" to run it as root.',
-    );
+  if (params.user !== undefined && !/^[a-z_][a-z0-9_-]{0,31}$/.test(params.user))
+    throw new DaytonaError(`Invalid user name ${JSON.stringify(params.user)}.`, 400);
   if (
     params.language !== undefined &&
     !["python", "javascript", "typescript"].includes(params.language)
@@ -653,12 +695,108 @@ export function lifecycleOf(params: CreateSandboxBaseParams): Lifecycle {
   const autoDelete = params.ephemeral ? 0 : (params.autoDeleteInterval ?? -1);
   return {
     windowSeconds: windowSeconds(autoStop),
+    idleSeconds: idleSeconds(autoStop),
     ...(params.ttlMinutes ? { deadline: Date.now() + params.ttlMinutes * 60_000 } : {}),
     ephemeral: autoDelete === 0,
     autoStopInterval: autoStop,
     autoArchiveInterval: params.autoArchiveInterval ?? 10_080,
     autoDeleteInterval: autoDelete,
   };
+}
+
+/** What list() takes; isPublic, snapshots and autoDestroyAt are refused. */
+const LISTED = new Set([
+  "limit",
+  "sort",
+  "order",
+  "id",
+  "name",
+  "labels",
+  "states",
+  "targets",
+  "minCpu",
+  "maxCpu",
+  "minMemoryGib",
+  "maxMemoryGib",
+  "minDiskGib",
+  "maxDiskGib",
+  "isRecoverable",
+  "createdAtAfter",
+  "createdAtBefore",
+  "lastActivityAfter",
+  "lastActivityBefore",
+]);
+
+const lastActivity = (one: RuntimeSandbox) =>
+  Date.parse(one.info.lastActiveAt ?? one.info.readyAt ?? one.info.createdAt);
+const SORTS: Record<string, (one: RuntimeSandbox) => number | string> = {
+  name: (one) => one.info.name ?? one.id,
+  cpu: (one) => one.info.vcpu,
+  memoryGib: (one) => one.info.memoryMiB / 1024,
+  diskGib: (one) => one.info.diskMiB / 1024,
+  lastActivityAt: lastActivity,
+  createdAt: (one) => Date.parse(one.info.createdAt),
+};
+
+/** Daytona's list filters and sorting, applied here: Runtime filters by
+ * labels and state only. Sorted descending unless `order` says, as Daytona
+ * does; unsorted lists keep Runtime's order, oldest first. */
+function arrange(all: RuntimeSandbox[], query: ListSandboxesQuery): RuntimeSandbox[] {
+  const within = (value: number, min?: number, max?: number) =>
+    (min === undefined || value >= min) && (max === undefined || value <= max);
+  const time = (date: Date | undefined) => (date === undefined ? undefined : date.getTime());
+  const kept = all.filter(
+    (one) =>
+      (query.id === undefined || one.id.toLowerCase().startsWith(query.id.toLowerCase())) &&
+      (query.name === undefined ||
+        (one.info.name ?? one.id).toLowerCase().startsWith(query.name.toLowerCase())) &&
+      (query.targets === undefined || query.targets.includes("us")) &&
+      (query.isRecoverable === undefined || query.isRecoverable === false) &&
+      within(one.info.vcpu, query.minCpu, query.maxCpu) &&
+      within(one.info.memoryMiB / 1024, query.minMemoryGib, query.maxMemoryGib) &&
+      within(one.info.diskMiB / 1024, query.minDiskGib, query.maxDiskGib) &&
+      within(
+        Date.parse(one.info.createdAt),
+        time(query.createdAtAfter),
+        time(query.createdAtBefore),
+      ) &&
+      within(lastActivity(one), time(query.lastActivityAfter), time(query.lastActivityBefore)),
+  );
+  const key = query.sort === undefined ? undefined : SORTS[query.sort]!;
+  if (!key) return query.order === "desc" ? kept.reverse() : kept;
+  const sign = query.order === "asc" ? 1 : -1;
+  return kept.sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    return sign * (typeof x === "string" ? x.localeCompare(y as string) : x - (y as number));
+  });
+}
+
+/** Readies a new sandbox to run as `user`: the user must be in the image, as
+ * on Daytona. It joins the owner's group, and the working directory takes
+ * that group for what is made in it, so both may change each other's files.
+ * A user the image lacks ends the sandbox and says how to add it. */
+async function asUser(runtime: RuntimeSandbox, user: string): Promise<void> {
+  const ready = await guard("sandbox", () =>
+    runtime.exec([
+      "sh",
+      "-c",
+      'id -u "$1" >/dev/null 2>&1 || exit 3; [ "$1" = root ] || { sudo usermod -aG runtime "$1" && sudo chmod 2775 /workspace; }',
+      "sh",
+      user,
+    ]),
+  ).catch(async (error: unknown) => {
+    await runtime.stop({ wait: false }).catch(() => undefined);
+    throw error;
+  });
+  if (ready.exitCode === 0) return;
+  await runtime.stop({ wait: false }).catch(() => undefined);
+  throw new DaytonaError(
+    ready.exitCode === 3
+      ? `The user "${user}" does not exist in this sandbox's image. Add it to the image (RUN useradd -m ${user}), or leave user out to run as the sandbox owner, who has passwordless sudo.`
+      : `The sandbox could not be readied for the user "${user}": ${ready.stderr.trim() || `exit ${ready.exitCode}`}`,
+    400,
+  );
 }
 
 /** The sandbox with this Runtime id, or the newest live one with this name. */

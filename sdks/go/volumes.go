@@ -24,6 +24,8 @@ type Volume struct {
 	BackedUp     bool              `json:"backedUp"`
 	Backups      BackupPolicy      `json:"backups"`
 	RestoredFrom *string           `json:"restoredFrom"`
+	// Resize is the newest growth of this volume, nil if it was never grown.
+	Resize *VolumeResize `json:"resize"`
 	// Attachments are the sandboxes it is attached to now.
 	Attachments []struct {
 		SandboxID  string    `json:"sandboxId"`
@@ -44,6 +46,26 @@ type CreateVolumeOptions struct {
 	Labels         map[string]string `json:"labels,omitempty"`
 	Region         string            `json:"region,omitempty"`
 	IdempotencyKey string            `json:"-"`
+}
+
+// VolumeResize is a volume's growth: State is pending, running, completed
+// or failed. SizeMiB is the size asked for; Volume.SizeMiB changes once the
+// grown disk has been checked.
+type VolumeResize struct {
+	ID          string  `json:"id"`
+	OperationID string  `json:"operationId"`
+	SizeMiB     int     `json:"sizeMiB"`
+	State       string  `json:"state"`
+	Generation  int     `json:"generation"`
+	Error       *string `json:"error"`
+}
+
+// ResizeVolumeOptions grow a volume to SizeMiB, which must be larger than
+// its size now. Wait is how many seconds to wait for it (10 unless set).
+type ResizeVolumeOptions struct {
+	SizeMiB        int    `json:"sizeMiB"`
+	IdempotencyKey string `json:"-"`
+	Wait           *int   `json:"-"`
 }
 
 // VolumeListOptions filter a list, every field optional.
@@ -81,6 +103,18 @@ func (s *VolumeService) List(ctx context.Context, opts *VolumeListOptions) (*Pag
 // All walks every volume a list with these options finds.
 func (s *VolumeService) All(ctx context.Context, opts *VolumeListOptions) iter.Seq2[Volume, error] {
 	return walk(ctx, func() (*Page[Volume], error) { return s.List(ctx, opts) })
+}
+
+// Resize grows a volume no sandbox holds, on its host, and waits (up to 10
+// seconds unless opts.Wait says otherwise) for it. Its Resize field shows
+// how far it has got.
+func (s *VolumeService) Resize(ctx context.Context, id string, opts ResizeVolumeOptions) (*Volume, error) {
+	wait := 10
+	if opts.Wait != nil {
+		wait = *opts.Wait
+	}
+	var volume Volume
+	return &volume, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/volumes/" + url.PathEscape(id) + ":resize", body: opts, wait: wait, key: opts.IdempotencyKey}, &volume)
 }
 
 // Delete deletes a volume and everything on it.

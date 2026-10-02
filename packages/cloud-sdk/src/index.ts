@@ -78,6 +78,7 @@ export type {
   SetUpstreamProxy,
   UpstreamProxy,
 } from "./products/network-products.js";
+export type { PrivateNetwork } from "./products/private-network.js";
 export {
   verifyWebhook,
   WebhookVerificationError,

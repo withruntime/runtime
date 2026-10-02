@@ -4,15 +4,20 @@ edit this one."""
 from __future__ import annotations
 
 import base64
+import math
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .._async_client import AsyncRuntime
+from .._compat_lease import epoch, extension_seconds
 
 from . import _core as core
-from ._async_io import call, catch_up, finish, start
-from ._core import (CodeRunParams, CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, CreateSnapshotParams,
+from ._async_io import AsyncPtyHandle, call, catch_up, finish, later, pty_options, start
+from ._core import (CodeRunParams, ComputerUseStartResponse, ComputerUseStatusResponse, ComputerUseStopResponse,
+                    DisplayInfo, DisplayInfoResponse, ListRecordingsResponse, MousePosition, PtyResult,
+                    PtySessionInfo, PtySize, Recording, ScreenshotOptions, ScreenshotRegion, ScreenshotResponse,
+                    WindowInfo, WindowsResponse, CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, CreateSnapshotParams,
                     DaytonaCommandAlreadyCompletedError, DaytonaConfig, DaytonaConflictError, DaytonaError,
                     DaytonaFileNotFoundError, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError,
                     DaytonaSessionEndedError, ExecuteResponse, ExecutionArtifacts, ExecutionError, ExecutionResult,
@@ -61,10 +66,21 @@ class AsyncProcess:
     def __init__(self, sandbox: "AsyncSandbox") -> None:
         self._sandbox = sandbox
         self._sessions: Dict[str, _Shell] = {}
+        # What only this client knows of its PTY sessions: envs and size.
+        self._ptys: Dict[str, tuple] = {}
 
     def _env(self, extra: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
         merged = {**self._sandbox.env, **(extra or {})}
         return merged or None
+
+    def _as(self, command: Union[str, List[str]], extra: Optional[Dict[str, str]] = None) -> tuple:
+        """A command and its environment as Runtime runs them: as given for
+        the sandbox owner, through sudo for create's ``user``."""
+        user = self._sandbox._user
+        if not user:
+            return command, self._env(extra)
+        argv = ["bash", "-c", command] if isinstance(command, str) else list(command)
+        return core.run_as(user, argv, self._env(extra))
 
     async def exec(self, command: str, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None,
                    timeout: Optional[int] = None) -> ExecuteResponse:
@@ -73,8 +89,9 @@ class AsyncProcess:
         await self._sandbox._ensure_home(f"{command}\n{cwd or ''}")
         runtime = await self._sandbox._live()
         timeout_ms = int(timeout * 1000) if timeout else core.LONGEST_MS
+        run, environment = self._as(f"{{ {command}\n}} 2>&1", env)
         result = await _guard("sandbox", lambda: runtime.exec(
-            f"{{ {command}\n}} 2>&1", cwd=core.HOME if cwd is None else core.resolve_path(cwd), env=self._env(env),
+            run, cwd=core.HOME if cwd is None else core.resolve_path(cwd), env=environment,
             timeout_ms=timeout_ms, on_stdout=core.whole_output))
         if result.timed_out:
             raise DaytonaProcessExecutionTimeoutError(f"Command timed out after {timeout} s.", 408)
@@ -92,9 +109,9 @@ class AsyncProcess:
                        ["bun", "-e", code] if language == "typescript" else ["node", "-e", code])
         argv = ["sh", "-c", 'exec "$@" 2>&1', "sh", *interpreter, *((params.argv if params else None) or [])]
         timeout_ms = int(timeout * 1000) if timeout else core.LONGEST_MS
+        run, environment = self._as(argv, params.env if params else None)
         result = await _guard("sandbox", lambda: runtime.exec(
-            argv, cwd=core.HOME, env=self._env(params.env if params else None), timeout_ms=timeout_ms,
-            on_stdout=core.whole_output))
+            run, cwd=core.HOME, env=environment, timeout_ms=timeout_ms, on_stdout=core.whole_output))
         if result.timed_out:
             raise DaytonaProcessExecutionTimeoutError(f"Code run timed out after {timeout} s.", 408)
         return ExecuteResponse(exit_code=-1 if result.exit_code is None else result.exit_code, result=result.stdout,
@@ -108,9 +125,9 @@ class AsyncProcess:
         if session_id in self._sessions or await self._discover(session_id) is not None:
             raise DaytonaConflictError(f"Session {session_id} already exists.", 409)
         runtime = await self._sandbox._live()
+        run, environment = self._as(["bash", "--noprofile", "--norc", "-s", f"{core.TAG}{session_id}"])
         process = await _guard("sandbox", lambda: runtime.spawn(
-            ["bash", "--noprofile", "--norc", "-s", f"{core.TAG}{session_id}"], cwd=core.HOME, env=self._env(),
-            stdin="pipe", timeout_ms=core.LONGEST_MS))
+            run, cwd=core.HOME, env=environment, stdin="pipe", timeout_ms=core.LONGEST_MS))
         await _guard("process", lambda: process.write(core.PRELUDE))
         self._sessions[session_id] = _Shell(session_id, process, 0)
 
@@ -247,14 +264,109 @@ class AsyncProcess:
         self._sessions.pop(session_id, None)
         await _guard("process", lambda: shell.process.kill("SIGKILL"))
 
-    _PTY = ("Daytona's PTY sessions", "Use sandbox.withruntime.terminal(cols=..., rows=...) for an interactive "
-            "terminal, or a session for commands.")
-    create_pty_session = staticmethod(core.unsupported(*_PTY))
-    connect_pty_session = staticmethod(core.unsupported(*_PTY))
-    list_pty_sessions = staticmethod(core.unsupported(*_PTY))
-    get_pty_session_info = staticmethod(core.unsupported(*_PTY))
-    kill_pty_session = staticmethod(core.unsupported(*_PTY))
-    resize_pty_session = staticmethod(core.unsupported(*_PTY))
+    # ---- PTY sessions ---------------------------------------------------------
+
+    async def create_pty_session(self, id: str, *args: Any, **kwargs: Any) -> AsyncPtyHandle:  # noqa: A002
+        """Starts an interactive shell on a terminal that outlives this
+        connection: disconnect() leaves it running, connect_pty_session(id)
+        attaches again, kill_pty_session(id) ends it. On Runtime it is a
+        process started with a terminal, found again by its id."""
+        on_data, cwd, envs, pty_size = pty_options(args, kwargs)
+        if not id:
+            raise DaytonaError("A PTY session needs an id.", 400)
+        if await self._find_pty(id) is not None:
+            raise DaytonaConflictError(f"PTY session {id} already exists.", 409)
+        size = pty_size or PtySize(rows=24, cols=80)
+        await self._sandbox._ensure_home(cwd)
+        runtime = await self._sandbox._live()
+        run, environment = self._as(["bash", "-l", "-i", "-s", core.pty_tag(id), f"{size.cols}x{size.rows}"],
+                                    {"TERM": "xterm-256color", **(envs or {})})
+        process = await _guard("sandbox", lambda: runtime.spawn(
+            run, cwd=core.HOME if cwd is None else core.resolve_path(cwd), env=environment,
+            pty={"cols": size.cols, "rows": size.rows}, timeout_ms=core.LONGEST_MS))
+        self._ptys[id] = (dict(envs or {}), size.cols, size.rows)
+        try:
+            return await self._attach(id, process.id, on_data)
+        except BaseException:
+            try:
+                await process.kill("SIGKILL")
+            except Exception:  # noqa: BLE001 - the attach failure is what to report
+                pass
+            raise
+
+    async def connect_pty_session(self, session_id: str, *args: Any, **kwargs: Any) -> AsyncPtyHandle:
+        """Attaches to a running PTY session. Output it printed before comes
+        first, then what it prints from now on."""
+        on_data = kwargs.get("on_data", args[0] if args else None)
+        found = await self._find_pty(session_id)
+        if found is None:
+            raise DaytonaNotFoundError(f"PTY session {session_id} was not found.", 404)
+        return await self._attach(session_id, found["id"], on_data)
+
+    async def list_pty_sessions(self, request_timeout: Optional[float] = None) -> List[PtySessionInfo]:
+        latest: Dict[str, Dict[str, Any]] = {}
+        for info in await self._pty_processes():
+            latest[core.pty_of(info.get("command"))[0]] = info
+        return [self._pty_info(info) for info in latest.values()]
+
+    async def get_pty_session_info(self, session_id: str, request_timeout: Optional[float] = None) -> PtySessionInfo:
+        found = [info for info in await self._pty_processes() if core.pty_of(info.get("command"))[0] == session_id]
+        if not found:
+            raise DaytonaNotFoundError(f"PTY session {session_id} was not found.", 404)
+        return self._pty_info(found[-1])
+
+    async def kill_pty_session(self, session_id: str, request_timeout: Optional[float] = None) -> None:
+        """Ends the session's shell and everything it runs."""
+        process = await self._pty_process(session_id)
+        await _guard("process", lambda: process.kill("SIGKILL"))
+
+    async def resize_pty_session(self, session_id: str, pty_size: PtySize,
+                                 request_timeout: Optional[float] = None) -> PtySessionInfo:
+        process = await self._pty_process(session_id)
+        await _guard("process", lambda: process.resize(pty_size.cols, pty_size.rows))
+        envs = self._ptys.get(session_id, ({}, 0, 0))[0]
+        self._ptys[session_id] = (envs, pty_size.cols, pty_size.rows)
+        info = dict(getattr(process, "info", None) or {})
+        info.update(state="running", command=info.get("command") or core.pty_tag(session_id))
+        return self._pty_info(info)
+
+    async def _pty_processes(self) -> List[Dict[str, Any]]:
+        """Terminal processes this adapter started; a killed one is gone, as on
+        Daytona, an exited one stays, inactive."""
+        runtime = await self._sandbox._live()
+        listed = await _guard("sandbox", lambda: runtime.processes())
+        return [info for info in listed if info.get("state") != "killed" and core.pty_of(info.get("command"))]
+
+    async def _find_pty(self, session_id: str) -> Optional[Dict[str, Any]]:
+        for info in await self._pty_processes():
+            if info.get("state") == "running" and core.pty_of(info.get("command"))[0] == session_id:
+                return info
+        return None
+
+    async def _pty_process(self, session_id: str) -> Any:
+        found = await self._find_pty(session_id)
+        if found is None:
+            raise DaytonaNotFoundError(f"PTY session {session_id} was not found.", 404)
+        runtime = await self._sandbox._live()
+        return await _guard("process", lambda: runtime.process(found["id"]))
+
+    def _pty_info(self, info: Dict[str, Any]) -> PtySessionInfo:
+        session_id, cols, rows = core.pty_of(info.get("command"))
+        envs, known_cols, known_rows = self._ptys.get(session_id, ({}, cols, rows))
+        return PtySessionInfo(id=session_id, cwd=str(info.get("cwd") or core.HOME), envs=dict(envs),
+                              cols=known_cols, rows=known_rows, created_at=str(info.get("startedAt") or ""),
+                              active=info.get("state") == "running", lazy_start=False)
+
+    async def _attach(self, session_id: str, process_id: str, on_data: Any) -> AsyncPtyHandle:
+        runtime = await self._sandbox._live()
+        terminal = await _guard("sandbox", lambda: runtime.terminal(process_id=process_id))
+
+        async def resize(size: PtySize) -> PtySessionInfo:
+            return await self.resize_pty_session(session_id, size)
+
+        async def kill() -> None:
+            await self.kill_pty_session(session_id)
+        return AsyncPtyHandle(terminal, session_id, on_data, resize, kill)
     _ENTRY = ("The image entrypoint session", "A Runtime image runs no entrypoint; start it with create_session.")
     get_entrypoint_session = staticmethod(core.unsupported(*_ENTRY))
     get_entrypoint_logs = staticmethod(core.unsupported(*_ENTRY))
@@ -285,7 +397,15 @@ class AsyncFileSystem:
         return result.stdout
 
     async def create_folder(self, path: str, mode: str) -> None:
-        await self._run(["mkdir", "-p", "-m", mode, "--", await self._path(path)])
+        target = await self._path(path)
+        await self._run(["mkdir", "-p", "-m", mode, "--", target])
+        await self._own(target)
+
+    async def _own(self, target: str) -> None:
+        """Gives what this client wrote to create's ``user``, so its commands
+        may change it; the owner's files stay the owner's."""
+        if self._sandbox._user:
+            await self._run(["sudo", "chown", self._sandbox._user, "--", target])
 
     async def delete_file(self, path: str, recursive: bool = False) -> None:
         target = await self._path(path)
@@ -396,6 +516,7 @@ class AsyncFileSystem:
             data = bytes(file)
         files = await self._files()
         await _guard("file", lambda: files.write(target, data))
+        await self._own(target)
 
     async def upload_files(self, files: List[FileUpload], timeout: int = 30 * 60) -> None:
         for upload in files:
@@ -517,13 +638,212 @@ class AsyncCodeInterpreter:
         await _guard("sandbox", lambda: runtime.interpreter.contexts.remove(context.id))
 
 
+class _Desktop:
+    """What every computer-use part shares: the sandbox's live desktop."""
+
+    def __init__(self, sandbox: "AsyncSandbox") -> None:
+        self._sandbox = sandbox
+
+    async def _desktop(self) -> Any:
+        return (await self._sandbox._live()).desktop
+
+
+class AsyncMouse(_Desktop):
+    """``sandbox.computer_use.mouse``."""
+
+    async def get_position(self, request_timeout: Optional[float] = None) -> MousePosition:
+        desktop = await self._desktop()
+        where = await _guard("other", lambda: desktop.cursor())
+        return MousePosition(x=where.get("x"), y=where.get("y"))
+
+    async def move(self, x: int, y: int, request_timeout: Optional[float] = None) -> MousePosition:
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.move(x, y))
+        return MousePosition(x=x, y=y)
+
+    async def click(self, x: int, y: int, button: str = "left", double: bool = False,
+                    request_timeout: Optional[float] = None) -> MousePosition:
+        which = core.mouse_button(button)
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.click(x, y, button=which, double=double))
+        return MousePosition(x=x, y=y)
+
+    async def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, button: str = "left",
+                   request_timeout: Optional[float] = None) -> MousePosition:
+        which = core.mouse_button(button)
+        desktop = await self._desktop()
+        if which == "left":
+            await _guard("other", lambda: desktop.drag((start_x, start_y), (end_x, end_y)))
+        else:
+            await _guard("other", lambda: desktop.move(start_x, start_y))
+            await _guard("other", lambda: desktop.mouse_down(which))
+            await _guard("other", lambda: desktop.move(end_x, end_y))
+            await _guard("other", lambda: desktop.mouse_up(which))
+        return MousePosition(x=end_x, y=end_y)
+
+    async def scroll(self, x: int, y: int, direction: str, amount: int = 1,
+                     request_timeout: Optional[float] = None) -> bool:
+        """``amount`` wheel clicks up or down at (x, y)."""
+        if direction not in ("up", "down"):
+            raise ValueError(f'direction is "up" or "down", not {direction!r}.')
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.scroll(amount if direction == "down" else -amount, x=x, y=y))
+        return True
+
+
+class AsyncKeyboard(_Desktop):
+    """``sandbox.computer_use.keyboard``. Key names are Daytona's (enter, esc,
+    ctrl, cmd, pageup, f5) or xdotool's (Return, Escape, Prior)."""
+
+    async def type(self, text: str, delay: Optional[int] = None, request_timeout: Optional[float] = None) -> None:
+        """Types ``text``, ``delay`` milliseconds between keys."""
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.type(text, delay_ms=delay))
+
+    async def press(self, key: str, modifiers: Optional[List[str]] = None,
+                    request_timeout: Optional[float] = None) -> None:
+        keys = "+".join(core.desktop_key(one) for one in [*(modifiers or []), key])
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.press(keys))
+
+    async def hotkey(self, keys: str, request_timeout: Optional[float] = None) -> None:
+        """A combination such as "ctrl+c" or "ctrl+shift+t"."""
+        combination = "+".join(core.desktop_key(one) for one in keys.split("+"))
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.press(combination))
+
+
+class AsyncScreenshot(_Desktop):
+    """``sandbox.computer_use.screenshot``: the whole screen, PNG or JPEG."""
+
+    async def take_full_screen(self, show_cursor: bool = False,
+                               request_timeout: Optional[float] = None) -> ScreenshotResponse:
+        return await self.take_compressed(ScreenshotOptions(show_cursor=show_cursor, fmt="png"))
+
+    async def take_region(self, region: ScreenshotRegion, show_cursor: bool = False,
+                          request_timeout: Optional[float] = None) -> ScreenshotResponse:
+        raise core.region_refused()
+
+    async def take_compressed(self, options: Optional[ScreenshotOptions] = None,
+                              request_timeout: Optional[float] = None) -> ScreenshotResponse:
+        fmt, quality = core.screenshot_format(options)
+        desktop = await self._desktop()
+        image = await _guard("other", lambda: desktop.screenshot(format=fmt, quality=quality))
+        return ScreenshotResponse(screenshot=base64.b64encode(image).decode(), size_bytes=len(image))
+
+    async def take_compressed_region(self, region: ScreenshotRegion, options: Optional[ScreenshotOptions] = None,
+                                     request_timeout: Optional[float] = None) -> ScreenshotResponse:
+        raise core.region_refused()
+
+
+class AsyncDisplay(_Desktop):
+    """``sandbox.computer_use.display``."""
+
+    async def get_info(self, request_timeout: Optional[float] = None) -> DisplayInfoResponse:
+        """The one screen, its size read from a screenshot."""
+        desktop = await self._desktop()
+        width, height = core.png_size(await _guard("other", lambda: desktop.screenshot()))
+        return DisplayInfoResponse(displays=[DisplayInfo(id=0, x=0, y=0, width=width, height=height, is_active=True)])
+
+    async def get_windows(self, request_timeout: Optional[float] = None) -> WindowsResponse:
+        desktop = await self._desktop()
+        windows = await _guard("other", lambda: desktop.windows())
+        return WindowsResponse(windows=[
+            WindowInfo(id=int(one["id"]) if str(one.get("id", "")).isdigit() else None, title=one.get("title"),
+                       x=one.get("x"), y=one.get("y"), width=one.get("width"), height=one.get("height"))
+            for one in windows])
+
+
+class AsyncRecordingService(_Desktop):
+    """``sandbox.computer_use.recording``: screen recordings to MP4."""
+
+    async def start(self, label: Optional[str] = None, request_timeout: Optional[float] = None) -> Recording:
+        """Starts recording. Runtime names the file itself; ``label`` is not used."""
+        desktop = await self._desktop()
+        return core.recording_of(await _guard("other", lambda: desktop.recordings.start()))
+
+    async def stop(self, recording_id: str, request_timeout: Optional[float] = None) -> Recording:
+        desktop = await self._desktop()
+        return core.recording_of(await _guard("other", lambda: desktop.recordings.stop(recording_id)))
+
+    async def list(self, request_timeout: Optional[float] = None) -> ListRecordingsResponse:
+        desktop = await self._desktop()
+        found = await _guard("other", lambda: desktop.recordings.list())
+        return ListRecordingsResponse(recordings=[core.recording_of(one) for one in found])
+
+    async def get(self, recording_id: str, request_timeout: Optional[float] = None) -> Recording:
+        desktop = await self._desktop()
+        return core.recording_of(await _guard("other", lambda: desktop.recordings.get(recording_id)))
+
+    async def delete(self, recording_id: str, request_timeout: Optional[float] = None) -> None:
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.recordings.delete(recording_id))
+
+    async def download(self, recording_id: str, local_path: str) -> None:
+        """Saves the MP4 to ``local_path``, making its directory."""
+        desktop = await self._desktop()
+        data = await _guard("other", lambda: desktop.recordings.download(recording_id))
+        core.save_local(local_path, data)
+
+
+class AsyncAccessibility:
+    """``sandbox.computer_use.accessibility``: Runtime's desktop has no
+    accessibility tree; every method raises NotSupportedError."""
+    get_tree = find_nodes = focus_node = invoke_node = set_node_value = staticmethod(core.unsupported(
+        "The desktop's accessibility tree", "Find things on screen with a screenshot "
+        "(sandbox.computer_use.screenshot.take_full_screen()) and act with the mouse and keyboard."))
+
+
+class AsyncComputerUse(_Desktop):
+    """``sandbox.computer_use``: a Linux desktop driven like a person would."""
+
+    def __init__(self, sandbox: "AsyncSandbox") -> None:
+        super().__init__(sandbox)
+        self.mouse = AsyncMouse(sandbox)
+        self.keyboard = AsyncKeyboard(sandbox)
+        self.screenshot = AsyncScreenshot(sandbox)
+        self.display = AsyncDisplay(sandbox)
+        self.recording = AsyncRecordingService(sandbox)
+        self.accessibility = AsyncAccessibility()
+
+    async def start(self, request_timeout: Optional[float] = None) -> ComputerUseStartResponse:
+        """Starts the desktop. A sandbox's first start installs it, which
+        takes a minute or two; this waits for that."""
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.start())
+        return ComputerUseStartResponse(message="Computer use processes started successfully",
+                                        status={"desktop": {"running": True}})
+
+    async def stop(self, request_timeout: Optional[float] = None) -> ComputerUseStopResponse:
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.stop())
+        return ComputerUseStopResponse(message="Computer use processes stopped successfully",
+                                       status={"desktop": {"running": False}})
+
+    async def get_status(self, request_timeout: Optional[float] = None) -> ComputerUseStatusResponse:
+        """"active" while the desktop runs, else "inactive"."""
+        desktop = await self._desktop()
+        try:
+            await desktop.cursor()
+        except Exception as error:  # noqa: BLE001
+            if getattr(error, "code", None) in ("desktop_not_running", "desktop_not_installed"):
+                return ComputerUseStatusResponse(status="inactive")
+            raise translate(error, "other") from error
+        return ComputerUseStatusResponse(status="active")
+
+    get_process_status = restart_process = get_process_logs = get_process_errors = staticmethod(core.unsupported(
+        "Managing the desktop's processes one by one",
+        "Use computer_use.get_status(), stop() and start(). Open the live desktop from "
+        "sandbox.withruntime.desktop.start()[\"streamUrl\"]."))
+
+
 class AsyncSandbox:
     """A sandbox with Daytona's fields and methods. ``sandbox.withruntime`` is
     the Runtime sandbox underneath, for anything Daytona has no name for."""
 
     def __init__(self, runtime: Any, client: AsyncRuntime, env: Optional[Dict[str, str]] = None,
                  language: Optional[str] = None, public: bool = False, lifecycle: Optional[core.Lifecycle] = None,
-                 snapshot: Optional[str] = None) -> None:
+                 snapshot: Optional[str] = None, user: Optional[str] = None) -> None:
         self.withruntime = runtime
         self._client = client
         self.env: Dict[str, str] = dict(env or {})
@@ -534,6 +854,13 @@ class AsyncSandbox:
         self._lifecycle = lifecycle or core.Lifecycle(
             window_seconds=timeout, ephemeral=runtime.info.get("onLeaseEnd") == "stop",
             auto_stop_interval=round(timeout / 60), auto_archive_interval=0, auto_delete_interval=-1)
+        if self._lifecycle.idle_seconds is None:
+            self._lifecycle.idle_seconds = float(self._lifecycle.window_seconds)
+        self._user: Optional[str] = user or (runtime.info.get("labels") or {}).get(core.USER_LABEL) or None
+        self._last_active = time.time()
+        self._timer: Any = None
+        self._kept_until_end = False
+        self._computer_use: Optional[AsyncComputerUse] = None
         self._home_linked = False
         self._paused_by_pause = False
         self.process = AsyncProcess(self)
@@ -551,8 +878,9 @@ class AsyncSandbox:
 
     @property
     def user(self) -> str:
-        """Daytona's user name, so /home/<user> leads to the working directory."""
-        return "daytona"
+        """The Linux user commands run as: create's ``user``, else Daytona's
+        name for the sandbox owner, so /home/<user> leads to the working directory."""
+        return self._user or "daytona"
 
     @property
     def labels(self) -> Dict[str, str]:
@@ -601,30 +929,63 @@ class AsyncSandbox:
         return self.withruntime.info.get("createdAt", "")
 
     async def _live(self, force: bool = False) -> Any:
-        """The sandbox, its lease moved on when less than half the autoStop
+        """The sandbox, its lease renewed when less than half the autoStop
         window is left: a call through this object counts as activity."""
+        self._last_active = time.time()
+        await self._keep(force)
+        return self.withruntime
+
+    def _until(self) -> float:
+        """When the sandbox should pause: autoStop after the last call, never
+        past ttl_minutes."""
+        until = self._last_active + (self._lifecycle.idle_seconds or self._lifecycle.window_seconds)
+        return until if self._lifecycle.deadline is None else min(until, self._lifecycle.deadline)
+
+    async def _keep(self, force: bool = False) -> None:
+        """Renews the lease toward _until() when less than half the window is
+        left, or as far as it may go with ``force``; then looks again in a
+        minute while autoStop runs past the lease (over an hour, or 0)."""
         runtime = self.withruntime
-        if runtime.state != "running":
-            return runtime
-        left = core._date_seconds(runtime.info.get("expiresAt")) - time.time()
-        window = self._lifecycle.window_seconds
-        if not force and left > window / 2:
-            return runtime
-        seconds = int(window - left) + 1
-        if self._lifecycle.deadline is not None:
-            seconds = min(seconds, int(self._lifecycle.deadline - time.time() - left))
-        if seconds < 1:
-            return runtime
-        try:
-            await runtime.extend(seconds)
-        except Exception as error:  # noqa: BLE001
-            if getattr(error, "status", None) != 409:
-                raise translate(error, "sandbox") from error
+        if self._kept_until_end or runtime.state != "running":
+            return
+        margin = math.inf if force else self._lifecycle.window_seconds / 2
+        extra = extension_seconds(epoch(runtime.info.get("expiresAt")), self._until(), time.time(), margin)
+        if extra >= 1:
             try:
-                await runtime.refresh()
-            except Exception:  # noqa: BLE001
-                pass
-        return runtime
+                await runtime.extend(extra)
+            except Exception as error:  # noqa: BLE001
+                if getattr(error, "status", None) != 409:
+                    raise translate(error, "sandbox") from error
+                try:
+                    await runtime.refresh()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._schedule()
+
+    def _schedule(self) -> None:
+        if self._kept_until_end or self._timer is not None:
+            return
+        expires = epoch(self.withruntime.info.get("expiresAt"))
+        if not math.isfinite(expires) or self._until() <= expires:
+            return
+        try:
+            self._timer = later(60, self._tick)
+        except RuntimeError:  # no running event loop: the next call renews instead
+            self._timer = None
+
+    async def _tick(self) -> None:
+        self._timer = None
+        try:
+            await self._keep()
+        except Exception:  # noqa: BLE001 - the next call through the adapter reports it
+            pass
+
+    def _end_keeping(self) -> None:
+        """Stops renewing: after stop() of an ephemeral sandbox, or delete()."""
+        self._kept_until_end = True
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
 
     async def _ensure_home(self, text: Optional[str]) -> None:
         if self._home_linked or not text or core.DAYTONA_HOME not in text:
@@ -656,6 +1017,7 @@ class AsyncSandbox:
         if state in ("stopped", "stopping"):
             return
         if self._lifecycle.ephemeral:
+            self._end_keeping()
             await _guard("sandbox", lambda: self.withruntime.stop())
             return
         if state != "paused":
@@ -674,6 +1036,7 @@ class AsyncSandbox:
 
     async def delete(self, timeout: float = 60) -> None:
         """Ends the sandbox for good."""
+        self._end_keeping()
         await _guard("sandbox", lambda: self.withruntime.refresh())
         if self.withruntime.state != "stopped":
             await _guard("sandbox", lambda: self.withruntime.stop(wait=False))
@@ -693,6 +1056,7 @@ class AsyncSandbox:
     async def set_autostop_interval(self, interval: int) -> None:
         self._lifecycle.auto_stop_interval = interval
         self._lifecycle.window_seconds = core.window_seconds(interval)
+        self._lifecycle.idle_seconds = core.idle_seconds(interval)
         await self._live()
 
     async def set_auto_pause_interval(self, interval: int) -> None:
@@ -741,7 +1105,7 @@ class AsyncSandbox:
         """A copy with this sandbox's files, memory and running processes."""
         copy = await _guard("sandbox", lambda: self.withruntime.fork(name=name))
         return type(self)(copy, self._client, self.env, self._language, self.public,
-                          core.Lifecycle(**vars(self._lifecycle)))
+                          core.Lifecycle(**vars(self._lifecycle)), user=self._user)
 
     async def create_snapshot(self, name: str, timeout: Optional[float] = 60) -> None:
         """Keeps this sandbox as a Runtime snapshot named ``name``;
@@ -755,9 +1119,11 @@ class AsyncSandbox:
         await self.delete()
 
     @property
-    def computer_use(self) -> Any:
-        raise NotSupportedError("Daytona's computer use",
-                                "Use Runtime's desktop through sandbox.withruntime.desktop.")
+    def computer_use(self) -> AsyncComputerUse:
+        """Daytona's computer use over Runtime's desktop."""
+        if self._computer_use is None:
+            self._computer_use = AsyncComputerUse(self)
+        return self._computer_use
 
     async def set_labels(self, labels: Dict[str, str], request_timeout: Optional[float] = None) -> Dict[str, str]:
         from .._request_scope import request_scope
@@ -931,6 +1297,9 @@ class AsyncDaytona:
             fields["name"] = params.name
         language = str(getattr(params.language, "value", params.language) or self.default_language)
         labels = dict(params.labels or {})
+        user = core.chosen_user(params)
+        if user:
+            labels[core.USER_LABEL] = user
         if language != "python":
             # Daytona keeps the language in this label, so a sandbox found later
             # runs code_run in the language it was made for.
@@ -946,9 +1315,15 @@ class AsyncDaytona:
         fields.update(self._runtime_create)
         fields.update(runtime_create or {})
         runtime = await _guard("sandbox", lambda: self._client.sandboxes.create(**fields))
-        if lifecycle.auto_delete_interval > 0:
+        if lifecycle.auto_delete_interval > 0 or user:
             try:
-                await _guard("sandbox", lambda: runtime.set_retention(core.retention_days(lifecycle.auto_delete_interval)))
+                if lifecycle.auto_delete_interval > 0:
+                    await _guard("sandbox", lambda: runtime.set_retention(
+                        core.retention_days(lifecycle.auto_delete_interval)))
+                if user:
+                    ready = await _guard("sandbox", lambda: runtime.exec(["sh", "-c", core.USER_READY, "sh", user]))
+                    if ready.exit_code != 0:
+                        raise core.missing_user(user, ready.exit_code, ready.stderr or "")
             except BaseException as original:
                 try:
                     await runtime.stop(wait=False)
@@ -958,8 +1333,10 @@ class AsyncDaytona:
         env = dict(params.env_vars or {})
         if params.outbound_proxy_url:
             env.update(HTTP_PROXY=params.outbound_proxy_url, HTTPS_PROXY=params.outbound_proxy_url)
-        return AsyncSandbox(runtime, self._client, env, language, bool(params.public), lifecycle,
-                            getattr(params, "snapshot", None))
+        sandbox = AsyncSandbox(runtime, self._client, env, language, bool(params.public), lifecycle,
+                               getattr(params, "snapshot", None), user)
+        sandbox._schedule()
+        return sandbox
 
     async def _source(self, params: Any, on_logs: Optional[Callable[[str], None]]) -> Dict[str, Any]:
         image = getattr(params, "image", None)
@@ -1016,17 +1393,16 @@ class AsyncDaytona:
         return AsyncSandbox(runtime, self._client)
 
     async def list(self, query: Optional[ListSandboxesQuery] = None) -> Any:
-        """Live and stopped (paused) sandboxes, oldest first."""
+        """Live and stopped (paused) sandboxes, every page: Daytona's filters
+        and sort, applied here past labels and state. ``limit`` is Daytona's
+        page size, so it never shortens the result."""
         query = query or ListSandboxesQuery()
-        for name in ("id", "snapshots", "targets", "min_cpu", "max_cpu"):
-            if getattr(query, name) is not None:
-                raise NotSupportedError(f"Listing sandboxes by {name}",
-                                        "Filter by name, labels or states, and narrow the result yourself.")
+        core.check_list(query)
         states = None if query.states is None else [
             one for state in query.states for one in core.RUNTIME_STATES.get(str(getattr(state, "value", state)), [])]
-        listing = await _guard("other", lambda: self._client.sandboxes.list(
-            state=states, labels=query.labels, name=query.name, limit=min(query.limit, 100) if query.limit else None))
-        for runtime in await listing.to_list():
+        listing = await _guard("other", lambda: self._client.sandboxes.list(state=states, labels=query.labels))
+        found = core.arrange(await listing.to_list(), query)
+        for runtime in found:
             yield AsyncSandbox(runtime, self._client)
 
     async def start(self, sandbox: AsyncSandbox, timeout: float = 60) -> None:

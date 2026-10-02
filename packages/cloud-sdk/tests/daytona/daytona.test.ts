@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { RuntimeError } from "../../src/errors";
 import type { DaytonaError } from "../../src/daytona/index";
 import {
-  ComputerUse,
   Daytona,
   DaytonaAuthenticationError,
   DaytonaCommandAlreadyCompletedError,
@@ -150,7 +149,6 @@ describe("daytona.create", () => {
       [{ spot: true }, /Spot/],
       [{ linkedSandbox: "x" }, /Linked/],
       [{ secrets: { A: "s" } }, /secrets/],
-      [{ user: "root" }, /user "root"/],
       [{ language: "rust" }, /language rust/],
       [{ otelEndpointOverride: "http://x" }, /telemetry/],
     ];
@@ -389,10 +387,10 @@ describe("process", () => {
     );
   });
 
-  test("PTYs and the entrypoint session are refused with the alternative", async () => {
+  test("the entrypoint session is refused with the alternative", async () => {
     const sandbox = await daytona.create();
     for (const refuse of [
-      () => sandbox.process.createPty(),
+      () => sandbox.process.getEntrypointSession(),
       () => sandbox.process.getEntrypointLogs(),
     ])
       expect(await refuse().catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
@@ -521,7 +519,7 @@ describe("lifecycle", () => {
     expect(listed).toEqual([made.id]);
     const paged = await daytona.list();
     expect(paged.items).toHaveLength(2);
-    expect(() => daytona.list({ minCpu: 2 })).toThrow(NotSupportedError);
+    expect(() => daytona.list({ isPublic: true })).toThrow(NotSupportedError);
   });
 
   test("preview links, fork and snapshots", async () => {
@@ -578,9 +576,9 @@ describe("errors and gaps", () => {
       () => sandbox.uploadUrl(),
       () => sandbox.recover(),
       () => sandbox.codeInterpreter.runCode("1", { envs: { A: "1" } }),
-      () => Promise.resolve().then(() => sandbox.computerUse),
+      () => sandbox.computerUse.accessibility.getTree(),
+      () => sandbox.computerUse.screenshot.takeRegion({ x: 0, y: 0, width: 1, height: 1 }),
       () => Promise.resolve().then(() => sandbox.createLspServer()),
-      () => Promise.resolve().then(() => new ComputerUse()),
       () => daytona.volume.create("v"),
       () => (daytona.secret as { list(): Promise<unknown> }).list(),
     ];

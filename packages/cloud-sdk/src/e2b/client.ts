@@ -1,10 +1,13 @@
 import { Runtime } from "../client.js";
-import { AuthenticationError, NotSupportedError } from "./errors.js";
+import { AuthenticationError, InvalidArgumentError, NotSupportedError } from "./errors.js";
 
 /** The Runtime sandbox the adapter drives. */
 export type RuntimeSandbox = Awaited<ReturnType<Runtime["sandboxes"]["create"]>>;
 /** What `Sandbox.create` sends to Runtime. */
 export type RuntimeCreate = NonNullable<Parameters<Runtime["sandboxes"]["create"]>[0]>;
+
+/** E2B's HTTP version for its API and sandboxes (e2b 2.52.0). */
+export type HttpVersion = "1.1" | "2";
 
 /** E2B's connection options, as far as they mean anything on Runtime. */
 export interface ConnectionOpts {
@@ -21,6 +24,9 @@ export interface ConnectionOpts {
   retries?: number;
   /** Accepted and ignored: Runtime's SDK does not take a logger. */
   logger?: unknown;
+  /** Checked as E2B checks it (and E2B_HTTP_VERSION), then left to Runtime's
+   * SDK, which picks its own transport. */
+  httpVersion?: HttpVersion;
   /** E2B endpoints. Refused: this package only talks to Runtime. */
   domain?: string;
   apiUrl?: string;
@@ -64,6 +70,12 @@ export function refuseE2BConnection(opts: ConnectionOpts = {}) {
           : "Remove it: this package talks only to Runtime (RUNTIME_API_URL overrides the API origin).",
       );
   }
+  // E2B refuses any other version, from the option or the environment.
+  const version = opts.httpVersion ?? (env("E2B_HTTP_VERSION") || undefined);
+  if (version !== undefined && version !== "1.1" && version !== "2")
+    throw new InvalidArgumentError(
+      `${opts.httpVersion === undefined ? "E2B_HTTP_VERSION" : "httpVersion"} must be '1.1' or '2', got '${version}'`,
+    );
   if (opts.debug)
     throw new NotSupportedError(
       "E2B's debug mode (a local envd)",

@@ -6,6 +6,7 @@ from typing import Any, Callable, Iterator
 from functools import wraps
 import inspect
 from .._request_scope import Limits, request_scope
+from .._clock import sync_background as background, sync_sleep as sleep  # noqa: F401 - the lease keeper's
 
 
 def request(work, timeout=None):
@@ -76,9 +77,11 @@ def command_events(handle):
             raise TimeoutException("The command connection timed out; the process may still be running.")
         source = handle._process.output_bytes if handle._pty else handle._process.output
         handle._events = source(cursor=handle._cursor, timeout_seconds=remaining)
+    limits = getattr(handle, "_limits", None)
     try:
-        for event in handle._events:
+        for event in (handle._events if limits is None else each_event(handle._events, limits)):
             if handle._disconnected: return
+            past_deadline(handle)
             kind = event["type"]
             if kind in ("stdout", "stderr"):
                 data = event["data"]
@@ -235,6 +238,11 @@ def watch_directory(filesystem: Any, path: str, user: Any = None, request_timeou
     if allow_network_mounts:
         raise core.NotSupportedException("Watching network mounts", "Watch a directory on the sandbox's local disk.")
     def create():
+        from ._core import NotSupportedException, other_user
+        if other_user(user):
+            raise NotSupportedException(f'Watching a directory as the user "{user}"',
+                                        "Watch it as the sandbox's own user (leave user out); Runtime's watch "
+                                        "reports changes made by anyone.")
         target = filesystem._path(path, user)
         native = filesystem._files.watch(target, recursive=recursive, timeout_ms=0)
         return target, native
@@ -243,3 +251,38 @@ def watch_directory(filesystem: Any, path: str, user: Any = None, request_timeou
     except Exception as error:
         raise core.translate(error, "file") from error
     return WatchHandle(native, filesystem, target, include_entry)
+
+
+def next_event(events: Any) -> Any:
+    """The first event of a command's stream: its start."""
+    return next(events)
+
+
+def each_event(events: Any, limits: Any) -> Any:
+    """A started command's events, each read under its connection deadline:
+    the stream resumes itself in new requests, which the deadline must reach."""
+    import time
+    from .._request_scope import request_scope
+    while True:
+        with request_scope(captured=limits):
+            try:
+                event = next(events)
+            except StopIteration:
+                return
+            except Exception as error:  # noqa: BLE001 - past the deadline, any failure is the deadline's
+                if limits.deadline is not None and time.monotonic() >= limits.deadline:
+                    from ._core import TimeoutException
+                    raise TimeoutException("The command connection timed out; the process may still be running. "
+                                           "Reconnect with commands.connect(pid).") from error
+                raise
+        yield event
+
+
+def past_deadline(handle: Any) -> None:
+    """A stream the command was started with goes on in slices the first
+    request's deadline does not reach; the handle's deadline still holds."""
+    import time
+    if handle._deadline is not None and time.monotonic() > handle._deadline:
+        from ._core import TimeoutException
+        raise TimeoutException("The command connection timed out; the process may still be running. "
+                               "Reconnect with commands.connect(pid).")

@@ -105,6 +105,16 @@ export async function runE2BDeadline() {
                   start();
                   return proc;
                 },
+                // A foreground command is started by a streamed exec, read
+                // from its first byte; the same child as a spawned one.
+                async *execStream(_cmd, opts) {
+                  spawnOptions = opts;
+                  start();
+                  yield { type: "start", processId: info.id };
+                  await waitForExit(void 0, opts.signal);
+                  yield { type: "stdout", data: await text, offset: 0 };
+                  yield { type: "exit", exitCode: await child.exited, timedOut: !1 };
+                },
                 processes: { list: async () => [info], get: async () => proc },
               },
             });
@@ -170,7 +180,10 @@ export async function runE2BDeadline() {
               });
               for (const call of calls.slice(1))
                 assert.deepEqual(call.body, { process: { selector: { case: "pid", value: 123 } } });
-            } else assert.equal(Object.hasOwn(spawnOptions, "timeoutMs"), !1);
+            } else
+              // E2B's timeout is the connection's, never the process's: a
+              // foreground command gets Runtime's longest life, a day.
+              assert.equal(spawnOptions.timeoutMs, background ? void 0 : 86_400_000);
             outcomes[variant] = { initial, next, result, kills };
           } finally {
             for (const handle of handles) await handle.disconnect();

@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.10.0. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.11.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -189,7 +189,7 @@ import { Sandbox } from "withruntime";
 
 await using sbx = await Sandbox.create();
 const server = await sbx.spawn("python3 -m http.server 8000", { cwd: "/workspace" });
-console.log(server.id, server.info.state);
+console.log(server.id, server.state); // console.log(server) shows id, command, state, exitCode
 
 const repl = await sbx.spawn(["python3", "-i", "-q"], { stdin: "pipe" });
 await repl.write("print(sum([125, 250, 375]))\n");
@@ -553,6 +553,11 @@ walks every item on every page. Filter by `name`, `labels`
 and `state`; stopped sandboxes are left out unless you pass `includeStopped: true`,
 except a persistent one, which keeps its disk and is listed with the live ones.
 
+`await runtime.sandboxes.stopAll({ labels: { team: "search" } })` stops every
+live sandbox with all those labels, eight at a time, and returns
+`{ stopped, failed }`: one failure does not stop the rest. It needs at least
+one label.
+
 ## Delete a sandbox
 
 `await sbx.delete()`, or `runtime.sandboxes.delete(id)` without reading it
@@ -736,6 +741,11 @@ moves one to it, keeping its id, `/workspace` (its home), volumes, environment
 and previews; its processes restart and the rest of its old disk is lost, so
 snapshot it first to keep everything. A switch that fails is undone
 (`switch_undone`). See [move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version).
+
+When enabled, `sbx.resize({ vcpu: 2, memoryMiB: 4096 }, { restart: true })`
+restarts a sandbox at a new size on the same server, keeping its whole disk,
+volumes, environment and previews; its programs stop, so snapshot it first to
+keep its memory too. Memory is charged on the new size from then.
 
 ## Volumes
 
@@ -1002,7 +1012,7 @@ token, so anyone holding it can watch. Open it in a browser and keep it to
 yourself.
 
 The first start in a sandbox installs the desktop (about 90 seconds and 1 GB
-of its disk, once); Firefox follows in the background, and an `open` before it
+of its disk, once); Chromium follows in the background, and an `open` before it
 is ready waits for it.
 
 Record the screen to MP4:
@@ -1024,6 +1034,38 @@ the desktop and your programs come first. Its file never grows past `maxMiB`,
 recording stops before the sandbox's disk fills, and a sandbox keeps at most
 8 GiB of recordings. They are files on the sandbox's own disk, counted with it;
 nothing is stored or charged apart from it.
+
+## A browser over CDP
+
+`sbx.browser.start()` runs Chromium in the sandbox and returns `cdpUrl`, the
+address Playwright, Puppeteer, browser-use and Stagehand connect to. The
+browser runs in the sandbox, so its traffic follows the sandbox's network
+rules.
+
+```ts check
+import { Sandbox } from "withruntime";
+
+await using sbx = await Sandbox.create();
+const { cdpUrl, version } = await sbx.browser.start();
+console.log(version, cdpUrl);
+```
+
+Hand `cdpUrl` to the tool as it is: `chromium.connectOverCDP(cdpUrl)` in
+Playwright, `puppeteer.connect({ browserWSEndpoint: cdpUrl })` in Puppeteer.
+
+`cdpUrl` is private: it carries a token that lasts a day, and
+`sbx.browser.get()` returns a fresh one. Anyone holding it can drive the
+browser, so keep it to yourself. Code inside the sandbox finds the same
+browser at `http://127.0.0.1:9222`. `start({ headless: false })` shows it on
+the sandbox's [desktop](#a-desktop) and returns the live view as `streamUrl`.
+`sbx.browser.stop()` ends it. The first start in a sandbox installs Chromium,
+about a minute, once; `start` waits for it. Called directly, the API answers
+409 `browser_installing` until the install is done: call again after
+`retryAfterMs`. A browser that cannot start or install answers 409
+`browser_failed` with the sandbox's own words.
+
+The CLI is `runtime sandbox browser <id> start`, and agents use the MCP tool
+`runtime_sandbox_browser`.
 
 ## MCP servers in a sandbox
 

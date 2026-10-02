@@ -1,6 +1,6 @@
 # Custom domains, TCP ports, dedicated addresses and private networks
 
-Five ways to connect sandboxes to the rest of your world. They are for paid
+Six ways to connect sandboxes to the rest of your world and to each other. They are for paid
 accounts: an account that has not added credit gets `payment_required` (402).
 A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
 
@@ -11,6 +11,8 @@ A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
   address of its own, so you can allow-list it.
 - **Private network:** a WireGuard tunnel from your own network, in any cloud or
   on your premises, into your sandboxes.
+- **Sandboxes by name:** your sandboxes reach each other at
+  `<name>.sandbox.internal`, free.
 - **Your Tailscale network:** a sandbox joins your tailnet as a machine of its
   own, with your auth key.
 
@@ -157,6 +159,57 @@ now. Without `--host`, every connection goes through it. A proxy that fails
 fails the connection; nothing goes around it.
 [Security](./security#your-own-proxy) has the rest: proxy credentials, what your
 proxy sees, and UDP.
+
+## Reach your other sandboxes by name
+
+Turn it on once, and every sandbox of your account reaches the others by name,
+over TCP, on any port: a database in one, a queue in another, the agent in a
+third. It is free, and off until you turn it on.
+
+```bash no-run
+runtime network private on
+# then, in any of your sandboxes:
+psql -h db.sandbox.internal -p 5432 app
+curl http://web.sandbox.internal:3000/
+runtime network private status
+runtime network private off                    # open connections are cut within seconds
+```
+
+- **The name** is the one the sandbox was created with (`name`), at
+  `<name>.sandbox.internal`, or its id, at `<id>.sandbox.internal`. Names are
+  matched without regard to case; use letters, digits, dots and dashes. If two
+  of your sandboxes answer to the same name, use the id.
+- **Only your own sandboxes answer.** Another account's sandbox of the same name
+  is never reached, nor is anything outside Runtime: `.sandbox.internal` names
+  are never looked up in public DNS.
+- **Any port** the target listens on, except Runtime's own relays inside every
+  sandbox (10800, 10802 and 10853). TCP only.
+- **A paused sandbox wakes** when a connection reaches it. A stopped one does
+  not: start it first.
+- **Paid accounts, from paid sandboxes.** A trial account is told so when it
+  turns it on; a connection from a trial sandbox is refused with
+  `private-network-paid-only`. A sandbox with its internet off reaches no other
+  sandbox either.
+- **Not billed:** these connections are not outbound traffic.
+
+From the SDKs, `runtime.network.private` (MCP: `runtime_network_private_*`):
+
+```ts check
+import { Runtime } from "withruntime";
+const runtime = new Runtime();
+await runtime.network.private.set({ enabled: true });
+const { enabled } = await runtime.network.private.get();
+```
+
+```python check
+runtime.network.private.set(enabled=True)
+```
+
+A program that connects directly sees a refused connection close at once. Through
+the proxy (`curl -x "$HTTP_PROXY"`, or any program that reads `HTTP_PROXY`), the
+answer's `X-Runtime-Egress` header says why: `private-network-off` (turn it on), `private-network-no-sandbox` (no sandbox of
+yours has that name or id), `private-network-not-running` (it is stopped, or
+could not be woken) or `private-network-port-reserved`.
 
 ## Private networks
 

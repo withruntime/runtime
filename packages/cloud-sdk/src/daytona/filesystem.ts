@@ -138,6 +138,13 @@ export class FileSystem {
   async createFolder(path: string, mode: string): Promise<void> {
     const target = await this.#path(path);
     await this.#run(["mkdir", "-p", "-m", mode, "--", target]);
+    await this.#own(target);
+  }
+
+  /** Gives what this client wrote to create's `user`, so its commands may
+   * change it; the owner's files stay the owner's. */
+  async #own(target: string) {
+    if (this.#ctx.user) await this.#run(["sudo", "chown", this.#ctx.user, "--", target]);
   }
 
   async deleteFile(path: string, recursive = false): Promise<void> {
@@ -370,6 +377,7 @@ export class FileSystem {
               ...(onProgress ? { onProgress } : {}),
             }),
       );
+      await this.#own(target);
     } finally {
       request.signal?.removeEventListener("abort", stopInput);
     }

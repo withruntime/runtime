@@ -34,7 +34,10 @@ are ignored.
 - **Machine:** Vercel's default, 2 vCPUs with 2048 MiB each.
   `resources: { vcpus }` sets another, with 2048 MiB per vCPU.
 - **Timeout:** Vercel's default of 5 minutes. Runtime's leases run 60 seconds to
-  an hour; `extendTimeout` moves the end later, as often as needed.
+  an hour. A longer `timeout` (Python `execution_time_limit`) starts with an
+  hour's lease, and the sandbox object renews it toward the timeout while it
+  lives, never past it; once the program ends, the sandbox pauses within an
+  hour. `extendTimeout` moves the end later, as often as needed.
 - **Persistence:** persistent by default, as in Vercel. `stop()` and the end of
   the timeout pause the sandbox, keeping its files and also its memory and
   processes. `Sandbox.get({ name })`, or the next command or file call, wakes
@@ -63,6 +66,8 @@ are ignored.
 | `source: { type: "tarball", url }`, `{ type: "snapshot" }`            | Downloaded and unpacked into the working directory; a Runtime snapshot, with its own shape.                                                 |
 | `networkPolicy`, `updateNetworkPolicy`                                | Runtime network rules: `allow-all`, `deny-all`, or a list of domains and subnets to allow and deny.                                         |
 | `Sandbox.get({ name })`, `getOrCreate`, `list({ tags })`              | The newest live sandbox with that name (or a Runtime id), woken; create when missing; `sandboxes.list` with Vercel's paginator.             |
+| `list({ namePrefix, since, until, sortBy, sortOrder, cursor })`       | Applied here over every sandbox the key sees; the cursor continues the same order. Python's `query_sandboxes` does the same.                |
+| `createUser`, `asUser`, `createGroup`, `addUserToGroup`               | `useradd`, `groupadd` and `usermod` with `sudo`, as Vercel does; a user's commands run under `sudo -u` in its home, its files given to it.  |
 | `Sandbox.fork({ sourceSandbox, name })`                               | A Runtime fork, which copies memory and processes too.                                                                                      |
 | `runCommand(cmd, args)`, `runCommand({ cmd, args, cwd, env, sudo })`  | `exec` of the argv without a shell. `sudo` runs it under `sudo --preserve-env`. A non-zero exit is a result. Past `timeoutMs` it exits 137. |
 | `stdout`, `stderr` writers, `detached: true`, `logs()`, `wait()`      | Output streams to the writers; a detached command is a Runtime process, its logs followed from the start.                                   |
@@ -72,7 +77,7 @@ are ignored.
 | Paths                                                                 | Relative paths resolve from `/vercel/sandbox`, which is `/workspace`. A command that names `/vercel/sandbox` finds a link to it.            |
 | `domain(port)`, `update({ ports })`                                   | The public preview of that port; ports added or removed.                                                                                    |
 | `stop()`, `delete()`, `extendTimeout(ms)`                             | `pause` (persistent) or `stop`; `stop`; `extend`.                                                                                           |
-| `update({ timeout, networkPolicy, snapshotExpiration })`              | `extend` (later only), network rules, retention.                                                                                            |
+| `update({ timeout, networkPolicy, snapshotExpiration })`              | A new timeout (earlier only while the lease has not reached it), network rules, retention.                                                  |
 | `snapshot()`, `Snapshot.get`, `Snapshot.list`, `snapshot.delete()`    | A verified disk-only capture, then the source stops; restored snapshots start fresh processes; `snapshots.get`, `list`, `delete`.           |
 | Error classes                                                         | `APIError` with a `response` whose status is Runtime's and `json` of `{ error: { code, message } }`; also `code`, `hint` and `requestId`.   |
 | Python: `create_sandbox`, `run_process`, `create_process`, `box.fs`   | The same mapping; operations await or work as context managers, which stop and by default destroy the sandbox; readers iterate by line.     |
@@ -82,21 +87,20 @@ are ignored.
 Each of these throws `NotSupportedError` before anything happens. Its
 `feature` names the gap and its `alternative` says what to use.
 
-| Vercel Sandbox                                             | Use instead                                                                                                 |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| An `image` with no Runtime image of that name              | Build it: `npx withruntime image build --dockerfile Dockerfile --name <image>`.                             |
-| `timeout` over one hour                                    | Create with up to an hour, then `extendTimeout` before it ends.                                             |
-| Drives (`mounts`), `networkId`                             | Runtime volumes through `withruntime: { create: { volumes } }`; network rules.                              |
-| A region outside the US, `failoverRegions`                 | Runtime runs in one US region.                                                                              |
-| Network rules that transform or forward requests           | Allow the domain and store the credential as a Runtime secret for it: the sandbox sees a placeholder.       |
-| `openInteractive`                                          | `sandbox.withruntime.terminal(...)` or `npx withruntime sandbox shell <id>`.                                |
-| Extra users and groups (`createUser`, `asUser`)            | `sudo useradd` and `sudo -u` through `runCommand`.                                                          |
-| Sessions (`currentSession`, `listSessions`)                | A Runtime sandbox is its own session.                                                                       |
-| `update` of tags, resources, persistence or region         | Create a new sandbox with them.                                                                             |
-| Overrides on `Sandbox.fork`                                | Fork, then change what Runtime can change.                                                                  |
-| `delete({ deleteOrphanSnapshots: true })`, `Snapshot.tree` | Delete snapshots one by one; `Snapshot.list`.                                                               |
-| `Drive`, `SandboxUser`, `defineSandboxProxy`               | Runtime volumes; `sudo`; `sandbox.withruntime.previews`.                                                    |
-| Listing by time, prefix or cursor (JavaScript)             | List them all and filter the result yourself. (Python applies a name prefix and newest-first order itself.) |
+| Vercel Sandbox                                             | Use instead                                                                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| An `image` with no Runtime image of that name              | Build it: `npx withruntime image build --dockerfile Dockerfile --name <image>`.                       |
+| Drives (`mounts`), `networkId`                             | Runtime volumes through `withruntime: { create: { volumes } }`; network rules.                        |
+| A region outside the US, `failoverRegions`                 | Runtime runs in one US region.                                                                        |
+| Network rules that transform or forward requests           | Allow the domain and store the credential as a Runtime secret for it: the sandbox sees a placeholder. |
+| A `timeout` earlier than the current lease's end           | Stop the sandbox when you are done with it.                                                           |
+| Sessions (`currentSession`, `listSessions`)                | A Runtime sandbox is its own session.                                                                 |
+| `openInteractive`                                          | `sandbox.withruntime.terminal(...)` or `npx withruntime sandbox shell <id>`.                          |
+| `update` of tags, resources, persistence or region         | Create a new sandbox with them.                                                                       |
+| Overrides on `Sandbox.fork`                                | Fork, then change what Runtime can change.                                                            |
+| `delete({ deleteOrphanSnapshots: true })`, `Snapshot.tree` | Delete snapshots one by one; `Snapshot.list`.                                                         |
+| `Drive`, `defineSandboxProxy`                              | Runtime volumes; `sandbox.withruntime.previews`.                                                      |
+| `keepLastSnapshots`                                        | Manage saved snapshots with `Snapshot.list` and `snapshot.delete`.                                    |
 
 Explicit snapshots require the released native disk-capture capability; a server
 that does not confirm disk-only capture is refused. If capture succeeds but the
@@ -116,8 +120,6 @@ Some differences are not refusals:
   `pwd` prints `/workspace`.
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun;
   Vercel's `universal` has Python 3.14.
-- `keepLastSnapshots` is accepted: a paused Runtime sandbox keeps exactly its
-  latest state.
 - A git source is cloned into the working directory itself.
 
 ## Tests

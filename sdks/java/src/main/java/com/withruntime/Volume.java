@@ -36,4 +36,12 @@ public final class Volume extends JsonObject {
   public Long usedMiB() {
     return getLong("usedMiB");
   }
+
+  /**
+   * The newest growth, or null: {@code state} is pending, running, completed or failed, and
+   * {@code sizeMiB} the size asked for. {@link #sizeMiB()} changes once the grown disk is checked.
+   */
+  public JsonObject resize() {
+    return getObject("resize");
+  }
 }

@@ -302,6 +302,8 @@ class CreateSnapshotParams:
 
 @dataclass
 class ListSandboxesQuery:
+    """Daytona's list filters. ``limit`` is the page size: every match is
+    listed. ``id`` and ``name`` are prefixes, any case."""
     limit: Optional[int] = None
     name: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
@@ -311,6 +313,22 @@ class ListSandboxesQuery:
     targets: Optional[List[str]] = None
     min_cpu: Optional[int] = None
     max_cpu: Optional[int] = None
+    min_memory_gib: Optional[int] = None
+    max_memory_gib: Optional[int] = None
+    min_disk_gib: Optional[int] = None
+    max_disk_gib: Optional[int] = None
+    is_public: Optional[bool] = None
+    is_recoverable: Optional[bool] = None
+    created_at_after: Any = None
+    created_at_before: Any = None
+    last_activity_after: Any = None
+    last_activity_before: Any = None
+    auto_destroy_at_after: Any = None
+    auto_destroy_at_before: Any = None
+    sort: Any = None
+    """name, cpu, memoryGib, diskGib, lastActivityAt or createdAt."""
+    order: Any = None
+    """asc, or desc (the default when sorting)."""
 
 
 # ---- results ------------------------------------------------------------------
@@ -533,6 +551,332 @@ UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 STOCK_SNAPSHOT = re.compile(r"^daytona(io)?[-/:]|^daytona$")
 LANGUAGE_LABEL = "code-toolbox-language"
 """Daytona's label for a sandbox's code language."""
+USER_LABEL = "compat.daytona-user"
+"""The Linux user given at create, so get() and list() run as it too."""
+OWNER = ("daytona", "runtime")
+"""The sandbox owner's names: Daytona's and Runtime's."""
+USER_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+USER_READY = ('id -u "$1" >/dev/null 2>&1 || exit 3; [ "$1" = root ] || '
+              '{ sudo usermod -aG runtime "$1" && sudo chmod 2775 /workspace; }')
+"""Readies a new sandbox for create's user: it must be in the image, as on
+Daytona. It joins the owner's group, and the working directory gives that
+group what is made in it, so both may change each other's files."""
+
+
+def chosen_user(params: Any) -> Optional[str]:
+    """create's user when it is not the sandbox owner."""
+    user = getattr(params, "os_user", None) or getattr(params, "user", None)
+    return None if user is None or user in OWNER else user
+
+
+def missing_user(user: str, exit_code: Optional[int], stderr: str) -> "DaytonaError":
+    if exit_code == 3:
+        return DaytonaValidationError(
+            f'The user "{user}" does not exist in this sandbox\'s image. Add it to the image (RUN useradd -m {user}), '
+            "or leave user out to run as the sandbox owner, who has passwordless sudo.", 400)
+    return DaytonaError(f'The sandbox could not be readied for the user "{user}": '
+                        f"{stderr.strip() or f'exit {exit_code}'}", 400)
+
+
+def run_as(user: Optional[str], argv: List[str], env: Optional[Dict[str, str]]) -> tuple:
+    """A command and its environment as Runtime runs them: as given for the
+    sandbox owner; for another user through sudo, its environment carried on
+    the command line (sudo resets it) and umask 002, so files it makes in the
+    shared working directory stay writable by the owner's group."""
+    if not user:
+        return argv, env or None
+    pairs = [f"{name}={value}" for name, value in (env or {}).items()]
+    return ["sudo", "-u", user, "-H", "--", "env", *pairs, "sh", "-c", 'umask 002; exec "$@"', "sh", *argv], None
+
+
+# ---- PTY sessions: Daytona's terminals over processes started with a PTY ------
+
+PTY_TAG = "daytona-pty:"
+
+
+def pty_tag(session_id: str) -> str:
+    """A session id as one word of the shell's command line, found again by
+    list_pty_sessions in any client."""
+    import base64
+    return PTY_TAG + base64.urlsafe_b64encode(session_id.encode()).decode().rstrip("=")
+
+
+def pty_of(command: Any) -> Optional[tuple]:
+    """(id, cols, rows) of a PTY session's shell, or None for another process."""
+    import base64
+    words = str(command or "").split()
+    for index, word in enumerate(words):
+        if word.startswith(PTY_TAG):
+            encoded = word[len(PTY_TAG):]
+            session_id = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+            size = re.fullmatch(r"(\d+)x(\d+)", words[index + 1] if index + 1 < len(words) else "")
+            return session_id, int(size.group(1)) if size else 80, int(size.group(2)) if size else 24
+    return None
+
+
+@dataclass
+class PtySize:
+    """A terminal's size."""
+    rows: int
+    cols: int
+
+
+@dataclass
+class PtyResult:
+    """How a PTY session ended: its exit code, or why there is none."""
+    exit_code: Optional[int] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class PtySessionInfo:
+    id: str
+    cwd: str
+    envs: Dict[str, str]
+    cols: int
+    rows: int
+    created_at: str
+    active: bool
+    lazy_start: bool = False
+
+
+# ---- computer use: Daytona's shapes over Runtime's desktop ------------------------
+
+
+@dataclass
+class ScreenshotRegion:
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass
+class ScreenshotOptions:
+    show_cursor: Optional[bool] = None
+    fmt: Optional[str] = None
+    quality: Optional[int] = None
+    scale: Optional[float] = None
+
+
+@dataclass
+class MousePosition:
+    """Daytona's MousePositionResponse, MouseClickResponse and MouseDragResponse."""
+    x: Optional[int] = None
+    y: Optional[int] = None
+
+
+@dataclass
+class ScreenshotResponse:
+    screenshot: Optional[str] = None
+    """The image, base64."""
+    size_bytes: Optional[int] = None
+    cursor_position: Optional[MousePosition] = None
+
+
+@dataclass
+class DisplayInfo:
+    id: Optional[int] = None
+    x: Optional[int] = None
+    y: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@dataclass
+class DisplayInfoResponse:
+    displays: List[DisplayInfo] = field(default_factory=list)
+
+
+@dataclass
+class WindowInfo:
+    id: Optional[int] = None
+    title: Optional[str] = None
+    x: Optional[int] = None
+    y: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@dataclass
+class WindowsResponse:
+    windows: List[WindowInfo] = field(default_factory=list)
+
+
+@dataclass
+class Recording:
+    id: str
+    file_name: str
+    file_path: str
+    start_time: str
+    status: str
+    end_time: Optional[str] = None
+    size_bytes: Optional[int] = None
+    duration_seconds: Optional[float] = None
+
+
+@dataclass
+class ListRecordingsResponse:
+    recordings: List[Recording] = field(default_factory=list)
+
+
+@dataclass
+class ComputerUseStartResponse:
+    message: Optional[str] = None
+    status: Optional[Dict[str, Any]] = None
+
+
+ComputerUseStopResponse = ComputerUseStartResponse
+
+
+@dataclass
+class ComputerUseStatusResponse:
+    status: Optional[str] = None
+
+
+DESKTOP_KEYS = {"enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape",
+                "backspace": "BackSpace", "delete": "Delete", "del": "Delete", "tab": "Tab", "space": "space",
+                "up": "Up", "down": "Down", "left": "Left", "right": "Right", "home": "Home", "end": "End",
+                "pageup": "Prior", "pagedown": "Next", "insert": "Insert", "capslock": "Caps_Lock",
+                "control": "ctrl", "ctrl": "ctrl", "shift": "shift", "alt": "alt", "cmd": "super",
+                "command": "super", "meta": "super", "win": "super", "super": "super"}
+
+
+def desktop_key(key: str) -> str:
+    """A Daytona key name (enter, esc, ctrl, cmd, pageup, f5) as xdotool's;
+    anything else, such as xdotool's own names, passes as given."""
+    name = key.strip()
+    lower = name.lower()
+    if lower in DESKTOP_KEYS:
+        return DESKTOP_KEYS[lower]
+    if re.fullmatch(r"f([1-9]|1[0-2])", lower):
+        return lower.upper()
+    return name
+
+
+def mouse_button(button: str) -> str:
+    if button not in ("left", "middle", "right"):
+        raise ValueError(f'button is "left", "middle" or "right", not {button!r}.')
+    return button
+
+
+_RECORDING_STATUS = {"starting": "recording", "installing": "recording", "recording": "recording",
+                     "finished": "completed", "failed": "failed"}
+
+
+def recording_of(recording: Dict[str, Any]) -> Recording:
+    from datetime import datetime, timezone
+    start = recording.get("startedAt")
+    seconds = recording.get("seconds")
+    status = _RECORDING_STATUS.get(recording.get("state", ""), recording.get("state", ""))
+
+    def iso(ms: float) -> str:
+        stamp = datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds")
+        return stamp.replace("+00:00", "Z")
+    path = str(recording.get("path") or "")
+    return Recording(id=recording["id"], file_name=path.rsplit("/", 1)[-1], file_path=path,
+                     start_time=iso(start) if start else "", status=status,
+                     end_time=iso(start + seconds * 1000) if start and seconds is not None and status != "recording"
+                     else None,
+                     size_bytes=recording.get("bytes"), duration_seconds=seconds)
+
+
+def region_refused() -> "NotSupportedError":
+    return NotSupportedError("Screenshots of part of the screen",
+                             "Take the whole screen with take_full_screen() or take_compressed() and crop it yourself.")
+
+
+def screenshot_format(options: Optional[ScreenshotOptions]) -> tuple:
+    """The desktop's screenshot format and quality for Daytona's options."""
+    options = options or ScreenshotOptions()
+    if options.show_cursor:
+        raise NotSupportedError("Drawing the cursor into a screenshot (show_cursor)",
+                                "Take it without; sandbox.computer_use.mouse.get_position() says where the cursor is.")
+    if options.scale is not None and options.scale != 1:
+        raise NotSupportedError("Scaling a screenshot", "Take it at full size and scale it yourself, or start the "
+                                "desktop smaller: sandbox.withruntime.desktop.start(width=..., height=...).")
+    fmt = (options.fmt or "png").lower()
+    if fmt not in ("png", "jpeg", "jpg"):
+        raise NotSupportedError(f"Screenshots as {fmt}", 'Use fmt "png" or "jpeg".')
+    return ("png", None) if fmt == "png" else ("jpeg", options.quality)
+
+
+def save_local(local_path: str, data: bytes) -> None:
+    folder = os.path.dirname(os.path.abspath(local_path))
+    os.makedirs(folder, exist_ok=True)
+    with open(local_path, "wb") as out:
+        out.write(data)
+
+
+def png_size(png: bytes) -> tuple:
+    """Width and height from a PNG's header."""
+    import struct
+    if len(png) < 24 or png[12:16] != b"IHDR":
+        raise ValueError("The desktop's screenshot was not a PNG.")
+    return struct.unpack(">II", png[16:24])
+
+
+# ---- list filters and sorting, applied here: Runtime filters by labels and state
+
+LIST_REFUSED = {"snapshots": "Filter by a label you set at create.",
+                "is_public": "Runtime previews are public or private per port: filter by a label you set at create.",
+                "auto_destroy_at_after": "Filter by a label you set at create, or narrow the result yourself.",
+                "auto_destroy_at_before": "Filter by a label you set at create, or narrow the result yourself."}
+LIST_SORTS = {
+    "name": lambda one: str(one.info.get("name") or one.id),
+    "cpu": lambda one: int(one.info.get("vcpu") or 0),
+    "memoryGib": lambda one: int(one.info.get("memoryMiB") or 0) / 1024,
+    "diskGib": lambda one: int(one.info.get("diskMiB") or 0) / 1024,
+    "lastActivityAt": lambda one: _date_seconds(one.info.get("lastActiveAt") or one.info.get("readyAt")
+                                                or one.info.get("createdAt")),
+    "createdAt": lambda one: _date_seconds(one.info.get("createdAt")),
+}
+
+
+def check_list(query: "ListSandboxesQuery") -> None:
+    if query.limit is not None and query.limit < 1:
+        raise DaytonaValidationError("limit must be a positive integer", 400)
+    for name, alternative in LIST_REFUSED.items():
+        if getattr(query, name) is not None:
+            raise NotSupportedError(f"Listing sandboxes by {name}", alternative)
+    sort = getattr(query.sort, "value", query.sort)
+    if sort is not None and sort not in LIST_SORTS:
+        raise ValueError(f"sort is one of {', '.join(LIST_SORTS)}, not {sort!r}.")
+    order = getattr(query.order, "value", query.order)
+    if order is not None and order not in ("asc", "desc"):
+        raise ValueError(f'order is "asc" or "desc", not {order!r}.')
+
+
+def arrange(found: List[Any], query: "ListSandboxesQuery") -> List[Any]:
+    """Daytona's filters past labels and state, then its sort: descending
+    unless ``order`` says; unsorted lists keep Runtime's order, oldest first."""
+    def stamp(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        return value.timestamp() if hasattr(value, "timestamp") else _date_seconds(str(value))
+
+    def within(value: float, low: Any, high: Any) -> bool:
+        return (low is None or value >= low) and (high is None or value <= high)
+
+    kept = [one for one in found
+            if (query.id is None or one.id.lower().startswith(query.id.lower()))
+            and (query.name is None or str(one.info.get("name") or one.id).lower().startswith(query.name.lower()))
+            and (query.targets is None or "us" in query.targets)
+            and (query.is_recoverable is None or query.is_recoverable is False)
+            and within(int(one.info.get("vcpu") or 0), query.min_cpu, query.max_cpu)
+            and within(int(one.info.get("memoryMiB") or 0) / 1024, query.min_memory_gib, query.max_memory_gib)
+            and within(int(one.info.get("diskMiB") or 0) / 1024, query.min_disk_gib, query.max_disk_gib)
+            and within(_date_seconds(one.info.get("createdAt")), stamp(query.created_at_after),
+                       stamp(query.created_at_before))
+            and within(LIST_SORTS["lastActivityAt"](one), stamp(query.last_activity_after),
+                       stamp(query.last_activity_before))]
+    sort = getattr(query.sort, "value", query.sort)
+    order = getattr(query.order, "value", query.order)
+    if sort is None:
+        return list(reversed(kept)) if order == "desc" else kept
+    return sorted(kept, key=LIST_SORTS[sort], reverse=order != "asc")
 MARK = "\x1e"
 TAG = "daytona-session:"
 PRELUDE = ("__rt_run() { eval \"$(printf %s \"$1\" | base64 -d)\"; __rt_c=$?; "
@@ -593,10 +937,20 @@ def resolve_path(path: str) -> str:
 
 
 def window_seconds(auto_stop_minutes: Optional[float]) -> int:
-    """Daytona's autoStopInterval (minutes; 0 is off) as the lease window."""
+    """Daytona's autoStopInterval (minutes; 0 is off) as the lease each call
+    renews: Runtime's longest lease is an hour."""
     if not auto_stop_minutes or auto_stop_minutes <= 0:
         return 3600
     return int(min(3600, max(60, round(auto_stop_minutes * 60))))
+
+
+def idle_seconds(auto_stop_minutes: Optional[float]) -> float:
+    """Daytona's autoStopInterval (minutes; 0 is never) as seconds without a
+    call before the sandbox pauses. Past an hour the lease is renewed while
+    the sandbox object lives."""
+    if not auto_stop_minutes or auto_stop_minutes <= 0:
+        return math.inf
+    return float(max(60, round(auto_stop_minutes * 60)))
 
 
 def retention_days(minutes: float) -> int:
@@ -612,6 +966,8 @@ class Lifecycle:
     auto_delete_interval: int
     deadline: Optional[float] = None
     """Epoch seconds past which the lease is never extended (ttl_minutes)."""
+    idle_seconds: Optional[float] = None
+    """Seconds without a call before the sandbox pauses; the window when None."""
 
 
 def lifecycle_of(params: CreateSandboxBaseParams) -> Lifecycle:
@@ -621,7 +977,8 @@ def lifecycle_of(params: CreateSandboxBaseParams) -> Lifecycle:
     return Lifecycle(window_seconds=window_seconds(auto_stop), ephemeral=auto_delete == 0,
                      auto_stop_interval=auto_stop, auto_archive_interval=params.auto_archive_interval or 10_080,
                      auto_delete_interval=auto_delete,
-                     deadline=time.time() + params.ttl_minutes * 60 if params.ttl_minutes else None)
+                     deadline=time.time() + params.ttl_minutes * 60 if params.ttl_minutes else None,
+                     idle_seconds=idle_seconds(auto_stop))
 
 
 REFUSED_CREATE = {
@@ -639,10 +996,8 @@ def refuse_create(params: CreateSandboxBaseParams) -> None:
         if getattr(params, name) is not None:
             raise NotSupportedError(feature, alternative)
     user = params.os_user or params.user
-    if user is not None and user != "daytona":
-        raise NotSupportedError(f'Running as the user "{user}"',
-                                'Commands run as the sandbox owner with passwordless sudo: prefix a command with '
-                                '"sudo" to run it as root.')
+    if user is not None and not USER_NAME.match(user):
+        raise DaytonaValidationError(f"Invalid user name {user!r}.", 400)
     if params.language is not None and str(getattr(params.language, "value", params.language)) not in (
             "python", "javascript", "typescript"):
         raise NotSupportedError(f"The language {params.language}",

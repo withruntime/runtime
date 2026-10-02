@@ -25,7 +25,7 @@ Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-
   is most of what an agent sandbox costs while it waits.
 - **Pause and fork now.** A paused Runtime sandbox keeps its memory and
   running processes for 1 to 365 days, and a fork copies a running sandbox into
-  up to 10 copies. Prime lists snapshots, and saving, restoring and forking a
+  up to {{fork-copies}} copies. Prime lists snapshots, and saving, restoring and forking a
   sandbox mid-run, as coming soon.
 - **Prices that do not lapse.** Prime's published rates hold through
   22 December 2026. Runtime's rates are fixed in each resource's quote, and

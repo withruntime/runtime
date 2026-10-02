@@ -375,5 +375,17 @@ class AsyncImages:
         return await self._t.json("POST", f"/v1/images/{_enc(await self._id(image))}:untag", body={"tag": tag})
 
     async def delete(self, image: str) -> dict[str, Any]:
-        """Delete one version (by id, name:tag or name@version) and its tags."""
-        return await self._t.json("POST", f"/v1/images/{_enc(await self._id(image))}:delete", body={})
+        """Delete one version (by id, name:tag or name@version) and its tags. A
+        bare name deletes its latest tag's version, or its only version when it
+        has one and no latest tag; with several, the error names its tags."""
+        try:
+            image_id = await self._id(image)
+        except RuntimeError as error:
+            if error.code != "image_not_found" or ":" in image or "@" in image:
+                raise
+            page = await self.list(name=image, limit=100)
+            live = [found for found in page.data if found.get("state") not in ("deleted", "deleting")]
+            if len(live) != 1:
+                raise
+            image_id = live[0]["id"]
+        return await self._t.json("POST", f"/v1/images/{_enc(image_id)}:delete", body={})

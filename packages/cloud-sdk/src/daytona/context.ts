@@ -12,6 +12,8 @@ export interface SandboxContext {
   /** Makes /home/daytona (Daytona's home) lead to /workspace (Runtime's),
    * once, the first time something names it. */
   ensureHome(text: string | undefined): Promise<void>;
+  /** The Linux user commands run as (create's `user`), when not the owner. */
+  readonly user?: string;
 }
 
 /** Daytona's home, and the working directory relative paths resolve from. */
@@ -38,4 +40,32 @@ export function resolvePath(path: string): string {
 /** Quotes a word for bash. */
 export function quote(word: string): string {
   return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/** A command and its environment as Runtime runs them: as given for the
+ * sandbox owner; for another user through sudo, its environment carried on
+ * the command line (sudo resets it) and umask 002, so files it makes in the
+ * shared working directory stay writable by the owner's group. */
+export function runAs(
+  user: string | undefined,
+  argv: readonly string[],
+  env: Record<string, string> = {},
+): { argv: string[]; env?: Record<string, string> } {
+  if (!user) return { argv: [...argv], ...(Object.keys(env).length ? { env } : {}) };
+  return {
+    argv: [
+      "sudo",
+      "-u",
+      user,
+      "-H",
+      "--",
+      "env",
+      ...Object.entries(env).map(([name, value]) => `${name}=${value}`),
+      "sh",
+      "-c",
+      'umask 002; exec "$@"',
+      "sh",
+      ...argv,
+    ],
+  };
 }

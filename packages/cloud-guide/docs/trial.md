@@ -37,8 +37,9 @@ Every new account gets **{{trial-hours}} hours of sandbox time** after a verifie
   out, as the E2B, Daytona, Vercel and Blaxel drop-ins do by default, uses the
   trial while it lasts and then prepaid credit, so pin the trial while you
   test.
-- Model calls are not included. Opening ports beyond the web (`connect`) needs
-  an account that has bought credit.
+- A trial sandbox reaches the internet on ports 80 and 443 only. Other ports,
+  such as a database's or git over SSH, need an account that has bought credit.
+  Model calls are not included.
 
 Over HTTP, a trial create is `POST /v1/sandboxes`. This body names the
 defaults; only `funding` needs to be there:
@@ -95,8 +96,10 @@ shows the hours used, set aside for running sandboxes, and left.
 
 ## When eight are running, or the hours run out
 
-- **`trial_busy`:** eight trial sandboxes are running, and the error names them.
-  Stop or pause one first; a paused sandbox does not count. Requests sent at the
+- **`trial_busy`:** eight trial sandboxes are running. The error's
+  `details.running` lists them, up to eight, with each one's id, name and state
+  (only those your key can see). Stop or pause one first; a paused sandbox does
+  not count. Requests sent at the
   same moment are admitted in no set order, so any one of them may be the one
   refused. Retry it once a sandbox has stopped; an SDK create waits for a slot
   by itself, for up to two minutes by default.

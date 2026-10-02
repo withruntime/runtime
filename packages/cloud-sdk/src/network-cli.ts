@@ -15,10 +15,12 @@ import { generateWireGuardKeyPair } from "./wireguard.js";
  *   runtime address reserve|ls|release       a dedicated outbound address for allow-lists
  *   runtime tunnel  create|get|rm|peer ...   a WireGuard tunnel from your network into your sandboxes
  *   runtime network upstream-proxy set|get|remove   the account's network settings
+ *   runtime network private on|off|status          your sandboxes reach each other by name
  *
  * Paid accounts only; an account that has not added credit is told so. */
 
 import type { NetworkFunding, UpstreamProxy } from "./products/network-products.js";
+import type { PrivateNetwork } from "./products/private-network.js";
 
 function fundingState(value: NetworkFunding): string {
   if (value.funded === false)
@@ -90,6 +92,12 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   upstream-proxy remove                  Connections leave directly again
   A proxy that refuses or cannot be reached fails the connection; nothing goes
   around it. Paid accounts only.
+
+  private on                             Your sandboxes reach each other by name, over TCP:
+                                         <name>.sandbox.internal:<port> or <id>.sandbox.internal:<port>
+  private off                            They stop; open connections between them are cut
+  private status                         On or off
+  Only your own sandboxes answer. Paid accounts only, and free.
 `,
 };
 
@@ -486,6 +494,32 @@ export async function networkProductCommand(
         throw usage(product, "Use peer add, peer rotate or peer rm.");
       }
     }
+  }
+  if (product === "network" && verb === "private") {
+    const describe = (state: PrivateNetwork) =>
+      state.enabled
+        ? "On: your sandboxes reach each other at <name>.sandbox.internal:<port> over TCP."
+        : state.allowed
+          ? "Off. Turn it on: runtime network private on"
+          : "Off. Reaching your sandboxes by name is for paid accounts; add credit to turn it on.";
+    switch (rest[0]) {
+      case "on":
+      case "off": {
+        const state = await runtime.network.private.set({ enabled: rest[0] === "on" });
+        print(
+          state.enabled ? describe(state) : "Off. Open connections between your sandboxes are cut.",
+          state,
+        );
+        return 0;
+      }
+      case "status":
+      case undefined: {
+        const state = await runtime.network.private.get();
+        print(describe(state), state);
+        return 0;
+      }
+    }
+    throw usage(product, "private takes on, off or status.");
   }
   if (product === "network") {
     if (verb !== "upstream-proxy") throw usage(product, `Unknown network command ${verb}.`);

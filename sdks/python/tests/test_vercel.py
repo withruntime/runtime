@@ -81,7 +81,7 @@ class Create(Base):
             self.create(image="other")
 
     def test_refusals_before_anything_happens(self):
-        cases = [({"execution_time_limit": 7200}, "over one hour"), ({"mounts": {"/d": "drive"}}, "Drives"),
+        cases = [({"mounts": {"/d": "drive"}}, "Drives"),
                  ({"network_id": "n"}, "Secure Compute"), ({"region": "fra1"}, "fra1"),
                  ({"failover_regions": ["sfo1"]}, "Failover")]
         for kwargs, text in cases:
