@@ -30,7 +30,7 @@ print(len(token))
 
 Or with curl, the way GitHub Actions does it. A new sandbox made from the
 current default image has these two variables ready for its first accepted
-command, bound to its current lease. Retained older-image sandboxes keep
+command, valid while it runs. Retained older-image sandboxes keep
 their original guest software:
 
 ```bash no-run
@@ -45,7 +45,7 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
   (`--lifetime` in the CLI). Get a fresh one when it runs out.
 - `RUNTIME_ID_TOKEN_REQUEST_TOKEN` is the sandbox's own proof of who it is. It
   can get tokens only for this sandbox, only while it is running, and stops
-  when the sandbox's lease ends. Treat it like a password anyway: anyone who
+  when the sandbox stops or pauses. Treat it like a password anyway: anyone who
   copies it can get tokens as this sandbox until then.
 - Use the supplied `RUNTIME_ID_TOKEN_REQUEST_URL`. It points to Runtime's
   internal token relay, which accepts only this sandbox's current request

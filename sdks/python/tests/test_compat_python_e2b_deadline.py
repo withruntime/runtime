@@ -2,6 +2,13 @@
 
 The local peer retains process output independently of a subscription. A client
 timeout may close the socket, but must never send a process signal.
+
+The client's deadline is half a second and the child runs for a second and a
+half, so the request reaches the peer and the deadline ends while the child
+runs, even on a loaded machine.
+With 30 ms against 0.4 s, a full check on 3 October 2026 (load 24) timed out
+before the peer's thread had started the child, and the test read a child that
+did not exist yet.
 """
 import asyncio
 import json
@@ -12,6 +19,10 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
+
+# The client's deadline, and how long the child runs: far apart on purpose.
+DEADLINE_S = 0.5
+CHILD_S = 1.5
 
 from withruntime._sync_client import _Transport, Process, Sandbox
 from withruntime._async_client import _Transport as AsyncTransport, AsyncProcess, AsyncSandbox
@@ -24,6 +35,7 @@ from withruntime.e2b._core import pid_of
 class Deadline(unittest.TestCase):
     def setUp(self):
         self.completed = threading.Event()
+        self.started = threading.Event()
         self.job = None
         self.collector = None
         self.payload = b""
@@ -38,7 +50,7 @@ class Deadline(unittest.TestCase):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.flush()
-                if not owner.completed.wait(3):
+                if not owner.completed.wait(5):
                     return
                 events = [{"type": "stdout", "data": owner.payload.decode(), "offset": 0},
                           {"type": "exit", "exitCode": owner.job.returncode, "timedOut": False}]
@@ -62,9 +74,12 @@ class Deadline(unittest.TestCase):
                 self.send_header("Content-Type", "application/x-ndjson")
                 self.send_header("Connection", "close")
                 self.end_headers()
-                self.wfile.write((json.dumps({"type": "start", "processId": "local-process"}) + "\n").encode())
-                self.wfile.flush()
-                if not owner.completed.wait(3):
+                try:
+                    self.wfile.write((json.dumps({"type": "start", "processId": "local-process"}) + "\n").encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                if not owner.completed.wait(5):
                     return
                 try:
                     for event in [{"type": "stdout", "data": owner.payload.decode(), "offset": 0},
@@ -80,16 +95,17 @@ class Deadline(unittest.TestCase):
 
     def tearDown(self):
         if self.job is not None:
-            if not self.completed.wait(3):
+            if not self.completed.wait(5):
                 self.job.kill()
-            self.collector.join(3)
+            self.collector.join(5)
         self.server.shutdown()
         self.server.server_close()
         self.server_thread.join(3)
 
     def start_child(self):
-        self.job = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(0.4);print('finished')"],
+        self.job = subprocess.Popen([sys.executable, "-c", f"import time;time.sleep({CHILD_S});print('finished')"],
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.started.set()
         def collect():
             self.payload, _ = self.job.communicate()
             self.completed.set()
@@ -125,6 +141,9 @@ class Deadline(unittest.TestCase):
     def assert_not_killed(self):
         # E2B's timeout is the connection's, never the process's: a waited-on
         # command is given Runtime's longest life (a day), a background one none.
+        # The peer starts the child on its own thread, which a loaded machine
+        # may run after the client has already given up waiting.
+        self.assertTrue(self.started.wait(5), "the exec never reached the peer")
         self.assertIsNone(self.job.poll())
         self.assertIn(self.spawn_options.get("timeout_ms"), (None, 86_400_000))
         self.assertFalse(any(method == "POST" and not path.endswith(":exec") for method, path in self.requests))
@@ -133,7 +152,7 @@ class Deadline(unittest.TestCase):
         commands, transport = self.commands()
         try:
             with self.assertRaises(TimeoutException):
-                commands.run("local child", timeout=0.03)
+                commands.run("local child", timeout=DEADLINE_S)
             self.assert_not_killed()
             result = commands.connect(pid_of("local-process"), timeout=0).wait()
             self.assertEqual((result.stdout, result.exit_code), ("finished\n", 0))
@@ -159,7 +178,7 @@ class Deadline(unittest.TestCase):
             commands, transport = self.commands(asynchronous=True)
             try:
                 with self.assertRaises(TimeoutException):
-                    await commands.run("local child", timeout=0.03)
+                    await commands.run("local child", timeout=DEADLINE_S)
                 self.assert_not_killed()
                 handle = await commands.connect(pid_of("local-process"), timeout=0)
                 waiter = asyncio.create_task(handle.wait())

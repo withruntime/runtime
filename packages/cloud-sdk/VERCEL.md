@@ -33,8 +33,9 @@ are ignored.
 
 - **Machine:** Vercel's default, 2 vCPUs with 2048 MiB each.
   `resources: { vcpus }` sets another, with 2048 MiB per vCPU.
-- **Timeout:** Vercel's default of 5 minutes. Runtime's leases run 60 seconds to
-  an hour. A longer `timeout` (Python `execution_time_limit`) starts with an
+- **Timeout:** none unless you pass one: the sandbox runs while it works and
+  pauses itself when idle. A `timeout` is kept as a Runtime time limit, which
+  runs 60 seconds to an hour. A longer `timeout` (Python `execution_time_limit`) starts with an
   hour's lease, and the sandbox object renews it toward the timeout while it
   lives, never past it; once the program ends, the sandbox pauses within an
   hour. `extendTimeout` moves the end later, as often as needed.

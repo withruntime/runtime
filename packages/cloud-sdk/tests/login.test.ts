@@ -5,17 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authenticationCommand, beginDeviceLogin, named } from "../src/login";
 import { connectionStore, resolveCredential } from "../src/credentials";
+import { sandboxMarker } from "../src/transport";
 
 let directory: string;
 let env: NodeJS.ProcessEnv;
 const key = `rtcloud_${randomUUID()}_${randomBytes(32).toString("base64url")}`;
 const connectionId = randomUUID();
 const orgId = randomUUID();
+const marker = sandboxMarker.path;
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), "runtime-login-test-"));
   env = { XDG_CONFIG_HOME: directory };
+  // Outside a sandbox, wherever the tests run: inside one, the API is called
+  // at runtime.internal (sandbox-origin.test.ts).
+  sandboxMarker.path = join(directory, "environment.json");
 });
 afterEach(async () => {
+  sandboxMarker.path = marker;
   await rm(directory, { recursive: true, force: true });
 });
 function mockServer(

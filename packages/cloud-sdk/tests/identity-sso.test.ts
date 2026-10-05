@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { run } from "../src/cli";
 import { Runtime } from "../src/client";
 import { Sandbox, identityToken, RuntimeError } from "../src/index";
+import { sandboxMarker } from "../src/transport";
 
 /* Identity tokens from inside a sandbox (Sandbox.identityToken,
    `runtime sandbox identity-token`) and single sign-on status
@@ -81,8 +82,15 @@ test("a refusal carries the API's code and message; outside a sandbox there is n
   expect(refused).toBeInstanceOf(RuntimeError);
   expect((refused as RuntimeError).code).toBe("forbidden");
   delete process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
-  const missing = await identityToken({ audience: "x" }).catch((e: unknown) => e);
-  expect((missing as RuntimeError).code).toBe("identity_unavailable");
+  // Outside a sandbox, wherever the test runs: no guest environment file either.
+  const marker = sandboxMarker.path;
+  sandboxMarker.path = "/nonexistent/runtime/environment.json";
+  try {
+    const missing = await identityToken({ audience: "x" }).catch((e: unknown) => e);
+    expect((missing as RuntimeError).code).toBe("identity_unavailable");
+  } finally {
+    sandboxMarker.path = marker;
+  }
 });
 
 test("runtime.sso.get() and `runtime sso` read GET /v1/sso", async () => {

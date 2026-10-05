@@ -453,7 +453,7 @@ func unpackArchive(data []byte, dir string) error {
 
 // unpackStream unpacks a gzipped tar that arrives as a stream into dir,
 // holding no more than a read at a time. Entries land only inside dir, and
-// links are not made. It unpacks into a folder beside dir and moves it into
+// symbolic links are not made; a hard link lands as the file it names. It unpacks into a folder beside dir and moves it into
 // place only once the whole archive arrived, its end blocks and gzip's
 // checksum included, so an archive cut short leaves nothing behind that
 // could pass for the folder: it is download_incomplete. A dir that exists is
@@ -537,8 +537,17 @@ func unpackEntries(source io.Reader, root string) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
+		case tar.TypeLink:
+			if err := hardLinkEntry(root, target, header.Name, header.Linkname); err != nil {
+				return err
+			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			// A name already unpacked may share its file with a hard link;
+			// writing through it would change the link's copy too.
+			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 			file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fs.FileMode(header.Mode)&0o777)
@@ -555,6 +564,45 @@ func unpackEntries(source io.Reader, root string) error {
 			}
 		}
 	}
+}
+
+// hardLinkEntry makes a second name for a file the archive already carried:
+// tar writes the first name as a file and every other as a hard link to it.
+// The link names a plain file unpacked earlier in this archive, read inside
+// the folder as every entry's name is, or the unpack fails; it never reaches
+// outside or ahead.
+func hardLinkEntry(root, target, name, link string) error {
+	source := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(path.Clean("/"+link), "/")))
+	info, err := os.Lstat(source)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("withruntime: refusing an archive hard link to a file it does not carry: %s -> %s", name, link)
+	}
+	if source == target {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if os.Link(source, target) == nil {
+		return nil
+	}
+	from, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer from.Close()
+	to, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(to, from)
+	if closeErr := to.Close(); copyErr == nil {
+		copyErr = closeErr
+	}
+	return copyErr
 }
 
 // copyEntry copies one entry's bytes: a failure to read them is the archive

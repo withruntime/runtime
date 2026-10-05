@@ -127,6 +127,8 @@ class RuntimeCloudSandboxClientOptions(BaseSandboxClientOptions):
     name: Optional[str] = None
     labels: Optional[dict[str, str]] = None
     max_cost_micros: Optional[int] = None
+    max_total_cost_micros: Optional[int] = None
+    """Stops the sandbox once its whole life has cost this much, in microdollars."""
     extra: Optional[dict[str, Any]] = None
     env: Optional[dict[str, str]] = None
     """Set for every command, under the manifest's own environment."""
@@ -158,7 +160,7 @@ def _create_fields(options: RuntimeCloudSandboxClientOptions) -> dict[str, Any]:
     """The keyword arguments for ``runtime.sandboxes.create``."""
     fields: dict[str, Any] = dict(options.extra or {})
     for name in ("funding", "region", "image", "vcpu", "memory_mib", "disk_mib", "timeout_seconds", "name",
-                 "labels", "max_cost_micros"):
+                 "labels", "max_cost_micros", "max_total_cost_micros"):
         value = getattr(options, name)
         if value is not None:
             fields[name] = value

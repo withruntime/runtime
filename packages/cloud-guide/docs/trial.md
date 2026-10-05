@@ -1,6 +1,9 @@
 # The free trial
 
 Every new account gets **{{trial-hours}} hours of sandbox time** after a verified sign-in, with no card.
+The limits below hold while the account has the trial alone; once it holds
+prepaid credit, its sandboxes have paid limits and still spend the trial's
+hours first ([after the trial](#after-the-trial)).
 
 - Up to **eight sandboxes running at once**, each up to **2 vCPU and 4 GiB of
   memory**, with up to 10 GiB of disk (4 GiB by default). Paused sandboxes do
@@ -8,51 +11,52 @@ Every new account gets **{{trial-hours}} hours of sandbox time** after a verifie
 - Trial CPU is shared, never reserved, and its guaranteed floor
   (`cpuFloorMillis`) is at most 250 thousandths of a vCPU; the default is 50.
   A create that asks for more is refused with `invalid_trial`, naming each
-  field, and a fork of such a sandbox can go only onto `"paid"`.
-- Trial sandboxes reach the web at {{trial-bandwidth}} each, and move {{trial-daily-transfer}} a day in all,
-  in and out together.
+  field, and so is a fork of such a sandbox.
+- Trial sandboxes download with no speed limit and upload at up to {{trial-upload}} each,
+  and move {{trial-daily-transfer}} a day in all, in and out together. While a server's link
+  is full, a paid sandbox gets {{paid-share}} a trial sandbox's share of it.
 - A trial sandbox that keeps trying to reach internal or cloud metadata
   addresses has its network cut and the account suspended. One that holds its
   CPUs flat out for 30 minutes is slowed to half a core for the rest of its run.
 - Previews of a trial sandbox are private: a link carries its token. Public
-  previews need a paid sandbox.
+  previews need a kept top-up: one paid and not refunded. Credit
+  given alone does not open them ([pricing](./pricing#how-many-at-once)).
 - The {{trial-hours}} hours are shared by all your trial sandboxes, so {{trial-sandboxes}} at once use them
   {{trial-sandboxes}} times as fast. Running time counts, idle or busy; paused or stopped time
   does not.
-- Each lease can last up to one hour; the server enforces `timeoutSeconds` of
-  at most 3600. A sandbox that is still working when its lease is about to end
-  keeps going: it gets its `timeoutSeconds` again, each time, until your trial
-  hours run out, and then pauses. Working means a command, terminal, SSH
-  session or port forward is open, or the sandbox used CPU or moved traffic in
-  the last ten seconds; a browser tab left open on a preview does not count.
-  An idle sandbox pauses at its lease's end, or sooner when idle pause is on;
-  extend it or wake it to keep going.
+- A sandbox runs while it works and pauses itself when idle, until your trial
+  hours run out; then it pauses, unless the account holds credit, in which
+  case it carries on on credit. There is no time limit unless you set one
+  with `timeoutSeconds` (60 to 86,400); one longer than the hours left is
+  cut to them. Idle means nothing happening in it for
+  `idlePauseSeconds` ({{idle-pause}} by default): no request, no command,
+  terminal, SSH session or port forward open, no CPU use and no traffic; a
+  browser tab left open on a preview does not count. Wake it to keep going.
 - Your first three images and first 10 GiB of volumes are stored free, for as
   long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)).
   A build counts toward the {{trial-hours}} hours: at most 2 vCPU and 4 GiB, {{trial-build-time}}
   and {{trial-builds-a-day}} builds a day, with only the time it builds used up, and none when it
   fails through a fault of ours.
-- A request that asks for the trial (`funding: "trial"`, `--trial`) never falls
-  back to paid credit, even when the account has some. One that leaves funding
-  out, as the E2B, Daytona, Vercel and Blaxel drop-ins do by default, uses the
-  trial while it lasts and then prepaid credit, so pin the trial while you
-  test.
+- There is nothing to choose: the trial's hours are spent first, then prepaid
+  credit, automatically. A request's `funding` is accepted and ignored.
+- A [scheduled job](./jobs)'s runs spend the hours too, each a trial sandbox
+  within the same size and count. A run the trial cannot take waits with
+  `blockedReason` `credits` until the account holds credit.
 - A trial sandbox reaches the internet on ports 80 and 443 only. Other ports,
-  such as a database's or git over SSH, need an account that has bought credit.
+  such as a database's or git over SSH, need a paid sandbox of an account
+  with a kept top-up.
   Model calls are not included.
 
-Over HTTP, a trial create is `POST /v1/sandboxes`. This body names the
-defaults; only `funding` needs to be there:
+Over HTTP, a create is `POST /v1/sandboxes`. This body names the defaults;
+an empty body is the same:
 
 ```json
 {
-  "funding": "trial",
   "vcpu": 2,
   "memoryMiB": 4096,
   "diskMiB": 4096,
   "cpu": "shared",
-  "cpuFloorMillis": 50,
-  "timeoutSeconds": 1800
+  "cpuFloorMillis": 50
 }
 ```
 
@@ -64,18 +68,16 @@ has on another provider, and tells you what you would save each month.
 
 ## Use the trial from code
 
-**You do not have to ask for the trial.** `create()` with no `funding` uses it
-while you have trial time left, sized to fit. Name `funding: "trial"` to insist
-on it. If you omit `funding` after the trial is exhausted, available prepaid
-credit can be used instead.
+**You do not have to ask for the trial.** `create()` uses it while you have
+trial time left, sized to fit.
 
 ```ts
 import { Runtime } from "withruntime";
 
 const runtime = new Runtime();
-const sbx = await runtime.sandboxes.create({ funding: "trial", vcpu: 1, memoryMiB: 2048 });
+const sbx = await runtime.sandboxes.create({ vcpu: 1, memoryMiB: 2048 });
 try {
-  console.log(sbx.info.funding, sbx.info.expiresAt);
+  console.log(sbx.info.funding, sbx.info.endsAt);
 } finally {
   await sbx.stop();
 }
@@ -85,11 +87,8 @@ Use a region listed for your account. Leave `region` out for the default.
 
 ## Track your time
 
-Time is reserved when a sandbox starts and settled from its confirmed running
-time when it ends, so stopping early gives the unused part back.
-
 Read what is left with `npx withruntime usage` (or `GET /v1/usage`). The `trial`
-fields are `totalMs`, `usedMs`, `reservedMs` and `availableMs`, in
+fields are `totalMs`, `usedMs` and `availableMs`, in
 milliseconds, apart from dollars. In the browser, the foot of the sidebar shows
 the whole hours left, and [Usage & billing](https://withruntime.com/account/billing)
 shows the hours used, set aside for running sandboxes, and left.
@@ -105,11 +104,11 @@ shows the hours used, set aside for running sandboxes, and left.
   by itself, for up to two minutes by default.
 - **`trial_domain_limit`:** accounts that sign in with your company's email
   domain share eight running trial sandboxes between them, and they are all
-  running. Stop or pause one, or use paid funding. Shared mail providers such as
+  running. Stop or pause one, or add credit. Shared mail providers such as
   gmail.com, outlook.com and icloud.com have no such limit. An SDK create waits
   for a slot, as it does for `trial_busy`.
-- **`trial_exhausted`:** the time is used up, and new trial sandboxes are
-  refused.
+- **`trial_exhausted`:** the time is used up and the account holds no credit,
+  so new sandboxes are refused. Add credit and they run on it.
 
 Sign in with Google or with an email address you keep. Temporary inbox
 services such as Guerrilla Mail and Mailinator cannot open an account.
@@ -121,16 +120,25 @@ Free time cannot be cashed out, refunded or replenished by signing in again.
 **Add credit and keep going.** An owner, admin or billing member adds prepaid
 credit at
 [Usage & billing](https://withruntime.com/account/billing), any amount from
-{{topup-min}}, with no subscription. Then choose paid funding.
+{{topup-min}}, with no subscription. There is nothing to switch: from then on
+
+- new sandboxes are paid, with paid limits (larger sizes, any port, public
+  previews, persistence, more at once), and their run time still comes from
+  the trial's hours first, then from credit;
+- a paused trial sandbox wakes on credit;
+- a running trial sandbox carries on on credit when its trial time ends,
+  without pausing.
+
+The trial's hours fund a sandbox of the trial's size (at most 2 vCPU and
+4 GiB on shared CPU); a larger one runs on credit from the start.
 
 - At the standard rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox cost
   {{=$2 trial-hours * busy-hour}} in compute ([pricing](./pricing)).
-- A paid sandbox's lease ends on time, whatever it is doing, because
-  `timeoutSeconds` bounds what it costs. For a long run make it `persistent`,
-  which renews the lease while credit lasts, or call `keepAlive` from the SDK.
-- A paid account runs {{paid-sandboxes}} sandboxes at once, and more on request; a new one runs
-  {{new-account-sandboxes}} until its first week or {{new-account-spend}} of paid use is behind it
-  ([pricing](./pricing#how-many-at-once)).
+- A paid sandbox runs the same way: while it works, until you stop it, it idles
+  into a pause, or credit or a spending limit runs out. `persistent` keeps one
+  running with no idle pause. A stop keeps a sandbox's disk until you delete it.
+- A paid account runs {{paid-sandboxes}} sandboxes at once from its first top-up, paused ones
+  not counted, and more on request ([pricing](./pricing#how-many-at-once)).
 - Refer a company and you both get credit matching its first top-up, from {{referral-min}} to {{referral-max}}
   each ([referrals](./referrals)).
 

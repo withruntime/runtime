@@ -74,7 +74,7 @@ set them under `x-runtime` on the service.
 | `image`                          | A container image such as `python:3.12-slim`, built once as a Runtime image                                                    |
 | `dockerfile`                     | A Dockerfile's path; its folder is the build context                                                                           |
 | `runtime_image`                  | A Runtime image (id, name or `name:tag`), used as it is                                                                        |
-| `funding`                        | `trial` or `paid`. Left out, the account's default: the free trial while it lasts                                              |
+| `funding`                        | Accepted and ignored: the trial's hours are spent first, then prepaid credit                                                   |
 | `vcpu`, `memory_mib`, `disk_mib` | The sandbox's size. On the trial, at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request runs at that size, with a warning |
 | `user`                           | Who commands and file operations run as when Inspect names no user: `root` by default                                          |
 | `workdir`                        | Where relative paths and commands start: `/workspace` by default, or the Dockerfile's `WORKDIR`                                |
@@ -104,8 +104,8 @@ RUN apt-get update && apt-get install -y sudo && echo '#1000 ALL=(ALL:ALL) NOPAS
 - **Files** of any size, anywhere in the machine; Inspect's 100 MiB read limit
   applies.
 - **Timeouts** raise `TimeoutError` and are retried as Inspect asks.
-- **Long samples** keep their sandbox: its lease is kept ahead of now until the
-  sample ends.
+- **Long samples** keep their sandbox: it runs while the sample works, however
+  long it takes.
 - `inspect sandbox cleanup runtime` stops sandboxes an interrupted eval left,
   and `connection()` gives `runtime sandbox ssh <id>` to open a shell in one.
 
@@ -117,7 +117,7 @@ async backend.
 - The trial runs {{trial-sandboxes}} sandboxes at once, so the sandbox asks Inspect for
   eight at a time. On a paid account raise it with `--max-sandboxes`; see
   [pricing](./pricing#how-many-at-once).
-- Builds run one at a time until your account has bought credit, then four. A
+- Builds run one at a time until your account holds credit, then four. A
   free trial keeps its first three images free; after that they are billed as
   stored images ([pricing](./pricing#snapshots-images-and-volumes)).
 

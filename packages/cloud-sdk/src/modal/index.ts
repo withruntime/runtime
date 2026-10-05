@@ -220,8 +220,12 @@ export class SandboxService {
         vcpu: params.cpu,
         memoryMiB: params.memoryMiB,
         region: placement,
-        timeoutSeconds: Math.ceil((params.timeoutMs ?? 300_000) / 1000),
-        idlePauseSeconds: 0,
+        // A timeout is the customer's limit, and the sandbox never pauses
+        // for idleness before it. None is no time limit (0300): it runs while
+        // it works and pauses when idle.
+        ...(params.timeoutMs === undefined
+          ? {}
+          : { timeoutSeconds: Math.ceil(params.timeoutMs / 1000), idlePauseSeconds: 0 }),
         onLeaseEnd: "stop",
         network: {
           internet: !params.blockNetwork,

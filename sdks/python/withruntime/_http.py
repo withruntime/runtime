@@ -20,6 +20,18 @@ if TYPE_CHECKING:
 from urllib.parse import urlsplit
 
 MAX_BODY = 64 * 1024 * 1024
+#: How long one attempt waits for its answer to start. The API starts every
+#: answer within 120 s: Caddy answers 503 itself past that, and a longer call
+#: gets its 200 at 90 s and then its JSON (runtime-late-answer). An attempt with
+#: no answer by then is talking to a server that is gone, such as a controller
+#: that died with the call in flight while its address moved to the new leader:
+#: a client that only waits sends nothing the new leader could refuse (the
+#: leader drill on vin-5, 4 October 2026). It is sent again under the same key.
+ANSWER_START_SECONDS = 125.0
+
+
+class NoAnswerStarted(TimeoutError):
+    """An attempt's answer did not start within ANSWER_START_SECONDS."""
 DEFAULT_BASE_URL = "https://api.withruntime.com"
 #: Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's own
 #: host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs on
@@ -27,12 +39,13 @@ DEFAULT_BASE_URL = "https://api.withruntime.com"
 #: because the hop never leaves the machine: from the program to the guest's own
 #: proxy, then over the sandbox's private channel to its host.
 SANDBOX_BASE_URL = "http://runtime.internal"
-#: Every Runtime sandbox has this file; the guest keeps it current.
+#: Every Runtime sandbox has this file; the guest keeps it current. Tests move
+#: it, so the machine running them does not decide what they see.
 SANDBOX_MARKER = "/run/runtime/environment.json"
 
 
-def in_runtime_sandbox(marker: str = SANDBOX_MARKER) -> bool:
-    return os.path.exists(marker)
+def in_runtime_sandbox(marker: Optional[str] = None) -> bool:
+    return os.path.exists(marker or SANDBOX_MARKER)
 
 
 def default_base_url(env=None, in_sandbox=in_runtime_sandbox) -> str:
@@ -365,11 +378,19 @@ class SyncHTTP:
                         if remaining <= 0:
                             raise TimeoutError("The request deadline expired")
                     connection.timeout = remaining
+                    start = ANSWER_START_SECONDS if remaining is None else min(remaining, ANSWER_START_SECONDS)
                     if connection.sock is not None:
-                        connection.sock.settimeout(remaining)
+                        connection.sock.settimeout(start)
                     connection.request(method, target, body=body, headers=headers)
                     socket = connection.sock
-                    response = connection.getresponse()
+                    try:
+                        response = connection.getresponse()
+                    except TimeoutError as error:
+                        if remaining is None or ANSWER_START_SECONDS < remaining:
+                            raise NoAnswerStarted("No answer started") from error
+                        raise
+                    if socket is not None:
+                        socket.settimeout(remaining)
                 return SyncResponse(self, connection, response, socket)
             except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError):
                 connection.close()
@@ -620,7 +641,13 @@ class AsyncHTTP:
                     head.append(f"Content-Length: {len(body or b'')}")
                 writer.write(("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + (body or b""))
                 await within(writer.drain(), timeout)
-                status_line = await within(reader.readline(), timeout)
+                try:
+                    start = ANSWER_START_SECONDS if timeout is None else min(timeout, ANSWER_START_SECONDS)
+                    status_line = await within(reader.readline(), start)
+                except asyncio.TimeoutError as error:
+                    if timeout is None or ANSWER_START_SECONDS < timeout:
+                        raise NoAnswerStarted("No answer started") from error
+                    raise
                 if not status_line:
                     raise ConnectionResetError("Server closed the connection")
                 parts = status_line.decode("latin-1").split(" ", 2)

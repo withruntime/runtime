@@ -28,7 +28,9 @@ import { Pty } from "./pty.js";
 /** E2B's default machine: 2 vCPU and 512 MiB (docs.e2b.dev/billing, checked
  * 23 September 2026). Pass `runtime: { create: { memoryMiB } }` for another. */
 export const DEFAULT_SHAPE = { vcpu: 2, memoryMiB: 512 } as const;
-/** E2B's default sandbox timeout, 300 s. */
+/** E2B's default sandbox timeout, 300 s. Not sent: a sandbox created with no
+ * timeoutMs has no time limit on Runtime, running while it works and pausing
+ * when idle (0300). Kept for code that imports it. */
 export const DEFAULT_TIMEOUT_MS = 300_000;
 /** Runtime's lease bounds (MAX_TIMEOUT_SECONDS in the API). */
 const MIN_LEASE_SECONDS = 60;
@@ -54,7 +56,8 @@ export interface SandboxOpts extends ConnectionOpts {
   /** The sandbox's own environment: every command, terminal and code run in it
    * gets these, whoever connects. Values are never shown again. */
   envs?: Record<string, string>;
-  /** Default 300 000, at most 24 hours. Runtime's leases run 60 s to 1 hour:
+  /** When it ends, at most 24 hours. Leave it out for no time limit: it runs
+   * while it works and pauses when idle. Runtime's limits run 60 s to 1 hour:
    * shorter rounds up to 60 s (with a warning); longer gets an hour, moved on
    * while this process runs, up to the time asked for. */
   timeoutMs?: number;
@@ -197,6 +200,7 @@ async function renew(keeper: Keeper) {
     const current = state(keeper.runtime);
     if (current === "stopped") return stopKeeping(id);
     if (current === "running") {
+      if (keeper.runtime.info.endsAt === null) return stopKeeping(id);
       const end = Date.parse(keeper.runtime.info.expiresAt);
       const want = Math.min(keeper.until, Date.now() + KEEP_AHEAD_MS);
       const later = Math.floor((want - end) / 1000);
@@ -312,7 +316,8 @@ function infoOf(runtime: RuntimeSandbox): SandboxInfo {
     ...(info.name ? { name: info.name } : {}),
     metadata: info.labels ?? {},
     startedAt: new Date(info.createdAt),
-    endAt: new Date(info.expiresAt),
+    // With no time limit, where it is paid up to: always ahead, moving on.
+    endAt: new Date(info.endsAt ?? info.expiresAt),
     state: current === "stopped" ? "paused" : current,
     cpuCount: info.vcpu,
     memoryMB: info.memoryMiB,
@@ -443,9 +448,10 @@ export class Sandbox {
     options.signal?.throwIfAborted();
     refuseCreate(opts);
     const client = clientFor(opts);
-    const asked = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    // No timeoutMs, no time limit: it runs while it works (0300).
+    const asked = opts.timeoutMs === undefined ? undefined : Date.now() + opts.timeoutMs;
     const input: RuntimeCreate = {
-      timeoutSeconds: leaseSeconds(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      ...(opts.timeoutMs === undefined ? {} : { timeoutSeconds: leaseSeconds(opts.timeoutMs) }),
       onLeaseEnd: onLeaseEnd(opts.lifecycle),
       // With a lifecycle, E2B resumes a paused sandbox on traffic only when
       // asked (autoResume); Runtime's automatic wake is the same thing (0093).
@@ -466,7 +472,7 @@ export class Sandbox {
       ...opts.runtime?.create,
     };
     const runtime = await guard("sandbox", () => client.sandboxes.create(create, options));
-    keepUntil(runtime, asked);
+    if (asked !== undefined) keepUntil(runtime, asked);
     return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
@@ -521,7 +527,8 @@ export class Sandbox {
 
   /** Sets the sandbox to end `timeoutMs` from now, up to 24 hours; past an
    * hour the lease is moved on while this process runs. Runtime cannot end a
-   * lease early, so an end sooner than the lease's is refused. */
+   * lease early, so an end sooner than the lease's is refused. A sandbox
+   * created with no timeout has no end to move, and nothing changes. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: SandboxApiOpts = {}) {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
@@ -747,6 +754,8 @@ async function resume(runtime: RuntimeSandbox, opts: SandboxConnectOpts) {
     );
   } else if (opts.timeoutMs !== undefined) {
     checkTimeout(opts.timeoutMs);
+    // No time limit: no end to move (0300).
+    if (runtime.info.endsAt === null) return;
     const later = Math.min(asked!, Date.now() + KEEP_AHEAD_MS) - Date.parse(runtime.info.expiresAt);
     if (later > 1000)
       await guard("sandbox", () => runtime.extend(Math.ceil(later / 1000), request(opts)));
@@ -770,8 +779,10 @@ async function extendTo(
   opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal">,
 ) {
   checkTimeout(timeoutMs);
+  // No time limit: no end to move (0300).
+  if (runtime.info.endsAt === null) return;
   const asked = Date.now() + timeoutMs;
-  const end = Date.parse(runtime.info.expiresAt);
+  const end = Date.parse(runtime.info.endsAt ?? runtime.info.expiresAt);
   if (asked - end < -1000)
     throw new NotSupportedError(
       "Ending a sandbox sooner than its lease (a shorter setTimeout)",

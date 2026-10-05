@@ -11,7 +11,7 @@ from datetime import timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
-from .._compat_lease import epoch, extension_seconds  # noqa: F401 - the adapter's names for them
+from .._compat_lease import end_of, epoch, extension_seconds, no_limit  # noqa: F401 - the adapter's names for them
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Vercel's names --------------------------------------------------
@@ -300,7 +300,9 @@ DEFAULT_VCPUS = 2
 MEMORY_MIB_PER_VCPU = 2048
 """Vercel's default machine: 2 vCPUs with 2048 MB each (checked 23 September 2026)."""
 DEFAULT_TIMEOUT = 300
-"""Vercel's default session length, 5 minutes."""
+"""Vercel's default session length, 5 minutes. Not sent: a sandbox created
+with no execution_time_limit has no time limit on Runtime, running while it
+works and pausing when idle (0300). Kept for code that imports it."""
 MIN_LEASE, MAX_LEASE = 60, 3600
 LONGEST_MS = 86_400_000
 HOME = "/vercel/sandbox"
@@ -326,7 +328,7 @@ def time_limit(value: Any) -> float:
     """An execution time limit in seconds, at least a minute. Past an hour the
     adapter renews Runtime's lease (an hour at most) while the sandbox object
     lives."""
-    total = DEFAULT_TIMEOUT if value is None else seconds(value)
+    total = seconds(value)
     if total is None or not math.isfinite(total) or total <= 0:
         raise ValueError(f"execution_time_limit must be positive, not {value}.")
     return max(float(math.ceil(total)), float(MIN_LEASE))

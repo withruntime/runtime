@@ -27,16 +27,23 @@ usage-pricing quote is fixed when it is made.
 nothing happening in it: no request, no command still running, no open
 connection, no network traffic and no CPU use. From then it pays
 [paused storage](#paused-storage) only, and the next request wakes it. Set
-`idlePauseSeconds` from {{idle-pause-min}} to {{idle-pause-max}}, or 0 to keep it running; `onLeaseEnd`
-pauses or stops it when its lease ends.
+`idlePauseSeconds` from {{idle-pause-min}} to {{idle-pause-max}}, or 0 to keep it running.
 
-**A persistent sandbox also pays for its disk.** While a sandbox is
-`persistent`, its whole `diskMiB` is billed at the reserved disk rate,
-{{volume-rate-micros}} microdollars per GiB-hour (about {{volume-month}} per GiB per 30-day
-month), whether it runs, is paused or is stopped; paused, its memory is billed
-as [paused storage](#paused-storage) beside it. Turning persistence off ends
-the disk charge: at once for a running sandbox, and once the disk is deleted
-for a stopped one.
+**A running sandbox's disk.** The first {{running-disk-included}} a running
+sandbox's disk holds are included. Past them, the blocks its disk alone holds
+are billed at the [paused-storage](#paused-storage) rate,
+{{paused-storage-rate}} per decimal GB per 30-day month, measured every 30
+seconds while it runs. A disk of {{running-disk-included}} or less, the default
+and every trial sandbox's, never pays it. It shows on the bill as "Sandbox
+disk". Sandboxes made before 5 October 2026 keep the terms they were quoted.
+
+**Busy time is never cut off on a clock.** A sandbox has no time limit unless
+you set one with `timeoutSeconds`: a busy one keeps running, paying for what it
+uses, until you stop it, it idles into a pause, or credit, a spending limit or
+its own `maxTotalCostMicros` runs out. `onTimeout` (`onLeaseEnd` in the SDKs)
+says whether it then pauses or stops. `persistent: true` keeps a sandbox
+running until you stop it, with no idle pause; its disk is billed as any
+sandbox's.
 
 **Start free.** Every new account gets the [{{trial-hours}}-hour free trial](./trial), no
 card. At these rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox would cost
@@ -49,29 +56,44 @@ at this month's pace and what each product cost each day, and its ledger links
 each card purchase to its Stripe receipt. Refer a company and you both get credit
 equal to its first top-up, up to {{referral-max}} each ([referrals](./referrals)). Moving
 from another provider? Your first top-up is matched, up to {{switching-max}}
-([switching credit](#switching-credit)).
+([switching credit](#switching-credit)). A venture-backed startup building with AI
+agents can apply to [Runtime for Startups](https://withruntime.com/startups) for
+{{startup-credit}} of credit, added over {{startup-months}} months.
 
 ## How many at once
 
 One paid sandbox can have up to **{{max-vcpu}} vCPUs and {{max-memory}} of memory**, at the same
-per-unit rates; a trial sandbox up to 2 vCPU and 4 GiB. Fully busy, the largest
+per-unit rates, and a disk of up to {{max-disk}}; a trial sandbox up to 2 vCPU, 4 GiB and a 10 GiB
+disk. Fully busy, the largest
 costs {{=$2 cost:runtime:16x64x3600x57600x1}} an hour.
 
-A paid account runs **{{paid-sandboxes}} sandboxes at once**, running or paused, with up to
+A paid account runs **{{paid-sandboxes}} sandboxes at once**, counting those starting, running,
+waking or pausing; paused and stopped ones do not count. It has up to
 **{{account-vcpus}} vCPUs and {{account-memory}} of memory** across the running ones and {{account-disk}} of
-disk. A new account earns the full {{paid-sandboxes}}: it runs **{{new-account-sandboxes}} sandboxes at once** until
-{{new-account-days}} days after its first top-up clears, or until {{new-account-spend}} of paid use has settled,
-whichever comes first. Granted credit, such as referral credit, counts toward
-neither. A disputed payment, a suspension or an abuse report puts an account
-back to {{new-account-sandboxes}}. A paused sandbox holds no CPU or memory. At a busy moment a create
-can still answer `no_capacity`; the SDKs wait for room, up to two minutes by
+disk, from the first top-up. A disputed payment, a suspension or an abuse
+report puts an account back to {{restricted-sandboxes}} sandboxes at once. A paused sandbox holds no
+CPU or memory; waking one while the account already runs its limit is refused
+with `quota_exceeded`, and the sandbox stays paused until another pauses or
+stops. A paused sandbox's disk is still billed as storage, and an account
+keeps up to 1,000 sandboxes in all, running, paused or stopped: delete ones
+you no longer need, or ask support for more. At a busy moment a create can still answer `no_capacity`; the SDKs wait for room, up to two minutes by
 default.
 
-An account counts as paid while it holds a top-up that was not refunded or
-charged back in full, and no payment of it is in dispute. Once every top-up has
-gone back, the paid-only features close again: outbound ports beyond 80 and
-443, the network products, rules on a secret, your own upstream proxy, and
-four image builds at once. Granted credit alone does not make an account paid.
+Paid features come at two levels.
+
+- **Has credit.** An account that holds credit, bought or given, has the paid
+  limits and everything else paid but three things, including rules on a
+  secret, dedicated outbound addresses and four image builds at once.
+- **Kept top-up.** Three things spammers abuse also need a kept top-up:
+  ports beyond 80 and 443 (outbound, custom domains, TCP ports and your own
+  upstream proxy), public previews, and private networks (WireGuard tunnels,
+  reaching your sandboxes by name, and Tailscale). A top-up counts once it is paid,
+  by card or in stablecoins, while it is not refunded or charged back in full
+  and no payment of it is in dispute; credit Runtime gave does not. A startup accepted to Runtime
+  for Startups counts as having a kept top-up from the day it is accepted.
+
+Once every top-up has gone back, the three close again. A refusal says which
+level is missing: "needs credit" or "needs a kept top-up".
 
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
@@ -82,12 +104,17 @@ runs {{trial-sandboxes}} at once.
 ## Paused storage
 
 A paused sandbox keeps its files and memory for **{{paused-storage-rate}} per decimal GB per
-30-day month**. Its immutable resource quote holds the actual rate.
+30-day month**. Its immutable resource quote holds the actual rate. A stopped
+sandbox keeps its disk the same way, at the same rate, for as long as a paused
+one, until you delete it; only a delete removes a disk. One stopped by a client
+older than 4 October 2026 (an SDK before 0.12.0, Go, Java or Ruby before 0.2.0)
+is kept free for three days, with one notice a day before, and then deleted.
 
 - **What counts:** disk and memory-snapshot blocks the sandbox alone owns. Shared
   base-image blocks and snapshot safety overhead are left out. Where the
   filesystem cannot report sharing, allocated blocks are the fallback, which can
-  overcount.
+  overcount. The same measure bills a running sandbox's disk past its first
+  {{running-disk-included}}.
 - **What does not:** the provisioned disk allowance, or the sum of live file
   sizes.
 - **When it runs:** compute billing ends when a pause stops the sandbox's
@@ -95,15 +122,20 @@ A paused sandbox keeps its files and memory for **{{paused-storage-rate}} per de
   at that moment, at the size measured once the write finishes. It ends on
   confirmed resume or deletion. Compute has no one-minute minimum.
 
-Paid retention defaults to 30 days from each successful pause and can be set to
-1–365 days. Each pause replaces the previous saved state. Trial sandboxes keep
-their free seven-day retention and never fall back to paid storage. The
-resource's `pausedExpiresAt` and paused-storage receipt give its actual terms.
+A paused sandbox on a paid account is kept as long as the account has credit,
+until you delete it, or for 1–365 days if you set them with `:retention`. When
+credit runs out it is kept seven more days, with a notice first, and a top-up
+before then keeps it again. Each pause replaces the previous saved state. On an
+account with only the trial, a paused sandbox is kept seven days for free. Once
+the account holds credit, a sandbox paused on the trial is kept as a paid one is,
+and its storage is billed from the end of its seven free days. The resource's `pausedExpiresAt` (null while it is kept as long as you
+have credit) and paused-storage receipt give its actual terms.
 
-A pause you ask for, or one at the end of a lease, posts an account notice with
-the date its saved state is kept until. The notice is posted within about five
-minutes, so a sandbox woken sooner may get none. An idle pause posts none. Every
-paused sandbox gets a warning a day before its saved state is deleted. Its
+A pause with an end date that you ask for, or one at the end of a time limit or of credit, posts an
+account notice with the date its saved state is kept until. The notice is posted
+within about five minutes, so a sandbox woken sooner may get none. An idle pause,
+and one kept as long as you have credit, posts none. Every paused sandbox with an
+end date gets a warning a day before its saved state is deleted. Its
 storage is still charged from the moment it paused, as above.
 
 ## Snapshots, images and volumes
@@ -142,7 +174,7 @@ microdollars. The volume rate is the reserved disk rate: a volume holds its whol
 size on its server from the moment you create it.
 
 Building an image is free (on the free trial it counts toward the {{trial-hours}} hours, unless it fails through a fault of ours),
-and so is the snapshot a fork takes for itself and deletes. A snapshot is kept 7 days unless you choose 1 to 365. A snapshot's copy
+and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, up to a year from when it was taken (7 days on the trial), unless you choose 1 to 365 days. A snapshot's copy
 off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**, charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
 Every volume is backed up off its server daily unless you turn that off.
@@ -164,18 +196,21 @@ is released.
 
 Inbound traffic is free. Each account's first **{{outbound-allowance}} of outbound traffic a
 month** is free, and after that it costs **{{outbound-rate}} per decimal GB**. Outbound
-traffic is what your sandboxes send over the connections they open to the
-internet, TCP and UDP. Everything a sandbox receives, replies it serves through
-previews, custom domains and TCP ports, traffic to your own network over a
-WireGuard tunnel, and your code's calls to Runtime's own API at
-`http://runtime.internal` are not counted. A trial sandbox's traffic is free and uses
+traffic is what your sandboxes send to the internet: over the connections
+they open, TCP and UDP, and, for sandboxes created from 5 October 2026, what they
+serve through previews, custom domains and TCP ports, a desktop's live view
+included. Everything a sandbox receives, traffic to your own network over a
+WireGuard tunnel or to your other sandboxes by name, and your code's calls to
+Runtime's own API at `http://runtime.internal` are not counted. What a sandbox
+created before 5 October 2026 serves stays free for its life. A trial sandbox's traffic is free and uses
 none of the allowance.
 
 The allowance is shared by all of an account's sandboxes and starts again on
 the first of each month, UTC. Traffic is charged from your balance each time a
-sandbox's compute settles: at each lease renewal and when it stops or pauses.
+sandbox's compute settles: each half hour while it runs, and when it stops or pauses.
 It is never held in advance and never takes the balance below zero. The rate is
-fixed in each sandbox's quote, as `egress.outbound` in `rates`, and
+fixed in each sandbox's quote, as `egress.outbound` in `rates` for what it
+sends and `egress.served` for what it serves, and
 `GET /v1/usage` answers the month so far under `outbound`: what was sent, what
 the allowance covered, and what the rest cost. At {{outbound-rate}}, 1 TB past the
 allowance costs {{=$0 1000 * outbound-rate}}.
@@ -195,12 +230,17 @@ outbound address. See [networking](./networking) for funding status and access.
 
 ## When your balance runs out
 
+While your sandboxes run on paid credit, each owner of the account is told,
+in the account inbox and by email, when the balance will last under five days
+at this month's pace, and again when it has run out: once each, and again
+after the next top-up. Usage & billing shows the same warning.
+
 Storage charges stop at zero, and your balance never goes below it. You never
 owe money. Nothing is lost straight away:
 
 - The item is kept for **seven days**. An account notice tells you the date, and
   a second notice warns you a day before it. Notices go to your account inbox
-  (`runtime_notices` in MCP); there is no email yet.
+  (`runtime_notices` in MCP).
 - Add credit within those seven days and charging starts again from then. The
   days it went unpaid are written off: they are never charged, now or later.
 - After seven days unpaid, the item is deleted. A volume that a sandbox still
@@ -245,16 +285,16 @@ each provider's comparison page gives its own date.
 | **Runtime**                                                     |          **{{cost:runtime}}** |                          — |
 | Northflank, published CPU and memory rates (4 GB)               |           {{cost:northflank}} |      {{saving:northflank}} |
 | Cloudflare Sandbox, published rates (2 vCPU, 6 GiB, 12 GB disk) |           {{cost:cloudflare}} |      {{saving:cloudflare}} |
-| Fly Machines, `performance-2x` with 4 GB, `iad`                 |         {{cost:fly-machines}} |    {{saving:fly-machines}} |
 | Prime Sandboxes, published rates (5 GiB disk)                   |                {{cost:prime}} |           {{saving:prime}} |
+| Fly Machines, `performance-2x` with 4 GB, `iad`                 |         {{cost:fly-machines}} |    {{saving:fly-machines}} |
 | Morph, 2 MCUs an hour                                           |                {{cost:morph}} |           {{saving:morph}} |
 | Vercel Sandbox, published `iad1` rates (4 GB)                   |               {{cost:vercel}} |          {{saving:vercel}} |
 | Freestyle, published rates (32 GiB disk)                        |            {{cost:freestyle}} |       {{saving:freestyle}} |
+| Fly Sprites, published rates (4 GB of memory in use)            |          {{cost:fly-sprites}} |     {{saving:fly-sprites}} |
 | CodeSandbox SDK, a Nano VM (2 cores, 4 GB)                      |          {{cost:codesandbox}} |     {{saving:codesandbox}} |
 | E2B, published per-second rates                                 |                  {{cost:e2b}} |             {{saving:e2b}} |
 | Daytona, published CPU and memory rates                         |              {{cost:daytona}} |         {{saving:daytona}} |
 | Blaxel, 4 GB of memory while active                             |               {{cost:blaxel}} |          {{saving:blaxel}} |
-| Fly Sprites, published rates (4 GB of memory in use)            |          {{cost:fly-sprites}} |     {{saving:fly-sprites}} |
 | Modal Sandboxes, published rates (1 physical core)              |                {{cost:modal}} |           {{saving:modal}} |
 | AWS Lambda MicroVMs, Arm, US East (a 4 GB baseline)             |      {{cost:lambda-microvms}} | {{saving:lambda-microvms}} |
 | Runloop, a `MEDIUM` devbox (2 CPUs, 4 GB, 8 GB disk)            |              {{cost:runloop}} |         {{saving:runloop}} |
@@ -335,7 +375,9 @@ runtime switch --from e2b
 - Once per organization, and only before its first top-up. Your agent can do
   it for you: `POST /v1/switching`, or the `runtime_switching_record` MCP tool.
 - The credit lands when the payment settles. Pay $40 and you get $40 more; pay
-  $250 and you get {{switching-max}} more.
+  $250 and you get {{switching-max}} more. Paid through Link or another wallet
+  that does not tell us the card, it lands once someone at Runtime has checked
+  it.
 - It does not stack with a [referral](./referrals). If you signed up through a
   referral link, the referral's match applies instead, and it is never smaller.
 - If the top-up is refunded or charged back, the matching credit goes back too,

@@ -150,7 +150,10 @@ export class FileSystem {
     options?.signal?.throwIfAborted();
     const result = await this.#call(syscall, path, () => this.#ctx.run(argv, options));
     if (result.exitCode === 0) return result.stdout;
-    if (/No such file or directory/.test(result.stderr)) throw fsError("ENOENT", syscall, path);
+    // dash, the sh of Debian and Ubuntu (a Runtime sandbox's), says "cannot
+    // create ...: Directory nonexistent" for a missing parent.
+    if (/No such file or directory|Directory nonexistent/.test(result.stderr))
+      throw fsError("ENOENT", syscall, path);
     if (syscall === "unlink" || syscall === "rm") throw fsError("EACCES", syscall, path);
     if (syscall === "rmdir" && /not empty/i.test(result.stderr))
       throw fsError("ENOTEMPTY", syscall, path);

@@ -46,17 +46,17 @@ in `ports`. Host-runtime harnesses such as Pi need none.
 
 Every option is optional.
 
-| Option              | What it does                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `create`            | How to create each sandbox: `funding`, `region`, `image`, `snapshot`, `vcpu`, memory, disk, lease, `network` |
-| `env`               | Set for every command, under the command's own `env`                                                         |
-| `ports`             | Ports shared as Runtime previews; bridge harnesses use the first                                             |
-| `previewVisibility` | `private` (default): the endpoint carries a preview token; `public`: anyone with the address, paid only      |
-| `previewTtlSeconds` | How long each endpoint's token lasts, 60 seconds to 7 days; one day by default                               |
-| `commandTimeoutMs`  | The longest a command may run: one hour by default, 24 hours at most                                         |
-| `pauseOnStop`       | `session.stop()` pauses the sandbox, so a resumed session wakes the same machine                             |
-| `runtime`           | The client to use                                                                                            |
-| `sandbox`           | A sandbox you created; the provider never stops it                                                           |
+| Option              | What it does                                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `create`            | How to create each sandbox: `funding`, `region`, `image`, `snapshot`, `vcpu`, memory, disk, time limit, `network` |
+| `env`               | Set for every command, under the command's own `env`                                                              |
+| `ports`             | Ports shared as Runtime previews; bridge harnesses use the first                                                  |
+| `previewVisibility` | `private` (default): the endpoint carries a preview token; `public`: anyone with the address, paid only           |
+| `previewTtlSeconds` | How long each endpoint's token lasts, 60 seconds to 7 days; one day by default                                    |
+| `commandTimeoutMs`  | The longest a command may run: one hour by default, 24 hours at most                                              |
+| `pauseOnStop`       | `session.stop()` pauses the sandbox, so a resumed session wakes the same machine                                  |
+| `runtime`           | The client to use                                                                                                 |
+| `sandbox`           | A sandbox you created; the provider never stops it                                                                |
 
 ## What runs in the sandbox
 

@@ -42,8 +42,9 @@ class Base(unittest.TestCase):
 class Create(Base):
     def test_daytona_defaults(self):
         sandbox = self.daytona.create()
+        # No time limit: autoStopInterval is its idle pause (0300).
         self.assertEqual(self.last_create(), {"vcpu": 1, "memory_mib": 1024, "disk_mib": 3072,
-                                              "timeout_seconds": 900, "on_lease_end": "pause"})
+                                              "idle_pause_seconds": 900, "on_lease_end": "pause"})
         self.assertEqual(sandbox.state, SandboxState.STARTED)
         self.assertEqual((sandbox.cpu, sandbox.user, sandbox.auto_stop_interval), (1, "daytona", 15))
 
@@ -54,7 +55,7 @@ class Create(Base):
             network_allow_list="10.0.0.0/8", domain_allow_list="pypi.org",
             volumes=[VolumeMount(volume_id="data", mount_path="/data")]))
         self.assertEqual(self.last_create(), {
-            "vcpu": 2, "memory_mib": 4096, "disk_mib": 10240, "timeout_seconds": 1800, "on_lease_end": "pause",
+            "vcpu": 2, "memory_mib": 4096, "disk_mib": 10240, "idle_pause_seconds": 1800, "on_lease_end": "pause",
             "name": "agent", "labels": {"team": "x"}, "network": {"internet": True, "allow": ["10.0.0.0/8", "pypi.org"]},
             "volumes": [{"volume_id": "11111111-2222-4333-8444-555555555555", "path": "/data"}]})
 
@@ -78,7 +79,7 @@ class Create(Base):
         self.assertEqual(self.last_create()["image"], "img-1")
         self.world.named_snapshots.append({"id": "snap-9", "name": "saved", "state": "ready"})
         self.daytona.create(CreateSandboxFromSnapshotParams(snapshot="saved"))
-        self.assertEqual(self.last_create(), {"snapshot": "snap-9", "timeout_seconds": 900, "on_lease_end": "pause"})
+        self.assertEqual(self.last_create(), {"snapshot": "snap-9", "idle_pause_seconds": 900, "on_lease_end": "pause"})
         with self.assertRaises(DaytonaNotFoundError) as caught:
             self.daytona.create(CreateSandboxFromSnapshotParams(snapshot="unknown"))
         self.assertIn("daytona.snapshot.create", str(caught.exception))
@@ -276,7 +277,7 @@ class Lifecycle(Base):
         sandbox.stop()
         self.assertEqual(sandbox.state, SandboxState.STOPPED)
         sandbox.start()
-        self.assertEqual(self.world.called("sandbox.wake")[-1][1], 900)
+        self.assertIsNone(self.world.called("sandbox.wake")[-1][1])  # no time limit, none on waking
         sandbox.delete()
         self.assertEqual(len(self.world.called("sandbox.stop")), 1)
         ephemeral = self.daytona.create(CreateSandboxFromSnapshotParams(ephemeral=True))
@@ -286,7 +287,7 @@ class Lifecycle(Base):
     def test_activity_moves_the_lease(self):
         import time
         from e2b_fake import _iso
-        sandbox = self.daytona.create()
+        sandbox = self.daytona.create(CreateSandboxFromSnapshotParams(ttl_minutes=120))
         self.world.sandboxes[sandbox.id].info["expiresAt"] = _iso(time.time() + 60)
         sandbox.process.exec("true")
         self.assertGreaterEqual(self.world.called("sandbox.extend")[-1][1], 839)

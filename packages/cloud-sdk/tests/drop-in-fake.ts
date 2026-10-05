@@ -97,7 +97,6 @@ export class DropInWorld extends FakeWorld {
     sandboxes.create = async (input: Record<string, unknown>, options: unknown) => {
       const made = await create(input, options);
       made.info.name = input.name ?? null;
-      made.info.timeoutSeconds = input.timeoutSeconds ?? 1800;
       made.info.diskMiB = input.diskMiB ?? 4096;
       return made;
     };

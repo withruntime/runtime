@@ -58,8 +58,10 @@ class SwitchImage(unittest.TestCase):
         sbx = runtime.sandboxes.get(SANDBOX)
         self.assertIs(sbx.switch_image("app:v2", keep="workspace"), sbx)
         self.expect_switch(Stub.seen)
-        with self.assertRaises(TypeError):
-            sbx.switch_image("app:v2")  # keep is required: it says what is lost
+        # keep is optional and still sent, so an API from before it was
+        # optional accepts the call too.
+        sbx.switch_image("app:v2")
+        self.expect_switch(Stub.seen)
 
     def test_async(self):
         async def main():
@@ -67,6 +69,12 @@ class SwitchImage(unittest.TestCase):
                 sbx = await runtime.sandboxes.get(SANDBOX)
                 await sbx.switch_image("app:v2", keep="workspace")
                 self.expect_switch(Stub.seen)
+                await sbx.switch_image("app:v2")
+                self.expect_switch(Stub.seen)
+                await sbx.resize(vcpu=2)
+                method, path, body, _ = Stub.seen[-1]
+                self.assertEqual((method, path, body),
+                                 ("POST", f"/v1/sandboxes/{SANDBOX}:resize", {"restart": True, "vcpu": 2}))
         asyncio.run(main())
 
 

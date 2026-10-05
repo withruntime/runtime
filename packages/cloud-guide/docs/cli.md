@@ -31,7 +31,7 @@ runtime sandbox run --keep --vcpu 2 -- nproc   # keeps it, and prints how to run
 `run` creates a sandbox, runs the command, prints its output, stops the sandbox
 and exits with the command's exit code. It takes the same options as
 `sandbox create`, with one difference: `--timeout <seconds>` limits the command,
-as it does for `exec` (exit code 124 when it runs out), not the sandbox's lease.
+as it does for `exec` (exit code 124 when it runs out), not the sandbox.
 `--keep` leaves the sandbox running for more commands.
 
 ## Connect once
@@ -107,12 +107,14 @@ runtime sandbox stop "${id}"
 `create` prints only the id, so it composes with `$(...)`, and waits until the
 sandbox is running (`--no-wait` returns at once). Its options:
 
-- `--vcpu`, `--memory` and `--disk` in MiB, `--timeout <seconds>`,
-  `--on-timeout pause|stop`
-- from withruntime 0.7.0: `--cpu reserved` and `--cpu-floor <thousandths>` for
-  guaranteed CPU; `--max-cost <usd>` refuses the create if its first lease
-  could cost more, and `--max-total-cost <usd>` caps its whole life
-- `--trial` or `--paid`, `--name`, `--label k=v` (repeatable)
+- `--vcpu`, `--memory` and `--disk` in MiB; `--timeout <seconds>` (60 to 86,400,
+  24 hours) sets a time limit, and `--on-timeout pause|stop` what it does. Without
+  `--timeout` a sandbox has none: it runs while it works and pauses when idle
+- from withruntime 0.7.0: `--cpu-floor <thousandths>` for guaranteed CPU, and
+  `--cpu reserved` for the highest floor, every vCPU; `--max-total-cost <usd>`
+  caps its whole life
+- `--name`, `--label k=v` (repeatable); `--trial` and `--paid` are accepted
+  and ignored, since the trial's hours are spent first, then credit
 - `--env K=V` (repeatable) sets a variable for every command, terminal and SSH
   session in it, for its whole life; values are never shown again
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
@@ -120,7 +122,8 @@ sandbox is running (`--no-wait` returns at once). Its options:
 - `--idle-pause <seconds>` pauses it after that long with nothing happening in
   it (default {{idle-pause-seconds}}; {{idle-pause-min}} to {{idle-pause-max}}, or 0 for never), and `--no-auto-wake` keeps a
   paused one paused until `wake`
-- `--persistent` keeps a paid sandbox running while credit lasts
+- `--persistent` keeps a paid sandbox running until you stop it, idle or not,
+  while credit lasts
 - `--get-or-create` with `--name` prints the id of the sandbox that already has
   the name, woken if paused, instead of failing with `name_taken`
 
@@ -133,9 +136,10 @@ Boolean options accept `=true` or `=false`; `--persistent=maybe` answers
 reach the API for validation rather than silently using a default. `--help`
 after any command prints its product's help and runs nothing.
 
-`ls` lists the live sandboxes; `ls --all` adds the stopped ones and lists every
+`ls` lists the live sandboxes and the stopped ones that keep their disk; `ls --all` adds the rest and lists every
 sandbox the account has had, oldest first, so the newest are last. `get`
-shows what happens at the end of the lease (`pause` or `stop`) and, once a
+shows its time limit, when it ends (or that it runs while it works), what
+happens then (`pause` or `stop`) and, once a
 sandbox has paused or ended, when, with its stop reason
 ([troubleshooting](./troubleshooting#a-sandbox-stopped-on-its-own) says what
 each means). A refused option is named as the option you typed, such as
@@ -211,8 +215,8 @@ leaves a short file under the name you gave.
 A sandbox's name works wherever its id does, in every `runtime sandbox` command
 and in `--sandbox` filters, when one live sandbox has it.
 
-Lifecycle: `pause`, `wake` (a sandbox already awake is left as it is), `restart`, `extend <id> <seconds>` (it prints the
-new end of the lease), `stop`. A paused
+Lifecycle: `pause`, `wake` (a sandbox already awake is left as it is), `restart`, `extend <id> <seconds>` (it moves a
+time limit on and prints the new end; a sandbox with none needs nothing), `stop`. A paused
 sandbox also wakes by itself when a command, file or terminal call or a visit
 to a shared port reaches it, billed as any wake from the moment it runs.
 
@@ -239,23 +243,16 @@ and previews. Its processes restart and the rest of its old disk is lost, so
 the flag is required; snapshot it first to keep everything
 ([images](./images#move-a-sandbox-to-a-new-version)).
 
-When enabled, `runtime sandbox resize <id> --vcpu 2 --memory 4096 --restart`
-gives a sandbox a new size by a restart, on the same server. Its whole disk,
-volumes, environment and previews stay; its programs stop, so the flag is
-required. Snapshot it first to keep its memory too. Memory is charged on the
-new size from then.
-
 `runtime sandbox rm <id>` (or `delete`) removes a sandbox for good, in any
 state: it stops it, deletes its disk and paused memory, revokes its previews
 and ports, and takes it out of every list. Its snapshots stay. Running it again
 prints the same.
 
-`--persistent on` renews the lease on the server while credit lasts, up to
-`--max-total-cost`, and keeps the disk after a stop, billed as reserved disk, so
-`restart` starts it again. A stopped persistent sandbox stays in `runtime ls`
-and `runtime sandbox ls`. `--persistent off` makes it an ordinary sandbox
-again: a running one stops paying for its disk at once, and a stopped one has
-its disk deleted; `rm` removes it for good. `get` shows the automatic wake,
+`--persistent on` keeps it running until you stop it, idle or not, while credit
+lasts, up to `--max-total-cost`, its disk billed as any sandbox's. Any stopped
+sandbox keeps its disk, so `restart` starts it again, and stays in `runtime ls`
+and `runtime sandbox ls`; `rm` deletes it. `--persistent off` makes it an ordinary sandbox
+again; `rm` removes it for good. `get` shows the automatic wake,
 idle pause and persistence settings.
 
 Watch a directory. `watch` prints each change as it happens (create, write,
@@ -347,7 +344,7 @@ runtime secrets rm OPENAI_API_KEY
 The value is read from standard input only, so it never lands in your shell
 history; typed at a terminal it is not shown. Every sandbox of the account then
 has `OPENAI_API_KEY` set to a placeholder, and the proxy swaps in the value on
-HTTPS requests to the hosts you named. On paid accounts, from `withruntime`
+HTTPS requests to the hosts you named. On accounts with credit, from `withruntime`
 0.7.0, `--allow` narrows that to some methods and paths, once
 per rule: `--allow /v1/chat/completions` for every method,
 `--allow 'GET,HEAD /repos/acme/*'` for two. `ls` shows names, hosts,
@@ -437,55 +434,38 @@ reads a token from standard input and stores it for private images. See
 storage ([pricing](./pricing#snapshots-images-and-volumes)). A volume lives on
 one server. It is backed up off that server every day and whenever you
 ask, and a backup restores as a new volume ([storage and backups](./storage)). `runtime sandbox stop` has the sandbox
-write out what it wrote to its volumes first, and so does a lease that runs
-out: the sandbox's programs are frozen just before the lease ends, and the
-write after that is not charged. `runtime sandbox mount <id>
+write out what it wrote to its volumes first, and so does a time limit or
+credit that runs out: the sandbox's programs are frozen just before its end,
+and the write after that is not charged. `runtime sandbox mount <id>
 s3://bucket/prefix /data --secret NAME`, `mounts` and `unmount` mount your own
 S3, R2 or Google Cloud Storage bucket without the sandbox holding its key
 (`--account-id` names an R2 bucket's Cloudflare account, `--endpoint` any other
 S3-compatible store)
 ([mount your own bucket](./storage#mount-your-own-bucket)).
 
-Shared volumes are disabled by default. Where the deployed API offers them,
-`runtime volume create --shared --size-mib <N>` creates one;
-`runtime volume attach <volume> <sandbox> --path /data`,
-`runtime volume detach <volume> <attachment>` and
-`runtime volume attachment <volume> <attachment>` submit and inspect saved
-attachment operations. Pending work remains visible; an error exits non-zero
-and prints its receipt. See [shared volumes](./storage#shared-volumes-when-enabled).
-
-Volume growth is disabled by default. If the deployed API offers it,
-`runtime volume resize <id> --size-mib <N>` grows a detached ordinary volume.
-A pending result retains the old confirmed size; use `runtime volume get <id>`
-to follow `resize.state` until `completed` or `failed`. Failure exits non-zero
-and keeps the error record. See [volume growth](./storage#growing-a-volume-when-enabled).
-
-Where deferred compression has been qualified and enabled, a memory
-snapshot can be ready for same-server starts while
-`compressionPending` is true. Raw preparation files are not charged; storage
-uses the final verified compressed allocation. Off-server copying waits for
-compression, and `backedUp` confirms the copy has been checked. See
+A memory snapshot can be ready, and started from, while `compressionPending`
+is true; it is charged on its final compressed size. `backedUp` confirms its
+off-server copy has been checked. See
 [snapshot storage](./storage#snapshots-survive-their-server).
 
 Forks and snapshots:
 
 - A fork or snapshot pauses a running sandbox for the moment it takes, then
   wakes it. A sandbox with volumes cannot be snapshotted. Copies and snapshots
-  run on the source's server by default. Cross-server placement requires
-  [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled)
-  to be enabled. Each kept snapshot is also copied off its server after its
+  run on the source's server. Each kept snapshot is also copied off its server after its
   final compressed form is ready.
-- `fork` takes `--trial` or `--paid` as `create` does; with neither, the copies
-  keep the source's funding. Copies keep the source's size and CPU, reserved or
-  a raised floor, and are billed as a create with those would be. A trial copy
-  must fit the trial.
+- Copies run on what the account's new sandboxes run on (`--trial` and `--paid`
+  are accepted and ignored). Copies keep the source's size and CPU, reserved or
+  a raised floor, and are billed as a create with those would be. On an
+  account with the trial alone, a copy must fit the trial.
 - The snapshot a fork takes is deleted when the fork ends, whether every copy
   started or not, and is not billed, unless you pass `--keep-snapshot`.
 - If a copy fails, the error names the copies that did start; they keep running
   until stopped. A retry with the same idempotency key answers the same error.
 - If a fork stops partway and left its source paused, the source stays paused
   and an account notice says so; wake it with `runtime sandbox wake`.
-- A snapshot is kept 7 days unless `--retention` gives 1 to 365.
+- A snapshot is kept as long as you have credit, up to a year from when it was
+  taken (7 days on the trial), unless `--retention` gives 1 to 365 days.
 
 ## Scripts and agents: `--json`
 
@@ -516,7 +496,8 @@ runtime sandbox stop "${id}" --json
   "diskMiB": 4096,
   "cpu": "shared",
   "cpuFloorMillis": 50,
-  "timeoutSeconds": 1800,
+  "timeoutSeconds": 0,
+  "endsAt": null,
   "onLeaseEnd": "pause"
 }
 ```
@@ -534,12 +515,12 @@ runtime ls
   integer microdollars, with each resource's rates and CPU time. From 0.7.0,
   `--csv` exports one row per resource for a spreadsheet: its name, kind, state,
   when it was made, its vCPUs and memory, how long it ran, the CPU seconds it
-  used and what it was charged and still holds, in dollars to the microdollar.
+  used, what it was charged and what running ones are about to use (`held_usd`), in dollars to the microdollar.
   It covers the newest 100 resources. For all visible resources over a date
   range, use `runtime usage export --since 2026-09-01T00:00:00Z
 --until 2026-10-01T00:00:00Z > usage.csv`. This follows every page and prints
   the server's CSV with one header. It includes settled intervals at `since`
-  and excludes those at `until`, by settlement time; pending holds are excluded.
+  and excludes those at `until`, by settlement time; running time not yet settled is left out.
   Amounts remain exact. `--json` prints one complete server page per line.
   Each page rechecks current permissions and reads current settlements. See
   [export settled usage](./api#export-settled-usage).
@@ -638,7 +619,7 @@ runtime tunnel rm                                   # the tunnel and every peer
 ```
 
 `runtime network upstream-proxy` arrived in 0.7.0. `runtime network private on|off|status` lets
-your sandboxes reach each other by name, paid accounts only. Each has
+your sandboxes reach each other by name, for an account with a kept top-up. Each has
 its own help: `runtime domain help`, `runtime port help`,
 `runtime address help`, `runtime tunnel help`, `runtime network help`.
 

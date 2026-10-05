@@ -40,7 +40,7 @@ describe("daytona.create", () => {
       vcpu: 1,
       memoryMiB: 1024,
       diskMiB: 3072,
-      timeoutSeconds: 900,
+      idlePauseSeconds: 900,
       onLeaseEnd: "pause",
     });
     expect([sandbox.state, sandbox.cpu, sandbox.user, sandbox.autoStopInterval]).toEqual([
@@ -70,7 +70,7 @@ describe("daytona.create", () => {
       vcpu: 2,
       memoryMiB: 4096,
       diskMiB: 10240,
-      timeoutSeconds: 1800,
+      idlePauseSeconds: 1800,
       onLeaseEnd: "pause",
       name: "agent",
       labels: { team: "x" },
@@ -102,7 +102,11 @@ describe("daytona.create", () => {
     expect(lastCreate()).toMatchObject({ image: "img-1" });
     world.namedSnapshots.push({ id: "snap-9", name: "saved", state: "ready" });
     await daytona.create({ snapshot: "saved" });
-    expect(lastCreate()).toEqual({ snapshot: "snap-9", timeoutSeconds: 900, onLeaseEnd: "pause" });
+    expect(lastCreate()).toEqual({
+      snapshot: "snap-9",
+      idlePauseSeconds: 900,
+      onLeaseEnd: "pause",
+    });
     const error = await daytona.create({ snapshot: "unknown" }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DaytonaNotFoundError);
     expect((error as Error).message).toContain("daytona.snapshot.create");
@@ -193,7 +197,7 @@ describe("daytona.create", () => {
         vcpu: 1,
         memoryMiB: 1024,
         diskMiB: 3072,
-        timeoutSeconds: 900,
+        idlePauseSeconds: 900,
         onLeaseEnd: "pause",
       });
     }
@@ -488,7 +492,8 @@ describe("lifecycle", () => {
     await sandbox.stop();
     expect(sandbox.state).toBe("stopped");
     await sandbox.start();
-    expect(world.called("sandbox.wake").at(-1)![1]).toEqual({ timeoutSeconds: 900 });
+    // No time limit, so none on waking.
+    expect(world.called("sandbox.wake").at(-1)![1]).toEqual({});
     await sandbox.delete();
     expect(world.called("sandbox.stop")).toHaveLength(1);
     const ephemeral = await daytona.create({ ephemeral: true });
@@ -497,8 +502,8 @@ describe("lifecycle", () => {
     expect(world.called("sandbox.stop")).toHaveLength(2);
   });
 
-  test("a call close to the end of the lease moves it on (activity)", async () => {
-    const sandbox = await daytona.create();
+  test("a call close to the end of a time to live's lease moves it on (activity)", async () => {
+    const sandbox = await daytona.create({ ttlMinutes: 120 });
     const runtime = fake(sandbox.id);
     runtime.info.expiresAt = new Date(Date.now() + 60_000).toISOString();
     await sandbox.process.executeCommand("true");

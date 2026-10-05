@@ -13,7 +13,7 @@ promise that another product is available.
 | ------------------- | ------------------------------------------------------------------------------------------------ | --------- |
 | Sandboxes           | Linux microVMs: commands (kept 14 days by name), processes, terminals, files, pause and wake     | Available |
 | Code interpreter    | A notebook-style session inside a sandbox in Python, JavaScript, TypeScript, R, Java, Bash or Go | Available |
-| Network rules       | Per-sandbox internet, allow and deny lists; every port on paid accounts                          | Available |
+| Network rules       | Per-sandbox internet, allow and deny lists; every port with a kept top-up                        | Available |
 | Secrets             | API keys sandboxes use without seeing, added by the egress proxy                                 | Available |
 | Images              | Custom sandbox images from a recipe, any image or a Dockerfile, versioned and tagged             | Available |
 | Volumes             | Persistent disks attached to sandboxes, backed up off their server daily                         | Available |
@@ -25,10 +25,10 @@ promise that another product is available.
 | OpenTelemetry       | Events as logs and CPU and memory as metrics, pushed over OTLP/HTTP                              | Available |
 | Bucket mounts       | Your S3, R2 or GCS bucket as a directory in a sandbox                                            | Available |
 | MCP servers         | Servers from the MCP catalog run in a sandbox, at URLs your agent connects to                    | Available |
-| Custom domains      | Your own hostname for a sandbox port, with HTTPS; paid accounts                                  | Available |
-| TCP ports           | A public TCP port to a sandbox port; paid accounts                                               | Available |
-| Dedicated addresses | A dedicated outbound IPv4 address, with IPv6; paid accounts                                      | Available |
-| Private networks    | The tunnel: WireGuard from your network to your sandboxes, up to 16 peers; paid accounts         | Available |
+| Custom domains      | Your own hostname for a sandbox port, with HTTPS; a kept top-up                                  | Available |
+| TCP ports           | A public TCP port to a sandbox port; a kept top-up                                               | Available |
+| Dedicated addresses | A dedicated outbound IPv4 address, with IPv6; accounts with credit                               | Available |
+| Private networks    | The tunnel: WireGuard from your network to your sandboxes, up to 16 peers; a kept top-up         | Available |
 | Identity tokens     | Signed tokens a sandbox uses to reach AWS, Google Cloud and others without stored keys           | Available |
 | Single sign-on      | Sign in through your company's OIDC or SAML provider; SCIM adds and removes people; free         | Available |
 

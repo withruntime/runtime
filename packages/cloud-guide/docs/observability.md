@@ -132,22 +132,26 @@ through `withruntime/e2b`; its `diskUsed` is null.
 Every lifecycle change of a sandbox, a snapshot or a volume is an event, kept
 14 days.
 
-| Type                    | When                                                      |
-| ----------------------- | --------------------------------------------------------- |
-| `sandbox.created`       | A sandbox is made; it is starting                         |
-| `sandbox.running`       | It is ready and running                                   |
-| `sandbox.paused`        | It paused, keeping its memory and files                   |
-| `sandbox.woken`         | A paused sandbox is running again                         |
-| `sandbox.stopped`       | It stopped. `stopReason` says why                         |
-| `sandbox.start_failed`  | It stopped before it ever ran; `sandbox.stopped` follows  |
-| `sandbox.wake_failed`   | A wake did not complete; the sandbox is paused or stopped |
-| `sandbox.files.changed` | Files changed under a watch that sends to webhooks        |
-| `snapshot.ready`        | A snapshot finished and can be started from               |
-| `snapshot.failed`       | A snapshot could not be taken                             |
-| `snapshot.deleted`      | A snapshot was deleted or expired                         |
-| `volume.ready`          | A volume is made and can be attached                      |
-| `volume.failed`         | A volume could not be made                                |
-| `volume.deleted`        | A volume was deleted                                      |
+| Type                       | When                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `sandbox.created`          | A sandbox is made; it is starting                                                                           |
+| `sandbox.running`          | It is ready and running                                                                                     |
+| `sandbox.paused`           | It paused, keeping its memory and files                                                                     |
+| `sandbox.woken`            | A paused sandbox is running again                                                                           |
+| `sandbox.stopped`          | It stopped. `stopReason` says why                                                                           |
+| `sandbox.start_failed`     | It stopped before it ever ran; `sandbox.stopped` follows                                                    |
+| `sandbox.wake_failed`      | A wake did not complete; the sandbox is paused or stopped                                                   |
+| `sandbox.host_unreachable` | Its server has not answered for 35 s, so what runs there is frozen; `host.unreachableSince` says since when |
+| `sandbox.host_reachable`   | Its server answers again, and the sandbox runs on as it was                                                 |
+| `sandbox.recovered`        | Its server was lost and it is back; `recovery` says from when                                               |
+| `sandbox.recovery_failed`  | Its server was lost and it cannot come back; `recovery.reason` says why                                     |
+| `sandbox.files.changed`    | Files changed under a watch that sends to webhooks                                                          |
+| `snapshot.ready`           | A snapshot finished and can be started from                                                                 |
+| `snapshot.failed`          | A snapshot could not be taken                                                                               |
+| `snapshot.deleted`         | A snapshot was deleted or expired                                                                           |
+| `volume.ready`             | A volume is made and can be attached                                                                        |
+| `volume.failed`            | A volume could not be made                                                                                  |
+| `volume.deleted`           | A volume was deleted                                                                                        |
 
 Each event carries the resource as it was:
 
@@ -371,7 +375,8 @@ The metrics are gauges, one resource per sandbox with `runtime.sandbox.id`,
 Each log record's body is the event type. Its attributes are `event.name`,
 `event.id` and the resource's fields, such as `runtime.sandbox.state`,
 `runtime.sandbox.stop_reason` and `runtime.sandbox.label.<key>`. A failure
-(`start_failed`, `wake_failed`, `failed`) is WARN; the rest are INFO.
+(`start_failed`, `wake_failed`, `recovery_failed`, `failed`) is WARN; the rest
+are INFO.
 
 A push that fails is retried, waiting 30 seconds and doubling to an hour, and
 sends from where it stopped. `runtime.otel.get(id)` shows `lastSuccessAt`,

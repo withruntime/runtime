@@ -172,16 +172,18 @@ export function durationMs(value: string): number {
   return total;
 }
 
-/** The lease and the paused retention that honour Blaxel's TTL, expiry and
- * lifecycle: never deleted before Blaxel would delete it. A fixed deadline
- * within the hour is a lease that ends the sandbox; any other deadline keeps
- * a paused sandbox that many days, rounded up; none keeps it 365 days. */
+/** The time limit and the paused retention that honour Blaxel's TTL, expiry
+ * and lifecycle: never deleted before Blaxel would delete it. A fixed
+ * deadline within the hour is a time limit that ends the sandbox; past that
+ * there is none, so it runs while it works and pauses when idle (0300), and
+ * a paused sandbox is kept that many days, rounded up; none keeps it 365
+ * days. */
 export function lifetimeOf(asked: {
   ttl?: string | null;
   expires?: Date;
   lifecycle?: SandboxLifecycle | null;
 }): {
-  timeoutSeconds: number;
+  timeoutSeconds?: number;
   onLeaseEnd: "pause" | "stop";
   days: number;
 } {
@@ -213,7 +215,7 @@ export function lifetimeOf(asked: {
     : KEEP_DAYS;
   return soonest <= LEASE_SECONDS * 1000
     ? { timeoutSeconds: Math.max(60, Math.ceil(soonest / 1000)), onLeaseEnd: "stop", days }
-    : { timeoutSeconds: LEASE_SECONDS, onLeaseEnd: "pause", days };
+    : { onLeaseEnd: "pause", days };
 }
 
 /** Blaxel's network settings as Runtime's rules: allowed and forbidden
@@ -526,9 +528,10 @@ export class SandboxInstance {
   // ---- the live sandbox ---------------------------------------------------
 
   /** The sandbox, ready for a call. A paused one wakes by itself on the call
-   * (autoWake); one made without autoWake is woken here. A lease nearing its
-   * end is renewed in the background, so a sandbox in use is not paused by
-   * its lease. */
+   * (autoWake); one made without autoWake is woken here. A time limit
+   * nearing its end (an hour, on a sandbox made before 0300) is renewed in
+   * the background, so a sandbox in use is not paused by it; one with no
+   * time limit renews itself. */
   async #live(): Promise<RuntimeSandbox> {
     if (this.#deleted) throw responseError(404, `Sandbox ${this.name} was deleted.`);
     const rt = this.#rt;
@@ -538,6 +541,8 @@ export class SandboxInstance {
     else if (
       state === "running" &&
       rt.info.onLeaseEnd === "pause" &&
+      // One with no time limit renews itself (0300).
+      rt.info.endsAt !== null &&
       !this.#renewing &&
       Date.parse(rt.info.expiresAt) - Date.now() < RENEW_BELOW_MS
     )
@@ -590,7 +595,7 @@ export class SandboxInstance {
             }),
           )
         : undefined,
-      rt.info.onLeaseEnd === "pause" && need >= 1
+      rt.info.onLeaseEnd === "pause" && rt.info.endsAt !== null && need >= 1
         ? rt.extend(Math.ceil(need)).catch(() => undefined)
         : undefined,
     ]);
@@ -690,7 +695,7 @@ export class SandboxInstance {
       vcpu: Math.min(MAX_VCPU, Math.max(1, Math.round(memory / MEMORY_PER_VCPU))),
       memoryMiB: memory,
       ...STANDBY,
-      timeoutSeconds: lifetime.timeoutSeconds,
+      ...(lifetime.timeoutSeconds === undefined ? {} : { timeoutSeconds: lifetime.timeoutSeconds }),
       onLeaseEnd: lifetime.onLeaseEnd,
       ...(config.name ? { name: config.name } : {}),
       labels,

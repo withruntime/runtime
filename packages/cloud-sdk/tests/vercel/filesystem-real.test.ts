@@ -13,7 +13,9 @@ afterEach(async () => {
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-async function filesystem() {
+/** `shell` runs the adapter's `sh -c` commands: dash is the sh of Debian and
+ * Ubuntu, so of a Runtime sandbox, and words its errors its own way. */
+async function filesystem(shell = "sh") {
   const directory = await mkdtemp(join(tmpdir(), "runtime-vercel-fs-"));
   directories.push(directory);
   const fs = new FileSystem({
@@ -33,7 +35,7 @@ async function filesystem() {
     run: async (argv, options) => {
       options?.signal?.throwIfAborted();
       expect(options?.stdin?.byteLength ?? 0).toBeLessThanOrEqual(1_048_576);
-      const mapped = argv.map((part) =>
+      const mapped = (argv[0] === "sh" ? [shell, ...argv.slice(1)] : argv).map((part) =>
         part.startsWith("/workspace/.runtime/append/")
           ? join(directory, part.split("/").at(-1)!)
           : part,
@@ -84,12 +86,16 @@ test("append creates a file, preserves binary bytes and handles hostile filename
   expect(await fs.readFile(name)).toEqual(Buffer.from([0, 255, 128, 10, 0, 254]));
 });
 
-test("append reports missing parents and directories with Node error codes", async () => {
-  const { fs, directory } = await filesystem();
-  await expect(fs.appendFile("absent/file", "x")).rejects.toMatchObject({ code: "ENOENT" });
-  await mkdir(join(directory, "folder"));
-  await expect(fs.appendFile("folder", "x")).rejects.toMatchObject({ code: "EISDIR" });
-});
+for (const shell of ["sh", "dash"])
+  test.skipIf(!Bun.which(shell))(
+    `append reports missing parents and directories with Node error codes (${shell})`,
+    async () => {
+      const { fs, directory } = await filesystem(shell);
+      await expect(fs.appendFile("absent/file", "x")).rejects.toMatchObject({ code: "ENOENT" });
+      await mkdir(join(directory, "folder"));
+      await expect(fs.appendFile("folder", "x")).rejects.toMatchObject({ code: "EISDIR" });
+    },
+  );
 
 test("an already aborted append makes no file", async () => {
   const { fs, directory } = await filesystem();

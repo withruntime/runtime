@@ -43,8 +43,12 @@ class Base(unittest.TestCase):
 class Create(Base):
     def test_vercel_defaults(self):
         box = self.create()
-        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 4096, "timeout_seconds": 300,
-                                              "on_lease_end": "pause"})
+        # No execution_time_limit, no time limit: it runs while it works (0300).
+        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 4096, "on_lease_end": "pause"})
+        self.assertEqual(box.execution_time_limit.total_seconds(), 0)
+        box.extend_execution_time_limit(timedelta(minutes=2))
+        box.update(execution_time_limit=60)
+        self.assertEqual(self.world.called("sandbox.extend"), [])
         self.assertTrue(box.persistent)
         self.assertEqual((box.status, box.cwd), (SandboxStatus.RUNNING, "/vercel/sandbox"))
 
@@ -69,7 +73,7 @@ class Create(Base):
         self.assertNotIn("p", argv[-3:])
         self.assertEqual(options["env"], {"GIT_USER": "u", "GIT_PASS": "p"})
         self.create(source=SnapshotSource(snapshot_id="snap-1"))
-        self.assertEqual(self.last_create(), {"snapshot": "snap-1", "timeout_seconds": 300, "on_lease_end": "pause"})
+        self.assertEqual(self.last_create(), {"snapshot": "snap-1", "on_lease_end": "pause"})
 
     def test_images(self):
         self.create(image="vercel/sandbox/universal")
@@ -219,7 +223,7 @@ class Lifecycle(Base):
         self.assertEqual(caught.exception.status_code, 404)
 
     def test_update_extend_snapshot_fork_and_query(self):
-        box = self.create(name="src", ports=[3000])
+        box = self.create(name="src", ports=[3000], execution_time_limit=300)
         box.extend_execution_time_limit(timedelta(minutes=2))
         self.assertEqual(self.world.called("sandbox.extend")[-1][1], 120)
         box.update(ports=[8080], network_policy=NetworkPolicy.deny_all())

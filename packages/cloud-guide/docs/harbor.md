@@ -63,7 +63,7 @@ Every option is optional.
 
 | `--ek`     | What it does                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `funding`  | `trial` or `paid`. Left out, the account's default: the free trial while it lasts                                         |
+| `funding`  | Accepted and ignored: the trial's hours are spent first, then prepaid credit                                              |
 | `region`   | The region to run in; left out, the default                                                                               |
 | `image`    | A Runtime image (id, name or `name:tag`) to start every trial from, instead of building the task's                        |
 | `build`    | Build limits, such as `build='{"disk_mib": 16384}'`: `vcpu`, `memory_mib`, `disk_mib`, `max_image_mib`, `timeout_seconds` |
@@ -80,7 +80,7 @@ Every option is optional.
 | Users                                    | Root by default, as in Docker, and any named user, through `sudo`                                                                                                               |
 | Files                                    | Uploads and downloads of any size, anywhere in the machine, as root                                                                                                             |
 | Network policies                         | `no-network`, and allow-lists of hostnames, `*.domain` wildcards, IPv4 addresses and IPv4 CIDR ranges, changed while the trial runs                                             |
-| Long trials                              | The sandbox's lease is kept ahead of now until the trial ends, however long it runs                                                                                             |
+| Long trials                              | The sandbox runs while the trial works, however long it takes                                                                                                                   |
 
 **Root and `sudo`.** Commands in a Runtime sandbox run as the sandbox user,
 uid 1000, and Harbor runs them as root. The environment runs root commands
@@ -102,8 +102,8 @@ only to its built-in environments.
 
 - The trial runs {{trial-sandboxes}} sandboxes at once, so keep `--n-concurrent` at {{trial-concurrency}} or
   below on the trial. A paid account runs more; see [pricing](./pricing#how-many-at-once).
-- Each task is its own image. Builds run one at a time until your account has
-  bought credit, then four. A free trial keeps its first three images free;
+- Each task is its own image. Builds run one at a time until your account holds
+  credit, then four. A free trial keeps its first three images free;
   after that they are billed as stored images
   ([pricing](./pricing#snapshots-images-and-volumes)). `runtime image ls` lists
   them and `runtime image rm` removes them.

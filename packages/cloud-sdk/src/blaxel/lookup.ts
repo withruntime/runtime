@@ -36,7 +36,8 @@ export const STANDBY = {
   idlePauseSeconds: 60,
   autoWake: true,
 } satisfies Partial<RuntimeCreate>;
-/** Runtime's longest lease. The adapter renews it while the sandbox is used. */
+/** Runtime's longest time limit. A sandbox made before 0300 has it, and the
+ * adapter renews it while the sandbox is used; one made since has none. */
 export const LEASE_SECONDS = 3600;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

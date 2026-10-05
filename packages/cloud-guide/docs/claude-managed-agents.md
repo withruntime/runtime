@@ -115,9 +115,10 @@ wakes it, and carries on.
 - **The daily spending limit** on the Runtime key bounds every sandbox the
   agent starts. A create or wake past it fails with `spending_limit_reached`,
   and nothing is charged.
-- **A bounded lease.** Sandboxes stop at the end of their lease unless
-  extended. Tell the agent in its system prompt to set `timeoutSeconds` and to
-  stop what it starts, as the example does.
+- **Idle sandboxes pause.** A sandbox pauses itself when nothing happens in
+  it, so a forgotten one stops costing compute. Tell the agent in its system
+  prompt to stop what it starts, as the example does, and to set
+  `timeoutSeconds` when a task should end at a fixed time.
 - **A read-only key** gives a reviewing agent the
   sandboxes, their files and their cost, and nothing it can change.
 - **A session budget** on the Managed Agents side caps the model spend of one

@@ -65,7 +65,7 @@ running. `RuntimeProvider` is the same lifecycle in your own code:
 from langchain_withruntime import RuntimeProvider
 
 provider = RuntimeProvider()
-backend = provider.get_or_create(timeout=900)  # a new sandbox with a 15 minute lease
+backend = provider.get_or_create(timeout=900)  # a new sandbox with a 15 minute time limit
 try:
     print(backend.execute("uname -r").output)
 finally:

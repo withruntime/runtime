@@ -377,16 +377,21 @@ class AsyncDevboxOps:
         reject({k: v for k, v in p.items() if k not in allowed}, "Runloop launch_parameters")
         if p.get("architecture", "x86_64") != "x86_64":
             raise CompatibilityError("Runtime currently supports x86_64 images")
-        fields = {"timeout_seconds": 3600}
+        # keep_alive_time_seconds is the customer's limit, with no idle pause
+        # before it. None is no time limit (0300): it runs while it works and
+        # pauses when idle.
+        fields = {}
         for old, new, scale in (("custom_cpu_cores", "vcpu", 1), ("custom_gb_memory", "memory_mib", 1024),
                                 ("custom_disk_size", "disk_mib", 1024), ("keep_alive_time_seconds", "timeout_seconds", 1)):
             if p.get(old) is not None:
                 fields[new] = positive(p[old] * scale, old, integral=True)
+        if "timeout_seconds" in fields:
+            fields["idle_pause_seconds"] = 0
         env = environment(json.dumps(environment_variables or {}).encode())
         if snapshot_id:
             _snapshots.view(await self._runtime.snapshots.get(snapshot_id))
         sb = await self._runtime.sandboxes.create(name=name, labels={**(metadata or {}), "compat.provider": "runloop"},
-            snapshot=snapshot_id, image=blueprint_id or blueprint_name, pausable=True, idle_pause_seconds=0, on_lease_end="stop", **fields)
+            snapshot=snapshot_id, image=blueprint_id or blueprint_name, on_lease_end="stop", **fields)
         try:
             # A clone inherits the saved environment unless a caller replaces it.
             if not snapshot_id or environment_variables is not None:

@@ -351,7 +351,17 @@ describe("which proxy an address uses", () => {
            .then(() => "none", (error) => error.code);
          console.log(JSON.stringify({ code, ms: performance.now() - started }));`,
       ],
-      { env: { ...process.env, HTTPS_PROXY: "socks5://proxy:1080" }, stdout: "pipe" },
+      {
+        // Only this proxy: the machine's own (a Runtime sandbox sets
+        // https_proxy, which wins over HTTPS_PROXY) would hide it.
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(([name]) => !/_proxy$/i.test(name)),
+          ),
+          HTTPS_PROXY: "socks5://proxy:1080",
+        },
+        stdout: "pipe",
+      },
     );
     const { code, ms } = JSON.parse(await new Response(child.stdout).text()) as {
       code: string;

@@ -6,7 +6,7 @@ import json
 from .. import AsyncRuntime
 from .._compat import CompatibilityError, ENV_PATH, environment, positive, reject
 from ._dual import Dual, async_only
-from . import Sandbox, Image, App, _Writer, _create_plan
+from . import Sandbox, Image, App, _Writer, _create_plan, _entrypoint_ms, _limit
 
 
 class _AsyncReader:
@@ -147,14 +147,13 @@ class AsyncContainerProcess:
 
 
 async def create(*args, app=None, name=None, tags=None, image=None, env=None, secrets=None,
-                 timeout=300, workdir=None, gpu=None, cpu=None, memory=None, block_network=False,
+                 timeout=None, workdir=None, gpu=None, cpu=None, memory=None, block_network=False,
                  outbound_domain_allowlist=None, client=None, **options):
     image, variables, lifetime, fields = _create_plan(image, env, secrets, timeout, gpu, cpu, memory, options)
     runtime = client or AsyncRuntime()
     source = {"snapshot": image._snapshot_id} if image._snapshot_id else {
         "image": (await runtime.images.build(dockerfile=image._dockerfile))["id"]}
-    sb = await runtime.sandboxes.create(name=name, **source, timeout_seconds=lifetime,
-        idle_pause_seconds=0, on_lease_end="stop", labels={"modal.tags": json.dumps(tags or {}), "compat.provider": "modal",
+    sb = await runtime.sandboxes.create(name=name, **source, **_limit(lifetime), on_lease_end="stop", labels={"modal.tags": json.dumps(tags or {}), "compat.provider": "modal",
         "modal.app": app.name or "" if app else "", "modal.name": name or ""},
         network={"internet": not block_network, **({"allow": list(outbound_domain_allowlist)} if outbound_domain_allowlist is not None else {})}, **fields)
     try:
@@ -162,7 +161,7 @@ async def create(*args, app=None, name=None, tags=None, image=None, env=None, se
             await sb.files.write(ENV_PATH, json.dumps(variables), mode=0o600)
         entry = None
         if args:
-            process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", timeout_ms=lifetime * 1000)
+            process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", timeout_ms=_entrypoint_ms(lifetime))
             await sb.update(labels={**sb.info.get("labels", {}), "modal.entrypoint": process.id})
             entry = AsyncContainerProcess(process, on_exit=sb.stop)
     except BaseException as original:

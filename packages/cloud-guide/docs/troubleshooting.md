@@ -102,16 +102,17 @@ Node from nodejs.org reads no such file, so it starts either way.
 
 ## Creation is refused
 
-| Code                  | What it means                                                                     | What to do                                                                       |
-| --------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `trial_busy`          | Eight trial sandboxes are already running; `details` names them                   | Stop or pause one, or retry once one ends                                        |
-| `trial_domain_limit`  | Your email domain's eight shared trial slots are all running                      | Stop or pause one, or use paid credit                                            |
-| `trial_exhausted`     | The {{trial-hours}} hours are used, or `timeoutSeconds` is more than what is left | Shorten `timeoutSeconds`, or use paid credit                                     |
-| `invalid_trial`       | A trial sandbox is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk             | Omit the size fields for the default                                             |
-| `invalid_request`     | `details.issues` names every wrong field                                          | Fix the named fields; unknown fields are refused                                 |
-| `invalid_region`      | `details.available` lists your regions                                            | Use a region listed for your account, or omit it                                 |
-| `no_capacity`, `busy` | No host has room right now                                                        | Wait `Retry-After`, then retry with the same idempotency key and a growing delay |
-| `image_not_found`     | `image` names nothing in your account; the message lists the name's tags          | Name one it lists, or build a public image first                                 |
+| Code                  | What it means                                                                               | What to do                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `trial_busy`          | Eight trial sandboxes are already running; `details` names them                             | Stop or pause one, or retry once one ends                                        |
+| `trial_domain_limit`  | Your email domain's eight shared trial slots are all running                                | Stop or pause one, or use paid credit                                            |
+| `trial_exhausted`     | The {{trial-hours}} hours are used                                                          | Use paid credit                                                                  |
+| `invalid_trial`       | A trial sandbox is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk                       | Omit the size fields for the default                                             |
+| `invalid_request`     | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                 |
+| `invalid_region`      | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                 |
+| `no_capacity`, `busy` | No host has room right now                                                                  | Wait `Retry-After`, then retry with the same idempotency key and a growing delay |
+| `image_not_found`     | `image` names nothing in your account; the message lists the name's tags                    | Name one it lists, or build a public image first                                 |
+| `volume_not_ready`    | A volume it names, or one you back up, is still `creating` (a restore is too until checked) | Wait until the volume reads `ready`, then try again                              |
 
 **`trial_busy` is temporary:** a slot frees when any trial sandbox stops or
 pauses.
@@ -124,10 +125,12 @@ pauses.
   (`waitForCapacityMs` in JavaScript, `wait_for_capacity` in Python), and then
   returns the refusal. The error's `retryable` is `true`, for a loop of your
   own.
-- To use credit instead, pass `funding: "paid"`.
+- Once the account holds prepaid credit, it runs more at once, with nothing
+  to change.
 
-A trial request never silently becomes a paid one. Paid credit does not make an
-exhausted trial available. See how much trial time is left with
+Once the trial's hours are used, an account with prepaid credit runs on it with
+nothing to change; one with neither is refused with `trial_exhausted`. See how
+much trial time is left with
 `npx withruntime usage`, or with `GET /v1/usage` or `GET /v1/limits`, whose
 `trial.availableMs` is what a new trial sandbox can still use, in milliseconds.
 See [the trial](./trial).
@@ -141,7 +144,7 @@ See [the trial](./trial).
 | `env_unavailable`             | This deployment cannot store an environment; nothing was created or changed                                                                                            | Pass `env` to each `exec` instead                                                            |
 | `env_unreadable`              | Its stored environment could not be opened, a fault on our side, so nothing ran                                                                                        | Set it again with `:update`, or contact support with the request id                          |
 | `sandbox_in_use`              | The sandbox runs a managed service                                                                                                                                     | Delete the service, which ends its sandbox                                                   |
-| `switch_keeps_workspace_only` | A switch of image keeps only `/workspace`, and the request did not say `keep: "workspace"`; nothing changed                                                            | Add it, or snapshot the sandbox first to keep everything                                     |
+| `switch_keeps_workspace_only` | `keep` named something other than `"workspace"`: a switch of image keeps only `/workspace`; nothing changed                                                            | Leave `keep` out, or snapshot the sandbox first to keep everything                           |
 | `switch_undone`               | The switch did not finish and was undone: the sandbox is on its old image with its files as they were                                                                  | Retry; a `/workspace` that takes longer than {{switch-copy-time}} to copy cannot be switched |
 | `switch_needs_disk`           | A stopped sandbox that was not persistent kept no disk, so there is nothing to move                                                                                    | Create a new sandbox from the image                                                          |
 | `image_on_another_host`       | The image is stored on another server than the sandbox                                                                                                                 | Create a new sandbox from the image, or build it again                                       |
@@ -161,26 +164,26 @@ without checking the first request's outcome.
 
 ## A sandbox stopped on its own
 
-**Read its `stopReason`.** A sandbox paused at the end of its lease, or by
+**Read its `stopReason`.** A sandbox paused at the end of its time limit, or by
 `:pause`, has lost nothing and has no `stopReason`: wake it. A paused sandbox
 that reads `pause_failed` lost its memory and kept its files.
 
-| `stopReason`         | What it means                                                                                                                                                                                                                                              | What to do                                                                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `idle`               | Read on a paused sandbox, not a stopped one: nothing happened in it for `idlePauseSeconds`, so it paused itself. Nothing is lost                                                                                                                           | A request wakes it while `autoWake` is on; `idlePauseSeconds: 0` keeps it running                                                                   |
-| `requested`          | A key, an agent or a person stopped it                                                                                                                                                                                                                     | Nothing                                                                                                                                             |
-| `lease_expired`      | Its `timeoutSeconds` ran out, and it was made to stop then rather than pause: `onLeaseEnd: "stop"`, or `pausable: false`. An ordinary sandbox's disk goes with it                                                                                          | Give the next one a longer `timeoutSeconds`, extend a running one before its end (`keepAlive` in the SDKs does it for you), or make it `persistent` |
-| `paused_expired`     | It stayed paused past its `pausedExpiresAt`, so its memory and disk were deleted                                                                                                                                                                           | Wake it before then, keep a paid one longer with `:retention`, or take a snapshot                                                                   |
-| `insufficient_funds` | The credit ran out, or the account is blocked by a payment that is disputed or [under review](./pricing#when-a-payment-is-under-review)                                                                                                                    | Add credit at Usage & billing. When a dispute or review is the cause, a create answers `account_blocked` and says what clears it                    |
-| `lifetime_cap`       | The sandbox reached its own `maxTotalCostMicros`                                                                                                                                                                                                           | Start a new sandbox if the work needs more                                                                                                          |
-| `spending_limit`     | An owner-set spending limit, usually this agent's daily one                                                                                                                                                                                                | See what is left with `GET /v1/limits` or `runtime limits`                                                                                          |
-| `authority_revoked`  | The key or agent that made it was revoked or removed                                                                                                                                                                                                       | Connect the agent again or make a new key, then create a new sandbox                                                                                |
-| `startup_failed`     | It stopped before it was ready to run commands                                                                                                                                                                                                             | If it starts from your image, check the image's start and ready commands; otherwise report the sandbox id                                           |
-| `service_unready`    | Its lease could not be renewed while a service it needs was unavailable                                                                                                                                                                                    | Create a new one, and report the sandbox id if it happens again                                                                                     |
-| `pause_failed`       | Read on a paused sandbox: the pause could not keep its memory, so the programs that were running are gone, and its files are kept                                                                                                                          | Wake it: it starts fresh from its disk and reads `memoryRestored: false`. Report the sandbox id                                                     |
-| `host_stopped`       | Its machine ended it without a stop being asked for. While it was starting or waking that is our fault; once it was running it can also be a shutdown or crash inside the sandbox                                                                          | Check whether your program shut the machine down; otherwise create a new one and report the sandbox id                                              |
-| `host_lost`          | The machine it ran on stopped answering and was taken out of service                                                                                                                                                                                       | Create a new one and report the sandbox id                                                                                                          |
-| `operator_stopped`   | Runtime stopped it: an operator, a suspension of the account, or the [abuse checks](./security#network-access) on traffic only abuse makes, which also cut its network. Your inbox (`GET /v1/notices`) holds an `abuse-halted` notice saying what was seen | Write to support with the sandbox id if you think it was a mistake                                                                                  |
+| `stopReason`         | What it means                                                                                                                                                                                                                                              | What to do                                                                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `idle`               | Read on a paused sandbox, not a stopped one: nothing happened in it for `idlePauseSeconds`, so it paused itself. Nothing is lost                                                                                                                           | A request wakes it while `autoWake` is on; `idlePauseSeconds: 0` keeps it running                                                                |
+| `requested`          | A key, an agent or a person stopped it                                                                                                                                                                                                                     | Nothing                                                                                                                                          |
+| `time_limit`         | The time limit it was created with (`timeoutSeconds`) ran out, and it was made to stop then rather than pause: `onTimeout: "stop"`. Its disk is kept for `:restart`. Before 4 October 2026 this read `lease_expired`                                       | Leave out `timeoutSeconds` so the next one runs while it works, or extend a running one before its end (`keepAlive` in the SDKs does it for you) |
+| `paused_expired`     | It stayed paused past its `pausedExpiresAt` (a trial's seven days, days you set, or seven days after credit ran out), so its memory and disk were deleted                                                                                                  | Wake it before then, top up, set `:retention` to `null`, or take a snapshot                                                                      |
+| `insufficient_funds` | The credit ran out, or the account is blocked by a payment that is disputed or [under review](./pricing#when-a-payment-is-under-review)                                                                                                                    | Add credit at Usage & billing. When a dispute or review is the cause, a create answers `account_blocked` and says what clears it                 |
+| `lifetime_cap`       | The sandbox reached its own `maxTotalCostMicros`                                                                                                                                                                                                           | Start a new sandbox if the work needs more                                                                                                       |
+| `spending_limit`     | An owner-set spending limit, usually this agent's daily one                                                                                                                                                                                                | See what is left with `GET /v1/limits` or `runtime limits`                                                                                       |
+| `authority_revoked`  | The key or agent that made it was revoked or removed                                                                                                                                                                                                       | Connect the agent again or make a new key, then create a new sandbox                                                                             |
+| `startup_failed`     | It stopped before it was ready to run commands                                                                                                                                                                                                             | If it starts from your image, check the image's start and ready commands; otherwise report the sandbox id                                        |
+| `service_unready`    | A service on our side that it needs was unavailable, so it could not keep running                                                                                                                                                                          | Create a new one, and report the sandbox id if it happens again                                                                                  |
+| `pause_failed`       | Read on a paused sandbox: the pause could not keep its memory, so the programs that were running are gone, and its files are kept                                                                                                                          | Wake it: it starts fresh from its disk and reads `memoryRestored: false`. Report the sandbox id                                                  |
+| `host_stopped`       | Its machine ended it without a stop being asked for. While it was starting or waking that is our fault; once it was running it can also be a shutdown or crash inside the sandbox                                                                          | Check whether your program shut the machine down; otherwise create a new one and report the sandbox id                                           |
+| `host_lost`          | The machine it ran on stopped answering and was taken out of service                                                                                                                                                                                       | Create a new one and report the sandbox id                                                                                                       |
+| `operator_stopped`   | Runtime stopped it: an operator, a suspension of the account, or the [abuse checks](./security#network-access) on traffic only abuse makes, which also cut its network. Your inbox (`GET /v1/notices`) holds an `abuse-halted` notice saying what was seen | Write to support with the sandbox id if you think it was a mistake                                                                               |
 
 Only a person can raise a spending limit, on the account's keys page: the member
 who made the key, or an owner or admin. Do not
@@ -208,14 +211,17 @@ A 5xx whose message says the fault is ours was reported to us when it happened,
 with its `requestId`. [API errors and retries](./api) describes the full
 contract.
 
-**`lease_too_short` (409) means the command could outlast the lease.** A
-command is refused, and nothing runs, when the timeout you set is longer than
-the time left before the sandbox's lease ends; a paused sandbox is refused
-before it is woken, so the wake costs nothing. Extend the sandbox first
-(`runtime sandbox extend <id> 600`, `sbx.extend(600)`), or give the command a
-shorter timeout. `details.leaseSecondsLeft` says how long is left. A command
-with no timeout of yours is not refused: it runs until the lease ends, unless
-the lease ends within about three seconds.
+**`time_limit_too_short` (409) means the command could outlast the sandbox's
+time.** A command is refused, and nothing runs, when the timeout you set is
+longer than the time left before the sandbox's time limit, or before the end of
+its funding once credit, trial hours or a spending limit ran out; a paused
+sandbox is refused before it is woken, so the wake costs nothing. For a time
+limit, raise it first (`runtime sandbox extend <id> 600`, `sbx.extend(600)`);
+for funding, add credit or raise the limit (`runtime limits`); or give the
+command a shorter timeout. `details.secondsLeft` says how long is left. A
+sandbox with no time limit and credit to run accepts a command of up to 24
+hours. A command with no timeout of yours is not refused: it runs until the
+sandbox's end, unless that is within about three seconds.
 
 ## The command succeeded over HTTP but the task failed
 
@@ -241,7 +247,7 @@ Outside your own files, use `sudo` in a command.
 
 - `npx withruntime sandbox network <id>` shows the rules.
 - A trial sandbox reaches ports 80 and 443 only; a paid sandbox of an account
-  that has made a purchase reaches every port. `openPorts` in the rules says
+  with a kept top-up reaches every port. `openPorts` in the rules says
   which. See [the sandbox environment](./sandbox-environment#the-network).
 - Name lookups or `pip install` time out in a sandbox from your own image on
   a Debian or Ubuntu base, such as `python:3.12-slim`, built before 30
@@ -253,13 +259,12 @@ Outside your own files, use `sudo` in a command.
 
 **Compare like with like.** Compare total CPU-seconds, provisioned memory, the
 quoted CPU floor and actual running duration. Include startup, dependency
-installation, retries and cleanup. Wait for settlement before equating reserved
-credit with a final charge.
+installation, retries and cleanup. A running sandbox's charges settle as it
+runs, so wait for it to stop before comparing the total.
 
 - Usage & billing groups daily and monthly settled service charges in UTC, and
   its estimate for the rest of the month is the pace so far, not a charge.
 - A payment adds credit; it is not service usage.
-- A reservation can lower available credit without being a final charge.
 - Paused storage is a separate meter, so stopping compute does not prove all
   retained-storage charges have ended.
 
@@ -281,8 +286,7 @@ See [storage and retention terms](./pricing) and [isolation](./security).
 **Stop is asynchronous.** The SDKs wait for `stopped`; over HTTP, send
 `Prefer: wait=60` or read the sandbox with `?waitFor=stopped`. Compute ends
 after confirmed VM shutdown. Do not report cleanup complete just because the
-request was accepted. The host-side lease provides a bound, but is not proof
-that your cleanup already completed.
+request was accepted.
 
 ## MCP is connected but execution is still local
 

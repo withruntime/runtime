@@ -651,18 +651,19 @@ class AsyncSandbox:
                      **connection: Any) -> Any:
         """Creates a sandbox from ``template`` (default "base", Runtime's stock
         image) with E2B's default machine, 2 vCPU and 512 MiB, and waits until
-        it runs. ``timeout`` is in seconds (default 300). Funding is left to
+        it runs. ``timeout`` is in seconds, when it ends; leave it out for no
+        time limit: it runs while it works and pauses when idle. Funding is left to
         Runtime: the free trial while the account has trial time, then prepaid
         credit, exactly as withruntime's own create. ``runtime_create`` passes
         Runtime fields (snake_case) over the adapter's."""
         core.refuse_create({"mcp": mcp, "network": network, "iam": iam, "volume_mounts": volume_mounts})
         runtime_client = _client(api_key, client, **connection)
-        asked = _time.time() + (core.DEFAULT_TIMEOUT if timeout is None else timeout)
+        # No timeout, no time limit: it runs while it works (0300).
+        asked = None if timeout is None else _time.time() + timeout
         with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
-            fields: Dict[str, Any] = {
-                "timeout_seconds": core.lease_seconds(core.DEFAULT_TIMEOUT if timeout is None else timeout),
-                "on_lease_end": core.on_lease_end(lifecycle),
-            }
+            fields: Dict[str, Any] = {"on_lease_end": core.on_lease_end(lifecycle)}
+            if timeout is not None:
+                fields["timeout_seconds"] = core.lease_seconds(timeout)
             if lifecycle:
                 # E2B resumes on traffic only when asked; Runtime's automatic wake is the same (0093).
                 fields["auto_wake"] = bool(lifecycle.get("auto_resume"))
@@ -680,7 +681,8 @@ class AsyncSandbox:
             fields.update(source)
             fields.update(runtime_create or {})
             created = await _guard("sandbox", lambda: runtime_client.sandboxes.create(**fields))
-        _keep_until(created, asked)
+        if asked is not None:
+            _keep_until(created, asked)
         result = cls(created, runtime_client)
         result._request_timeout = connection.get("request_timeout") if connection.get("request_timeout") is not None else 60
         return result
@@ -762,7 +764,8 @@ class AsyncSandbox:
     async def set_timeout(self, timeout: int, **_: Any) -> None:
         """Sets the sandbox to end ``timeout`` seconds from now, up to 24 hours;
         past an hour the lease is moved on while this process runs. Runtime
-        cannot end a lease early, so an end sooner than the lease's is refused."""
+        cannot end a lease early, so an end sooner than the lease's is refused.
+        A sandbox created with no timeout has no end to move, and nothing changes."""
         await _guard("sandbox", lambda: self.runtime.refresh())
         await _extend_to(self.runtime, timeout)
 
@@ -941,6 +944,8 @@ async def _resume(runtime: Any, timeout: Optional[int], on_resume: str) -> None:
         await _guard("sandbox", lambda: runtime.wake(timeout_seconds=None if timeout is None else core.lease_seconds(timeout)))
     elif timeout is not None:
         core.check_timeout(timeout)
+        if core.no_limit(runtime.info):
+            return
         later = core.seconds_later(runtime.info, min(timeout, core.KEEP_AHEAD))
         if later > 1:
             await _guard("sandbox", lambda: runtime.extend(int(later) + 1))
@@ -958,6 +963,8 @@ async def _stop(runtime: Any) -> bool:
 
 async def _extend_to(runtime: Any, timeout: float) -> None:
     core.check_timeout(timeout)
+    if core.no_limit(runtime.info):
+        return
     asked = _time.time() + timeout
     if core.seconds_later(runtime.info, timeout) < -1:
         raise NotSupportedException("Ending a sandbox sooner than its lease (a shorter set_timeout)",
@@ -1019,7 +1026,7 @@ async def _renew(keeper: Dict[str, Any]) -> None:
     try:
         await runtime.refresh()
         state = core.simple_state(runtime.state)
-        if state == "stopped":
+        if state == "stopped" or core.no_limit(runtime.info):
             _stop_keeping(runtime.id)
             return
         if state == "running":

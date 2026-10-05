@@ -79,7 +79,7 @@ test("`sandbox ls --all` lists every sandbox, the newest included, past a thousa
   expect(listed.at(-1)!.id).toBe(sandbox(total - 1).id);
 });
 
-test("`sandbox get` says what happens at the lease end, when it ended and why", async () => {
+test("`sandbox get` says what happens at its end, when it ended and why", async () => {
   const { out } = await cli(["sandbox", "get", SANDBOX], (_m, url) =>
     url.pathname === `/v1/sandboxes/${SANDBOX}`
       ? sandbox(1, {
@@ -91,7 +91,7 @@ test("`sandbox get` says what happens at the lease end, when it ended and why", 
         })
       : undefined,
   );
-  expect(out).toMatch(/at lease end\s+stop/);
+  expect(out).toMatch(/at its end\s+stop/);
   expect(out).toMatch(/ended\s+2026-09-30T03:14:53.000Z/);
   expect(out).toMatch(/stop reason\s+lease_expired/);
 });
@@ -252,4 +252,49 @@ test("`sandbox kill` on a process that already exited says so, and sends no sign
   expect(code).toBe(0);
   expect(out).toContain("already exited");
   expect(seen.some((s) => s.path.endsWith(":signal"))).toBe(false);
+});
+
+test("`sandbox get` and `extend` say a sandbox with no time limit runs while it works (0300)", async () => {
+  const unlimited = (url: URL) =>
+    url.pathname.startsWith(`/v1/sandboxes/${SANDBOX}`)
+      ? sandbox(1, { id: SANDBOX, state: "running", timeoutSeconds: 0, endsAt: null })
+      : undefined;
+  const got = await cli(["sandbox", "get", SANDBOX], (_m, url) => unlimited(url));
+  expect(got.out).toMatch(/time limit\s+none/);
+  expect(got.out).toMatch(/ends\s+when idle, stopped or out of credit/);
+  const extended = await cli(["sandbox", "extend", SANDBOX, "600"], (_m, url) => unlimited(url));
+  expect(extended.out).toContain("has no time limit");
+  // A limited one, or one from an older server with no endsAt, says its end.
+  const end = "2026-10-03T20:00:00.000Z";
+  const limited = await cli(["sandbox", "extend", SANDBOX, "600"], (_m, url) =>
+    url.pathname.startsWith(`/v1/sandboxes/${SANDBOX}`)
+      ? sandbox(1, { id: SANDBOX, state: "running", timeoutSeconds: 300, expiresAt: end })
+      : undefined,
+  );
+  expect(limited.out).toContain(`now ends at ${end}`);
+});
+
+test("`sandbox ls` shows when each sandbox ends by itself, not where it is paid up to (0381)", async () => {
+  const ends = "2026-10-05T09:00:00.000Z";
+  const { code, out } = await cli(["sandbox", "ls"], (_m, url) => {
+    if (url.pathname !== "/v1/sandboxes") return undefined;
+    if (url.searchParams.get("state") === "stopped") return { data: [], nextCursor: null };
+    return {
+      data: [
+        // A 24-hour limit: its lease, expiresAt, is an hour; endsAt is a day.
+        sandbox(1, { state: "running", timeoutSeconds: 86_400, endsAt: ends }),
+        // No time limit: it never ends by itself.
+        sandbox(2, { state: "running", timeoutSeconds: 0, endsAt: null }),
+        // An older server, which sends no endsAt: its expiresAt was the end.
+        sandbox(3, { state: "running", timeoutSeconds: 600 }),
+      ],
+      nextCursor: null,
+    };
+  });
+  expect(code).toBe(0);
+  const [header, limited, unlimited, older] = out.split("\n");
+  expect(header).toMatch(/FUNDING\s+ENDS$/);
+  expect(limited).toMatch(new RegExp(`${ends}$`));
+  expect(unlimited).toMatch(/\s-$/);
+  expect(older).toMatch(/2026-09-30T00:00:00\.000Z$/);
 });

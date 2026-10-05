@@ -1,8 +1,8 @@
 import type { RequestOptions, Transport } from "../transport.js";
 
-/* Your sandboxes reach each other by name. Paid accounts only, free, and off
- * until you turn it on; an account that has not added credit gets
- * `payment_required` (402).
+/* Your sandboxes reach each other by name. Free, off until you turn it on,
+ * and only for an account with a kept top-up;
+ * any other account gets `payment_required` (402).
  *
  *   await runtime.network.private.set({ enabled: true });
  *   // in any of your sandboxes: psql -h db.sandbox.internal -p 5432
@@ -17,7 +17,7 @@ export type PrivateNetwork = {
   enabled: boolean;
   /** `sandbox.internal`. */
   suffix: string;
-  /** Whether this account may turn it on: paid accounts only. */
+  /** Whether this account may turn it on: it must have a kept top-up. */
   allowed: boolean;
   /** Why not, when `allowed` is false: `not_paid`, `revoked` or `suspended`. */
   why: string | null;

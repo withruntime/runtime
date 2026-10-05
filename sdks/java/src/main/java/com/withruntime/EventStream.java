@@ -113,27 +113,65 @@ public class EventStream<T> implements Iterator<T>, Iterable<T>, AutoCloseable {
         null);
   }
 
-  /** A command's stream: when the server hands it over with "continue", follow the process. */
+  /**
+   * A command's stream: when the server hands it over with "continue", follow the process. A stream
+   * that closes or is cut before the command's exit is followed from where it stopped, since the
+   * output is kept on the sandbox; an end with no exit is never a result.
+   */
   static EventStream<OutputEvent> following(
       EventStream<OutputEvent> first, BiFunction<String, Long, EventStream<OutputEvent>> follow) {
     return new EventStream<>() {
       volatile EventStream<OutputEvent> current = first;
+      boolean followed;
+      boolean exited;
+      String processId;
+      long at;
 
       @Override
       OutputEvent pull() {
-        if (isClosed() || !current.hasNext()) return null;
-        OutputEvent event = current.next();
-        if ("continue".equals(event.type())) {
-          current.close();
-          current = follow.apply(event.processId(), event.cursor());
-          if (isClosed()) {
-            current.close();
-            return null;
-          }
-          return current.hasNext() ? current.next() : null;
+        if (isClosed() || exited) return null;
+        if (followed) return current.hasNext() ? current.next() : null;
+        boolean more;
+        try {
+          more = current.hasNext();
+        } catch (RuntimeCloudException.Connection error) {
+          if (processId == null || !"connection_error".equals(error.code())) throw error;
+          more = false;
         }
-        if ("error".equals(event.type())) throw streamError(event);
+        if (!more) {
+          if (processId == null)
+            throw new RuntimeCloudException.Connection(
+                "The exec stream closed before the command started.",
+                "connection_error",
+                "Run it again; to be sure it runs once, pass the same idempotency key.",
+                null,
+                null);
+          return handOver(processId, at);
+        }
+        OutputEvent event = current.next();
+        switch (event.type()) {
+          case "continue" -> {
+            return handOver(event.processId(), event.cursor());
+          }
+          case "error" -> throw streamError(event);
+          case "start" -> processId = event.processId();
+          case "stdout", "stderr" ->
+              at = event.offset() + event.data().getBytes(StandardCharsets.UTF_8).length;
+          case "exit" -> exited = true;
+          default -> {}
+        }
         return event;
+      }
+
+      private OutputEvent handOver(String process, long cursor) {
+        current.close();
+        current = follow.apply(process, cursor);
+        followed = true;
+        if (isClosed()) {
+          current.close();
+          return null;
+        }
+        return current.hasNext() ? current.next() : null;
       }
 
       @Override
@@ -144,28 +182,51 @@ public class EventStream<T> implements Iterator<T>, Iterable<T>, AutoCloseable {
     };
   }
 
-  /** A process's output from a cursor, reopened at each "continue", until it exits. */
+  /**
+   * A process's output from a cursor, reopened at each "continue", until it exits. A stream that
+   * closes or is cut before the exit is reopened where it stopped; four in a row with nothing new
+   * are an error, never an end.
+   */
   static EventStream<OutputEvent> resuming(
       long cursor, LongFunction<EventStream<OutputEvent>> open) {
     return new EventStream<>() {
       long at = cursor;
+      long opened = cursor;
+      int idle;
       volatile EventStream<OutputEvent> current = open.apply(cursor);
       boolean exited;
 
       @Override
       OutputEvent pull() {
         while (!exited && !isClosed()) {
-          if (!current.hasNext()) return null;
+          boolean more;
+          boolean cut = false;
+          try {
+            more = current.hasNext();
+          } catch (RuntimeCloudException.Connection error) {
+            if (!"connection_error".equals(error.code())) throw error;
+            more = false;
+            cut = true;
+          }
+          if (!more) {
+            if (at > opened) idle = 0;
+            else if (++idle > 3)
+              throw new RuntimeCloudException.Connection(
+                  "The output stream of the process keeps closing before it ends.",
+                  "connection_error",
+                  "Read what it printed so far with the process's output.",
+                  null,
+                  null);
+            if (cut) pause(idle);
+            reopen();
+            continue;
+          }
           OutputEvent event = current.next();
           switch (event.type()) {
             case "continue" -> {
-              at = event.cursor();
-              current.close();
-              current = open.apply(at);
-              if (isClosed()) {
-                current.close();
-                return null;
-              }
+              at = Math.max(at, event.cursor());
+              idle = 0;
+              reopen();
               continue;
             }
             case "stdout", "stderr" ->
@@ -177,6 +238,21 @@ public class EventStream<T> implements Iterator<T>, Iterable<T>, AutoCloseable {
           return event;
         }
         return null;
+      }
+
+      private void reopen() {
+        current.close();
+        opened = at;
+        if (!isClosed()) current = open.apply(at);
+      }
+
+      private void pause(int attempt) {
+        try {
+          Thread.sleep(Math.min(2000L, 50L << attempt));
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          close();
+        }
       }
 
       @Override

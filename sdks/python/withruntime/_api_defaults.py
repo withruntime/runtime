@@ -8,7 +8,7 @@
 WAIT_FOR_TIMEOUT_SECONDS = 60
 # A streamed exec's command limit when none is given: the API's longest.
 STREAMED_EXEC_TIMEOUT_MS = 86_400_000
-# The lease keep_alive keeps ahead of now, and so the most it extends by.
+# The time keep_alive keeps ahead of a time limit, and so the most it extends by.
 KEEP_ALIVE_MARGIN_SECONDS = 600
 # A job run's limit, and the time added to it for its sandbox to start.
 JOB_TIMEOUT_SECONDS = 1800

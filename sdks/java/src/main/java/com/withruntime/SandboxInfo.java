@@ -47,6 +47,7 @@ public final class SandboxInfo extends JsonObject {
     return (int) getLong("diskMiB", 0);
   }
 
+  /** Its time limit in seconds; 0 is none: it runs while it works. */
   public int timeoutSeconds() {
     return (int) getLong("timeoutSeconds", 0);
   }
@@ -55,6 +56,10 @@ public final class SandboxInfo extends JsonObject {
     return getString("onLeaseEnd");
   }
 
+  /**
+   * Runs until stopped while credit lasts, never paused for idleness or a time limit, and its disk
+   * is kept after a stop.
+   */
   public boolean persistent() {
     return getBoolean("persistent");
   }
@@ -67,8 +72,20 @@ public final class SandboxInfo extends JsonObject {
     return getInstant("createdAt");
   }
 
+  /**
+   * Paid up to: a time ahead of now that moves on by itself while it runs. Not when it ends; that
+   * is {@link #endsAt()}.
+   */
   public Instant expiresAt() {
     return getInstant("expiresAt");
+  }
+
+  /**
+   * When it stops or pauses by itself: its time limit, or where its funding ends once credit or a
+   * spending limit stops its renewal. Null when it never will, and when it is not running.
+   */
+  public Instant endsAt() {
+    return getInstant("endsAt");
   }
 
   public Instant endedAt() {

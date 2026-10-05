@@ -1,7 +1,14 @@
-import { ConnectionError, DELIBERATE, errorFor, RuntimeError, WAITS_FOR_ROOM } from "./errors.js";
+import {
+  ConnectionError,
+  DELIBERATE,
+  errorFor,
+  NOTHING_RAN,
+  RuntimeError,
+  WAITS_FOR_ROOM,
+} from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.11.0";
+export const VERSION = "0.11.1";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -9,11 +16,12 @@ export const DEFAULT_BASE_URL = "https://api.withruntime.com";
  * because the hop never leaves the machine: it goes from the program to the
  * guest's own proxy and over the sandbox's private channel to its host. */
 export const SANDBOX_BASE_URL = "http://runtime.internal";
-/** Every Runtime sandbox has this file; guest-net.py keeps it current. */
-const SANDBOX_MARKER = "/run/runtime/environment.json";
+/** Every Runtime sandbox has this file; guest-net.py keeps it current. Tests
+ * move it, so the machine running them does not decide what they see. */
+export const sandboxMarker = { path: "/run/runtime/environment.json" };
 
 /** True in a Runtime sandbox. Node and Bun only; a browser is never one. */
-export function inRuntimeSandbox(marker = SANDBOX_MARKER): boolean {
+export function inRuntimeSandbox(marker = sandboxMarker.path): boolean {
   try {
     const host = (
       globalThis as {
@@ -84,7 +92,24 @@ export type Call = RequestOptions & {
   /** Called each time a call waits for room, with the refusal it is waiting
    * out and how long it will sleep before sending the call again. */
   onCapacityWait?: (refusal: RuntimeError, waitMs: number) => void;
+  /** Internal: when the call's own deadline ends (performance.now()), set
+   * once the call is prepared; absent when it has none. */
+  deadlineAt?: number;
 };
+
+/** How long an answer that ran nothing (NOTHING_RAN) is retried for a call
+ * that has no deadline of its own. */
+const NOTHING_RAN_MS = 300_000;
+
+/** How long one attempt waits for its answer to start. The API starts every
+ * answer within 120 s: Caddy answers 503 itself past that, and a longer call
+ * gets its 200 at 90 s and then its JSON (runtime-late-answer). An attempt
+ * with no answer by then is talking to a server that is gone, such as a
+ * controller that died with the call in flight while its address moved to
+ * the new leader: a client that only waits sends nothing the new leader could
+ * refuse, so it waited out the whole deadline and failed (the leader drill on
+ * vin-5, 4 October 2026). It is sent again under the same key. */
+export const ANSWER_START_MS = 125_000;
 
 export function apiOrigin(value: string): string {
   const url = new URL(value);
@@ -195,14 +220,27 @@ function slots(maximum: number) {
   };
 }
 
+/** A call's hold on its connection slots. */
+type Gate = { take(): Promise<void>; lend(): void };
+
+/** Connections a client holds at once by default: under the 64 one address
+ * may hold to the API (api.md, "Limits"), with room for a second client. */
+export const DEFAULT_MAX_CONNECTIONS = 48;
+/** Connections a client keeps for answers read whole, however many streams
+ * are open: a stream's reader that makes a call (an output callback writing a
+ * file) never waits behind streams, its own included. */
+const KEPT_FOR_CALLS = 8;
+
 /** One connection pool, one retry policy, one error shape for every product.
  * Node's and Bun's fetch keep connections alive, so a client reused across
  * calls pays TLS once. Over HTTP/1.1 every call in flight holds its own
- * connection, so a hundred calls at once would open a hundred, past what one
- * address may hold at the edge (64). Answers read whole are therefore held to
- * `maxConnections` at once and the rest queue here, reusing those
- * connections; streams and terminals are long-lived and do not wait behind
- * them. */
+ * connection, and one address may hold 64 to the API before it has used a
+ * valid key: past that the API's edge holds new ones back until one closes.
+ * So a client holds at most `maxConnections` at once,
+ * answers and streams together, and the rest queue here, first come first
+ * served, and wait rather than fail. Streams (a command's output, a download,
+ * a watch) take at most `maxConnections` less KEPT_FOR_CALLS of them. A
+ * terminal or tunnel's WebSocket is not counted. */
 export class Transport {
   readonly baseUrl: string;
   #apiKey: string | undefined;
@@ -211,9 +249,11 @@ export class Transport {
   /** Whether calls go through envFetch, so a failure can name its proxy. */
   readonly #routed: boolean;
   readonly #timeoutMs: number;
+  readonly #answerStartMs: number;
   readonly #maxRetries: number;
   readonly #client: string;
   readonly #slots: ReturnType<typeof slots>;
+  readonly #streams: ReturnType<typeof slots>;
   /** What `sandboxes.create` waits for room by default. */
   readonly waitForCapacityMs: number;
   constructor(options: {
@@ -222,9 +262,13 @@ export class Transport {
     baseUrl?: string;
     fetch?: typeof fetch;
     timeoutMs?: number;
+    /** How long one attempt waits for its answer to start before it is sent
+     * again under the same key. Default ANSWER_START_MS. */
+    answerStartMs?: number;
     maxRetries?: number;
     client?: string;
-    /** Calls read whole that may be in flight at once. Default 32. */
+    /** Connections held at once, answers and streams together; the rest
+     * wait their turn. Default 48: one address may hold 64 to the API. */
     maxConnections?: number;
     /** How long a create waits for room. Default 120 000; 0 fails at once. */
     waitForCapacityMs?: number;
@@ -238,9 +282,12 @@ export class Transport {
     this.#fetch = options.fetch ?? envFetch;
     this.#routed = options.fetch === undefined;
     this.#timeoutMs = options.timeoutMs ?? 300_000;
+    this.#answerStartMs = options.answerStartMs ?? ANSWER_START_MS;
     this.#maxRetries = options.maxRetries ?? 4;
     this.#client = options.client ?? `sdk-js/${VERSION}`;
-    this.#slots = slots(Math.max(1, options.maxConnections ?? 32));
+    const most = Math.max(1, options.maxConnections ?? DEFAULT_MAX_CONNECTIONS);
+    this.#slots = slots(most);
+    this.#streams = slots(Math.max(1, most - KEPT_FOR_CALLS));
     this.waitForCapacityMs = Math.max(0, options.waitForCapacityMs ?? 120_000);
   }
 
@@ -291,6 +338,7 @@ export class Transport {
     return {
       ...call,
       timeoutMs: 0,
+      ...(timeoutMs === 0 ? {} : { deadlineAt: performance.now() + timeoutMs + roomMs }),
       ...(signal ? { signal } : {}),
       ...(call.method !== "GET"
         ? { idempotencyKey: call.idempotencyKey ?? crypto.randomUUID() }
@@ -320,7 +368,18 @@ export class Transport {
     });
   }
 
-  async #send<T>(call: Call, consume: (response: Response) => Promise<T>): Promise<T> {
+  /** Sleeps between tries. A call holding a connection slot (`gate`) lends
+   * it out while it sleeps, since a sleep holds no connection, and takes a
+   * slot again before it sends: a thousand creates waiting out a full region
+   * or a 429 would otherwise keep every other call of this client, the stop
+   * that frees room included, queued behind them. */
+  async #rest(ms: number, signal: AbortSignal | undefined, gate?: Gate): Promise<void> {
+    gate?.lend();
+    await sleep(ms, signal);
+    await gate?.take();
+  }
+
+  async #send<T>(call: Call, consume: (response: Response) => Promise<T>, gate?: Gate): Promise<T> {
     let apiKey: string;
     try {
       call.signal?.throwIfAborted();
@@ -338,6 +397,9 @@ export class Transport {
     const body = call.bytes ?? (call.body === undefined ? undefined : JSON.stringify(call.body));
     const retry = call.retry ?? true;
     let attempt = 0;
+    // An answer that ran nothing is sent again until the call's deadline.
+    const idleUntil = call.deadlineAt ?? performance.now() + NOTHING_RAN_MS;
+    let idleAttempt = 0;
     for (;;) {
       let response: Response | undefined;
       let inCallback = false;
@@ -349,13 +411,22 @@ export class Transport {
         // The API never redirects, so a redirect is refused here exactly as
         // "error" refused it: thrown, retried, then a connection_error.
         signal?.throwIfAborted();
-        response = await send(url, {
-          method: call.method,
-          headers: this.#headers(call, key, apiKey),
-          redirect: "manual",
-          signal,
-          ...(body === undefined ? {} : { body: body as NonNullable<RequestInit["body"]> }),
-        });
+        const started = new AbortController();
+        const unanswered = setTimeout(
+          () => started.abort(new DOMException("No answer started.", "TimeoutError")),
+          this.#answerStartMs,
+        );
+        try {
+          response = await send(url, {
+            method: call.method,
+            headers: this.#headers(call, key, apiKey),
+            redirect: "manual",
+            signal: signal ? AbortSignal.any([signal, started.signal]) : started.signal,
+            ...(body === undefined ? {} : { body: body as NonNullable<RequestInit["body"]> }),
+          });
+        } finally {
+          clearTimeout(unanswered);
+        }
         if (
           response.type === "opaqueredirect" ||
           (response.status >= 300 && response.status < 400)
@@ -418,7 +489,26 @@ export class Transport {
           inCallback = true;
           call.onCapacityWait?.(error, pause);
           inCallback = false;
-          await sleep(pause, signal);
+          await this.#rest(pause, signal, gate);
+          continue;
+        }
+        // Nothing ran: safe to send again for any call, past maxRetries,
+        // with growing waits, until the deadline; then this refusal stands.
+        // A late answer's failure came after the work began, so only a
+        // guest's own refusal (`guest_busy`, before anything is journaled)
+        // still says nothing ran.
+        if (
+          [429, 503].includes(status) &&
+          NOTHING_RAN.has(error.code) &&
+          (!late || error.code === "guest_busy")
+        ) {
+          const header = Number(response.headers.get("retry-after"));
+          const base =
+            error.retryAfterMs ?? (Number.isFinite(header) && header > 0 ? header * 1000 : 250);
+          const pause =
+            Math.min(30_000, base * 2 ** Math.min(idleAttempt++, 3)) * (0.9 + Math.random() * 0.2);
+          if (pause >= idleUntil - performance.now()) throw error;
+          await this.#rest(pause, signal, gate);
           continue;
         }
         const retryable = [429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code);
@@ -427,7 +517,7 @@ export class Transport {
         const wait =
           error.retryAfterMs ??
           (Number.isFinite(header) && header > 0 ? header * 1000 : backoff(attempt));
-        await sleep(Math.min(30_000, wait) * (0.9 + Math.random() * 0.2), signal);
+        await this.#rest(Math.min(30_000, wait) * (0.9 + Math.random() * 0.2), signal, gate);
       } catch (cause) {
         // Deliberate API refusals and unusable proxy settings cannot be
         // fixed by repeating the request. Body failures are transport
@@ -439,24 +529,40 @@ export class Transport {
         if (cause instanceof RuntimeError) throw cause;
         if (signal?.aborted || !retry || attempt >= this.#maxRetries)
           throw this.#connectionError(call, cause);
-        await sleep(backoff(attempt), signal).catch((cause: unknown) => {
-          throw this.#connectionError(call, cause);
+        await this.#rest(backoff(attempt), signal, gate).catch((cause: unknown) => {
+          throw cause instanceof RuntimeError ? cause : this.#connectionError(call, cause);
         });
       }
       attempt++;
     }
   }
 
+  /** A hold on `kinds` of slot, taken in order and given back together. */
+  #gate(call: Call, kinds: ReturnType<typeof slots>[]): Gate {
+    let held = 0;
+    const lend = () => {
+      while (held > 0) kinds[--held]!.give();
+    };
+    return {
+      take: async () => {
+        try {
+          for (; held < kinds.length; held++) await kinds[held]!.take(call.signal);
+        } catch (cause) {
+          lend();
+          throw this.#connectionError(call, cause);
+        }
+      },
+      lend,
+    };
+  }
+
   async #queued<T>(call: Call, consume: (response: Response) => Promise<T>): Promise<T> {
+    const gate = this.#gate(call, [this.#slots]);
+    await gate.take();
     try {
-      await this.#slots.take(call.signal);
-    } catch (cause) {
-      throw this.#connectionError(call, cause);
-    }
-    try {
-      return await this.#send(call, consume);
+      return await this.#send(call, consume, gate);
     } finally {
-      this.#slots.give();
+      gate.lend();
     }
   }
 
@@ -496,30 +602,79 @@ export class Transport {
    * errors with `download_incomplete` if it ends short of the length the API
    * promised; it is never retried part way. */
   async fileStream(call: Call): Promise<ReadableStream<Uint8Array>> {
-    const response = await this.send(call);
+    const { response, release } = await this.#opened(this.#prepare(call));
     const expected = promisedLength(response.headers);
     const body = response.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() });
     let got = 0;
-    return body.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          got += chunk.byteLength;
-          if (expected !== undefined && got > expected)
-            controller.error(incompleteDownload(got, expected));
-          else controller.enqueue(chunk);
-        },
-        flush(controller) {
-          if (expected !== undefined && got !== expected)
-            controller.error(incompleteDownload(got, expected));
-        },
-      }),
-    );
+    const reader = body
+      .pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            got += chunk.byteLength;
+            if (expected !== undefined && got > expected)
+              controller.error(incompleteDownload(got, expected));
+            else controller.enqueue(chunk);
+          },
+          flush(controller) {
+            if (expected !== undefined && got !== expected)
+              controller.error(incompleteDownload(got, expected));
+          },
+        }),
+      )
+      .getReader();
+    // The connection is given back when the body ends, fails or is cancelled.
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) {
+            release();
+            controller.close();
+          } else controller.enqueue(value);
+        } catch (error) {
+          release();
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        release();
+        await reader.cancel(reason);
+      },
+    });
+  }
+
+  /** Sends a call whose answer is a stream, holding a stream slot and a
+   * connection slot from before it is sent until `release`: once its body is
+   * read, failed or cancelled, or its deadline or signal ends it, whichever
+   * comes first, so a stream nobody finishes still gives its slots back at
+   * its deadline. */
+  async #opened(call: Call): Promise<{ response: Response; release: () => void }> {
+    const gate = this.#gate(call, [this.#streams, this.#slots]);
+    await gate.take();
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      call.signal?.removeEventListener("abort", release);
+      gate.lend();
+    };
+    try {
+      const response = await this.#send(call, async (response) => response, gate);
+      if (call.signal?.aborted) release();
+      else call.signal?.addEventListener("abort", release, { once: true });
+      return { response, release };
+    } catch (error) {
+      release();
+      throw error;
+    }
   }
 
   /** Newline-delimited JSON events, as they arrive. */
   async *events<T>(call: Call): AsyncGenerator<T> {
-    const response = await this.send({ ...call, accept: "application/x-ndjson" });
-    if (!response.body) return;
+    const { response, release } = await this.#opened(
+      this.#prepare({ ...call, accept: "application/x-ndjson" }),
+    );
+    if (!response.body) return release();
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = "";
     try {
@@ -544,6 +699,7 @@ export class Transport {
       // Cleanup must not replace a parse, network or callback error.
       await reader.cancel().catch(() => undefined);
       reader.releaseLock();
+      release();
     }
   }
 

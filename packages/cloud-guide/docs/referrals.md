@@ -25,7 +25,11 @@ The details:
   Google and email sign-in.
 - The reward is paid once per referred company, on its first top-up of {{topup-min}} or
   more, and matches that top-up. Later top-ups pay nothing more. Free trial
-  time never counts.
+  time never counts. It is paid when Stripe confirms the card behind the
+  top-up, usually within seconds of it; the top-up's own credit never waits.
+  When that top-up, or one of yours, went through Link or another wallet that
+  does not tell us the card, the reward is paid once someone at Runtime has
+  checked it.
 - A referral and the [switching credit](./pricing#switching-credit) never
   both pay: when a company that signed up with your link also records a switch,
   the referral's match applies, and it is never smaller.
@@ -41,7 +45,9 @@ The details:
   what stands, and both sides give back the difference. If less than {{referral-min-purchase}}
   stands, or it is disputed, both rewards are taken back. Either way, only what
   is still unspent is taken, so a refund of that top-up is smaller by any
-  reward credit already spent on either side.
+  reward credit already spent on either side. While such a refund is being
+  paid out, the reward credit it will take back is held on both sides and
+  can't be spent.
 - Referral credit is spent like any other credit. It can't be exchanged for
   cash or refunded.
 

@@ -6,7 +6,11 @@ import { DropInWorld } from "../drop-in-fake.js";
 async function fixture(paused = false) {
   const world = new DropInWorld();
   const client = world.client();
-  const box = await Sandbox.create({ name: "preflight", withruntime: { client } });
+  const box = await Sandbox.create({
+    name: "preflight",
+    timeout: 300_000,
+    withruntime: { client },
+  });
   if (paused) await box.stop();
   const checkpoint = world.calls.length;
   return { world, box, client, checkpoint };

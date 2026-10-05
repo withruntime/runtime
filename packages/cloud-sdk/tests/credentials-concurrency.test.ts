@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { unlinkSync } from "node:fs";
 import * as filesystem from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -93,10 +94,48 @@ test("an interrupted holder fails safely without replacing saved credentials", a
   const pid = Number(await new Response(dead.stdout).text());
   expect(await dead.exited).toBe(0);
   await writeFile(lock, JSON.stringify({ pid }), { mode: 0o600 });
-  await expect(store.save(kit.saved("org-b"))).rejects.toThrow("credential update was interrupted");
+  const refused = store.save(kit.saved("org-b"));
+  await expect(refused).rejects.toThrow("credential update was interrupted");
+  await expect(refused).rejects.toMatchObject({
+    name: "CredentialsLockedError",
+    reason: "interrupted",
+    lockFile: lock,
+  });
   expect(await retained(kit.env)).toEqual(["org-a"]);
   expect(JSON.parse(await readFile(join(directory, current), "utf8")).key).toBe(first.key);
   expect(await readFile(lock, "utf8")).toBe(JSON.stringify({ pid }));
+});
+
+test("a holder that finishes between the lock's read and its check is waited for, not called interrupted", async () => {
+  // Under load a waiter reads the holder's pid, the holder saves, removes its
+  // lock and exits, and only then does the waiter ask whether that pid lives.
+  // That used to fail the save as an interrupted update (exit 1 in the CLI).
+  const kit = await setup();
+  const store = connectionStore(kit.env);
+  await store.save(kit.saved("org-a"));
+  const directory = join(kit.directory, "runtime-cloud");
+  const current = (await readdir(directory)).find((file) => file.endsWith(".json"))!;
+  const lock = join(directory, current.replace(/\.json$/, ".lock"));
+  const finished = Bun.spawn(
+    [process.execPath, "--eval", "process.stdout.write(String(process.pid))"],
+    { stdout: "pipe" },
+  );
+  const pid = Number(await new Response(finished.stdout).text());
+  expect(await finished.exited).toBe(0);
+  await writeFile(lock, JSON.stringify({ pid }), { mode: 0o600 });
+  const real = process.kill.bind(process);
+  const kill = spyOn(process, "kill").mockImplementation((target, signal) => {
+    // The holder finished just before this check: its lock is gone.
+    if (target === pid) unlinkSync(lock);
+    return real(target, signal);
+  });
+  try {
+    await store.save(kit.saved("org-b"));
+  } finally {
+    kill.mockRestore();
+  }
+  expect(await retained(kit.env)).toEqual(["org-a", "org-b"]);
+  expect((await readdir(directory)).some((file) => file.endsWith(".lock"))).toBe(false);
 });
 
 test("malformed archived connections cannot replace the active credential", async () => {

@@ -169,7 +169,7 @@ class AsyncSpritesClient(SpritesClient):
     async def create_sprite(self, name, config=None, url_settings=None, labels=None, wait_for_capacity=False, runtime=None):
         if url_settings is not None or runtime is not None:
             raise CompatibilityError("Sprites URL authentication and runtime selection require a migration")
-        sb = await self._runtime.sandboxes.create(name=name, persistent=True, pausable=True, auto_wake=True,
+        sb = await self._runtime.sandboxes.create(name=name, persistent=True, auto_wake=True,
             labels={"compat.provider": "sprites", "compat.labels": json.dumps(labels or [])},
             wait_for_capacity=None if wait_for_capacity else 0, **_resources(config))
         from ._metadata import populate

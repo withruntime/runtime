@@ -137,7 +137,7 @@ final class Tar {
 
   /**
    * Unpacks a gzipped tar that arrives as a stream into target, holding no more than a read at a
-   * time. Entries land only inside target, and links are not made. It unpacks into a folder beside
+   * time. Entries land only inside target, and symbolic links are not made; a hard link lands as the file it names. It unpacks into a folder beside
    * target and moves it into place only once the whole archive arrived, its end blocks and gzip's
    * checksum included, so an archive cut short leaves nothing behind that could pass for the
    * folder: it is {@code download_incomplete}. A target that exists is merged into, files of the
@@ -184,6 +184,7 @@ final class Tar {
 
   private static void unpackEntries(InputStream in, Path root) throws IOException {
     String longName = null;
+    String longLink = null;
     for (; ; ) {
       byte[] header = take(in, 512);
       if (header.length < 512) throw cutShort(null);
@@ -207,13 +208,17 @@ final class Tar {
           longName != null
               ? longName
               : prefix.isEmpty() ? field(header, 0, 100) : prefix + "/" + field(header, 0, 100);
+      String link = longLink != null ? longLink : field(header, 157, 100);
       longName = null;
+      longLink = null;
       String modeText = field(header, 100, 8).trim();
       int mode = modeText.isEmpty() ? 0644 : Integer.parseInt(modeText, 8);
-      if (type == 'L') {
+      if (type == 'L' || type == 'K') {
         byte[] value = take(in, (int) size);
         if (value.length < size) throw cutShort(null);
-        longName = new String(value, StandardCharsets.UTF_8).replaceAll("\0.*$", "");
+        String text = new String(value, StandardCharsets.UTF_8).replaceAll("\0.*$", "");
+        if (type == 'L') longName = text;
+        else longLink = text;
         skip(in, padding);
         continue;
       }
@@ -228,8 +233,14 @@ final class Tar {
       if (type == '5') {
         Files.createDirectories(destination);
         skip(in, size + padding);
+      } else if (type == '1') {
+        hardLink(root, destination, link, name);
+        skip(in, size + padding);
       } else if (type == '0' || type == '\0' || type == '7') {
         Files.createDirectories(destination.getParent());
+        // A name already unpacked may share its file with a hard link; writing
+        // through it would change the link's copy too.
+        Files.deleteIfExists(destination);
         try (java.io.OutputStream out = Files.newOutputStream(destination)) {
           for (long left = size; left > 0; ) {
             byte[] part = take(in, (int) Math.min(left, 1 << 16));
@@ -247,6 +258,32 @@ final class Tar {
       } else {
         skip(in, size + padding);
       }
+    }
+  }
+
+  /**
+   * A second name for a file the archive already carried: tar writes the first name as a file and
+   * every other as a hard link to it. The link names a plain file unpacked earlier in this archive,
+   * or the unpack fails; it never reaches outside or ahead.
+   */
+  private static void hardLink(Path root, Path destination, String link, String name)
+      throws IOException {
+    String named = link;
+    while (named.startsWith("./")) named = named.substring(2);
+    Path source = root.resolve(named).normalize();
+    if (named.isEmpty() || named.startsWith("/") || !source.startsWith(root) || source.equals(root))
+      throw new IOException(
+          "Refusing an archive hard link that leads outside the target: " + name + " -> " + link);
+    if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
+      throw new IOException(
+          "Refusing an archive hard link to a file it does not carry: " + name + " -> " + link);
+    if (source.equals(destination)) return;
+    Files.createDirectories(destination.getParent());
+    Files.deleteIfExists(destination);
+    try {
+      Files.createLink(destination, source);
+    } catch (IOException | UnsupportedOperationException noLinks) {
+      Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
     }
   }
 

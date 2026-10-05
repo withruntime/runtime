@@ -37,8 +37,7 @@ e2b_fake.FakePreviews.delete = _previews_delete  # type: ignore[attr-defined]
 class DropInSandbox(FakeSandbox):
     def __init__(self, world: World, sandbox_id: str, fields: Dict[str, Any]) -> None:
         super().__init__(world, sandbox_id, fields)
-        self.info.update(name=fields.get("name"), timeoutSeconds=fields.get("timeout_seconds", 1800),
-                         diskMiB=fields.get("disk_mib", 4096))
+        self.info.update(name=fields.get("name"), diskMiB=fields.get("disk_mib", 4096))
         self.network = FakeNetwork(world, sandbox_id)
 
     def set_retention(self, days: int) -> "DropInSandbox":

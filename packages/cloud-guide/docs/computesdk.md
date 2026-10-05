@@ -56,7 +56,7 @@ Every option is optional.
 
 `compute.sandbox.create()` takes ComputeSDK's own options and maps them:
 `templateId` is a Runtime [image](./images), `snapshotId` a Runtime snapshot,
-`metadata` becomes labels, `timeout` the lease, `vcpus`, `memoryMiB` and
+`metadata` becomes labels, `timeout` a time limit, `vcpus`, `memoryMiB` and
 `diskMiB` the size, and `envs` is set on every command the provider runs in
 that sandbox.
 

@@ -70,10 +70,14 @@ export class GuestFiles {
     if (!overwrite) {
       // cp -n alone reports success when it skips a raced destination. Stage
       // privately, then publish without replacement and verify it moved.
+      // mv -n that skips succeeds before coreutils 9.2 and fails from it on
+      // (the guest's 9.4 says "not replacing"), so a skip is told by the
+      // staged copy still being there beside a destination; with none there,
+      // mv's own error stands.
       await checked(sandbox, [
         "bash",
         "-c",
-        'set -e; parent=$(dirname -- "$2"); stage="$parent/.runtime-copy-$4"; mkdir -m 700 -- "$stage"; trap \'rm -rf -- "$stage"\' EXIT; if [ "$3" = true ]; then cp -R -n -- "$1" "$stage/item"; else cp -n -- "$1" "$stage/item"; fi; mv -n -T -- "$stage/item" "$2"; if [ -e "$stage/item" ] || [ -L "$stage/item" ]; then printf "Destination exists: %s\\n" "$2" >&2; exit 73; fi',
+        'set -e; parent=$(dirname -- "$2"); stage="$parent/.runtime-copy-$4"; mkdir -m 700 -- "$stage"; trap \'rm -rf -- "$stage"\' EXIT; if [ "$3" = true ]; then cp -R -- "$1" "$stage/item"; else cp -- "$1" "$stage/item"; fi; mv -n -T -- "$stage/item" "$2" 2>"$stage/mv.err" || :; if [ -e "$stage/item" ] || [ -L "$stage/item" ]; then if [ -e "$2" ] || [ -L "$2" ]; then printf "Destination exists: %s\\n" "$2" >&2; exit 73; fi; cat -- "$stage/mv.err" >&2; exit 1; fi',
         "bash",
         this.path(from),
         this.path(to),

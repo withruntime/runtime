@@ -8,6 +8,123 @@ Each day also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 5 October 2026
+
+- **A hundred sandboxes at once from the first top-up, and time limits up to
+  24 hours.** A paid account runs {{paid-sandboxes}} sandboxes at once as
+  soon as its first top-up clears, where a new one ran 50 for its first week;
+  only a disputed payment, a suspension or an abuse report holds an account to
+  {{restricted-sandboxes}}. Paused and stopped sandboxes no longer count
+  toward it, and an account keeps up to 1,000 in all. A time limit goes up to
+  24 hours, where it stopped at one, and a sandbox it stops reads `stopReason`
+  `time_limit` where it read `lease_expired`, in the API, events, webhooks and
+  OpenTelemetry export: code that compares with `lease_expired` should compare
+  with both. A sandbox's disk is at most {{max-disk}}, and a larger `diskMiB`
+  is refused at once, naming the limit. See
+  [how many at once](./pricing#how-many-at-once).
+- **Scheduled jobs run on the free trial, and an account holds
+  {{paid-jobs}} of them.** A job's runs spend the trial's hours first, then
+  credit, as a sandbox does; a run the trial cannot take, on an account
+  without credit, waits with `blockedReason` `credits`. An account holds up
+  to {{paid-jobs}} jobs and {{paid-secrets}} secrets for jobs, where it held
+  50 and 200. Credit, bought or given, now opens every paid feature but three:
+  a kept top-up is needed only for ports beyond 80 and 443, public previews,
+  and private networks and Tailscale. See [what a job costs](./jobs#what-it-costs).
+- **Downloads as fast as the server's link, and TCP ports five times
+  faster.** A sandbox's downloads are no longer capped: each sandbox shares
+  its server's link, and when several are busy a paid account gets four times
+  a trial's share. Uploads stay limited, more strictly on the trial
+  ({{trial-upload}}); paid uploads are {{paid-upload}},
+  {{paid-upload-sustained}} after {{paid-upload-burst}},
+  {{paid-daily-transfer}} a day. A public TCP port now moves traffic at those
+  paid figures, where it was 100 Mbit/s, 20 Mbit/s after 2 GiB and 50 GiB a
+  day. See [sandbox environment](./sandbox-environment#the-network).
+- **A snapshot of a running sandbox, in one call, at any size.** `POST
+:snapshot` and `runtime_snapshot` (action `create`) take a running sandbox:
+  they pause it, capture it and wake it, as a fork does, and answer once the
+  capture is over. A sandbox with volumes is still refused. A copy of a disk
+  snapshot takes the vCPUs, memory and disk you ask for, with a disk at least
+  the saved one; a memory snapshot's copy is still the snapshot's size, and
+  asking for another size answers `400`. Every sandbox can now pause, fork and
+  be snapshotted, and every stop keeps the sandbox's files. See
+  [snapshots and forks](./javascript#snapshots-and-forks).
+- **What a sandbox serves is billed as outbound traffic, and persistence
+  costs nothing extra.** For sandboxes created from today, what a sandbox
+  sends back through a preview, a custom domain or a TCP port counts toward
+  the account's {{outbound-allowance}} a month free, then {{outbound-rate}}
+  per GB, like what it sends over its own connections; what visitors send in
+  stays free. While a sandbox made from today runs, its disk past the first
+  {{running-disk-included}} is billed at {{paused-storage-rate}} per decimal
+  GB per 30-day month, as a paused disk is; a disk of
+  {{running-disk-included}} or less never pays it. A `persistent` sandbox no
+  longer pays {{volume-month}} per GiB for a reserved disk all the time: its
+  disk is billed as any sandbox's, and `persistent` means only "keep it
+  running". See [pricing](./pricing).
+
+## 4 October 2026
+
+- **Paused sandboxes, kept disks and snapshots are kept while you have
+  credit.** A paused sandbox, a stopped one's disk and a snapshot stay for as
+  long as the account holds credit, with no 30-day or 7-day end, unless you set
+  days with `:retention` or a snapshot's `retentionDays`. When credit runs out
+  they are kept seven more days, with a notice first, and a top-up keeps them
+  again. A sandbox paused on the trial is kept the same way once the account
+  holds credit, and its storage is billed from the end of its seven free days.
+  See [paused storage](./pricing#paused-storage).
+- **The trial's hours, then credit, with nothing to choose.** A sandbox runs
+  on the free trial's hours first and on prepaid credit after, automatically:
+  at create, when a paused sandbox wakes, and while one runs, so a running
+  trial sandbox carries on on credit instead of pausing when the hours run
+  out. A request's `funding` is accepted and ignored, and code that sets it
+  keeps working. Once an account holds credit, its sandboxes have paid limits
+  and still spend the trial's hours first, and a trial sandbox that turns paid
+  while it runs gets a paid sandbox's disk share at once and, if the trial
+  had slowed it, its full cores back. See [the trial](./trial#after-the-trial).
+- **Public previews follow a kept purchase.** A preview can be public once
+  the account has bought credit; credit given alone does not open one. While
+  an account is blocked, or every purchase it made is refunded in full, its
+  public previews need the token like private ones, and they open to anyone
+  again once it pays. See [security](./security).
+- **A stop keeps the disk; only a delete removes it.** A stopped sandbox keeps
+  its files for {{paused-storage-rate}} per decimal GB per 30-day month, reads
+  `diskKept: true` and starts again from them with `:restart`, its memory gone;
+  deleting it removes them. `onLeaseEnd: "delete"` deletes a sandbox and its
+  files when its time limit ends. A stop from a client released before today,
+  or from raw HTTP without `x-runtime-client: http/2026-10-04`, keeps the disk
+  free for three days, with one notice, and then deletes it. The console shows
+  Restart and Delete on a stopped sandbox. See
+  [paused storage](./pricing#paused-storage).
+- **Ending a sandbox never waits for room.** A delete, stop or pause never
+  fails for lack of room, even on a full server.
+
+## 3 October 2026
+
+- **A sandbox runs while it works.** There is no lease to manage any more: a
+  sandbox has no time limit unless you set one, runs for as long as it is busy
+  and pauses itself when idle, until you stop it or credit runs out. Nothing
+  needs extending, and code that extends, sets `timeoutSeconds` or calls
+  `keepAlive` keeps working: a time limit you set is still kept. `endsAt` says
+  when a sandbox will stop or pause by itself, and is `null` when it never
+  will. The E2B, Daytona, Vercel, Blaxel, Modal and Runloop adapters do the
+  same when your code sets no timeout. See [the API](./api#sandboxes).
+- **Runtime for Startups.** A venture-backed startup building with AI agents
+  can apply at [withruntime.com/startups](https://withruntime.com/startups)
+  for {{startup-credit}} of credit, added over {{startup-months}} months:
+  over {{startup-busy-hours}} hours of a 2 vCPU, 4 GiB sandbox. An accepted
+  startup's account counts as paid from the day it is accepted. See
+  [pricing](./pricing).
+- **Two error codes are renamed.** A command whose timeout outlasts the
+  sandbox's time limit or its funded time is refused with 409
+  `time_limit_too_short`, and `details.secondsLeft` says how long is left:
+  `time_limit_too_short` replaces `lease_too_short`. A host that is busy
+  answers 503 `busy`, safe to retry with the same key: `busy` replaces
+  `fence_conflict`. Code that matched the old names should match the new
+  ones. See [errors](./api#responses-and-errors).
+- **More requests at once for accounts with many sandboxes.** An organization
+  may have 192 requests in flight, and two more for each sandbox it holds that
+  is not stopped, up to 1,024, so every sandbox can stream a command and a
+  watch at once. See [limits](./api#limits).
+
 ## 2 October 2026
 
 - **Export settled usage for a chosen period.** `runtime usage export` and
@@ -50,17 +167,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 30 September 2026
 
-- **Claim 100 hours free goes straight to Google again.** For a few hours the
-  button opened the sign-in page instead; it now passes the human check itself.
-- **A new Runtime Cloud page for sandboxes.** [/sandbox](https://withruntime.com/sandbox)
-  shows what 1,000 sandbox hours cost as stacks of cash beside the claim, and
-  each comparison page says how many times cheaper Runtime is, such as
-  "4× cheaper", instead of a percentage.
-- **/sandbox names 19 integrations and shows pausing in one picture.** The
-  strip under the hero adds Claude Code, Cursor, Gemini CLI, Windsurf, Docker,
-  JetBrains, Tailscale, OpenTelemetry, Datadog, Grafana and Okta, each linked
-  to its guide, and no longer runs empty on wide screens. The pause section
-  shows a sandbox working, idle a minute, paused and awake again.
 - **Environment variables for a whole sandbox.** Pass `env` at create, or
   change it later with an update, and every command, background process,
   terminal, SSH session and image start command gets those variables. Values
@@ -84,27 +190,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 - **Trial sandboxes keep going while they work.** A trial sandbox that is still
   busy when its lease ends gets its `timeoutSeconds` again, until the trial
   hours run out. See [the trial](./trial).
-- **Commands near the end of a lease run.** A command with no timeout of its
-  own gets the time the lease has left instead of being refused, and a paused
-  sandbox is never woken for a command that could not fit.
-- **A failed pause keeps your files.** If a sandbox's memory cannot be saved,
-  it stays paused with its disk, and its next wake starts it from that disk.
-- **The CLI lists everything and says why.** `runtime sandbox ls --all` lists
-  every sandbox, `sandbox get` shows when and why one stopped, errors name the
-  option you typed, and `<command> help` prints help.
-- **Clearer errors.** The API reference lists every error code you can meet,
-  a trial refusal names only the limits you crossed, and paid-only features
-  say what counts as a paid account. See [troubleshooting](./troubleshooting).
-- **Console links land where they point.** Signing in from any console page
-  brings you back to that page.
-- **Custom images look up names.** Images built from Debian or Ubuntu bases,
-  such as `python:3.12-slim`, brought their own `/etc/resolv.conf`, and name
-  lookups in them timed out. Every image now uses Runtime's resolver, in its
-  build steps and in the sandbox; build an older such image again. See
-  [images](./images).
-- **A payment under review says so.** When a payment is held for review, the
-  console says it is under review rather than disputed, and spending returns
-  when the review clears.
 
 ## 29 September 2026
 
@@ -122,23 +207,9 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 - **Disk-only snapshots.** `mode: "disk"` on a snapshot keeps only the root
   filesystem, and a sandbox created from it boots fresh with your files and no
   saved processes. Memory snapshots stay the default. See [the API](./api).
-- **Large uploads say where they go.** An upload to a path outside
-  `/workspace` is refused with a hint to move the file with a command after it
-  lands, and a file write too big for `files/content` names `/uploads`. See
-  [the API](./api).
-- **Image builds ask for the disk they need.** A build with less than
-  {{image-build-disk-min-gib}} of scratch disk is refused before it
-  queues, with the size it needs. See
-  [the build machine](./images#build-machine).
 - **Wakes read memory from memory.** A paused sandbox's memory image stays in
   the server's memory until its wake, so waking no longer reads it back from
   disk first.
-- **Keys with one label are told apart.** The list of keys to revoke shows
-  when each was made, and the Agents & API keys page loads again for every
-  account, with Try again asking the server afresh.
-- **A mistyped address finds its page.** The not-found page shows the address
-  you asked for, the closest page the site has, and the pages people most
-  often want.
 - **Faster disks, shared fairly.** A sandbox's disk no longer has a fixed
   speed or a burst to run out. It shares its server's drives with the
   sandboxes beside it, in proportion: at least about {{disk-floor}} each way,
@@ -146,20 +217,9 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   neighbour slows your writes a little rather than stalling them, and a pause
   stays quick on a busy server. See
   [the sandbox environment](./sandbox-environment#disk-cpu-and-memory).
-- **A paused sandbox shows no live use.** Your account, the CLI and the
-  metrics API showed a sandbox paused a few minutes earlier as still using CPU
-  and memory, from its last reading before it slept. Now `latest` is empty
-  unless the sandbox is running, and a paused sandbox reads as using nothing.
-  See [observability](./observability).
 
 ## 28 September 2026
 
-- **Refused creates are counted, and the Sandboxes page is quicker.** A create
-  Runtime refuses, such as an image or tag that does not exist, leaves no
-  sandbox, so until now it showed nowhere. The Sandboxes page now counts each
-  one with the reason and the image asked for, and Images names a tag your
-  agents keep asking for that no image has. "How long they live" counts the
-  runs that ended; one still running has no lifetime yet.
 - **A console that reports your day.** Home, Sandboxes, Images, Volumes, Usage
   & billing and Agents & API keys each open on what needs you, then today in a
   line, two charts and the list. Sandboxes describes today's runs as a whole,
@@ -175,13 +235,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   as running: on its Activity tab while it runs, and in its life once it ends.
   Runtime keeps each command's program name, exit code and duration for 14
   days, never its arguments. See [observability](./observability#commands).
-- **Speed, timed the way other providers time it.** The [speed guide](./speed)
-  now leads with each step's time on Runtime's servers, from the moment a
-  request reaches the API to its answer, the way other providers quote theirs:
-  a warm create answers in 102 ms, a pause in 63 ms and a wake in 76 ms at the
-  median, across 1,800 requests. Beside them are the figures E2B, Blaxel,
-  Daytona, Modal, Vercel, Cloudflare, Fly.io and CodeSandbox publish, and the
-  times from a laptop, network included, as what your own machine sees.
 - **Scheduled jobs.** Run a command in a fresh sandbox once at a time you
   choose or on a cron schedule in your timezone, with each run's exit code and
   output kept, retries when you ask for them, and pause, resume and cancel:
@@ -202,13 +255,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   `us-east` as a job's default region; update with `npm i withruntime@latest`
   or `pip install -U withruntime`. A job that names a region Runtime does not
   have is now refused when you create it, rather than waiting at every run.
-- **Your first key and code on Home.** A new account's Home puts your code in
-  one place beside the browser shell: the prompt that has your coding agent do
-  the setup, and by hand **Create my key**, which makes a key and shows it
-  once, with the install and a first sandbox in Python or JavaScript. Signing
-  up from a page comparing Runtime with another provider opens Home on that
-  switch, with the one import that changes for E2B, Daytona, Vercel Sandbox and
-  Blaxel. See [Get started](./start#run-your-first-sandbox).
 - **A sandbox from a browser.** A sandbox session is a short-lived token your
   own web page uses to run commands, read and write files and reach previews in
   one sandbox, with no API key and no proxy of your own. It cannot stop, extend
@@ -218,9 +264,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   `Sandbox.fromSession({ token, sandboxId })` uses it, from `withruntime`
   0.8.3; Blaxel's `sandbox.sessions` and `fromSession` now work in the
   drop-in. See [JavaScript](./javascript) and [Python](./python).
-- **The one import, printed.** `runtime switch --from` and
-  `runtime compare --from` print the import that moves E2B, Daytona, Vercel
-  Sandbox or Blaxel code to Runtime, from `withruntime` 0.8.3.
 - **Passkeys.** Sign in with a passkey, with no email link and no code, or use
   one as the second step in place of an authenticator app's code. Add them
   under Settings → Two-step sign-in, beside the app or instead of it. See
@@ -241,25 +284,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   the network to Virginia, a pause answers in 81 ms, a wake in 75 ms and a stop
   in 37 ms; the [speed](./speed) page now shows those figures beside the ones
   from a laptop.
-- **Idle pause sees a download that has just started.** A background download
-  or any other traffic now keeps a sandbox awake from its first second; before,
-  traffic that began right after the last command could go unseen for up to
-  15 seconds.
-- **A stop keeps the files written just before it.** A persistent sandbox now
-  restarts with every file it had, including ones written a moment before the
-  stop; before, writes from the last few seconds could be lost unless the
-  program had synced them. The stop still answers at once and billing ends
-  there: its programs are paused and its network cut first, the disk is written
-  out afterwards, and a restart waits for that. Sandboxes created from the next
-  base image on get the pause; older ones are written out with their programs
-  running. A stop of a sandbox with a volume no longer waits for the volume to
-  be let go: a create that names it straight away waits in the SDKs instead.
-- **A lease that runs out keeps the files written just before it too.** When
-  a sandbox's time or credit runs out, a persistent sandbox's disk and any
-  volume it writes to are written out the same way: its programs are paused
-  and its network cut just before the lease ends, and billing ends there. The
-  write after it is not charged. An ordinary sandbox still stops at the end of
-  its lease.
 - **Persistence can be turned off, and a stopped persistent sandbox deleted.**
   `runtime sandbox update <id> --persistent off`, `update({ persistent: false })`
   or `:update` with `{"persistent": false}` now works as the guides said: a
@@ -277,16 +301,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 27 September 2026
 
-- **Settings in the sidebar.** Open Settings and the sidebar lists its pages
-  in three groups, Developers, Team and Security, with a way back to where you
-  were. Referrals stay on Usage & billing and Support in the account menu.
-- **Security and compliance page.** One page for a security review: where
-  data lives and the certifications of the companies that hold it, isolation,
-  encryption, sign-in, recovery, and how Runtime is run, with the date each
-  recurring check was last done. See [security and compliance](./trust), or
-  withruntime.com/trust.
-- **A nightly off-site copy of the database.** Encrypted to a key held
-  offline and kept 30 days in Backblaze, locked against early deletion.
 - **Two-step sign-in.** Turn on a code from an authenticator app after every
   sign-in, whichever way you sign in, under Settings → Two-step sign-in. Owners
   can require it of everyone in the account. See
@@ -319,10 +333,6 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   its row, or approve `runtime keys create --account-wide`. `getOrCreate` with
   a name another key holds then returns that sandbox. Keys made without it are
   unchanged. See [keys in a team](./teams#keys-in-a-team).
-- **withruntime 0.8.2.** `runtime keys create --account-wide` makes an
-  account-wide key from the command line. Large file writes send eight chunks
-  at once in both SDKs, so a big upload finishes sooner: 100 MB took 11 s
-  instead of 17 from a 12.6 MB/s connection.
 - **Switch from Blaxel in one import.** Code written for Blaxel's sandbox SDK
   runs on Runtime after changing `@blaxel/core` to `withruntime/blaxel`
   (`withruntime` 0.8.0), or in Python `blaxel.core` to `withruntime.blaxel`
@@ -337,44 +347,16 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   shell running in the page, runs on the free hours, and pauses after an idle
   minute. It acts as an agent named Console, one for each member, shown
   on the API keys page like any other. See [Get started](./start#run-your-first-sandbox).
-- **withruntime 0.7.2.** A directory download (`files.download`,
-  `runtime sandbox cp`) can no longer write outside the folder you gave it: a
-  link in the sandbox that leads outside, or a file written through one, is
-  refused with `unsafe_archive`, and links that stay inside arrive intact. A
-  `custom` network policy in the Vercel AI SDK harness that allows nothing now
-  turns the internet off, as `deny-all` does. `runtime sandbox exec … --json --
-tool --json` passes the second `--json` to the tool, and a streamed command
-  that times out says 24 hours, its real limit. The Harbor and Inspect adapters
-  build images with the current image builder. Update with
-  `npm i withruntime@latest` or `pip install -U withruntime`.
-- **A changelog page for every day, and a feed.** Each day's changes have a
-  page of their own at [withruntime.com/changelog](https://withruntime.com/changelog),
-  every entry has a link, and the [RSS feed](https://withruntime.com/changelog/feed.xml)
-  carries each one. The glossary adds fifteen cloud terms, from
-  [vCPU](https://withruntime.com/glossary/vcpu) to
-  [egress fees](https://withruntime.com/glossary/egress-fees), and every price,
-  limit and speed on the guides and question pages is now filled in from one
-  source, so a change reaches every page at once.
 
 ## 26 September 2026
 
-- **Security fixes across the account.** A read-only key still lists a
-  sandbox's previews but no longer receives a private preview's token.
-  Webhooks and telemetry exports are made, changed and deleted by an owner's or
-  admin's key, and every key still lists them. A deleted or replaced private
-  registry password is erased, as is every one when an account closes. Support
-  asked through a read-only key sees only what that key can. See
-  [security](./security) and [observability](./observability#webhooks).
 - **Single sign-on through OIDC.** Okta, Entra ID and Google Workspace
   connections by OIDC can be saved and used, as SAML ones could. See
   [single sign-on](./single-sign-on).
-- **Bucket mounts work again,** and a custom domain under a suffix such as
-  `co.uk` is told to set A and AAAA records at its apex, not a CNAME.
 - **Paid means paid and kept.** Paid-only features follow a top-up that was not
   refunded or charged back in full, and a refund of a top-up that earned
   matching credit is smaller by any of that credit already spent. See
   [pricing](./pricing).
-
 - **Faster starts, pauses and wakes.** Runtime now keeps machines of the most
   common sandbox shapes started ahead of time, and the servers keep memory
   ready for sandboxes that start or grow at once. Measured through the public
@@ -390,22 +372,6 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   network, and trial sandboxes are not charged, and sandboxes made before today
   keep free traffic for their whole life. `GET /v1/usage` shows the month so
   far under `outbound`. See [pricing](./pricing#network-products).
-- **A calmer console.** Home is your whole account on three sheets: your
-  sandboxes' CPU hour by hour for the last day, this month's cost by product,
-  and **Worth a look**, which names sandboxes costing money while doing little
-  and offers **Pause** for an idle one. Sandboxes, a sandbox's page, Images,
-  Volumes and Settings are redrawn to match, and the sidebar holds everything,
-  with your account and your menu in one place at its top.
-- **Fast commands keep all their output.** A command that writes faster than
-  it is read now waits for its reader from its first byte instead of losing
-  what came before: 4 MiB written at once came back whole in every run, where
-  before about half the runs lost up to three quarters of it. See
-  [running commands](./javascript#run-commands).
-- **withruntime 0.7.1.** Code written for E2B no longer gets lost output back
-  looking whole: when part of a command's output was dropped before it was
-  read, the result says `truncated` and a warning names it. `runtime login`
-  now names the account it connected to. Update with
-  `npm i withruntime@latest` or `pip install -U withruntime`.
 - **Your account opens straight away.** A new account now lands in the full
   console. Home shows the setup prompt for your coding agent until the agent
   connects, and keys, billing and settings are in the menu from the first
@@ -448,7 +414,8 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   See [networking](./networking#outbound-udp).
 - **50 sandboxes at once for a new paid account, then 100.** A paid account
   runs up to 50 at once until 7 days after its first top-up clears or $50 of
-  paid use has settled, whichever comes first, then 100. See
+  paid use has settled, whichever comes first, then 100. A paid account now
+  runs {{paid-sandboxes}} from its first top-up. See
   [pricing](./pricing#how-many-at-once).
 - **Rules on a secret.** On a paid account, a secret can name the methods and
   paths it goes to, such as `GET /repos/acme/*`; a request no rule allows
@@ -458,92 +425,17 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   its secrets as the proxy's password. Runtime's own checks still come first,
   and a proxy that fails refuses the connection rather than going direct. See
   [networking](./networking#your-own-upstream-proxy).
-- **Private preview links work for every client.** A link that carries its
-  token now serves `curl`, `fetch` and WebSockets directly; only a browser's
-  page load is redirected to set a cookie. The cookie lasts as long as its
-  token, and a stopped sandbox's preview answers 404 (410 once deleted)
-  instead of asking the client to retry forever. The MCP server's
-  `runtime_sandbox_previews_rotate` refuses a preview's old tokens and returns
-  a new one.
-- **Previews answer again after a wake.** For a short time on 25 September, a
-  preview of a sandbox that had been paused and woken answered `503 waking`
-  instead of reaching its server. A visit to a paused sandbox's private
-  preview now reaches the server in 3.99 s at the median. See
-  [speed](./speed).
-- **Long responses are no longer cut at 150 seconds.** Downloads, preview
-  streams and other responses longer than two and a half minutes used to end
-  there.
-- **Downloads arrive whole or fail loudly.** The API now sends every file's
-  length first. A download interrupted on our side is read again instead of
-  ending short. In `withruntime` 0.7.0, `files.read` checks the length (and a
-  small file's SHA-256), reads a short answer again and then raises
-  `download_incomplete`; `files.readStream` (`read_stream` in Python) streams a
-  file of any size and raises if it ends short; and `runtime sandbox cp`
-  writes to a partial file and renames it only when whole.
-- **Remote MCP sign-in is found automatically.** A connector that meets the
-  MCP server's 401 now finds where to sign in, including clients written to
-  the March 2025 MCP specification.
 - **Custom images get `sudo`, `adduser` and `useradd`.** Every image Runtime
   builds, from a public image too, gives the sandbox user passwordless
   `sudo`, and the base image now carries `adduser` and `useradd`. A command in
   a sandbox from an image starts in the image's last `WORKDIR` (inside
   `/workspace`). Build logs number only the steps they log.
-- **Forks and snapshot copies keep their labels.** A fork's copies, a snapshot
-  and a sandbox created from it take the source's labels unless you name
-  others. Names are never copied.
-- **The audit log records every creation.** Each resource created writes one
-  `resource.created` entry with its kind, name, labels and funding, and a
-  rules change is logged only when the rules change. See
-  [teams](./teams#audit-log).
-- **A blocked account says so.** When a payment is disputed or under review,
-  a create answers `account_blocked` (402) with the reason and what clears it,
-  instead of `insufficient_funds`. In `withruntime` 0.7.0 both SDKs raise
-  `AccountBlockedError`.
 - **Close your account yourself.** An owner closes the account at
   [Close account](https://withruntime.com/account/close) or with
   `POST /v1/account:close`; `runtime account close` arrived in `withruntime` 0.7.0. See [teams](./teams).
 - **Usage per run.** `GET /v1/usage` now gives each resource's name, start
   time, size and billed running time. In `withruntime` 0.7.0,
   `runtime usage --csv` exports one row per resource to the microdollar.
-- **Adapter and CLI fixes, in `withruntime` 0.7.0.** E2B's `getHost(port)`
-  answers at once, as E2B's does, instead of throwing. The AI SDK harness,
-  ComputeSDK, Harbor and Inspect adapters report a timed-out command as exit
-  code 124 and a signal as 128 plus its number, as a shell does. Piped input
-  to `runtime sandbox shell` ends the shell when it runs out. Secret rules
-  and the upstream proxy get `runtime secrets set --allow`,
-  `runtime network upstream-proxy` and matching SDK methods.
-- **Rotate a preview token from the CLI.** In `withruntime` 0.7.0, `runtime sandbox preview rotate <id> <port>` refuses every token
-  given out for a private port and prints the new one, as
-  `previews.rotate(port)` does in the SDKs.
-- **The CLI refuses an option it does not take.** In `withruntime` 0.7.0, `runtime sandbox create --memory-mib 8192` stops with "Did you
-  mean --memory?" and creates nothing; before, an unknown option was ignored.
-  `--help` after any command prints its help instead of running it, and
-  `sandbox create` and `run` take `--cpu`, `--cpu-floor`, `--max-cost` and
-  `--max-total-cost`, as the SDKs do.
-- **Ctrl-C on `runtime sandbox exec` stops the command in the sandbox.** It
-  used to stop only the CLI, and the command ran on. A connection that drops
-  mid-command is now picked up where it stopped, output skipped by a slow
-  reader is always reported as lost, and `exec` by id makes one request instead
-  of two, about 100 ms sooner. In the SDKs, a streamed exec that is cancelled
-  stops its command. In `withruntime` 0.7.0.
-- **Clearer CLI answers.** `runtime whoami` names the organization, your role
-  and what you can spend; `runtime usage` shows what was used apart from what
-  refunds returned; `sandbox cp` into `dir/` keeps the file's name and makes
-  missing folders; a refused request no longer asks you to report it. In
-  `withruntime` 0.7.0.
-- **A create that waits for room says so.** When every trial slot is taken,
-  `runtime sandbox create` and `run` now print why on standard error instead
-  of waiting up to two minutes in silence. In the SDKs, `onCapacityWait` in
-  JavaScript and `on_capacity_wait` in Python hear each wait, and
-  `Sandbox.create` takes `waitForCapacityMs` as `runtime.sandboxes.create`
-  does. In `withruntime` 0.7.0.
-- **A misspelled create option is a TypeScript error.** In `withruntime` 0.7.0, `Sandbox.create()` accepts only the options the API takes,
-  so `{ vcpus: 2 }` fails the typecheck instead of the request. The package now
-  asks for Node 22.12 or later, the first release where `require("withruntime")`
-  works without a flag.
-- **Custom domains verify as soon as the record is published.** Verification
-  used to keep answering "No TXT record" for up to half an hour after you
-  added it.
 
 ## 24 September 2026
 
@@ -568,7 +460,6 @@ tool --json` passes the second `--json` to the tool, and a streamed command
 - **Identity and file permissions.** A new sandbox on the current default image receives its current lease's
   identity-token environment before its first accepted command. File writes apply the
   requested mode, including executable scripts; the default remains 0644.
-
 - **The code interpreter speaks seven languages.** Python, JavaScript,
   TypeScript, R, Java, Bash and Go, each keeping its state between cells (Go
   keeps its declarations and runs each cell as a program). R plots come back
@@ -587,24 +478,8 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   servers in a sandbox in one call, each at an authenticated URL your agent
   connects to; secret settings come from Runtime secrets, so the server never
   holds the value. `GET /v1/mcp/catalog` lists them with their licences.
-- **Fixes.** A sandbox created from an image with a start command now runs it
-  and waits for its ready check, as the images guide says. A program in the
-  image's own `PATH` (`python` in `python:3.12-slim`) is found by `exec`. The
-  desktop starts: its first start installs it, and `open` reports a missing
-  browser instead of "Opened". Deleting an image no longer leaves it in
-  `deleting`. An uploaded file keeps its permissions, and a written one is 644,
-  not 600. The CLI, from `withruntime` 0.6.0, passes piped input to `exec`, says so and exits non-zero if
-  output was lost, makes the `--out-dir` of `run-code`, and marks symbolic links
-  in `files`. An egress secret's placeholder is in the environment of every
-  command from the moment the secret is set, including in a sandbox made a
-  second ago. A preview visited just after its sandbox paused wakes it instead
-  of answering 502. A trial sandbox's network rules no longer say it may reach
-  ports beyond 80 and 443.
 - **Terminals.** An organization may hold 64 terminals open, 12 in one sandbox
   (it was 8).
-- **Stopping a sandbox keeps what it wrote to its volumes.** A write made just
-  before `runtime sandbox stop` could be lost; the sandbox now writes its
-  volumes out first.
 - **Mount your own bucket.** An Amazon S3, Cloudflare R2 or Google Cloud
   Storage bucket appears as a directory in a sandbox (`runtime sandbox mount`,
   `sbx.mounts.add`). The sandbox never holds the bucket's key: Runtime's egress
@@ -628,7 +503,6 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   own for allow-lists (`runtime address reserve`), and reach your sandboxes from
   your own network over WireGuard (`runtime tunnel`). See
   [networking](./networking).
-
 - **MCP tools are renamed, a breaking change.** Every tool now carries its
   product's name, as the CLI does: `runtime_exec` is `runtime_sandbox_exec`,
   `runtime_files_read` is `runtime_sandbox_files_read`,
@@ -641,33 +515,6 @@ tool --json` passes the second `--json` to the tool, and a streamed command
   is in [MCP](./mcp#renamed-tools).
 - **`runtime_sandbox_exec` takes a command as a list** as well as a string; a
   list runs without a shell, as `argv` does.
-- **Extending a sandbox answers with its new end.**
-  `POST /v1/sandboxes/{id}:extend`, `runtime_sandbox_manage` with `extend`
-  and `runtime sandbox extend` returned the expiry from before the extension;
-  they now wait for the server to confirm the new lease and return it.
-- **The saving a month says what it is projected from.** When your first
-  sandbox in the window is more recent than the window, the `note` of
-  `GET /v1/usage/compare` and `runtime_usage_compare` says how many days the
-  monthly figure is projected from, and so does `runtime compare` from
-  `withruntime` 0.6.0.
-- **CLI fixes, in `withruntime` 0.6.0.** `runtime sandbox logs`
-  without `-f` prints what the process has written so far and returns;
-  `runtime usage` prints a summary in dollars (`--json` keeps every figure); a
-  sandbox's name works in every `runtime sandbox` command and `--sandbox`
-  filter, not only `ssh` and `port-forward`; and `runtime mcp` exits at once
-  when its client stops it.
-- **`runtime compare` prices the free trial at the standard rates.** Sandboxes
-  the trial ran are priced at what the same work costs on paid credit, and the
-  output says how many ran on the trial, so the saving it reports is the one
-  you get after the trial.
-- **Large command output comes back whole in the drop-ins.** `commands.run` in
-  `withruntime/e2b`, and `process.exec`, `codeRun` and `findFiles` in
-  `withruntime/daytona`, return all of a command's output however large it is,
-  in JavaScript and Python.
-- **The status page says when a window is longer than its record.** Until the
-  record covers a whole window, [withruntime.com/status](https://withruntime.com/status)
-  shows that window as not yet and says how much of it the record covers, and
-  `/status.json` gives it `null` with `complete: false` and `covered_hours`.
 
 ## 23 September 2026
 
@@ -755,11 +602,6 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
   account starts with room for 100 sandboxes, 200 vCPUs and 400 GiB of memory
   at once, and more on request. Accounts that signed up before get the 50 hours
   too.
-- **Paid accounts run 20 sandboxes at once.** A paid account starts with room
-  for 20 sandboxes, 64 vCPUs and 128 GiB of memory at once (now
-  {{paid-sandboxes}}, {{account-vcpus}} and {{account-memory}}), and more on request.
-- **The free trial runs eight sandboxes at once.** Up from three, with the same
-  20 free hours (now {{trial-hours}}) and still no card.
 - **Forks and snapshots for everyone.** Copy a running sandbox with its memory
   and processes, and choose whether the copies use the trial or paid credit.
 - **Code written for E2B runs on Runtime.** Change `from "e2b"` to
@@ -780,8 +622,6 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
   trial keeps three images and 10 GiB of volumes free for good.
 - **Read your own limits.** `runtime limits` and `runtime.limits.get()` show
   whether a key is read-only and how much of its daily limit is left.
-- **Side-by-side guides.** Comparisons with E2B, Daytona, Vercel, Modal,
-  Cloudflare and Fly.io, each with the cost of the same job.
 
 ## 22 September 2026
 
@@ -823,8 +663,6 @@ api.openai.com` stores a key once; sandboxes see a placeholder, and the proxy
 - **Idle sandboxes pause themselves.** A sandbox left on the default lease and
   never used pauses after five minutes (now any sandbox after a
   minute with nothing happening in it), so it stops paying the running rate.
-- **Retries you never see.** A brief outage answers 503 with `Retry-After`, and
-  both SDKs retry it with the same idempotency key.
 - **Ask support anywhere.** Ask from the dashboard, with `runtime support`, or
   at support@withruntime.com.
 

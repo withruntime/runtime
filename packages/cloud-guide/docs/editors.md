@@ -81,13 +81,18 @@ with Sandbox.create() as sbx:
 ```
 
 `sbx.tunnel()` in JavaScript opens one connection at a time instead:
-`tunnel.connect(5432)` and `tunnel.ssh(publicKey)` each give a stream.
+`tunnel.connect(5432)` and `tunnel.ssh(publicKey)` each give a stream. It
+reaches this one sandbox from your code, and is not the WireGuard tunnel that
+joins your own network to your sandboxes
+([private networks](./networking#private-networks)).
 
 ## Limits
 
 - Connecting to a paused sandbox wakes it, as any command does. An open
-  connection does not keep a sandbox running: when its lease pauses or stops
-  it, the connection ends. Extend the lease for a long session.
+  connection keeps it running: a sandbox is never idle while one is open, and
+  with no time limit it runs as long as the session does, while credit lasts.
+  A sandbox created with `timeoutSeconds` still ends the connection at its
+  limit; extend it for a long session.
 - An organization has at most 16 SSH logins and port forwards open at once,
   and one port forward carries at most 64 connections at once. Each lasts at
   most 24 hours; open it again to go on.

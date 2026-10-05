@@ -29,6 +29,9 @@ def archive(*entries):
             elif kind == "link":
                 info.type, info.linkname = tarfile.SYMTYPE, value
                 tar.addfile(info)
+            elif kind == "hard":
+                info.type, info.linkname = tarfile.LNKTYPE, value
+                tar.addfile(info)
             else:
                 body = value.encode()
                 info.size = len(body)
@@ -113,6 +116,39 @@ class Unpack(unittest.TestCase):
                                ("./current", "link", "node_modules/.bin")), self.target)
         with open(os.path.join(self.target, "current", "tool")) as tool:
             self.assertEqual(tool.read(), "run()")
+
+    def test_hard_linked_files_land_with_their_content(self):
+        # tar writes a file's first name as a file and every other as a hard
+        # link to it: a folder holding one file twice (1 October 2026 audit).
+        source = os.path.join(self.base.name, "source")
+        os.makedirs(os.path.join(source, "sub"))
+        with open(os.path.join(source, "original.txt"), "w") as out:
+            out.write("same bytes")
+        os.link(os.path.join(source, "original.txt"), os.path.join(source, "sub", "copy.txt"))
+        packed = subprocess.run(["tar", "-czf", "-", "-C", source, "."], capture_output=True, check=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(packed)) as made:
+            self.assertIn(tarfile.LNKTYPE, [member.type for member in made.getmembers()])
+        unpack_archive(packed, self.target)
+        for name in ("original.txt", "sub/copy.txt"):
+            with open(os.path.join(self.target, name)) as got:
+                self.assertEqual(got.read(), "same bytes")
+        # A later entry of the first name replaces it without changing the link's copy.
+        unpack_archive(archive(("a.txt", "file", "first"), ("b.txt", "hard", "./a.txt"),
+                               ("a.txt", "file", "second")), self.target)
+        with open(os.path.join(self.target, "a.txt")) as got:
+            self.assertEqual(got.read(), "second")
+        with open(os.path.join(self.target, "b.txt")) as got:
+            self.assertEqual(got.read(), "first")
+
+    def test_a_hard_link_must_name_a_file_the_archive_already_carried(self):
+        with open(os.path.join(self.outside, "secret.txt"), "w") as out:
+            out.write("theirs")
+        self.refused(archive(("x", "hard", "../outside/secret.txt")), "leads outside the target")
+        self.refused(archive(("x", "hard", "/etc/hosts")), "leads outside the target")
+        self.refused(archive(("x", "hard", "later.txt"), ("later.txt", "file", "a")), "does not carry")
+        self.refused(archive(("d", "link", "../outside"), ("x", "hard", "d/secret.txt")), "does not carry")
+        self.refused(archive(("d", "dir", None), ("x", "hard", "d")), "does not carry")
+        self.assertFalse(os.path.exists(self.target))
 
     def test_header_checksum_is_required_before_publishing(self):
         body = bytearray(gzip.decompress(archive(("a.txt", "file", "hello"))))

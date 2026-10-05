@@ -15,7 +15,7 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
   processes still running and its next command done {{server-wake-command}}
   after the request reaches Runtime.
 - **Back from a pause in milliseconds.** Daytona states a paused VM resumes in
@@ -50,7 +50,7 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any create with `maxCostMicros`. Every write takes an
+  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
   idempotency key and the SDKs retry with it, so a lost response never creates
   a second sandbox.
 
@@ -66,17 +66,17 @@ addresses and WireGuard private networks. See [products](./products).
 Daytona's figures come from its public pricing and documentation, checked
 {{checked:daytona}}.
 
-|                  | Runtime                                                                     | Daytona                                                                   |
-| ---------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Isolation        | Firecracker microVM for every sandbox                                       | Containers by default; VM sandboxes as a separate class                   |
-| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:daytona:cpu}} per allocated vCPU-hour                              |
-| Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:daytona:memory}} per GiB-hour                                      |
-| Disk             | Included while running; paused storage {{paused-storage-rate}} per GB-month | First 5 GiB free, then {{term:daytona:disk}} per GiB-hour, stopped or not |
-| Plan fee         | None; prepaid credit from {{topup-min}}                                     | None published                                                            |
-| Free start       | {{trial-hours}} sandbox hours, no card                                      | {{term:daytona:credit}} of compute                                        |
-| Pause and resume | Files and memory, every sandbox                                             | Files and memory on VM sandboxes                                          |
-| Snapshots, forks | Copies of a running sandbox, with memory and processes                      | Memory snapshots on VM sandboxes                                          |
-| Agent sign-in    | Browser approval; no key in the agent's config                              | API key                                                                   |
+|                  | Runtime                                                                                   | Daytona                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Isolation        | Firecracker microVM for every sandbox                                                     | Containers by default; VM sandboxes as a separate class                   |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                            | {{rate:daytona:cpu}} per allocated vCPU-hour                              |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                                     | {{rate:daytona:memory}} per GiB-hour                                      |
+| Disk             | Included while running; paused storage {{paused-storage-rate}} per GB (10⁹ bytes) a month | First 5 GiB free, then {{term:daytona:disk}} per GiB-hour, stopped or not |
+| Plan fee         | None; prepaid credit from {{topup-min}}                                                   | None published                                                            |
+| Free start       | {{trial-hours}} sandbox hours, no card                                                    | {{term:daytona:credit}} of compute                                        |
+| Pause and resume | Files and memory, every sandbox                                                           | Files and memory on VM sandboxes                                          |
+| Snapshots, forks | Copies of a running sandbox, with memory and processes                                    | Memory snapshots on VM sandboxes                                          |
+| Agent sign-in    | Browser approval; no key in the agent's config                                            | API key                                                                   |
 
 ## Cost for the same job
 
@@ -104,7 +104,7 @@ Disk, network, taxes and free credits are left out of both.
 `runtime compare --from daytona` prices your own usage the same way, with
 sandboxes the free trial paid for at the standard rates, so trial time never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
-first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing)
+first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
 
 ## How to switch

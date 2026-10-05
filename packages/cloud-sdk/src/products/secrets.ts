@@ -6,7 +6,7 @@ import { switchedOff } from "./jobs.js";
  * absent) and `paths`, each exact (`/v1/chat/completions`) or a prefix ending
  * in `/*` (`/repos/acme/*`), written canonically: starting with `/`, no `.` or
  * `..` segments, no `;` or `\`, no encoded slash. A request whose path could be
- * read two ways gets no secret that has rules. Paid accounts only. */
+ * read two ways gets no secret that has rules. Needs credit on the account. */
 export type SecretRule = { methods?: string[]; paths: string[] };
 /** A secret your sandboxes use without seeing it. Every sandbox of your
  * organization has an environment variable of the secret's name holding
@@ -36,7 +36,7 @@ export type SetSecret = {
   header?: string;
   /** With `header`: its value, `{value}` where the secret goes. Default `{value}`. */
   format?: string;
-  /** Only requests a rule allows carry the value. Paid accounts only. 1 to 16.
+  /** Only requests a rule allows carry the value. Needs credit on the account. 1 to 16.
    * Absent: every request to the hosts; replacing a secret without rules
    * clears them. */
   rules?: SecretRule[];

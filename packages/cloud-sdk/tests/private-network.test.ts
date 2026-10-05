@@ -86,7 +86,7 @@ test("a trial account is told it needs a paid account", async () => {
   await withStub(
     () => ({ ...STATE, enabled: false, allowed: false, why: "not_paid", enabledAt: null }),
     async () => {
-      expect((await cli(["network", "private", "status"])).text).toContain("paid accounts");
+      expect((await cli(["network", "private", "status"])).text).toContain("needs a kept top-up");
     },
   );
 });

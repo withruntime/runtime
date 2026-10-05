@@ -224,7 +224,7 @@ def _create_plan(image, env, secrets, timeout, gpu, cpu, memory, options):
         raise CompatibilityError("Modal GPU sandboxes need GPU compute; Runtime CPU cannot substitute")
     if isinstance(cpu, tuple) or isinstance(memory, tuple):
         raise CompatibilityError("Separate minimum and maximum resource reservations are not yet supported")
-    lifetime = positive(timeout, "timeout", integral=True)
+    lifetime = None if timeout is None else positive(timeout, "timeout", integral=True)
     fields = {}
     if cpu is not None:
         fields["vcpu"] = positive(cpu, "cpu", integral=True)
@@ -240,6 +240,19 @@ def _create_plan(image, env, secrets, timeout, gpu, cpu, memory, options):
     return image or Image.debian_slim(), variables, lifetime, fields
 
 
+def _limit(lifetime):
+    """A timeout is the customer's limit, and the sandbox never pauses for
+    idleness before it. None is no time limit (0300): it runs while it works
+    and pauses when idle."""
+    return {} if lifetime is None else {"timeout_seconds": lifetime, "idle_pause_seconds": 0}
+
+
+def _entrypoint_ms(lifetime):
+    """The entrypoint runs as long as the sandbox may: its timeout, or with
+    none the longest a process runs, a day."""
+    return 86_400_000 if lifetime is None else lifetime * 1000
+
+
 class Sandbox:
     def __init__(self, runtime, sb, entrypoint=None):
         self._runtime, self._sandbox, self.object_id = runtime, sb, sb.id
@@ -249,20 +262,19 @@ class Sandbox:
 
     @staticmethod
     def create(*args, app=None, name=None, tags=None, image=None, env=None, secrets=None,
-               timeout=300, workdir=None, gpu=None, cpu=None, memory=None, block_network=False,
+               timeout=None, workdir=None, gpu=None, cpu=None, memory=None, block_network=False,
                outbound_domain_allowlist=None, client=None, **options):
         image, variables, lifetime, fields = _create_plan(image, env, secrets, timeout, gpu, cpu, memory, options)
         runtime = client or Runtime()
         source = {"snapshot": image._snapshot_id} if image._snapshot_id else {"image": runtime.images.build(dockerfile=image._dockerfile)["id"]}
-        sb = runtime.sandboxes.create(name=name, **source, timeout_seconds=lifetime,
-            idle_pause_seconds=0, on_lease_end="stop", labels={"modal.tags": json.dumps(tags or {}), "compat.provider": "modal", "modal.app": app.name or "" if app else "", "modal.name": name or ""},
+        sb = runtime.sandboxes.create(name=name, **source, **_limit(lifetime), on_lease_end="stop", labels={"modal.tags": json.dumps(tags or {}), "compat.provider": "modal", "modal.app": app.name or "" if app else "", "modal.name": name or ""},
             network={"internet": not block_network, **({"allow": list(outbound_domain_allowlist)} if outbound_domain_allowlist is not None else {})}, **fields)
         try:
             if not image._snapshot_id or env is not None or secrets is not None:
                 sb.files.write(ENV_PATH, json.dumps(variables), mode=0o600)
             entry = None
             if args:
-                process = sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", timeout_ms=lifetime * 1000)
+                process = sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", timeout_ms=_entrypoint_ms(lifetime))
                 sb.update(labels={**sb.info.get("labels", {}), "modal.entrypoint": process.id})
                 entry = ContainerProcess(process, on_exit=sb.stop)
         except BaseException as original:

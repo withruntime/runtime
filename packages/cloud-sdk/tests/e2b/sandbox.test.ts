@@ -36,16 +36,37 @@ beforeEach(() => {
 });
 
 describe("Sandbox.create", () => {
-  test("gives E2B's default machine and timeout, and leaves funding to Runtime", async () => {
+  test("gives E2B's default machine, no time limit, and leaves funding to Runtime", async () => {
     const sbx = await create();
+    // No timeoutMs, no time limit: it runs while it works and pauses when
+    // idle (0300), never killed at E2B's five minutes in the middle of work.
     expect(lastCreate()).toEqual({
       vcpu: 2,
       memoryMiB: 512,
-      timeoutSeconds: 300,
       onLeaseEnd: "stop",
     });
     expect(sbx.sandboxId).toBe(fake(sbx).id);
     expect(world.called("images.list")).toEqual([]);
+    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
+    // Its endAt is a time ahead, never 1970; setTimeout has no end to move.
+    expect((await sbx.getInfo()).endAt.getTime()).toBeGreaterThan(Date.now());
+    await sbx.setTimeout(600_000);
+    expect(world.called("sandbox.extend")).toEqual([]);
+  });
+
+  test("a timeoutMs is the limit the customer set: sent as it is, and extended only by setTimeout", async () => {
+    const sbx = await create({ timeoutMs: 600_000 });
+    expect(lastCreate()).toMatchObject({ timeoutSeconds: 600, onLeaseEnd: "stop" });
+    const end = (await sbx.getInfo()).endAt.getTime();
+    expect(Math.abs(end - (Date.now() + 600_000))).toBeLessThan(2000);
+    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
+    await sbx.setTimeout(1_200_000);
+    // Ten minutes on, rounded up to a whole second: 601 when a millisecond
+    // passed between the create and the call.
+    const [id, seconds] = world.called("sandbox.extend").at(-1) as [string, number];
+    expect(id).toBe(sbx.sandboxId);
+    expect(seconds).toBeGreaterThanOrEqual(600);
+    expect(seconds).toBeLessThanOrEqual(601);
   });
 
   test("maps timeoutMs, metadata, internet access and lifecycle", async () => {
@@ -128,12 +149,12 @@ describe("Sandbox.create", () => {
     expect(keptLeases().has(sbx.sandboxId)).toBe(true);
     await sbx.kill();
     expect(keptLeases().has(sbx.sandboxId)).toBe(false);
-    const other = await create();
+    const other = await create({ timeoutMs: 600_000 });
     await other.setTimeout(5 * 3_600_000);
     expect(keptLeases().get(other.sandboxId)! - Date.now()).toBeGreaterThan(4.9 * 3_600_000);
     // The lease itself goes no further than an hour ahead.
     expect(Date.parse(fake(other).info.expiresAt) - Date.now()).toBeLessThanOrEqual(3_600_000);
-    const third = await create();
+    const third = await create({ timeoutMs: 600_000 });
     await Sandbox.connect(third.sandboxId, { ...runtime(), timeoutMs: 3 * 3_600_000 });
     expect(keptLeases().has(third.sandboxId)).toBe(true);
     await Sandbox.kill(third.sandboxId, runtime());
@@ -199,7 +220,7 @@ describe("templates", () => {
     expect(lastCreate()).toMatchObject({ image });
     const snapshot = "99999999-2222-4333-8444-555555555555";
     await Sandbox.create(snapshot, runtime());
-    expect(lastCreate()).toEqual({ snapshot, timeoutSeconds: 300, onLeaseEnd: "stop" });
+    expect(lastCreate()).toEqual({ snapshot, onLeaseEnd: "stop" });
   });
 
   test("a snapshot while forks are off fails with Runtime's own words", async () => {

@@ -15,7 +15,7 @@ Weighing more than two? [Northflank alternatives](/compare/northflank-alternativ
   actually uses, so time spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
   processes still running and its next command done {{server-wake-command}}
   after the request reaches Runtime.
 - **An uptime promise that pays itself.** Paid accounts are promised
@@ -27,7 +27,7 @@ Weighing more than two? [Northflank alternatives](/compare/northflank-alternativ
   no service, project or deployment plan to set up. Northflank creates each
   sandbox as a service.
 - **Pause and fork keep memory.** A paused Runtime sandbox wakes with its
-  processes still running, kept for 1 to 365 days, and a fork copies a running
+  processes still running, kept while you have credit, and a fork copies a running
   sandbox with its memory.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
@@ -45,7 +45,7 @@ Weighing more than two? [Northflank alternatives](/compare/northflank-alternativ
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any create with `maxCostMicros`. Every write takes an
+  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
   idempotency key, so a lost response never creates a second sandbox.
 
 **Also included:** a code interpreter, network allow and deny lists, custom
@@ -93,7 +93,7 @@ Northflank  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:northflank:cpu}}  = $0.5
 The more of its time an agent spends waiting, the more Runtime saves. Storage,
 network, taxes and free allowances are left out of both. On Runtime, inbound
 traffic is free, and each account's first {{outbound-allowance}} out a month is free, then
-{{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
+{{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

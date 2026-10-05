@@ -2,8 +2,9 @@ import type { RequestOptions, Transport } from "../transport.js";
 import { privateNetwork } from "./private-network.js";
 
 /* Custom domains, public TCP ports, dedicated outbound addresses and the
- * WireGuard tunnel into your sandboxes. Paid accounts only: an account that
- * has not added credit gets `payment_required` (402). None of these belongs to
+ * WireGuard tunnel into your sandboxes. A dedicated address needs credit on the
+ * account; the rest need a kept top-up. Without
+ * either, the answer is `payment_required` (402). None of these belongs to
  * one sandbox alone: a domain or a port names the sandbox and port it serves,
  * an address and the tunnel belong to the whole account.
  *
@@ -242,7 +243,7 @@ export type SetUpstreamProxy = {
  * `upstreamProxy`: after Runtime's own rules allow a connection, the host
  * reaches it with CONNECT through your proxy, so your proxy's controls and
  * logs apply. A proxy that refuses or cannot be reached fails the connection
- * (upstream-proxy-failed); nothing goes around it. Paid accounts only. */
+ * (upstream-proxy-failed); nothing goes around it. Needs a kept top-up. */
 export function network(t: Transport) {
   const path = "/v1/network/upstream-proxy";
   return {

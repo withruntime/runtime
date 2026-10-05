@@ -1,7 +1,9 @@
 # Custom domains, TCP ports, dedicated addresses and private networks
 
-Six ways to connect sandboxes to the rest of your world and to each other. They are for paid
-accounts: an account that has not added credit gets `payment_required` (402).
+Six ways to connect sandboxes to the rest of your world and to each other. A dedicated address
+needs credit on the account; the others need a kept top-up, one paid and
+not refunded, because spammers abuse them. Without one, a request gets
+`payment_required` (402) saying which ([pricing](./pricing#how-many-at-once)).
 A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
 
 - **Custom domain:** a sandbox's web port at your own hostname, with HTTPS.
@@ -10,9 +12,13 @@ A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
 - **Dedicated outbound address:** every sandbox of your account sends from one
   address of its own, so you can allow-list it.
 - **Private network:** a WireGuard tunnel from your own network, in any cloud or
-  on your premises, into your sandboxes.
+  on your premises, into your sandboxes (`runtime tunnel`). This is the only
+  "tunnel" on this page; `runtime sandbox ssh` and `port-forward` are a
+  separate connection from your own computer ([SSH and editors](./editors)).
 - **Sandboxes by name:** your sandboxes reach each other at
-  `<name>.sandbox.internal`, free.
+  `<name>.sandbox.internal`, free. It needs no tunnel: the CLI and MCP call it
+  `network private` (`runtime network private on`), which is not the WireGuard
+  private network above.
 - **Your Tailscale network:** a sandbox joins your tailnet as a machine of its
   own, with your auth key.
 
@@ -96,9 +102,11 @@ sandbox. Opening the same sandbox and port again returns the same public port.
 - **Only TCP is carried.** UDP (most game servers' own traffic, QUIC) is not.
 - **Limits:** 5 ports per sandbox, 20 per account and 50 opened a day. Each
   sandbox's ports share 256 open connections, 50 new connections a second, and
-  32 connections from any one client address. Traffic through a port has its
-  own limits, whatever the sandbox's outbound tier: {{port-bandwidth}}, {{port-bandwidth-sustained}} once
-  {{port-bandwidth-burst}} has moved at that speed, and {{port-daily-transfer}} a day, in and out together.
+  32 connections from any one client address.
+- **Speed:** each sandbox's ports move up to {{paid-upload}} each way, {{paid-upload-sustained}} once
+  {{paid-upload-burst}} has moved at that speed, and {{paid-daily-transfer}} a day, in and out together.
+  When ports of several sandboxes on one address are sending at once, they
+  share {{paid-upload}} in equal parts.
 - **Use the address each port was given.** A port keeps its address for as
   long as it is open, but ports opened later may be given a different address
   from earlier ones, so read it from the answer (`address`, `connect`) rather
@@ -107,6 +115,10 @@ sandbox. Opening the same sandbox and port again returns the same public port.
   client still pointed at it never reaches someone else's service.
 - **A paused sandbox is woken** by a connection, and its connections end when
   it stops, pauses or is deleted.
+- **What the sandbox sends back is outbound traffic**, on the account's
+  monthly allowance and then at {{outbound-rate}} per GB, for sandboxes created
+  from 5 October 2026; what clients send in is free. See
+  [pricing](./pricing#network-products).
 - `runtime port ls` lists them; `runtime port close <portId>` closes one, and
   its open connections, before it returns. A port you open listens before its
   address is returned.
@@ -164,7 +176,11 @@ proxy sees, and UDP.
 
 Turn it on once, and every sandbox of your account reaches the others by name,
 over TCP, on any port: a database in one, a queue in another, the agent in a
-third. It is free, and off until you turn it on.
+third. It is free, and off until you turn it on. The setting is named
+`network private` in the CLI, the API (`/v1/network/private`) and MCP
+(`runtime_network_private`); it has nothing to do with the WireGuard
+[private network](#private-networks) below, which joins your own network to
+your sandboxes.
 
 ```bash no-run
 runtime network private on
@@ -186,7 +202,7 @@ runtime network private off                    # open connections are cut within
   sandbox (10800, 10802 and 10853). TCP only.
 - **A paused sandbox wakes** when a connection reaches it. A stopped one does
   not: start it first.
-- **Paid accounts, from paid sandboxes.** A trial account is told so when it
+- **A kept top-up, from paid sandboxes.** An account without one is told so when it
   turns it on; a connection from a trial sandbox is refused with
   `private-network-paid-only`. A sandbox with its internet off reaches no other
   sandbox either.
@@ -214,7 +230,9 @@ could not be woken) or `private-network-port-reserved`.
 ## Private networks
 
 A WireGuard tunnel from a machine or router on your network into your
-sandboxes. Every sandbox gets an address in the tunnel's subnet, and your
+sandboxes (`runtime tunnel`, `runtime.tunnel`, `runtime_tunnel`). For your
+sandboxes reaching each other, no tunnel is needed: see
+[reach your other sandboxes by name](#reach-your-other-sandboxes-by-name). Every sandbox gets an address in the tunnel's subnet, and your
 machines reach any port of it there.
 While you have a tunnel, your sandboxes start where its gateway can reach them
 both ways; with no room there just now, a create answers `no_capacity` (503),
@@ -342,8 +360,8 @@ Google in 16 ms.
 - Private, link-local and cloud metadata addresses are refused, and so are the
   ports no sandbox reaches over TCP either. The sandbox's network rules apply.
 - Datagrams are limited to 1,472 bytes. A sandbox sends and receives at most
-  50,000 datagrams a second, enough for full-size traffic at its {{paid-bandwidth}}
-  peak, inside its bandwidth limits and daily allowance.
+  50,000 datagrams a second, enough for full-size traffic at its {{paid-upload}}
+  upload peak, inside its upload limits and daily allowance.
 - A flow that has sent 256 datagrams without an answer is closed, so a sandbox
   cannot flood a host that does not reply.
 - NTP to port 123 accepts standard 48-byte client requests and matching server
@@ -353,13 +371,13 @@ Google in 16 ms.
 
 ## Errors
 
-| Code                  | Status | Meaning                                                         |
-| --------------------- | -----: | --------------------------------------------------------------- |
-| `payment_required`    |    402 | The account has not added credit, or the sandbox is a trial one |
-| `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it  |
-| `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet             |
-| `network_not_allowed` |    403 | Runtime turned network features off for the account             |
-| `quota_exceeded`      |    409 | A limit above was reached                                       |
-| `rate_limited`        |    429 | Too many added today                                            |
-| `no_capacity`         |    503 | No public port or dedicated address is free just now            |
-| `network_unavailable` |    503 | The feature is not switched on in this region yet               |
+| Code                  | Status | Meaning                                                        |
+| --------------------- | -----: | -------------------------------------------------------------- |
+| `payment_required`    |    402 | The account has no kept top-up, or the sandbox is a trial one  |
+| `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it |
+| `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet            |
+| `network_not_allowed` |    403 | Runtime turned network features off for the account            |
+| `quota_exceeded`      |    409 | A limit above was reached                                      |
+| `rate_limited`        |    429 | Too many added today                                           |
+| `no_capacity`         |    503 | No public port or dedicated address is free just now           |
+| `network_unavailable` |    503 | The feature is not switched on in this region yet              |

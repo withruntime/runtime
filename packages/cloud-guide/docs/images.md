@@ -170,9 +170,8 @@ to the new version and keep its files, switch its image:
 runtime sandbox switch-image "${id}" web:v2 --keep-workspace
 ```
 
-`sbx.switchImage("web:v2", { keep: "workspace" })` in JavaScript,
-`sbx.switch_image("web:v2", keep="workspace")` in Python, and
-`POST /v1/sandboxes/{id}:switch-image` with `{"image": "web:v2", "keep": "workspace"}`
+`sbx.switchImage("web:v2")` in JavaScript, `sbx.switch_image("web:v2")` in
+Python, and `POST /v1/sandboxes/{id}:switch-image` with `{"image": "web:v2"}`
 do the same ([API](./api#sandboxes)).
 
 - **What it keeps:** its id and name, `/workspace` (your home, with its
@@ -180,9 +179,8 @@ do the same ([API](./api#sandboxes)).
   volumes, environment, labels, previews and ports.
 - **What it loses:** its running processes, which start again with the new
   image's start command, and everything else on its old disk: packages
-  installed with `sudo` or apt, and changes to `/etc`. `keep: "workspace"`
-  says you know; without it the switch is refused and nothing changes. To keep
-  everything, snapshot the sandbox first.
+  installed with `sudo` or apt, and changes to `/etc`. To keep everything,
+  snapshot the sandbox first.
 - A running sandbox is paused for the switch; a paused one, or a stopped
   persistent one, is switched as it is. It is charged as a wake.
 - If anything goes wrong the switch is undone: the answer is
@@ -336,7 +334,7 @@ Dockerfile, and we are alerted; build again in a few minutes.
 
 | Limit                | Value                                                                                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Builds at once       | 1 until your account has bought credit, then 4                                                                                                    |
+| Builds at once       | 1 until your account holds credit, then 4                                                                                                         |
 | Build machine        | 1 to 8 vCPUs (2 by default), 1 to 16 GiB of memory (4 GiB), {{image-build-disk-min-gib}} to 32 GiB of scratch disk ({{image-build-disk-min-gib}}) |
 | Build time           | 60 seconds to 1 hour (30 minutes by default), counting starting the build machine and saving the image                                            |
 | Image size           | 512 MiB to 20 GiB (8 GiB by default)                                                                                                              |
@@ -348,16 +346,7 @@ Dockerfile, and we are alerted; build again in a few minutes.
 
 ## Pricing
 
-A stored image is charged on its whole file until copied-image accounting has
-been qualified and enabled. Where it is enabled, an identical copy verified
-in your account on the same server is charged
-only for the extra storage it adds, which can be zero. The shared base and
-each verified extra allocation count once while a ready copy still holds them.
-Deleting the base's owner transfers it to a remaining ready copy; an extra
-allocation moves only to a copy proven to descend from the one that added it.
-Retained capacity is freed only after the last files holding it are removed.
-Changed images and copies whose storage allocation cannot be verified still keep
-ordinary full-file accounting. Storage
+A stored image is charged on its whole file. Storage
 quotas follow the same allocation ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
 with credit. On the free trial a build counts toward the {{trial-hours}} hours, only for
 the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds

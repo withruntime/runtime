@@ -71,8 +71,7 @@ Every option is optional.
 | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `funding`, `image`, ...   | `create`                | How to create the sandbox: `funding`, `region`, `image`, a snapshot, `vcpu`, memory, disk, `name`, `labels`    |
 | `snapshot_id`             | `create.snapshot`       | Start from a ready Runtime snapshot, with its files, memory and processes                                      |
-| `timeout_seconds`         | `create.timeoutSeconds` | How long the sandbox may run before its lease ends                                                             |
-| `max_cost_micros`         | `create.maxCostMicros`  | Refuse the create if its first lease could cost more, in millionths of a dollar                                |
+| `timeout_seconds`         | `create.timeoutSeconds` | A time limit: the sandbox pauses when it runs out. Left out, it runs while it works                            |
 | `extra`                   | `create`                | Any other create field, such as `network` or `volumes`                                                         |
 | `env`                     | `env`                   | Set for every command, under the manifest's own environment                                                    |
 | `exposed_ports`           | `exposedPorts`          | Ports `resolve_exposed_port` may share as Runtime previews                                                     |

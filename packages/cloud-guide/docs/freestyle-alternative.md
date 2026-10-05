@@ -17,7 +17,7 @@ Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives
   small floor, {{cpu-floor-share}}.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
   processes still running and its next command done {{server-wake-command}}
   after the request reaches Runtime.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
@@ -27,8 +27,7 @@ Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives
   time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:freestyle}} on Freestyle.
 - **Scale without a plan.** Freestyle runs 10 VMs at once on its free plan, 40
   on the {{term:freestyle:hobby}}-a-month Hobby plan and 400 on the {{term:freestyle:pro}}-a-month Pro plan. A paid
-  Runtime account runs {{paid-sandboxes}} sandboxes at once, {{new-account-sandboxes}} in its first week or first {{new-account-spend}}
-  of use, with no plan fee: prepaid credit from {{topup-min}}, and support raises the
+  Runtime account runs {{paid-sandboxes}} sandboxes at once, with no plan fee: prepaid credit from {{topup-min}}, and support raises the
   limit when you ask.
 - **Bigger sandboxes without Pro.** A paid Runtime sandbox takes up to {{max-vcpu}} vCPUs
   and {{max-memory}}. On Freestyle, 64 GiB needs the Pro plan; Hobby stops at 8 vCPUs
@@ -44,7 +43,7 @@ Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Read-only keys, a daily spending limit per key and
-  `maxCostMicros` on each create keep an agent inside its budget, and every
+  `maxTotalCostMicros` on each sandbox keep an agent inside its budget, and every
   write takes an idempotency key.
 - **Python and JavaScript.** Runtime has SDKs for both, a CLI and an MCP server.
 
@@ -60,17 +59,17 @@ addresses and WireGuard private networks. See [products](./products).
 Freestyle's figures come from its public pricing page and VM documentation,
 checked {{checked:freestyle}}.
 
-|                    | Runtime                                                                        | Freestyle                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Isolation          | Firecracker microVM, own kernel                                                | Full Linux virtual machines                                                                      |
-| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                 | {{rate:freestyle:cpu}} per allocated vCPU-hour                                                   |
-| Memory billing     | {{memory-rate}} per reserved GiB-hour                                          | {{rate:freestyle:memory}} per allocated GiB-hour                                                 |
-| Disk while it runs | Included                                                                       | {{rate:freestyle:disk}} per allocated GiB-hour                                                   |
-| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                 | 4 vCPUs and 8 GiB free; 8 and 16 Hobby; 32 and 64 Pro                                            |
-| At once            | {{paid-sandboxes}} paid ({{new-account-sandboxes}} in the first week), no plan | 10 free, 40 Hobby, 400 Pro                                                                       |
-| Plan fee           | None; prepaid credit from {{topup-min}}                                        | Free $0; Hobby {{term:freestyle:hobby}} and Pro {{term:freestyle:pro}} a month, counted to usage |
-| Free start         | {{trial-hours}} sandbox hours, no card                                         | 200 vCPU-hours and 400 GiB-hours of memory a month                                               |
-| Pause              | Files, memory and processes, kept 1 to 365 days                                | Hibernate with memory, billed as storage while paused                                            |
+|                    | Runtime                                                        | Freestyle                                                                                        |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Isolation          | Firecracker microVM, own kernel                                | Full Linux virtual machines                                                                      |
+| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:freestyle:cpu}} per allocated vCPU-hour                                                   |
+| Memory billing     | {{memory-rate}} per reserved GiB-hour                          | {{rate:freestyle:memory}} per allocated GiB-hour                                                 |
+| Disk while it runs | Included                                                       | {{rate:freestyle:disk}} per allocated GiB-hour                                                   |
+| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | 4 vCPUs and 8 GiB free; 8 and 16 Hobby; 32 and 64 Pro                                            |
+| At once            | {{paid-sandboxes}} paid, no plan                               | 10 free, 40 Hobby, 400 Pro                                                                       |
+| Plan fee           | None; prepaid credit from {{topup-min}}                        | Free $0; Hobby {{term:freestyle:hobby}} and Pro {{term:freestyle:pro}} a month, counted to usage |
+| Free start         | {{trial-hours}} sandbox hours, no card                         | 200 vCPU-hours and 400 GiB-hours of memory a month                                               |
+| Pause              | Files, memory and processes, kept while you have credit        | Hibernate with memory, billed as storage while paused                                            |
 
 ## Cost for the same job
 
@@ -98,7 +97,7 @@ Freestyle  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:freestyle:cpu}}        = 
 
 Plan fees, free allowances, data transfer, paused storage and taxes are left out
 of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}}
-out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's
+out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's
 terms.
 
 ## How to switch
@@ -110,7 +109,8 @@ you merge.
 
 A Freestyle snapshot you start VMs from maps to a Runtime
 [snapshot](./javascript#snapshots-and-forks) or a [custom image](./images), and a
-VM kept for weeks maps to a sandbox paused with a long retention:
+VM kept for weeks maps to a paused sandbox, kept while you have credit, or
+for a fixed number of days:
 
 ```ts check
 import { Sandbox } from "withruntime";
@@ -118,7 +118,7 @@ import { Sandbox } from "withruntime";
 const box = await Sandbox.create({ funding: "paid", timeoutSeconds: 3600 });
 await box.exec("pip install --quiet requests");
 await box.pause(); // memory, processes and files are kept
-await box.setRetention(90); // for 90 days
+await box.setRetention(90); // a fixed 90 days instead
 await box.wake(); // later: it carries on where it stopped
 await box.stop();
 ```

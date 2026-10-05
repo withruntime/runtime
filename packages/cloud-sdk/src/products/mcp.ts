@@ -1,5 +1,6 @@
 import type { Sandbox } from "../sandbox.js";
 import type { RequestOptions, Transport } from "../transport.js";
+import { pause } from "../wait.js";
 
 export type McpCatalogEntry = {
   id: string;
@@ -79,15 +80,35 @@ export function sandboxMcp(t: Transport, sandbox: Sandbox) {
     /** Their state, and fresh URLs. */
     get: (options?: RequestOptions) =>
       t.json<McpGateway>({ method: "GET", path: path(), ...options }),
-    /** Wait until every server is ready (or one failed). */
-    async ready(input: { timeoutMs?: number; intervalMs?: number } = {}): Promise<McpGateway> {
-      const deadline = Date.now() + (input.timeoutMs ?? 600_000);
+    /** Wait until every server is ready (or one failed). Past `timeoutMs`
+     * (default ten minutes), the last state read; a status request still
+     * unanswered then is cut off at the deadline, and throws its timeout when
+     * no state was read at all. */
+    async ready(
+      input: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
+    ): Promise<McpGateway> {
+      const deadline = performance.now() + (input.timeoutMs ?? 600_000);
+      let last: McpGateway | undefined;
       for (;;) {
-        const state = await t.json<McpGateway>({ method: "GET", path: path() });
-        if (!state.running || state.servers.every((server) => server.status !== "installing"))
-          return state;
-        if (Date.now() > deadline) return state;
-        await new Promise((resolve) => setTimeout(resolve, input.intervalMs ?? 2_000));
+        const left = Math.ceil(deadline - performance.now());
+        if (left <= 0 && last) return last;
+        try {
+          last = await t.json<McpGateway>({
+            method: "GET",
+            path: path(),
+            timeoutMs: Math.max(1, left),
+            ...(input.signal ? { signal: input.signal } : {}),
+          });
+        } catch (error) {
+          if (last && !input.signal?.aborted && (error as { code?: string }).code === "timeout")
+            return last;
+          throw error;
+        }
+        if (!last.running || last.servers.every((server) => server.status !== "installing"))
+          return last;
+        const rest = deadline - performance.now();
+        if (rest <= 0) return last;
+        await pause(Math.min(input.intervalMs ?? 2_000, rest), input.signal);
       }
     },
     stop: (options?: RequestOptions) =>

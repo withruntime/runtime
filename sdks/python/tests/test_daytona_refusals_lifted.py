@@ -204,31 +204,34 @@ class User(Base):
 
 
 class AutoStop(Base):
-    def test_two_hours_idle_renews_while_calls_come_and_stops_after(self):
-        sandbox = self.create(CreateSandboxFromSnapshotParams(auto_stop_interval=120))
-        self.assertEqual(self.world.called("sandboxes.create")[-1][0]["timeout_seconds"], 3600)
-        self.assertIsNotNone(sandbox._timer)
-        runtime = sandbox.withruntime
-        now = time.time()
-        runtime.info["expiresAt"] = _iso(now + 600)
-        sandbox._tick()
-        self.assertAlmostEqual(_seconds(runtime.info["expiresAt"]), now + 3600, delta=3)
-        # Nothing since the last call for two hours: the lease is left to end.
-        sandbox._last_active = now - 7200
-        runtime.info["expiresAt"] = _iso(now + 60)
-        extends = len(self.world.called("sandbox.extend"))
-        sandbox._tick()
-        self.assertEqual(len(self.world.called("sandbox.extend")), extends)
+    """Since 0300 a sandbox with no time to live has no time limit: the
+    interval is its idle pause, counted by the sandbox itself, and nothing
+    here extends anything, so a long command is never frozen for want of
+    calls from this object."""
 
-    def test_zero_never_stops_while_the_object_lives(self):
-        sandbox = self.create(CreateSandboxFromSnapshotParams(auto_stop_interval=0))
-        runtime = sandbox.withruntime
-        sandbox._last_active = time.time() - 86_400
-        runtime.info["expiresAt"] = _iso(time.time() + 60)
+    def test_two_hours_is_the_sandbox_own_idle_pause(self):
+        sandbox = self.create(CreateSandboxFromSnapshotParams(auto_stop_interval=120))
+        create = self.world.called("sandboxes.create")[-1][0]
+        self.assertEqual(create["idle_pause_seconds"], 7200)
+        self.assertNotIn("timeout_seconds", create)
+        self.assertIsNone(sandbox._timer)
+        sandbox._last_active = time.time() - 7200
         sandbox._tick()
-        self.assertAlmostEqual(_seconds(runtime.info["expiresAt"]), time.time() + 3600, delta=3)
+        self.assertEqual(self.world.called("sandbox.extend"), [])
+
+    def test_zero_never_pauses_for_idleness(self):
+        sandbox = self.create(CreateSandboxFromSnapshotParams(auto_stop_interval=0))
+        create = self.world.called("sandboxes.create")[-1][0]
+        self.assertEqual(create["idle_pause_seconds"], 0)
+        self.assertNotIn("timeout_seconds", create)
         sandbox.delete()
         self.assertIsNone(sandbox._timer)
+
+    def test_a_time_to_live_is_a_time_limit(self):
+        self.create(CreateSandboxFromSnapshotParams(ttl_minutes=30))
+        create = self.world.called("sandboxes.create")[-1][0]
+        self.assertEqual((create["timeout_seconds"], create["on_lease_end"]), (900, "stop"))
+        self.assertNotIn("idle_pause_seconds", create)
 
 
 def _seconds(stamp: str) -> float:
@@ -312,7 +315,7 @@ class Async(unittest.TestCase):
             daytona = AsyncDaytona(client=world.async_client())
             sandbox = await daytona.create(CreateSandboxFromSnapshotParams(os_user="alice", auto_stop_interval=0))
             self.assertEqual(sandbox.user, "alice")
-            self.assertIsNotNone(sandbox._timer)
+            self.assertIsNone(sandbox._timer)  # no time limit: nothing to keep
             seen: List[bytes] = []
 
             async def on_data(data: bytes) -> None:

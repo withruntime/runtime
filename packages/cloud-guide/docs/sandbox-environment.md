@@ -43,7 +43,8 @@ npx playwright install chromium
 
 ## Who you are
 
-- Commands run as the user `runtime` (uid 1000), with `bash`.
+- Commands run as the user `runtime` (uid 1000), with `bash`, and `USER` and
+  `LOGNAME` say so.
 - `HOME` is `/workspace`, which is also the default working directory. Files
   there belong to you.
 - `sudo` works without a password: you are root inside your own sandbox. Root
@@ -118,11 +119,15 @@ telnet, Windows RPC, NetBIOS and SMB, and IRC. TCP leaves the sandbox, and a
 paid sandbox also sends UDP to any public address and port
 ([outbound UDP](./networking#outbound-udp)); DNS is answered inside it.
 
-**Bandwidth.** A paid sandbox of an account that has made a purchase moves up
-to {{paid-bandwidth}} in each direction. After its first {{paid-bandwidth-burst}} at that speed it runs
-at {{paid-bandwidth-sustained}}, and earns the burst back at that rate while it moves less. It
-can move {{paid-daily-transfer}} a day, in and out together, in a 24-hour window that starts
-with its first byte. A trial sandbox gets {{trial-bandwidth}}, and a trial account {{trial-daily-transfer}} a
+**Bandwidth.** Downloads are fast for everyone; uploads are limited, more
+strictly on the trial, because uploads are what spam and floods use. Downloads
+have no speed limit: each server's link is shared between the sandboxes using
+it, and while it is full a paid sandbox gets {{paid-share}} a trial sandbox's share.
+A sandbox paid for with credit uploads at up to {{paid-upload}}; after its first {{paid-upload-burst}}
+at that speed it uploads at {{paid-upload-sustained}}, and earns the burst back at that rate
+while it sends less. A trial sandbox uploads at up to {{trial-upload}}. A paid sandbox of
+an account that has made a purchase can move {{paid-daily-transfer}} a day, in and out together,
+in a 24-hour window that starts with its first byte; a trial account {{trial-daily-transfer}} a
 day shared by all its sandboxes. Past the daily amount, open connections close
 and new requests get `429 Too Many Requests` with `X-Runtime-Egress:
 quota-exhausted` (`quota-exhausted:account` for a trial account's shared
@@ -210,10 +215,13 @@ all yours to open:
 - A tunnel for your own machine: `runtime sandbox ssh` and `runtime sandbox port-forward` reach
   any port on the sandbox's loopback through Runtime's API, with your key. See
   [SSH and editors](./editors).
-- For paid accounts, a custom domain, a public TCP port, or a WireGuard tunnel
-  from your own network. See [networking](./networking).
+- For an account with a kept top-up, a custom domain, a public TCP port,
+  or a WireGuard tunnel from your own network. See [networking](./networking).
 
 A sandbox with none of these accepts no connections from anyone but you.
+What a sandbox created from 5 October 2026 sends back through a preview, a custom
+domain or a TCP port counts as outbound traffic, and what visitors send in is
+free ([pricing](./pricing#network-products)).
 
 Start a server that should keep answering with `spawn` (`runtime sandbox spawn`,
 `sbx.spawn`), not with `exec`: everything an `exec` starts, `nohup … &`
@@ -252,14 +260,15 @@ docker compose up -d
 ## Time and lifetime
 
 - The clock is kept on the host's clock, and set again after every wake.
-- A sandbox runs until its lease ends (`timeoutSeconds`, at most an hour ahead,
-  which `extend` moves as often as you need), then pauses or stops as
-  `onLeaseEnd` says. A pause keeps its memory and processes. A trial sandbox
-  still working at its lease's end (a command, terminal or SSH session open,
-  CPU in use or traffic moving) is given its `timeoutSeconds` again until the
-  trial hours run out ([trial](./trial)).
+- A sandbox runs while it works and pauses itself when idle
+  (`idlePauseSeconds`), until you stop it or credit or the trial hours
+  ([trial](./trial)) run out; then it pauses or stops as `onTimeout` says. It
+  has no time limit unless `timeoutSeconds` sets one (60 to 86,400), which
+  `extend` moves. A pause keeps its memory and processes.
 - A host-side lease bounds execution even if management is unavailable.
-- A stopped sandbox is not a backup; copy out what you need to keep.
+- A stop keeps the disk, billed as [paused storage](./pricing#paused-storage),
+  until you delete the sandbox; `restart` starts it again with its memory
+  gone. It is still not a backup; copy out what you need to keep.
 - A deleted sandbox is gone: `DELETE /v1/sandboxes/{id}`, `sandbox.delete()` or
   `runtime sandbox rm <id>` stops it and deletes its disk and paused memory in
   any state. Its snapshots stay.

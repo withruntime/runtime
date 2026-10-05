@@ -229,6 +229,34 @@
           "artifacts": {
             "prime_sandboxes-0.4.1-py3-none-any.whl": "sha256-1a1bb96afacc66d690815be82c0b7af180ea141421b7d180b4a0adbada4f38f0",
             "prime_sandboxes-0.4.1.tar.gz": "sha256-53f7577dc9070e3b8e30db360f9e3cce3bcc35f8765b26f24f64dbc3c7763b06"
+          },
+          "latestReview": {
+            "version": "0.4.2",
+            "artifacts": {
+              "prime_sandboxes-0.4.2-py3-none-any.whl": "sha256-ed59f001c7575339d6c903166c5468f783eda0997586ec6476fd8b35f65746f9",
+              "prime_sandboxes-0.4.2.tar.gz": "sha256-4990a724cac0a662fde6e12e7eccfee092a78679cc568653b8ef52008dfa28e4"
+            },
+            "reviewedAt": "2026-10-02",
+            "disposition": "held-for-sdk-qualification",
+            "evidence": {
+              "sourceUrls": [
+                "https://pypi.org/pypi/prime-sandboxes/0.4.2/json",
+                "https://files.pythonhosted.org/packages/3f/4d/a379cdf82d6f06c970bd4f0333c2360c08aba65c809d7492f49aece84c66/prime_sandboxes-0.4.2.tar.gz",
+                "https://files.pythonhosted.org/packages/da/b5/6a9fe6ae1342872c1c0cc45072cc0c58a5fa2783c4c45770e585f2535c8f/prime_sandboxes-0.4.2-py3-none-any.whl",
+                "https://github.com/PrimeIntellect-ai/prime/tree/main/packages/prime-sandboxes"
+              ],
+              "artifactSha256": {
+                "prime_sandboxes-0.4.2-py3-none-any.whl": "ed59f001c7575339d6c903166c5468f783eda0997586ec6476fd8b35f65746f9",
+                "prime_sandboxes-0.4.2.tar.gz": "4990a724cac0a662fde6e12e7eccfee092a78679cc568653b8ef52008dfa28e4"
+              },
+              "changes": [
+                "Source diff of the 0.4.1 and 0.4.2 sdists, downloaded and hashed on the Mac, nothing installed or run: README, __init__, models.py, sandbox.py, one test changed; tests/test_checkpoints.py added.",
+                "Adds filesystem checkpoints: SandboxCheckpoint, CheckpointLookupError and BatchCheckpointResponse models; checkpoint, get_checkpoint, get_checkpoints (batch of up to 100 ids), wait_for_checkpoint and list_checkpoints on the sync and async clients; CreateSandboxRequest takes checkpoint_id with a validate_restore_source check.",
+                "CreateSandboxRequest.docker_image becomes Optional (None when restoring from a checkpoint) and disk_size_gb's default 5.0 becomes None.",
+                "Background job launch: the working_dir prefix is 'cd DIR || exit 1;' instead of 'cd DIR &&', and the launch cwd is / for an absolute working_dir.",
+                "No existing method was removed or renamed. Installed consumer qualification against withruntime/prime is not run; the supported pin stays 0.4.1."
+              ]
+            }
           }
         }
       ]
@@ -252,6 +280,33 @@
           "artifacts": {
             "modal-1.6.0-py3-none-any.whl": "sha256-2f5981ba656570ad96379d29f0ddff876880708c84966024ce130e9e1794fa68",
             "modal-1.6.0.tar.gz": "sha256-c5dd551b5e0a283f3c764476c0a4ebe5bdef1e4a69432fa27e1b1ad8ca5e0817"
+          },
+          "latestReview": {
+            "version": "1.6.1",
+            "artifacts": {
+              "modal-1.6.1-py3-none-any.whl": "sha256-f408ef88563003a83e491a6be09d4221eaa6e038fa4faa2ad8b15b25afe949a4",
+              "modal-1.6.1.tar.gz": "sha256-ff17768f67a65595aa7882e893e6cb78e2e001b3653aa52cfe98d4051d8d9e9e"
+            },
+            "reviewedAt": "2026-10-03",
+            "disposition": "held-for-sdk-qualification",
+            "evidence": {
+              "sourceUrls": [
+                "https://pypi.org/pypi/modal/1.6.1/json",
+                "https://files.pythonhosted.org/packages/65/ba/2b36899ea5633bf101e6ba6f7e95a4da3e4b1f57f52bd0ba8f4cfd12e808/modal-1.6.1.tar.gz",
+                "https://files.pythonhosted.org/packages/d2/3c/6b7d9a15dab9af2833ce674bbc72b5654d4099d5b088f1cc1eda3f8249ca/modal-1.6.1-py3-none-any.whl"
+              ],
+              "artifactSha256": {
+                "modal-1.6.1-py3-none-any.whl": "f408ef88563003a83e491a6be09d4221eaa6e038fa4faa2ad8b15b25afe949a4",
+                "modal-1.6.1.tar.gz": "ff17768f67a65595aa7882e893e6cb78e2e001b3653aa52cfe98d4051d8d9e9e"
+              },
+              "changes": [
+                "Source diff of the 1.6.0 and 1.6.1 sdists, downloaded and hashed on the Mac, nothing installed or run; the 1.6.0 hashes match the pin. No file added or removed; 37 files changed, most in sandbox.py, the CLI and the generated protos.",
+                "Sandbox v2 calls send a per-sandbox token (x-modal-sandbox-token, from the create response) beside the auth token through a new _v2_metadata helper, including command router access.",
+                "Experimental sidecars take include_oidc_identity_token and proxy, refused for GPU sandboxes. Server sessions retry start with an idempotency key for up to 25 minutes; the CLI gains endpoint commands; stats types gain container_total_count; agent detection reads tool variables before AGENT and AI_AGENT.",
+                "Requirements: protobuf below 8.0 instead of 7.0, synchronicity ~=0.12.6 instead of ~=0.12.5. Some iterator return types become AsyncGenerator.",
+                "No public Sandbox, ContainerProcess, Image, App or file method used by withruntime/modal was removed or renamed; that drop-in does not import modal. Installed consumer qualification is not run; the supported pin stays 1.6.0."
+              ]
+            }
           }
         }
       ]

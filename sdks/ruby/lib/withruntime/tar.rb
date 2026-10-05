@@ -91,7 +91,7 @@ module WithRuntime
 
     # Unpacks a gzipped tar fed to it a chunk at a time into a target folder,
     # holding no more than a chunk. Entries land only inside the target, and
-    # links are not made. It unpacks into a folder beside the target and moves
+    # symbolic links are not made; a hard link lands as the file it names. It unpacks into a folder beside the target and moves
     # it into place only once the whole archive arrived (+finish+), so an
     # archive cut short leaves nothing behind that could pass for the folder.
     # A target that exists is merged into, files of the same name replaced,
@@ -109,6 +109,7 @@ module WithRuntime
         @left = 0
         @padding = 0
         @long = nil
+        @long_link = nil
         @ended = false
       end
 
@@ -189,12 +190,15 @@ module WithRuntime
         type = header[156]
         prefix = field(header, 345, 155)
         name = @long || (prefix.empty? ? field(header, 0, 100) : "#{prefix}/#{field(header, 0, 100)}")
+        link = @long_link || field(header, 157, 100)
         @long = nil
+        @long_link = nil
+        @long_link = nil
         mode = field(header, 100, 8).strip.then { |text| text.empty? ? 0o644 : text.to_i(8) }
         @left = size
         @padding = -size % 512
         @entry = {}
-        if %w[L x].include?(type)
+        if %w[L K x].include?(type)
           @entry = { long: "".b, type: type }
         else
           name = name.delete_prefix("./")
@@ -204,8 +208,12 @@ module WithRuntime
 
             case type
             when "5" then FileUtils.mkdir_p(destination)
+            when "1" then hard_link(destination, link, name)
             when "0", "\0", "7"
               FileUtils.mkdir_p(File.dirname(destination))
+              # A name already unpacked may share its file with a hard link;
+              # writing through it would change the link's copy too.
+              File.unlink(destination) if File.exist?(destination) || File.symlink?(destination)
               @entry = { file: File.open(destination, "wb"), path: destination, mode: mode }
             end
           end
@@ -219,13 +227,36 @@ module WithRuntime
           File.chmod(@entry[:mode] & 0o777, @entry[:path])
         elsif @entry[:long]
           body = @entry[:long]
-          @long = if @entry[:type] == "L"
-                    body.split("\0", 2).first.force_encoding("UTF-8")
-                  else
-                    pax_path(body)
-                  end
+          case @entry[:type]
+          when "L" then @long = body.split("\0", 2).first.force_encoding("UTF-8")
+          when "K" then @long_link = body.split("\0", 2).first.force_encoding("UTF-8")
+          else @long = pax_path(body)
+          end
         end
         @entry = {}
+      end
+
+      # A second name for a file the archive already carried: tar writes the
+      # first name as a file and every other as a hard link to it. The link
+      # names a plain file unpacked earlier in this archive, or the unpack
+      # fails; it never reaches outside or ahead.
+      def hard_link(destination, link, name)
+        source = File.expand_path(link.delete_prefix("./"), @root)
+        unless source.start_with?("#{@root}/") && !link.start_with?("/")
+          raise IOError, "Refusing an archive hard link that leads outside the target: #{name} -> #{link}"
+        end
+        unless File.file?(source) && !File.symlink?(source)
+          raise IOError, "Refusing an archive hard link to a file it does not carry: #{name} -> #{link}"
+        end
+        return if source == destination
+
+        FileUtils.mkdir_p(File.dirname(destination))
+        File.unlink(destination) if File.exist?(destination) || File.symlink?(destination)
+        begin
+          File.link(source, destination)
+        rescue SystemCallError
+          FileUtils.cp(source, destination, preserve: true)
+        end
       end
 
       # A pax header's path record, if it has one.

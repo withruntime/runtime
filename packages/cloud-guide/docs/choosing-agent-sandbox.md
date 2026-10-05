@@ -20,7 +20,7 @@ each.
 - **Every sandbox is a Firecracker microVM** with its own kernel, on dedicated
   servers Runtime operates.
 - **Pause keeps memory.** A paused sandbox wakes with its processes still
-  running, kept for 1 to 365 days. Forks copy a running sandbox, memory
+  running, kept while you have credit. Forks copy a running sandbox, memory
   included.
 - **An uptime promise.** {{uptime-promise}} API uptime a month for paid accounts, and
   {{uptime-credit}} of a short month's charges back as credit automatically
@@ -49,15 +49,15 @@ to keep, expected duration and acceptable failure rate.
 | Isolated code execution | Boundary between guest, host and other tenants                | A Firecracker microVM with its own kernel for every sandbox                                                                                                     |
 | Agent integration       | Actual remote execution, structured results, file round trip  | API, CLI, Python, JavaScript and MCP; an OpenAI Agents SDK sandbox client and ready tools for ten agent frameworks; MCP servers from a catalog run in a sandbox |
 | Easy authentication     | Connection without secrets in prompts or project files        | Browser-approved CLI connection; local MCP reuses it                                                                                                            |
-| Outbound network        | Your package registries and service destinations work         | Every port on paid accounts, 80 and 443 on the trial; per-sandbox rules; secrets the sandbox never sees                                                         |
-| Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default; custom domains and TCP ports on paid accounts                                                          |
-| Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept 1–365 days; a failed wake says so                                                                                              |
+| Outbound network        | Your package registries and service destinations work         | Every port with a kept top-up, 80 and 443 on the trial; per-sandbox rules; secrets the sandbox never sees                                                       |
+| Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default; custom domains and TCP ports with a kept top-up                                                        |
+| Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept while you have credit; a failed wake says so                                                                                   |
 | Custom environments     | Dependencies installed once, reused on every start            | Custom images from a recipe, any public or private image, or a Dockerfile                                                                                       |
 | Storage                 | Data that outlives a sandbox, and your own buckets            | Volumes backed up off their server daily; S3, R2 and GCS buckets mounted as directories                                                                         |
 | Predictable cost        | CPU, memory, idle time, storage, retries and fees             | Pauses itself after {{idle-pause}} idle; measured CPU with a floor, reserved memory, separately quoted paused storage, {{outbound-allowance}} out a month free  |
 | Spending control        | Limits an agent cannot raise itself                           | Read-only keys and a daily spending limit per key, set only by a person                                                                                         |
 | Observability           | What each sandbox did, in the tools you already watch         | CPU and memory metrics, signed webhooks and OpenTelemetry export, at no charge                                                                                  |
-| Private connectivity    | Fixed egress for allow-lists; a way into your own network     | Dedicated outbound addresses and WireGuard private networks on paid accounts; identity tokens for AWS and Google Cloud                                          |
+| Private connectivity    | Fixed egress for allow-lists; a way into your own network     | Dedicated outbound addresses with credit, WireGuard private networks with a kept top-up; identity tokens for AWS and Google Cloud                               |
 | Team access             | Roles for people, and a record of who changed what            | Single sign-on (SAML, OIDC) and SCIM free; owner, admin, developer and billing roles; an audit log kept at least 400 days                                       |
 | Reliability             | A published uptime figure, and what you get when it is missed | {{uptime-promise}} a month for paid accounts, {{uptime-credit}} back automatically; a status page checked from outside                                          |
 
@@ -84,7 +84,7 @@ compare like with like.
 ## Exercise the failures you will have to handle
 
 Try a lost create response, an execution timeout, a nonzero exit code, a refused
-network destination, an expired lease, and unavailable capacity on wake.
+network destination, a time limit that ran out, and unavailable capacity on wake.
 
 - Retrying the same operation should not create duplicate work or charges.
 - Revoking one agent's credential should stop its access without breaking
@@ -100,7 +100,7 @@ network responses.
 
 A running sandbox still pays its CPU floor and reserved memory, and paused
 storage is billed separately. Inbound traffic is free, and each account's first
-{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. Sandboxes run Linux on CPUs, in
+{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). Sandboxes run Linux on CPUs, in
 one US region today; see [products](./products) for everything available.
 
 ## Compared with a specific provider
@@ -114,16 +114,16 @@ seconds each, 20 CPU-seconds of work. Rival rates were checked
 | **Runtime**                                              |     **{{cost:runtime}}** |                          — |
 | [Northflank](./northflank-alternative)                   |      {{cost:northflank}} |      {{saving:northflank}} |
 | [Cloudflare Sandbox](./cloudflare-sandbox-alternative)   |      {{cost:cloudflare}} |      {{saving:cloudflare}} |
-| [Fly Machines](./fly-alternative)                        |    {{cost:fly-machines}} |    {{saving:fly-machines}} |
 | [Prime Sandboxes](./prime-sandboxes-alternative)         |           {{cost:prime}} |           {{saving:prime}} |
+| [Fly Machines](./fly-alternative)                        |    {{cost:fly-machines}} |    {{saving:fly-machines}} |
 | [Morph](./morph-alternative)                             |           {{cost:morph}} |           {{saving:morph}} |
 | [Vercel Sandbox](./vercel-sandbox-alternative)           |          {{cost:vercel}} |          {{saving:vercel}} |
 | [Freestyle](./freestyle-alternative)                     |       {{cost:freestyle}} |       {{saving:freestyle}} |
+| [Fly Sprites](./fly-alternative)                         |     {{cost:fly-sprites}} |     {{saving:fly-sprites}} |
 | [CodeSandbox](./codesandbox-alternative)                 |     {{cost:codesandbox}} |     {{saving:codesandbox}} |
 | [E2B](./e2b-alternative)                                 |             {{cost:e2b}} |             {{saving:e2b}} |
 | [Daytona](./daytona-alternative)                         |         {{cost:daytona}} |         {{saving:daytona}} |
 | [Blaxel](./blaxel-alternative)                           |          {{cost:blaxel}} |          {{saving:blaxel}} |
-| [Fly Sprites](./fly-alternative)                         |     {{cost:fly-sprites}} |     {{saving:fly-sprites}} |
 | [Modal Sandboxes](./modal-sandbox-alternative)           |           {{cost:modal}} |           {{saving:modal}} |
 | [AWS Lambda MicroVMs](./aws-lambda-microvms-alternative) | {{cost:lambda-microvms}} | {{saving:lambda-microvms}} |
 | [Runloop](./runloop-alternative)                         |         {{cost:runloop}} |         {{saving:runloop}} |

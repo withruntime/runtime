@@ -38,14 +38,13 @@ package talks only to Runtime.
   kept for Runtime's retention: 30 days on credit, 7 on the trial, or
   `autoDeleteInterval` minutes rounded up to whole days. `delete()` ends it.
   An `ephemeral` sandbox (or `autoDeleteInterval: 0`) ends on `stop()`.
-- **Auto-stop:** Runtime runs a sandbox on a lease of up to an hour. The lease
-  is `autoStopInterval` minutes (default 15), and every call through the
-  adapter moves it on once less than half is left, so a sandbox pauses after
-  that long without calls, as Daytona's does. Past an hour, or `0` (never),
-  the sandbox object also renews the lease each minute while it lives, toward
-  `autoStopInterval` after the last call; once the program ends, the sandbox
-  pauses within an hour. `ttlMinutes` caps the renewals and ends the sandbox at
-  the deadline.
+- **Auto-stop:** `autoStopInterval` minutes (default 15; `0` never) is the
+  sandbox's idle pause: it pauses after that long with nothing happening in
+  it, counted by the sandbox itself, so a long command is never paused for
+  want of calls. It has no time limit. `ttlMinutes` gives it one, and with
+  it Daytona's own rule: the sandbox pauses after `autoStopInterval` minutes
+  without a call through the adapter, each call moving the limit on, and ends
+  at the deadline.
 - **Funding:** left to Runtime, as `withruntime`'s own `create()` does: the free
   trial while the account has trial time, then prepaid credit. Pass
   `withruntime: { create: { funding: "trial" } }` to `new Daytona(...)` or to

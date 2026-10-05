@@ -51,7 +51,7 @@ results back there.
   A command is at most {{job-command-size}}, and `cwd` must be under `/workspace`.
 - **The size is a sandbox's.** 2 vCPU and 4 GiB with a 4 GiB disk unless you
   say otherwise, up to {{max-vcpu}} vCPUs and {{max-memory}}. The disk is at
-  least 3 GiB, the size of the system image.
+  least 3 GiB, the size of the system image, and at most {{max-disk}}.
 - **A run may last up to {{job-max-run}}.** The timeout is
   {{job-timeout-default}} unless you set it, counted from when the command
   starts. At the timeout the run is stopped, and every process it started with
@@ -95,24 +95,37 @@ did before you run it by hand. The schedule carries on: the next occurrence
 runs as usual.
 
 If a run cannot start, the job's `blockedReason` says why and it tries again
-every {{job-blocked-retry}}: `credits` (add credit), `cost_cap` (a limit you
+every {{job-blocked-retry}}: `credits` (the trial cannot take the run and the
+account has no credit: add credit), `cost_cap` (a limit you
 set, or the key's daily limit, was reached), `capacity` (no room right now) or
 `permission` (the key that made the job was revoked or narrowed).
 
 ## What it costs
 
-A run is a paid sandbox, billed at the sandbox rates for exactly the time it
-runs: {{cpu-rate}} per active vCPU-hour and {{memory-rate}} per reserved
-GiB-hour, with nothing for the job itself. Each run holds its cost for its
-time limit before it starts, and is charged only what it used, through the same
-[spending limits](./security) as every sandbox. The free trial's hours do not
-fund jobs, so add credit first; a job made on an account without credit waits
-with `blockedReason` `credits`.
+A run is paid for as any sandbox is, for exactly the time it runs, with
+nothing for the job itself. The [free trial](./trial)'s hours come first, then
+credit, with nothing to choose:
+
+- **On the trial alone,** a run is a trial sandbox. It spends the trial's
+  hours while it fits the trial: at most 2 vCPU and 4 GiB, and no more than
+  {{trial-sandboxes}} trial sandboxes running at once. Like every trial
+  sandbox, it reaches the internet on ports 80 and 443 only.
+- **Once the account holds credit,** a run spends the trial's hours while they
+  last and then credit, at the sandbox rates: {{cpu-rate}} per active
+  vCPU-hour and {{memory-rate}} per reserved GiB-hour. A paid run holds its
+  cost for its time limit before it starts, and is charged only what it used,
+  through the same [spending limits](./security) as every sandbox.
+
+A run the trial cannot take, on an account with no credit, waits with
+`blockedReason` `credits`: once the hours are spent, or when the run is larger
+than the trial or would be one sandbox too many. It starts by itself once there
+is credit or room.
 
 Two limits bound what a job spends: `--max-cost` for one run and
 `--max-total-cost` for every run of the job together (`compute.maxCostMicros`
-and `maxTotalCostMicros` in the SDKs and API). An account runs up to
-{{paid-jobs}} jobs; [ask](./feedback-and-support) for more.
+and `maxTotalCostMicros` in the SDKs and API). An account holds up to
+{{paid-jobs}} jobs, active or paused; a finished or cancelled job does not
+count. [Ask](./feedback-and-support) for more.
 
 ## Secrets in a job
 
@@ -146,6 +159,7 @@ differently:
 | ------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------- |
 | What the code sees | A placeholder; the egress proxy adds the value on HTTPS | The value itself, in the variable you name                              |
 | Size               | Up to {{egress-secret-size}} of plain text              | Up to {{job-secret-size}}                                               |
+| How many           | Up to {{sandbox-secrets}} per account                   | Up to {{paid-secrets}} per account                                      |
 | Read it back       | Never, by anyone                                        | `runtime secrets reveal NAME`, with a key allowed to reveal             |
 | Change it          | `set` again                                             | `runtime secrets rotate NAME`: a new version, the old one stops at once |
 | Belongs to         | The account                                             | The person whose key stored it                                          |

@@ -36,8 +36,10 @@ end
 
 `create` returns once the sandbox is running. With no arguments you get the
 free trial while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
-a 4 GiB disk for up to 30 minutes. `funding: "trial"` never falls back to paid
-credit. Every field is optional, in snake_case:
+a 4 GiB disk, running while it works and pausing itself when idle, with no
+time limit (`timeout_seconds:` sets one, 60 to 86,400). The trial's hours are
+spent first, then prepaid credit; `funding:` is accepted and ignored. Every
+field is optional, in snake_case:
 
 ```ruby
 require "withruntime"
@@ -53,7 +55,7 @@ sbx = runtime.sandboxes.create(
   on_lease_end: "stop",
   network: { internet: true, allow: ["rubygems.org", "*.githubusercontent.com"] }
 )
-puts sbx.id, sbx.info.funding, sbx.info.expires_at
+puts sbx.id, sbx.info.funding, sbx.info.ends_at
 sbx.stop
 ```
 
@@ -163,8 +165,9 @@ A fork copies a sandbox as it is now, with its files, memory and running
 processes, on the same server; see [JavaScript](./javascript) for what forks
 and snapshots keep and how they are billed. If a copy fails, the error's
 `details["startedSandboxIds"]` names the copies that did start. Because
-`extend` is Ruby's own, the lease is extended with `extend_lease(seconds)`.
-`sbx.keep_alive` extends it from your process until `stop`, and
+`extend` is Ruby's own, a time limit is moved on with `extend_lease(seconds)`;
+a sandbox with no time limit has nothing to move. `sbx.keep_alive` moves it on
+from your process until `stop`, and
 `runtime.sandboxes.get_or_create(name, **fields)` answers the sandbox with
 that name, woken or restarted, or creates it.
 

@@ -5,7 +5,7 @@ import { clientFactories, clientProductAliases, type ClientExtensions } from "./
 import { usageExport as makeUsageExport } from "./products/observability.js";
 import { Sandbox, deleteSandbox, sandboxPage } from "./sandbox.js";
 import { Snapshots } from "./snapshots.js";
-import { Transport, missingKey, type RequestOptions } from "./transport.js";
+import { DEFAULT_BASE_URL, Transport, missingKey, type RequestOptions } from "./transport.js";
 import type { CreateSandbox, DeletedSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
 
 export type RuntimeOptions = {
@@ -18,7 +18,11 @@ export type RuntimeOptions = {
   timeoutMs?: number;
   /** Retries of transport failures, 429, 502, 503 and 504. Default 4. */
   maxRetries?: number;
-  /** Calls in flight at once; more wait their turn and reuse connections. Default 32. */
+  /** Connections held at once, calls and streams (a command's output, a
+   * download) together; more wait their turn, first come first served, and
+   * reuse them. Default 48: one address may hold 64 connections to the API
+   * before it has used a valid key. 8 are kept for calls whatever the
+   * streams hold. */
   maxConnections?: number;
   /** How long `sandboxes.create` keeps retrying, with the same key and input,
    * when the trial's slots, the account's quota or the region is full
@@ -59,10 +63,14 @@ export class Runtime {
   /** Date-range settlements, paged with exact charges and the server's CSV. */
   readonly usageExport: ReturnType<typeof makeUsageExport>;
   constructor(options: RuntimeOptions = {}) {
+    // The saved key is found by the origin as given, as `runtime login` saved
+    // it; the calls go where that origin is reachable from here, which in a
+    // sandbox is runtime.internal (transport.ts, `reachable`).
+    const origin = options.baseUrl || env("RUNTIME_API_URL") || DEFAULT_BASE_URL;
     this.transport = new Transport({
       // A key given, then RUNTIME_API_KEY, then (in Node and Bun) the key
       // `runtime login` saved for this machine, read on the first call.
-      apiKey: options.apiKey ?? env("RUNTIME_API_KEY") ?? (() => savedKey(this.transport.baseUrl)),
+      apiKey: options.apiKey ?? env("RUNTIME_API_KEY") ?? (() => savedKey(origin)),
       baseUrl: options.baseUrl ?? env("RUNTIME_API_URL"),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
@@ -162,6 +170,9 @@ export class Sandboxes {
     options: CreateOptions = {},
   ): Promise<Sandbox> {
     const { wait, ...body } = input;
+    const began = performance.now();
+    // Time spent waiting for capacity is the room's, not the deadline's.
+    let waited = 0;
     const info = await this.t.json<SandboxInfo>({
       method: "POST",
       path: "/v1/sandboxes",
@@ -169,13 +180,22 @@ export class Sandboxes {
       wait: wait === false ? 0 : 60,
       ...options,
       waitForCapacityMs: options.waitForCapacityMs ?? this.t.waitForCapacityMs,
+      onCapacityWait: (refusal, waitMs) => {
+        waited += waitMs;
+        options.onCapacityWait?.(refusal, waitMs);
+      },
     });
     const sandbox = new Sandbox(this.t, info);
     if (wait !== false && info.state !== "running") {
+      // One deadline for the whole create: the wait for running gets what the
+      // create left of it (1 ms when nothing is left, so it ends as a timeout).
+      const { timeoutMs } = options;
       await sandbox.waitFor("running", {
         timeoutSeconds: WAIT_FOR_TIMEOUT_SECONDS,
         signal: options.signal,
-        timeoutMs: options.timeoutMs,
+        timeoutMs: timeoutMs
+          ? Math.max(1, Math.ceil(timeoutMs - (performance.now() - began - waited)))
+          : timeoutMs,
         idempotencyKey: options.idempotencyKey,
       });
       if (sandbox.state !== "running")

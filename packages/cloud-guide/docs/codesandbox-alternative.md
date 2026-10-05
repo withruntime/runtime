@@ -17,7 +17,7 @@ Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alte
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
   and runs its next command {{server-wake-command}} after the request that
   wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB of saved state a month.
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **Starts in milliseconds.** CodeSandbox's figure for a new VM is
   {{speed:codesandbox:create}}. On Runtime's servers a new sandbox is running
   {{server-create}} after the create request, and {{server-create-p95}} at p95 ([speed](./speed)).
@@ -32,7 +32,7 @@ Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alte
   and memory for each sandbox and pay for no more.
 - **No plan fee for concurrency.** More than 10 VMs at once on CodeSandbox needs
   the {{term:codesandbox:scale}}-a-month Scale plan. Runtime has no plan: a paid account runs {{paid-sandboxes}}
-  sandboxes at once, {{new-account-sandboxes}} in its first week, and support raises the limit on
+  sandboxes at once, and support raises the limit on
   request.
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
@@ -89,7 +89,7 @@ CodeSandbox  Size   1,000 × 60 s / 3,600 × {{rate:codesandbox:size}}     = {{p
 Each run here is a whole minute, so CodeSandbox's rounding adds nothing; a
 40-second run would still be billed as a minute there. Plan fees, storage,
 network and taxes are left out of both. On Runtime, inbound traffic is free, and
-each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See
+each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See
 [pricing](./pricing) for Runtime's terms.
 
 ## How to switch

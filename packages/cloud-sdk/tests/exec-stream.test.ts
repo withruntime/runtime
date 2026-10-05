@@ -35,7 +35,10 @@ function stream(lines: Line[], end: "close" | "fail" | "hang" = "close", signal?
   );
 }
 
-function server(answer: (method: string, url: URL, init: RequestInit) => Response | undefined) {
+function server(
+  answer: (method: string, url: URL, init: RequestInit) => Response | undefined,
+  options: { maxRetries?: number } = {},
+) {
   const calls: string[] = [];
   const fetcher = (async (input: string, init: RequestInit = {}) => {
     const url = new URL(input);
@@ -46,6 +49,7 @@ function server(answer: (method: string, url: URL, init: RequestInit) => Respons
     apiKey: "rk",
     baseUrl: "https://api.example.test",
     fetch: fetcher,
+    ...options,
   });
   return { runtime, calls };
 }
@@ -124,6 +128,83 @@ test("a stream that keeps closing with nothing new is given up with the process 
   expect((error as RuntimeError).details).toEqual({ sandboxId: ID, processId: "p1" });
   expect((error as RuntimeError).hint).toContain(`runtime sandbox logs ${ID} p1 -f`);
   expect(calls.filter((c) => c.includes("/output")).length).toBe(4);
+});
+
+test("an hours-long command outlives a spell of refusals and cuts while its output is followed", async () => {
+  /* A thousand agents each follow a long command, reconnecting every 110 s.
+     A reconnect that meets a busy API (503 busy, 429), a host restarting (an
+     error event with a passing status) or a dropped connection must keep
+     following: the command is still running. Four such in a row used to end
+     the exec with "keeps closing" and fail the agent's task. */
+  const busy = (code: string, status: number) =>
+    Response.json({ error: { code, status, message: "m", retryAfterMs: 1 } }, { status });
+  const spell = [
+    () => busy("busy", 503),
+    () => busy("rate_limited", 429),
+    () =>
+      stream([
+        {
+          type: "error",
+          error: {
+            code: "host_unavailable",
+            status: 503,
+            message: "m",
+            processId: "p1",
+            cursor: 2,
+          },
+        },
+      ]),
+    () => stream([], "fail"),
+    () => busy("host_unavailable", 503),
+  ];
+  const { runtime, calls } = server(
+    (method, url) => {
+      if (method === "POST" && url.pathname.endsWith(":exec"))
+        return stream([
+          { type: "start", processId: "p1" },
+          { type: "stdout", data: "a\n", offset: 0 },
+          { type: "continue", processId: "p1", cursor: 2 },
+        ]);
+      if (url.pathname.endsWith("/processes/p1/output"))
+        return (
+          spell.shift()?.() ??
+          stream([
+            { type: "stdout", data: "b\n", offset: 2 },
+            { type: "exit", exitCode: 0, state: "exited", timedOut: false },
+          ])
+        );
+      return undefined;
+    },
+    { maxRetries: 0 },
+  );
+  const result = await (await runtime.sandboxes.get(ID)).exec("x", { onStdout: () => {} });
+  expect(result).toMatchObject({ exitCode: 0, stdout: "a\nb\n", stdoutTruncated: false });
+  expect(calls.filter((c) => c.includes("/output")).length).toBe(6);
+});
+
+test("a deliberate refusal or a missing process still ends the follow at once", async () => {
+  for (const [code, status] of [
+    ["unavailable", 503],
+    ["process_not_found", 404],
+  ] as const) {
+    const { runtime, calls } = server(
+      (method, url) => {
+        if (method === "POST" && url.pathname.endsWith(":exec"))
+          return stream([{ type: "start", processId: "p1" }], "fail");
+        if (url.pathname.endsWith("/processes/p1/output"))
+          return Response.json({ error: { code, status, message: "m" } }, { status });
+        return undefined;
+      },
+      { maxRetries: 0 },
+    );
+    const error = await (
+      await runtime.sandboxes.get(ID)
+    )
+      .exec("x", { onStdout: () => {} })
+      .catch((e: unknown) => e);
+    expect((error as RuntimeError).code).toBe(code);
+    expect(calls.filter((c) => c.includes("/output")).length).toBe(1);
+  }
 });
 
 test("cancelling a streamed exec stops the command in the sandbox and says so", async () => {

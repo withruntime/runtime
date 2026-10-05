@@ -165,7 +165,9 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
       // spent includes what a refund took back: used and returned are apart.
       expect(text).toMatch(/^used\s+\$0\.0003$/m);
       expect(text).toMatch(/^returned by refunds and disputes\s+\$10\.00$/m);
-      expect(text).toMatch(/^held for running sandboxes and this hour's storage\s+\$0\.0011$/m);
+      expect(text).toMatch(
+        /^set aside for running sandboxes and this hour's storage\s+\$0\.0011$/m,
+      );
       expect(text).toMatch(/^free trial\s+99 of 100 hours left$/m);
       expect(text).toMatch(
         /^outbound traffic this month\s+104\.7 GiB sent, 0 GiB of 100 GiB free left, \$0\.1000 charged$/m,
@@ -181,6 +183,49 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
       expect(JSON.parse(json[0]!)).toEqual(usage);
     },
   );
+});
+
+test("`usage` on a pilot account says the sandbox-hours left, and that they are used", async () => {
+  const pilot = {
+    id: "pilot-1",
+    sandboxes: 1000,
+    vcpu: 2,
+    memoryMiB: 2048,
+    diskMiB: 10240,
+    startsAt: "2026-10-03T14:00:00Z",
+    endsAt: "2026-10-10T14:00:00Z",
+    graceEndsAt: "2026-10-11T14:00:00Z",
+    endedAt: null,
+    hours: 10_000,
+    usedMs: 4_567_800_000,
+    leftMs: 31_432_200_000,
+  };
+  const base = {
+    available: "0",
+    credited: "0",
+    spent: "0",
+    held: "0",
+    expired: "0",
+    trial: null,
+    resources: [],
+  };
+  for (const [figures, said] of [
+    [
+      pilot,
+      /^pilot sandbox hours\s+8,731\.2 of 10,000 left; new pilot sandboxes until 2026-10-10 14:00 UTC$/m,
+    ],
+    [
+      { ...pilot, usedMs: 36_000_000_000, leftMs: 0 },
+      /^pilot sandbox hours\s+This pilot's sandbox hours are used\.$/m,
+    ],
+  ] as const)
+    await withStub(
+      (_method, url) => (url.pathname === "/v1/usage" ? { ...base, pilot: figures } : undefined),
+      async (lines) => {
+        expect(await run(["usage"], env, out(lines))).toBe(0);
+        expect(lines.join("\n")).toMatch(said);
+      },
+    );
 });
 
 test("`usage --csv` is one row per resource with exact dollars, quoted where it must be", async () => {

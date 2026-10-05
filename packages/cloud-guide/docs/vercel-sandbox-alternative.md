@@ -16,7 +16,7 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
   Runtime and {{cost:vercel:busy}} on Vercel.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
   connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB a month. The next request wakes it with its
+  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
   processes still running and its next command done {{server-wake-command}}
   after the request reaches Runtime.
 - **Faster from a snapshot.** Vercel states its snapshot restores take
@@ -26,7 +26,7 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).
 - **Memory survives a pause.** A paused Runtime sandbox wakes with its
-  processes still running, kept for 1 to 365 days. A stopped Vercel sandbox
+  processes still running, kept while you have credit. A stopped Vercel sandbox
   keeps its filesystem, and its processes start again.
 - **Forks keep memory too.** A Runtime fork copies a running sandbox with its
   memory and running processes. A Vercel snapshot or fork captures the
@@ -61,17 +61,17 @@ WireGuard private networks. See [products](./products).
 Vercel's figures come from its public pricing and documentation, checked
 {{checked:vercel}}, at the rates of its default `iad1` region.
 
-|                  | Runtime                                                                                                                         | Vercel Sandbox                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Isolation        | Firecracker microVM, own kernel                                                                                                 | Firecracker microVM, own kernel                      |
-| CPU billing      | {{cpu-rate}} per active vCPU-hour, with a small floor                                                                           | {{rate:vercel:cpu}} per active CPU-hour              |
-| Memory billing   | {{memory-rate}} per reserved GiB-hour                                                                                           | {{rate:vercel:memory}} per provisioned GB-hour       |
-| Plan             | None; prepaid credit from {{topup-min}}                                                                                         | Hobby allowance free; usage beyond it needs Pro      |
-| Free start       | {{trial-hours}} sandbox hours, no card                                                                                          | 5 active CPU-hours and 420 GB-hours a month on Hobby |
-| Session length   | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | 45 minutes on Hobby, 24 hours on Pro                 |
-| Stop and resume  | Pause keeps files, memory and processes                                                                                         | Stop keeps the filesystem; processes start again     |
-| Snapshots, forks | Files, memory and running processes                                                                                             | The filesystem                                       |
-| Port URLs        | Private with a token by default                                                                                                 | Public                                               |
+|                  | Runtime                                                                     | Vercel Sandbox                                       |
+| ---------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Isolation        | Firecracker microVM, own kernel                                             | Firecracker microVM, own kernel                      |
+| CPU billing      | {{cpu-rate}} per active vCPU-hour, with a small floor                       | {{rate:vercel:cpu}} per active CPU-hour              |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:vercel:memory}} per provisioned GB-hour       |
+| Plan             | None; prepaid credit from {{topup-min}}                                     | Hobby allowance free; usage beyond it needs Pro      |
+| Free start       | {{trial-hours}} sandbox hours, no card                                      | 5 active CPU-hours and 420 GB-hours a month on Hobby |
+| Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 45 minutes on Hobby, 24 hours on Pro                 |
+| Stop and resume  | Pause keeps files, memory and processes                                     | Stop keeps the filesystem; processes start again     |
+| Snapshots, forks | Files, memory and running processes                                         | The filesystem                                       |
+| Port URLs        | Private with a token by default                                             | Public                                               |
 
 ## Cost for the same job
 
@@ -96,7 +96,7 @@ Vercel   CPU    1,000 × 20 s / 3,600 × {{rate:vercel:cpu}}      = {{part:verce
 
 A GiB is about 7% larger than a GB, so Runtime's memory figure covers slightly
 more. Creations, network, storage, plan fees, taxes and free allowances are left
-out of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for
+out of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch
@@ -125,8 +125,9 @@ timeout, and persistence, so `stop()` pauses a sandbox and the next call or
 and `domain(port)` answers from them. They use the free trial while the account
 has trial time, then prepaid credit.
 
-A timeout over an hour works: the sandbox object renews Runtime's hour-long
-lease toward it while your program runs. Users and groups (`createUser`,
+With no timeout a sandbox has no time limit: it runs while it works. A timeout
+over an hour works too: the sandbox object moves Runtime's hour-long limit on
+toward it while your program runs. Users and groups (`createUser`,
 `asUser`) and list filters, sorting and cursors work as on Vercel. A call
 Runtime handles differently, such as Drives or other regions, throws
 `NotSupportedError` before anything happens and names what to use instead.

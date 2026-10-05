@@ -164,10 +164,10 @@ const SANDBOX_HELP = `runtime sandbox <command>
   resize <id> [--vcpu 2] [--memory 4096] --restart
                                               Change its size by a restart: the whole disk stays,
                                               programs stop (snapshot it first to keep memory)
-  extend <id> <seconds>                       More time before the lease ends
+  extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
-                                              Change its settings; persistent keeps it running
+                                              Change its settings; persistent keeps it running until stopped
   snapshot <id> [--name n] [--retention days] Keep its whole machine; prints the snapshot id
   mount <id> <s3|r2|gcs>://<bucket>[/prefix] <path> [--secret NAME] [--region r]
         [--endpoint https://...] [--account-id id] [--read-only]
@@ -566,8 +566,18 @@ function describe(info: SandboxInfo): string {
     ],
     ["funding", info.funding],
     ["region", info.region],
-    ["expires", info.expiresAt ?? "-"],
-    ["at lease end", info.onLeaseEnd ?? "-"],
+    // A sandbox with no time limit runs while it works (0300): endsAt is
+    // null. An older server sends no endsAt; its expiresAt was the end.
+    ["time limit", info.timeoutSeconds ? `${info.timeoutSeconds} s` : "none"],
+    [
+      "ends",
+      info.endsAt === null
+        ? info.state === "running"
+          ? "when idle, stopped or out of credit"
+          : "-"
+        : (info.endsAt ?? info.expiresAt ?? "-"),
+    ],
+    ["at its end", info.onLeaseEnd ?? "-"],
     // Why a sandbox is no longer running (troubleshooting.md, "A sandbox
     // stopped on its own"); `get` left both out until 30 September 2026.
     ...(info.pausedAt ? [["paused at", info.pausedAt]] : []),
@@ -1212,11 +1222,21 @@ export function usageCsv(u: Usage): string {
   return [head.join(","), ...rows].join("\n");
 }
 
+/** Milliseconds as hours, to a tenth: "8,731.2". */
+const hours = (ms: number) =>
+  (ms / 3_600_000).toLocaleString("en-US", { maximumFractionDigits: 1 });
+
 /** The free trial's time left, as `runtime usage` and `runtime limits` say it. */
-function trialLeft(trial: { totalMs: number; reservedMs: number; availableMs: number }): string {
-  const hours = (ms: number) =>
-    (ms / 3_600_000).toLocaleString("en-US", { maximumFractionDigits: 1 });
-  return `${hours(trial.availableMs)} of ${hours(trial.totalMs)} hours left${trial.reservedMs > 0 ? `, ${hours(trial.reservedMs)} held by running sandboxes` : ""}`;
+function trialLeft(trial: { totalMs: number; availableMs: number }): string {
+  return `${hours(trial.availableMs)} of ${hours(trial.totalMs)} hours left`;
+}
+
+/** A pilot's sandbox hours left, as `runtime usage` says them. */
+function pilotLeft(pilot: NonNullable<Usage["pilot"]>): string {
+  const left = `${hours(pilot.leftMs)} of ${pilot.hours.toLocaleString("en-US")} left`;
+  return pilot.leftMs > 0
+    ? `${left}; new pilot sandboxes until ${pilot.endsAt.slice(0, 16).replace("T", " ")} UTC`
+    : "This pilot's sandbox hours are used.";
 }
 
 function usageSummary(u: Usage): string {
@@ -1232,13 +1252,14 @@ function usageSummary(u: Usage): string {
     // its own line, so "spent" reads as what was used.
     ["used", dollars(micros(u.spent) - takenBack)],
     ...(takenBack > 0n ? [["returned by refunds and disputes", dollars(takenBack)]] : []),
-    // Holds cover running sandboxes and the hour ahead of stored snapshots,
-    // images and volumes (pricing guide), so an account with nothing running
-    // can still show one.
-    ["held for running sandboxes and this hour's storage", dollars(micros(u.held))],
+    // What running sandboxes and the hour ahead of stored snapshots, images
+    // and volumes are about to use, so an account with nothing running can
+    // still show some. Said without "held": no guide teaches holds.
+    ["set aside for running sandboxes and this hour's storage", dollars(micros(u.held))],
   ];
   if (micros(u.expired) > 0n) rows.push(["expired or taken back", dollars(micros(u.expired))]);
   if (u.trial) rows.push(["free trial", trialLeft(u.trial)]);
+  if (u.pilot) rows.push(["pilot sandbox hours", pilotLeft(u.pilot)]);
   if (u.outbound) {
     const gib = (bytes: number) =>
       `${(bytes / 1_073_741_824).toLocaleString("en-US", { maximumFractionDigits: 1 })} GiB`;
@@ -1663,12 +1684,14 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         s.state,
         `${s.info.vcpu}/${s.info.memoryMiB}`,
         s.info.funding,
-        s.info.expiresAt ?? "-",
+        // When it stops or pauses by itself (0381): its time limit's end, or
+        // "-" when it never will. An older server sends no endsAt.
+        (s.info.endsAt === undefined ? s.info.expiresAt : s.info.endsAt) ?? "-",
       ]);
       print(
         [
           rows.length
-            ? table([["ID", "NAME", "STATE", "CPU/MIB", "FUNDING", "EXPIRES"], ...rows])
+            ? table([["ID", "NAME", "STATE", "CPU/MIB", "FUNDING", "ENDS"], ...rows])
             : stopped
               ? "No live sandboxes."
               : "No sandboxes. Create one: runtime sandbox create",
@@ -1932,7 +1955,12 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const sbx = await get(rest[0]);
       const seconds = Number(need(rest[1], "seconds, e.g. runtime sandbox extend <id> 600"));
       await sbx.extend(seconds);
-      print(`${sbx.id} now ends at ${sbx.info.expiresAt}`, sbx.info);
+      print(
+        sbx.info.endsAt === null
+          ? `${sbx.id} has no time limit: it runs while it works, so nothing was extended`
+          : `${sbx.id} now ends at ${sbx.info.endsAt ?? sbx.info.expiresAt}`,
+        sbx.info,
+      );
       return 0;
     }
     case "exec": {
@@ -3167,8 +3195,8 @@ export async function imageCommand(
 
 const JOB_HELP = `runtime job <command>
 
-  A job runs a command in a fresh sandbox, once or on a schedule. Each run is a
-  paid sandbox billed at the sandbox rates; the trial's hours do not fund jobs.
+  A job runs a command in a fresh sandbox, once or on a schedule. Each run spends
+  the free trial's hours first, then credit at the sandbox rates.
 
   create <name> (--cron "<min hour day month weekday>" [--timezone Europe/Berlin] | --at <time|now>)
          [--vcpu 2] [--memory 4096] [--disk 4096] [--cpu shared|reserved] [--cpu-floor <thousandths>]

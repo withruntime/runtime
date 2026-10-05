@@ -45,8 +45,9 @@ public class Hello {
 
 `create` returns once the sandbox is running, and closing it stops it. With no
 options you get the free trial while it lasts, the default region, and 2 vCPU,
-4 GiB of memory and a 4 GiB disk for up to 30 minutes. `funding("trial")`
-never falls back to paid credit. Every field is optional:
+4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
+when idle, with no time limit (`timeoutSeconds(seconds)` sets one, 60 to
+86,400). The trial's hours are spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
 
 ```java
 import com.withruntime.*;
@@ -67,7 +68,7 @@ public class Sized {
                     .timeoutSeconds(900)
                     .onLeaseEnd("stop")
                     .network(new NetworkRules().internet(true).allow("repo.maven.apache.org")));
-    System.out.println(sbx.id() + " " + sbx.info().funding() + " " + sbx.info().expiresAt());
+    System.out.println(sbx.id() + " " + sbx.info().funding() + " " + sbx.info().endsAt());
     sbx.stop();
   }
 }
@@ -210,8 +211,10 @@ A fork copies a sandbox as it is now, with its files, memory and running
 processes, on the same server; see [JavaScript](./javascript) for what forks
 and snapshots keep and how they are billed. If a copy fails, the exception's
 `details().get("startedSandboxIds")` names the copies that did start.
-`sbx.keepAlive(every, margin, onError)` extends the lease from your process
-until `stop()`, and `runtime.sandboxes().getOrCreate(name, options)` answers
+`wake(Duration)` and `extend(Duration)` set and move a time limit, for a
+sandbox that has one; on one without, `extend` changes nothing.
+`sbx.keepAlive(every, margin, onError)` moves a time limit on from your
+process until `stop()`, and `runtime.sandboxes().getOrCreate(name, options)` answers
 the sandbox with that name, woken or restarted, or creates it.
 
 ## Share a port

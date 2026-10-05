@@ -51,6 +51,19 @@ func newKey() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
+// answerStart is how long one attempt waits for its answer to start. The API
+// starts every answer within 120 s: Caddy answers 503 itself past that, and a
+// longer call gets its 200 at 90 s and then its JSON (runtime-late-answer). An
+// attempt with no answer by then is talking to a server that is gone, such as
+// a controller that died with the call in flight while its address moved to
+// the new leader: a client that only waits sends nothing the new leader could
+// refuse (the leader drill on vin-5, 4 October 2026). It is sent again under
+// the same key.
+var answerStart = 125 * time.Second
+
+// errNoAnswerStarted ends an attempt whose answer did not start in time.
+var errNoAnswerStarted = errors.New("no answer started")
+
 func backoff(attempt int) time.Duration {
 	base := min(8000, 250*(1<<min(attempt, 10)))
 	return time.Duration(float64(base)*(0.5+mathrand.Float64())) * time.Millisecond
@@ -77,8 +90,12 @@ func sleep(ctx context.Context, d time.Duration) error {
 // send makes the call and returns the response once it succeeded, with a
 // cancel to call when its body has been read. It retries transport failures,
 // 429, 502, 503 and 504 with backoff and jitter, with the same idempotency key
-// every time, and waits out a full house for a call that sets room.
-func (c *Client) send(ctx context.Context, cl *call) (*http.Response, context.CancelFunc, error) {
+// every time, and waits out a full house for a call that sets room. With
+// whole, it reads the successful body itself and a body lost part way is a
+// transport failure like any other: retried with the same key, and an error
+// that carries the key once the retries are spent, so a write the server made
+// is never made twice by a caller retrying with a new one.
+func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response, context.CancelFunc, error) {
 	write := cl.method != http.MethodGet
 	key := ""
 	if write {
@@ -139,19 +156,29 @@ func (c *Client) send(ctx context.Context, cl *call) (*http.Response, context.Ca
 		if cl.wait > 0 {
 			request.Header.Set("Prefer", "wait="+strconv.Itoa(min(120, cl.wait)))
 		}
-		response, err := c.http.Do(request)
+		// The attempt's own context: ended only if no answer starts in time,
+		// so a body read after the headers keeps the call's deadline alone.
+		attemptCtx, endAttempt := context.WithCancelCause(ctx)
+		unanswered := time.AfterFunc(answerStart, func() { endAttempt(errNoAnswerStarted) })
+		response, err := c.http.Do(request.WithContext(attemptCtx))
+		unanswered.Stop()
 		if err == nil && response.StatusCode >= 300 && response.StatusCode < 400 {
 			response.Body.Close()
 			err = fmt.Errorf("runtime answered a redirect (%d)", response.StatusCode)
 		}
+		if err == nil && whole && response.StatusCode < 300 {
+			var body []byte
+			body, err = io.ReadAll(response.Body)
+			response.Body.Close()
+			response.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		if err != nil {
-			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries {
+			// The error is read before cancel, which would make every
+			// failure read as a timeout.
+			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries || sleep(ctx, backoff(attempt)) != nil {
+				failure := c.connectionError(ctx, write, key, err)
 				cancel()
-				return nil, nil, c.connectionError(ctx, write, key, err)
-			}
-			if sleep(ctx, backoff(attempt)) != nil {
-				cancel()
-				return nil, nil, c.connectionError(ctx, write, key, err)
+				return nil, nil, failure
 			}
 			continue
 		}
@@ -226,25 +253,47 @@ func (c *Client) connectionError(ctx context.Context, write bool, key string, ca
 	}
 }
 
+// acquire waits for a connection slot within the call's own deadline and
+// takes the wait off it, so a queued call expires as an unqueued one would,
+// without sending anything. The caller frees the slot it returns with.
+func (c *Client) acquire(ctx context.Context, cl *call) (*call, error) {
+	timeout := cl.timeout
+	if timeout == 0 {
+		timeout = c.timeout
+	}
+	started := time.Now()
+	waiting, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case c.slots <- struct{}{}:
+	case <-waiting.Done():
+		return nil, c.connectionError(waiting, cl.method != http.MethodGet, cl.key, waiting.Err())
+	}
+	left := timeout - time.Since(started)
+	if left <= 0 {
+		<-c.slots
+		<-waiting.Done()
+		return nil, c.connectionError(waiting, cl.method != http.MethodGet, cl.key, waiting.Err())
+	}
+	admitted := *cl
+	admitted.timeout = left
+	return &admitted, nil
+}
+
 // do sends a call and decodes its JSON answer into out (when out is not nil).
 // At most the client's max connections of these run at once.
 func (c *Client) do(ctx context.Context, cl *call, out any) error {
-	select {
-	case c.slots <- struct{}{}:
-	case <-ctx.Done():
-		return c.connectionError(ctx, cl.method != http.MethodGet, cl.key, ctx.Err())
+	cl, err := c.acquire(ctx, cl)
+	if err != nil {
+		return err
 	}
 	defer func() { <-c.slots }()
-	response, cancel, err := c.send(ctx, cl)
+	response, cancel, err := c.send(ctx, cl, true)
 	if err != nil {
 		return err
 	}
 	defer cancel()
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return c.connectionError(ctx, cl.method != http.MethodGet, cl.key, err)
-	}
+	body, _ := io.ReadAll(response.Body)
 	if out == nil || len(bytes.TrimSpace(body)) == 0 {
 		return nil
 	}
@@ -256,34 +305,27 @@ func (c *Client) do(ctx context.Context, cl *call, out any) error {
 
 // bytes sends a call and returns its body.
 func (c *Client) bytes(ctx context.Context, cl *call) ([]byte, error) {
-	select {
-	case c.slots <- struct{}{}:
-	case <-ctx.Done():
-		return nil, c.connectionError(ctx, cl.method != http.MethodGet, cl.key, ctx.Err())
+	cl, err := c.acquire(ctx, cl)
+	if err != nil {
+		return nil, err
 	}
 	defer func() { <-c.slots }()
-	response, cancel, err := c.send(ctx, cl)
+	response, cancel, err := c.send(ctx, cl, true)
 	if err != nil {
 		return nil, err
 	}
 	defer cancel()
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, c.connectionError(ctx, cl.method != http.MethodGet, cl.key, err)
-	}
-	return body, nil
+	return io.ReadAll(response.Body)
 }
 
 // stream sends a call and returns its body to read as it arrives. It holds a
 // connection slot until the body is closed.
 func (c *Client) stream(ctx context.Context, cl *call) (io.ReadCloser, error) {
-	select {
-	case c.slots <- struct{}{}:
-	case <-ctx.Done():
-		return nil, c.connectionError(ctx, cl.method != http.MethodGet, cl.key, ctx.Err())
+	cl, err := c.acquire(ctx, cl)
+	if err != nil {
+		return nil, err
 	}
-	response, cancel, err := c.send(ctx, cl)
+	response, cancel, err := c.send(ctx, cl, false)
 	if err != nil {
 		<-c.slots
 		return nil, err
@@ -309,7 +351,7 @@ func events[T any](ctx context.Context, c *Client, cl *call) iter.Seq2[T, error]
 	return func(yield func(T, error) bool) {
 		var zero T
 		cl.accept = "application/x-ndjson"
-		response, cancel, err := c.send(ctx, cl)
+		response, cancel, err := c.send(ctx, cl, false)
 		if err != nil {
 			yield(zero, err)
 			return

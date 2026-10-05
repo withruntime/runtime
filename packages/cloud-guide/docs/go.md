@@ -56,8 +56,9 @@ func main() {
 
 `Create` returns once the sandbox is running. `opts` may be `nil`: with no
 options you get the free trial while it lasts, the default region, and 2 vCPU,
-4 GiB of memory and a 4 GiB disk for up to 30 minutes. `Funding: "trial"` never
-falls back to paid credit. Every field is optional:
+4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
+when idle, with no time limit (`TimeoutSeconds` sets one, 60 to 86,400; `EndsAt`
+is nil while none applies). The trial's hours are spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
 
 ```go
 package main
@@ -443,9 +444,11 @@ who has the address. Addresses are under `runtimehost.com`.
 
 `Sandboxes.GetOrCreate(ctx, name, opts)` answers the sandbox with that name,
 woken if paused and restarted if stopped and persistent, or creates one with
-`opts`; `Info().Reused` says which. `KeepAlive` extends the lease from your
-process, so ten minutes remain, until `Stop` or `StopKeepAlive`.
-`Persistent: true` on a paid sandbox renews the lease on the server instead.
+`opts`; `Info().Reused` says which. A sandbox with no time limit runs while
+it works with nothing to renew. `Persistent: true` keeps a paid one running
+until you stop it, idle or not, while credit lasts. `KeepAlive` moves a time
+limit on from your process, keeping ten minutes ahead, until `Stop` or
+`StopKeepAlive`; on a sandbox with no limit it only watches.
 
 ```go
 package main

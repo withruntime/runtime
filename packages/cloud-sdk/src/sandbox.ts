@@ -3,7 +3,16 @@ import {
   STREAMED_EXEC_TIMEOUT_MS,
   WAIT_FOR_TIMEOUT_SECONDS,
 } from "./api-defaults.js";
-import { CommandError, ConnectionError, NotFoundError, RuntimeError } from "./errors.js";
+import {
+  CommandError,
+  ConnectionError,
+  DELIBERATE,
+  errorFor,
+  NotFoundError,
+  RateLimitError,
+  RuntimeError,
+  ServiceUnavailableError,
+} from "./errors.js";
 import { Page } from "./page.js";
 import {
   type FileEvent,
@@ -28,8 +37,11 @@ import type {
 import { sandboxFactories, type SandboxExtensions } from "./products/index.js";
 import type { Snapshot, SnapshotOptions } from "./snapshots.js";
 import { Tunnel, type PortForward } from "./tunnel.js";
+import { pause } from "./wait.js";
 import type { StreamUploadSource } from "./file-source.js";
 
+/** How long snapshot() waits, pause and capture together, unless told. */
+const SNAPSHOT_DEADLINE_MS = 10 * 60_000;
 const CHUNK = 1_048_576;
 /** Chunks of a large write in flight at once. Each chunk's reply waits on the
  * API and the guest, and the link idles while every chunk in flight waits:
@@ -468,7 +480,8 @@ export class Sandbox implements AsyncDisposable {
     this.#keepAlive?.();
     return deleteSandbox(this.#t, this.id, options);
   }
-  /** Carries on a paused sandbox; `timeoutSeconds` is its new lease. */
+  /** Carries on a paused sandbox; for one with a time limit,
+   * `timeoutSeconds` is its new one. */
   async wake(
     options: RequestOptions & { wait?: boolean; timeoutSeconds?: number } = {},
   ): Promise<this> {
@@ -484,12 +497,14 @@ export class Sandbox implements AsyncDisposable {
       // lease asked for, the refusal stands: it was not given.
       if (!(error instanceof RuntimeError) || error.code !== "not_paused" || timeoutSeconds)
         throw error;
-      await this.refresh(pick(rest));
+      await this.refresh(requestOnly(rest));
       if (this.state !== "running" && this.state !== "starting") throw error;
       return this;
     }
   }
-  /** More time before the lease ends (at most an hour ahead of now). */
+  /** More time before its time limit ends (at most an hour ahead of now). A
+   * sandbox with no time limit needs none: the call answers at once and
+   * changes nothing. */
   async extend(seconds: number, options: RequestOptions = {}): Promise<this> {
     return this.#lifecycle("extend", { ...options, wait: false }, { seconds });
   }
@@ -503,12 +518,16 @@ export class Sandbox implements AsyncDisposable {
    * its id, /workspace (its home: dotfiles, pip --user and npm -g installs),
    * volumes, environment, name and previews. Its processes restart, and
    * everything else on its old disk (sudo installs, apt packages, /etc) is
-   * lost, which `keep: "workspace"` says you know; snapshot it first to keep
-   * everything. A running sandbox is paused first. A switch that fails is
-   * undone (`switch_undone`), the sandbox on its old image with nothing lost.
-   * Charged as a wake. */
-  async switchImage(image: string, options: RequestOptions & { keep: "workspace" }): Promise<this> {
-    const { keep, ...rest } = options;
+   * lost; snapshot it first to keep everything. A running sandbox is paused
+   * first. A switch that fails is undone (`switch_undone`), the sandbox on
+   * its old image with nothing lost. Charged as a wake. `keep` is optional:
+   * "workspace" is the only value, and it is sent either way, so an API from
+   * before it was optional accepts the call too. */
+  async switchImage(
+    image: string,
+    options: RequestOptions & { keep?: "workspace" } = {},
+  ): Promise<this> {
+    const { keep = "workspace", ...rest } = options;
     this.#keep(
       await this.#t.json<SandboxInfo>({
         method: "POST",
@@ -516,25 +535,26 @@ export class Sandbox implements AsyncDisposable {
         body: { image, keep },
         // A pause, two boots and the copy between them.
         wait: 120,
-        ...pick(rest),
+        ...requestOnly(rest),
       }),
     );
     return this;
   }
   /** Gives it more or fewer vCPUs or more or less memory by a restart: its id,
    * whole disk, volumes, environment, name and previews stay, and its
-   * programs stop, which `restart: true` says you know (snapshot it first to
-   * keep its memory too). A running sandbox is paused, or stopped if it is
+   * programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped if it is
    * persistent, and comes back running at the new size on the same server; a
    * paused or stopped one is started. Memory bills on the new size from then.
    * Refused, with nothing changed, when the server has no room
    * (`no_capacity`), above your quota or the trial's 2 vCPU and 4 GiB, or
-   * while a snapshot or fork of it is being taken. */
+   * while a snapshot or fork of it is being taken. `restart` is optional:
+   * true is the only value, and it is sent either way, so an API from before
+   * it was optional accepts the call too. */
   async resize(
     size: { vcpu?: number; memoryMiB?: number },
-    options: RequestOptions & { restart: true },
+    options: RequestOptions & { restart?: true } = {},
   ): Promise<this> {
-    const { restart, ...rest } = options;
+    const { restart = true, ...rest } = options;
     this.#keep(
       await this.#t.json<SandboxInfo>({
         method: "POST",
@@ -542,16 +562,17 @@ export class Sandbox implements AsyncDisposable {
         body: { ...size, restart },
         // A pause or stop and a cold boot.
         wait: 120,
-        ...pick(rest),
+        ...requestOnly(rest),
       }),
     );
     return this;
   }
-  /** Keeps a running sandbox's lease ahead of now, in the background, until
-   * stop() or the returned function ends it: every `everySeconds` (60) it
-   * extends the lease so that `marginSeconds` (600) remain, never more than
-   * the hour ahead the API allows. Running time is billed as it is used, as
-   * for any extension. A paused sandbox is left paused (a request wakes it,
+  /** Keeps a sandbox with a time limit running past it, in the background,
+   * until stop() or the returned function ends it: every `everySeconds` (60)
+   * it extends the limit so that `marginSeconds` (600) remain, never more
+   * than the hour ahead the API allows. A sandbox with no time limit
+   * (`endsAt` null) needs none, and is only watched. Running time is billed
+   * as it is used. A paused sandbox is left paused (a request wakes it,
    * unless autoWake is off); a stopped one ends the loop. It does not keep a
    * Node or Bun process alive by itself. */
   keepAlive(options: KeepAliveOptions = {}): () => void {
@@ -570,8 +591,9 @@ export class Sandbox implements AsyncDisposable {
       try {
         await this.refresh();
         if (this.state === "stopped" || this.state === "stopping") return end();
-        if (this.state === "running") {
-          const left = (Date.parse(this.info.expiresAt) - Date.now()) / 1000;
+        // No time limit: nothing to extend (an older server sends no endsAt).
+        if (this.state === "running" && this.info.endsAt !== null) {
+          const left = (Date.parse(this.info.endsAt ?? this.info.expiresAt) - Date.now()) / 1000;
           const need = Math.ceil(margin - left);
           if (need >= 1) await this.extend(Math.min(3600, need));
         }
@@ -592,17 +614,35 @@ export class Sandbox implements AsyncDisposable {
   }
   /** Keeps this sandbox's whole machine (files, memory, running processes) as
    * a snapshot to start new sandboxes from. A running sandbox is paused for
-   * the moment it takes, then woken; a paused one stays paused. */
+   * the moment it takes, then woken; a paused one stays paused. Past
+   * `timeoutMs` (ten minutes unless given) mid-capture, it stays paused and
+   * the error names the snapshot. */
   async snapshot(options: SnapshotOptions & RequestOptions = {}): Promise<Snapshot> {
     const { idempotencyKey, signal, timeoutMs, ...body } = options;
     if (body.mode !== undefined && body.mode !== "memory" && body.mode !== "disk")
       throw new TypeError("Snapshot mode must be memory or disk.");
     signal?.throwIfAborted();
+    // One minute, whatever `timeoutMs` said, was too short: pausing a busy
+    // 16 vCPU, 32 GiB sandbox writes its memory out first (4 October 2026).
     const until =
-      performance.now() + Math.min(timeoutMs && timeoutMs > 0 ? timeoutMs : 60_000, 60_000);
+      performance.now() + (timeoutMs && timeoutMs > 0 ? timeoutMs : SNAPSHOT_DEADLINE_MS);
+    let running = false;
+    /** The capture in progress, once the server has one. */
+    let capturing: string | undefined;
+    let late = false;
     const request = (): RequestOptions => {
       signal?.throwIfAborted();
       const left = Math.ceil(until - performance.now());
+      if (left <= 0 && capturing) {
+        late = true;
+        throw new RuntimeError({
+          code: "snapshot_timeout",
+          status: 0,
+          message: `Snapshot ${capturing} was still capturing at the deadline.${running ? " The sandbox stays paused until it ends: waking it now would fail the capture." : ""}`,
+          hint: `Wait until runtime.snapshots.get("${capturing}") is ready${running ? ", then wake the sandbox" : ""}, or pass a longer timeoutMs.`,
+          details: { snapshotId: capturing, sourceSandboxId: this.id },
+        });
+      }
       if (left <= 0)
         throw new RuntimeError({
           code: "snapshot_timeout",
@@ -618,7 +658,7 @@ export class Sandbox implements AsyncDisposable {
     if (this.state === "resuming" || this.state === "starting")
       await this.waitFor("running", request());
     else if (this.state === "pausing") await this.waitFor("paused", request());
-    const running = this.state === "running";
+    running = this.state === "running";
     // Check before entering cleanup: an abort during refresh must not pause or wake.
     const pauseOptions = running ? request() : undefined;
     let captured: Snapshot | undefined;
@@ -638,14 +678,8 @@ export class Sandbox implements AsyncDisposable {
       // Prefer: wait is bounded on the server. A capture still in progress
       // must keep its source paused, or the worker refuses it after we wake.
       while (snapshot.state === "capturing") {
-        signal?.throwIfAborted();
-        if (performance.now() >= until)
-          throw new RuntimeError({
-            code: "snapshot_timeout",
-            status: 0,
-            message: "Snapshot capture did not finish within one minute.",
-            details: { snapshotId: snapshot.id },
-          });
+        capturing = snapshot.id;
+        request();
         await new Promise((resolve) => setTimeout(resolve, 200));
         snapshot = await this.#t.json<Snapshot>({
           method: "GET",
@@ -671,8 +705,12 @@ export class Sandbox implements AsyncDisposable {
     } catch (error) {
       failed = true;
       primary = error;
+      // A request cut off by the deadline mid-capture is late all the same.
+      if (capturing && performance.now() >= until) late = true;
     }
-    if (running) {
+    // A capture still running needs its source paused: the worker fails one
+    // whose source woke. The timeout says so and leaves the wake to the caller.
+    if (running && !late) {
       try {
         await this.wake();
       } catch (wakeError) {
@@ -733,11 +771,7 @@ export class Sandbox implements AsyncDisposable {
       path: `/v1/sandboxes/${enc(this.id)}:fork`,
       body,
       wait: 60,
-      ...pick({
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-        ...(signal ? { signal } : {}),
-        ...(timeoutMs ? { timeoutMs } : {}),
-      }),
+      ...requestOnly({ idempotencyKey, signal, timeoutMs }),
     });
     const sandboxes = reply.sandboxes.map((info) => new Sandbox(this.#t, info));
     return options.count === undefined ? sandboxes[0]! : sandboxes;
@@ -757,7 +791,7 @@ export class Sandbox implements AsyncDisposable {
         path: `/v1/sandboxes/${enc(this.id)}:${verb}`,
         body,
         wait: options.wait === false ? 0 : 60,
-        ...pick(options),
+        ...requestOnly(options),
       }),
     );
     return this;
@@ -779,13 +813,9 @@ export class Sandbox implements AsyncDisposable {
 class OutputCursor {
   constructor(public cursor = 0) {}
   *pass(event: OutputEvent): Generator<OutputEvent> {
-    if (event.type === "error")
-      throw new RuntimeError({
-        message: event.error.message,
-        code: event.error.code,
-        status: 0,
-        ...(event.error.requestId ? { requestId: event.error.requestId } : {}),
-      });
+    // As the status the API would have answered it, so a passing failure (a
+    // host restarting) is followed again rather than ending the read.
+    if (event.type === "error") throw errorFor(event.error.status ?? 0, event);
     if (event.type === "truncated") this.cursor = Math.max(this.cursor, event.resumeAt);
     if (event.type === "stdout" || event.type === "stderr") {
       if (event.offset > this.cursor)
@@ -819,11 +849,23 @@ function processBytes(encoded: string): string {
   }
 }
 
-/** A stream cut off by the network rather than refused by Runtime: worth
- * reconnecting to from the cursor. */
+/** A stream cut off by the network, or refused by a failure that passes by
+ * itself (a busy API, a 429, a host restarting), rather than refused for good:
+ * worth reconnecting to from the cursor. */
 function cutOff(error: unknown): boolean {
-  return !(error instanceof RuntimeError) || error instanceof ConnectionError;
+  return (
+    !(error instanceof RuntimeError) ||
+    error instanceof ConnectionError ||
+    ((error instanceof RateLimitError || error instanceof ServiceUnavailableError) &&
+      [429, 502, 503, 504].includes(error.status) &&
+      !DELIBERATE.has(error.code))
+  );
 }
+
+/** How long a follow keeps reconnecting while every attempt fails. A command
+ * runs for hours whether or not anyone reads it; a few minutes of a deploy, a
+ * network blip or a busy API must not end the read of it. */
+const FOLLOW_OUTAGE_MS = 300_000;
 
 /** A streamed command keeps all its output unless the reader fell more than the
  * process's output buffer behind, which the server marks with a "truncated"
@@ -833,11 +875,23 @@ function truncation(dropped: boolean) {
   return { stdoutTruncated: dropped, stderrTruncated: dropped };
 }
 
+/** A command's request options: its `timeoutMs` is the command's own limit
+ * in the guest, so the call is given a minute more for the answer. */
 function pick(options: RequestOptions): RequestOptions {
   return {
     ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs + 60_000 } : {}),
+  };
+}
+
+/** Any other call's request options, as the caller gave them: `timeoutMs` is
+ * the call's whole deadline, and 0 turns it off. */
+function requestOnly(options: RequestOptions): RequestOptions {
+  return {
+    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   };
 }
 
@@ -956,12 +1010,19 @@ export class Processes {
     options: { cursor?: number; signal?: AbortSignal } = {},
   ): AsyncGenerator<OutputEvent> {
     const read = new OutputCursor(options.cursor ?? 0);
-    // Reconnections in a row that brought nothing: a stream that keeps
-    // closing without output or an exit is given up, not followed forever.
+    // Reconnections in a row that closed cleanly with nothing: a stream that
+    // keeps closing without output or an exit is given up, not followed
+    // forever.
     let idle = 0;
+    // Since when every reconnection has failed (a cut, a busy API, a host
+    // restarting). The command runs on regardless, so these are waited out
+    // for FOLLOW_OUTAGE_MS, with backoff, before the follow gives up.
+    let failingSince: number | undefined;
+    let failures = 0;
     for (;;) {
       const before = read.cursor;
       let resumed = false;
+      let failure: unknown;
       try {
         for await (const event of this.t.events<OutputEvent>({
           method: "GET",
@@ -980,8 +1041,27 @@ export class Processes {
         }
       } catch (error) {
         if (options.signal?.aborted || !cutOff(error)) throw error;
+        failure = error;
       }
-      idle = resumed || read.cursor > before ? 0 : idle + 1;
+      if (resumed || read.cursor > before) {
+        idle = failures = 0;
+        failingSince = undefined;
+        continue;
+      }
+      if (failure === undefined) idle++;
+      else {
+        failingSince ??= performance.now();
+        if (performance.now() - failingSince >= FOLLOW_OUTAGE_MS)
+          throw new ConnectionError({
+            message: `Lost the output stream of process ${processId} for ${FOLLOW_OUTAGE_MS / 60_000} minutes; the command may still be running.`,
+            code: "connection_error",
+            status: 0,
+            hint: `Follow it again: runtime sandbox logs ${this.sandboxId} ${processId} -f`,
+            details: { sandboxId: this.sandboxId, processId },
+            cause: failure,
+          });
+        await pause(Math.min(5000, 50 * 2 ** failures++), options.signal);
+      }
       if (idle > 3)
         throw new ConnectionError({
           message: `The output stream of process ${processId} keeps closing before it ends.`,

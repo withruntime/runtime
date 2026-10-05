@@ -31,8 +31,8 @@ leaving the `with` block stops it. With no arguments you get the free trial
 while it lasts: {{trial-hours}} free hours, no card, up to {{trial-sandboxes}} sandboxes running at once.
 The current default image includes NumPy, pandas and matplotlib; see the
 [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-Omitting `funding` can use prepaid credit after the trial is exhausted. Use
-`Sandbox.create(funding="trial")` for free use only; it never falls back to paid.
+The trial's hours are spent first, then prepaid credit, with nothing to
+choose; `funding` is accepted and ignored.
 `AsyncRuntime` is the same client for asyncio, method for method:
 
 ```python
@@ -103,7 +103,8 @@ from withruntime.e2b import Sandbox, AsyncSandbox  # was: from e2b import ...
 from withruntime.e2b.code_interpreter import Sandbox  # was: from e2b_code_interpreter import Sandbox
 ```
 
-Sandboxes get E2B's defaults: 2 vCPU, 512 MiB and a 300-second timeout.
+Sandboxes get E2B's defaults, 2 vCPU and 512 MiB, and no time limit unless
+you pass `timeout`: a sandbox runs while it works and pauses itself when idle.
 Timeouts are in seconds, as in E2B's Python SDK. `runtime_create={...}` passes
 Runtime's own create fields, for example `{"funding": "trial"}`. What Runtime
 does not do the way E2B does raises `NotSupportedException` before anything
@@ -123,8 +124,8 @@ from withruntime.vercel.sandbox import sync as sandbox  # was: from vercel.sandb
 ```
 
 Sandboxes get the rival's defaults: Daytona's 1 vCPU, 1 GiB and 3 GiB disk,
-pausing after 15 minutes without calls; Vercel's 2 vCPUs with 2048 MiB each, 5
-minutes, persistent. `runtime_create={...}` passes Runtime's own create
+pausing after 15 idle minutes; Vercel's 2 vCPUs with 2048 MiB each,
+persistent, with no time limit unless you pass one. `runtime_create={...}` passes Runtime's own create
 fields. A Daytona or Vercel key is never sent anywhere. What Runtime does not do
 the same way raises `NotSupportedError` before anything happens, naming what to
 use instead. The sync modules are generated from the async ones by
@@ -163,7 +164,7 @@ my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
 - **Standby.** A sandbox pauses after a minute with no call (Blaxel: about 15
   seconds). It keeps its memory and processes, and wakes on the next command,
   file call or preview visit. `archive` pauses it and keeps its memory too.
-  A lease in use is renewed, so a long command is not paused at the hour.
+  It has no time limit, so a long command is never paused on a clock.
   `keep_alive` raises the idle pause to the process's time limit, or turns it
   off for a process with none. The first call from any client that finds no
   `keep_alive` process running gives the old idle pause back.

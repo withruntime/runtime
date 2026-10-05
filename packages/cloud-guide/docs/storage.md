@@ -24,49 +24,20 @@ In your account, [Volumes](https://withruntime.com/account/volumes) lists each
 volume with how full it is, the sandbox it is attached to and its backups, and
 lets you create a volume, back it up now, change its backup policy, restore
 a backup as a new volume, or delete a volume or backup. You can attach a
-volume when creating a new sandbox. Spending and deletion ask for
-confirmation using the console agent's existing permissions. Growth and
-shared-volume attachment controls appear only when the deployed API offers
-those guarded features; they are disabled by default.
+volume when creating a new sandbox. A stop keeps a sandbox's disk, so its
+volume stays attached until that sandbox is deleted. Spending and deletion ask for
+confirmation using the console agent's existing permissions.
 
-## Growing a volume when enabled
+## Attaching a volume
 
-Volume growth is disabled by default and appears in the API reference and
-MCP tool list only after it is enabled. Where offered, it grows an ordinary
-volume on its current server while the volume is detached; shrinking and
-shared volumes are refused.
+A create attaches up to four volumes, each at a path such as `/data`, in one of
+two modes:
 
-Use `runtime volume resize <id> --size-mib <N>`,
-`runtime.volumes.resize(id, { sizeMiB })` in JavaScript,
-`runtime.volumes.resize(volume_id, size_mib)` in Python,
-`client.Volumes.Resize(ctx, id, ResizeVolumeOptions{SizeMiB: n})` in Go,
-`runtime.volumes().resize(id, sizeMiB, null)` in Java or
-`runtime.volumes.resize(id, size_mib: n)` in Ruby. The volume stays
-`ready`, while `resize.state` tracks `pending`, `running`, `completed` or
-`failed`. Poll the volume if the request returns before completion. Attachments,
-deletion and new backups wait while the operation is active. A backup that is
-still being copied off the server holds growth back: resize once it is ready.
-Sending the same request again with the same idempotency key returns the same
-operation rather than starting another.
-
-The old disk and confirmed size remain until the grown copy has been checked.
-The larger size is billed only after completion, at the volume's existing
-rate. A failure keeps the old confirmed size and records the error.
-
-## Shared volumes when enabled
-
-Shared volumes are disabled by default. Where the deployed API offers them,
-`shared: true` at volume creation lets several sandboxes read and write the
-same volume. The mode stays fixed; restoring a backup preserves its source
-volume's mode rather than converting it.
-
-Attach through `runtime volume attach <volume> <sandbox> --path /data`, and
-follow the returned attachment's `attaching`, `active`, `detaching` or
-`detached` state. `runtime volume attachment <volume> <attachment>` reads the
-saved receipt, and `runtime volume detach <volume> <attachment>` requests a
-detach. A request that stops waiting does not cancel the saved operation.
-If a detach is busy, the mount remains and the receipt records the error;
-free the mount before trying again.
+- **`"rw"`** (the default): read-write, attached to one sandbox at a time.
+- **`"snapshot"`**: a read-only copy of the volume as it is when the sandbox
+  starts, which any number of sandboxes can attach at once. The name means a
+  frozen copy of the volume's files; it is not a sandbox
+  [snapshot](./javascript#snapshots-and-forks) and makes none.
 
 ## Volume backups
 
@@ -122,19 +93,15 @@ runtime volume backup-rm "${backup}"
   names the newest backup to restore it from.
 - **Stopping a sandbox** has it write out what it wrote to its volumes first,
   and a stop that waits answers once its volumes are free to attach again. A
-  sandbox whose lease runs out does the same: its programs are frozen just
-  before the lease ends, and what they wrote to its volumes, and to a
+  sandbox whose time limit or credit runs out does the same: its programs are
+  frozen just before its end, and what they wrote to its volumes, and to a
   persistent sandbox's own disk, is written out after that at no charge.
 
 ## Snapshots survive their server
 
-On hosts where deferred compression has been qualified and enabled, a
-memory snapshot can be `ready` and startable on its server while
-`compressionPending: true`: capture has finished, and Runtime is preparing its
-final compressed form in the background. Temporary raw files are Runtime
-overhead, not charged storage. The final verified compressed allocation is
-used for storage billing from the snapshot's ready time, within the existing
-prepaid bounds.
+A memory snapshot can be `ready`, and started from, while
+`compressionPending: true`: it is still being compressed in the background. It
+is charged on its final compressed size from the time it was ready.
 
 Its encrypted off-server copy is queued only after compression finishes.
 While compression is pending, `meteredBytes` is zero, `backedUp` is false and
@@ -157,22 +124,6 @@ server has room yet, the snapshot stays copied off the server and its `error`
 says it is waiting; it is restored as soon as one does. A snapshot whose server
 was lost before it was copied is deleted, its `error` says why, and it is not
 charged after the server's last sign of life.
-
-## Wake or fork on another server when enabled
-
-Cross-server wake and fork transfers are disabled by default and require
-operator qualification. Ordinary wakes and copies stay on the source server.
-On a qualified deployment with transfers enabled, placement may choose a
-healthy compatible server in the same region when the source cannot fit the
-wake or copy. Saved processor, kernel and device compatibility, image and
-volume placement, and private-placement choices still constrain that move.
-
-Transfer workspaces and replicas are Runtime overhead, not an extra customer
-charge. Uncertain outcomes keep the source data and reserved capacity until
-handover or cleanup is verified. A capture awaiting compression cannot be
-exported for transfer; same-server starts can still use that raw capture.
-This capability does not change when an off-server backup is considered
-checked: `backedUp` remains the authority for that protection.
 
 ## Updating the default image
 
@@ -250,5 +201,5 @@ await sbx.exec("ls /data");
   `pending` until it is copied and checked, and a restored volume is `creating`
   until every byte is downloaded and checked.
 - Snapshot copies are part of the snapshot and its [price](./pricing).
-- Volume backups cost {{backup-rate}} per decimal GB per 30-day month, charged on
+- Volume backups cost {{backup-rate}} per GB (10⁹ bytes) per 30-day month, charged on
   `storedBytes` once the copy is ready. See [pricing](./pricing).

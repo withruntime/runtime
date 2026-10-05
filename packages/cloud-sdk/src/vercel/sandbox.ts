@@ -30,7 +30,9 @@ import { Snapshot } from "./snapshot.js";
  * 2026). Runtime gives 2 vCPU and 4096 MiB. */
 export const DEFAULT_VCPUS = 2;
 export const MEMORY_MIB_PER_VCPU = 2048;
-/** Vercel's default timeout, 5 minutes. */
+/** Vercel's default timeout, 5 minutes. Not sent: a sandbox created with no
+ * timeout has no time limit on Runtime, running while it works and pausing
+ * when idle (0300). Kept for code that imports it. */
 export const DEFAULT_TIMEOUT_MS = 300_000;
 const MIN_LEASE_SECONDS = 60;
 /** Extend a long timeout's lease when less than this is left. */
@@ -76,9 +78,10 @@ export interface CreateSandboxParams extends Credentials {
   /** Shared at public HTTPS addresses (Runtime previews); `domain(port)`
    * answers from them. */
   ports?: number[];
-  /** Milliseconds. Default 300 000, at least 60 s. Over an hour, the
-   * sandbox's hour-long lease is extended while this object lives, up to the
-   * timeout (`sandbox.timeout`). */
+  /** Milliseconds, at least 60 s: when it stops. Leave it out for no time
+   * limit: it runs while it works and pauses when idle. Over an hour, the
+   * hour-long limit is extended while this object lives, up to the timeout
+   * (`sandbox.timeout`). */
   timeout?: number;
   resources?: { vcpus: number };
   networkPolicy?: NetworkPolicy;
@@ -367,7 +370,8 @@ export class Sandbox {
     return statusOf(this.#rt.state);
   }
   /** Milliseconds from the start of the session: the timeout given at
-   * create, with every extension, or the lease of a sandbox found by name. */
+   * create, with every extension, or the time limit of a sandbox found by
+   * name. 0 for one with no time limit, which runs while it works. */
   get timeout(): number {
     return this.#timeoutMs ?? this.#rt.info.timeoutSeconds * 1000;
   }
@@ -389,7 +393,8 @@ export class Sandbox {
   // ---- create, get, list ------------------------------------------------
 
   /** Creates a sandbox and waits until it runs. Vercel's defaults: 2 vCPUs,
-   * 2048 MiB per vCPU, a 5-minute timeout, persistent. Funding is left to
+   * 2048 MiB per vCPU, persistent. With no `timeout` it has no time limit: it
+   * runs while it works and pauses when idle. A `timeout` is kept as given. Funding is left to
    * Runtime: the free trial while the account has trial time, then prepaid
    * credit, exactly as withruntime's own create. */
   static async create(params: CreateSandboxParams = {}): Promise<Sandbox & AsyncDisposable> {
@@ -402,7 +407,8 @@ export class Sandbox {
     const source = await guard(() => resolveImage(client, params));
     const input: RuntimeCreate = {
       ...(source.snapshot ? {} : { vcpu: vcpus, memoryMiB: vcpus * MEMORY_MIB_PER_VCPU }),
-      timeoutSeconds: leaseSeconds(params.timeout ?? DEFAULT_TIMEOUT_MS),
+      // No timeout, no time limit: it runs while it works (0300).
+      ...(params.timeout === undefined ? {} : { timeoutSeconds: leaseSeconds(params.timeout) }),
       onLeaseEnd: persistent ? "pause" : "stop",
       ...(params.name ? { name: params.name } : {}),
       ...(params.tags && Object.keys(params.tags).length ? { labels: params.tags } : {}),
@@ -414,7 +420,7 @@ export class Sandbox {
     const sandbox = new Sandbox({
       runtime,
       client,
-      params: { ...params, persistent, timeout: params.timeout ?? DEFAULT_TIMEOUT_MS },
+      params: { ...params, persistent },
     });
     try {
       await sandbox.#setUp(params);
@@ -884,13 +890,15 @@ export class Sandbox {
     await this.stop().catch(() => undefined);
   }
 
-  /** Moves the end `duration` milliseconds later. The lease moves at once
-   * as far as it may (an hour ahead of now); past that it is extended while
-   * this object lives. */
+  /** Moves the end `duration` milliseconds later. The time limit moves at
+   * once as far as it may (an hour ahead of now); past that it is extended
+   * while this object lives. A sandbox with no time limit has no end to
+   * move, and nothing changes. */
   async extendTimeout(duration: number, opts: { signal?: AbortSignal } = {}): Promise<void> {
     if (!Number.isFinite(duration) || duration <= 0)
       throw new RangeError(`duration must be a positive number of milliseconds, not ${duration}.`);
     await this.#withResume(async (runtime) => {
+      if (runtime.info.endsAt === null) return;
       this.#timeoutMs = this.timeout + duration;
       await this.#leaseToTimeout(runtime, opts);
     }, opts);
@@ -898,8 +906,9 @@ export class Sandbox {
 
   /** Extends the lease now toward the timeout, an hour ahead at most. */
   async #leaseToTimeout(runtime: RuntimeSandbox, opts: { signal?: AbortSignal }) {
+    if (runtime.info.endsAt === null) return;
     const seconds = extensionSeconds(
-      Date.parse(runtime.info.expiresAt),
+      Date.parse(runtime.info.endsAt ?? runtime.info.expiresAt),
       this.#until(),
       Date.now(),
       Infinity,
@@ -917,7 +926,8 @@ export class Sandbox {
 
   /** Changes what Runtime can change on a sandbox: `timeout`, `ports`,
    * `networkPolicy` and `snapshotExpiration`. Anything else is refused before
-   * anything changes. */
+   * anything changes. A `timeout` on a sandbox with no time limit changes
+   * nothing: it runs while it works. */
   async update(
     params: {
       timeout?: number;
@@ -943,15 +953,17 @@ export class Sandbox {
         : retentionDays(params.snapshotExpiration);
     if (params.ports !== undefined) validatePorts(params.ports);
     const wanted = params.ports === undefined ? undefined : new Set(params.ports);
-    if (params.timeout !== undefined) {
+    // A sandbox with no time limit has none to change (0300).
+    if (params.timeout !== undefined && this.#rt.info.endsAt !== null) {
       const timeout = checkTimeout(params.timeout);
       // A shorter timeout is kept when the lease has not reached it yet: the
       // lease then stops being extended there. Runtime cannot end a lease
       // earlier than it was given.
-      if (this.#sessionStart + timeout < Date.parse(this.#rt.info.expiresAt) - 1000)
+      const end = this.#rt.info.endsAt ?? this.#rt.info.expiresAt;
+      if (this.#sessionStart + timeout < Date.parse(end) - 1000)
         throw new NotSupportedError(
           "A timeout that ends earlier than the current lease",
-          `The lease runs to ${this.#rt.info.expiresAt}; call stop() when the work is done, or pass a timeout that ends after it.`,
+          `The lease runs to ${end}; call stop() when the work is done, or pass a timeout that ends after it.`,
         );
       const longer = timeout > this.timeout;
       this.#timeoutMs = timeout;

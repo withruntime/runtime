@@ -137,6 +137,17 @@ test("create refuses a run bigger than a sandbox, a bad cron and a bad time befo
   expect(() => jobBody({ ...base, schedule: { at: 1 }, compute: { diskMiB: 512 } })).toThrow(
     /at least 3072 MiB/,
   );
+  // A disk is at most 400 GiB, as a sandbox's is (0389).
+  expect(() => jobBody({ ...base, schedule: { at: 1 }, compute: { diskMiB: 409_601 } })).toThrow(
+    /at most 409600 MiB \(400 GiB\); asked for 409601/,
+  );
+  expect(
+    (
+      jobBody({ ...base, schedule: { at: 1 }, compute: { diskMiB: 409_600 } }).compute as {
+        diskMiB: number;
+      }
+    ).diskMiB,
+  ).toBe(409_600);
   expect(() => jobBody({ ...base, schedule: { cron: "0 3 * *" } })).toThrow(/five fields/);
   expect(() => jobBody(base)).toThrow(/schedule.at must be a time/);
   expect(() => jobBody({ ...base, schedule: { at: 1 }, timeoutSeconds: 4000 })).toThrow(

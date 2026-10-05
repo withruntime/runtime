@@ -280,6 +280,24 @@ class FakePreviews:
         return {"url": f"https://{port}-{self._s.id.replace('-', '')}.runtimehost.com/"}  # as the API names it
 
 
+class _Info(dict):
+    """A sandbox as the API answers it since 0300: ``endsAt`` is where it is
+    paid up to when it has a time limit, None when it has none."""
+
+    limited = True
+
+    def __contains__(self, key: object) -> bool:
+        return key == "endsAt" or super().__contains__(key)
+
+    def __getitem__(self, key: Any) -> Any:
+        if key == "endsAt":
+            return super().get("expiresAt") if self.limited else None
+        return super().__getitem__(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        return self[key] if key in self else default
+
+
 class FakeSandbox:
     def __init__(self, world: World, sandbox_id: str, fields: Dict[str, Any]) -> None:
         import time
@@ -287,12 +305,15 @@ class FakeSandbox:
         self.file_map: Dict[str, bytes] = {}
         self.process_list: List[FakeProcess] = []
         self.contexts: Dict[str, Dict[str, Any]] = {}
-        timeout = fields.get("timeout_seconds", 1800)
-        self.info: Dict[str, Any] = {
+        # No timeout_seconds is no time limit: shown as 0, renewed in half hours.
+        timeout = fields.get("timeout_seconds") or 0
+        self.info: Dict[str, Any] = _Info({
             "id": sandbox_id, "state": "running", "labels": dict(fields.get("labels") or {}),
             "vcpu": fields.get("vcpu", 2), "memoryMiB": fields.get("memory_mib", 4096),
             "onLeaseEnd": fields.get("on_lease_end", "pause"), "createdAt": "2026-09-23T00:00:00.000Z",
-            "expiresAt": _iso(time.time() + timeout), "funding": world.funding}
+            "timeoutSeconds": timeout, "expiresAt": _iso(time.time() + (timeout or 1800)),
+            "funding": world.funding})
+        self.info.limited = bool(timeout)
         for key in ("image", "snapshot"):
             if key in fields:
                 self.info[key] = fields[key]
@@ -374,6 +395,8 @@ class FakeSandbox:
         import time
         from datetime import datetime
         self._w.record("sandbox.extend", self.id, seconds)
+        if self.info.get("endsAt") is None:
+            return self  # No time limit: answered at once, nothing changed (0300).
         end = datetime.fromisoformat(self.info["expiresAt"].replace("Z", "+00:00")).timestamp()
         self.info["expiresAt"] = _iso(end + seconds)
         _ = time

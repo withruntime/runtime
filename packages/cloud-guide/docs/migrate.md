@@ -7,13 +7,14 @@ change. For a project with no sandbox yet, start with [Get started](./start).
 
 ## Give your agent one instruction
 
-> Switch this project's sandboxes to Runtime Cloud: read
-> https://withruntime.com/docs/migrate.md and follow it. Replace our current
-> provider's calls, test on the free trial, then tell me what I save each
-> month. When it asks for my approval, show me the link and code.
+> Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
+> follow it to the end. When it asks for my approval, show me the link and code.
 
-The agent follows the steps below and ends with your monthly saving in dollars.
-It never spends paid credit, and it never touches your old provider's account.
+The agent follows the steps below and keeps going until your real job runs on
+Runtime. It ends with your monthly saving in dollars and what is left for you
+to go live.
+It tests on the free trial, asks before going on once the trial's hours are
+used, and never touches your old provider's account.
 
 **Why teams switch:**
 
@@ -23,8 +24,8 @@ It never spends paid credit, and it never touches your old provider's account.
 - **The calls map one to one.** Create, exec, files and stop have direct
   equivalents (table below). Code written for E2B, Daytona, Vercel Sandbox or
   Blaxel runs after changing one import.
-- **Pause keeps memory.** A paused sandbox wakes where it left off, kept 1 to
-  365 days on a paid account. A fork copies a running sandbox with its memory
+- **Pause keeps memory.** A paused sandbox wakes where it left off, kept while a
+  paid account has credit. A fork copies a running sandbox with its memory
   and processes.
 - **More is built in.** A desktop, a code interpreter, custom images, volumes,
   and preview URLs that are private by default.
@@ -99,8 +100,9 @@ old code. Then:
   below).
 - Remove the old provider's SDK, its client setup and its settings from the
   code.
-- Keep `funding: "trial"` (CLI: `--trial`) while you test. Omitted funding can
-  use prepaid credit after the trial.
+- Test on the trial's hours. Once they are used, sandboxes run on the
+  account's credit by themselves, so check what is left with
+  `npx withruntime usage` and ask the owner before going on.
 - Use one sandbox per isolated task or tenant, not a shared global sandbox.
 - Choose an idempotency key before a write that accepts one, and reuse it with
   identical input after a lost response; a new key can run the work twice. The
@@ -118,8 +120,7 @@ sandbox; `delete()` ends it. See [JavaScript](./javascript) and
 (Python `from blaxel.core import SandboxInstance` to
 `from withruntime.blaxel import SandboxInstance`). Standby becomes a pause that
 keeps memory and processes after {{idle-pause}} idle, and the next call wakes the
-sandbox. Pass `withruntime: { create: { funding: "trial" } }` (Python
-`runtime_create={"funding": "trial"}`) while you test. Sessions carry over as
+sandbox. Sessions carry over as
 Runtime's [sandbox sessions](./javascript#a-sandbox-from-a-browser). A call
 Runtime handles differently, such as drives or schedules, throws
 `NotSupportedError` naming what to use instead.
@@ -137,9 +138,7 @@ Runtime handles differently, such as drives or schedules, throws
   (`?bl_preview_token=`) are accepted.
 
 **From E2B:** change `from "e2b"` to `from "withruntime/e2b"` (Python
-`from withruntime.e2b import ...`, SDK 0.4.0 and later), and pass
-`runtime: { create: { funding: "trial" } }` (Python
-`runtime_create={"funding": "trial"}`) while you test. Errors stay E2B's:
+`from withruntime.e2b import ...`, SDK 0.4.0 and later). Errors stay E2B's:
 `commands.run` throws `CommandExitError` (Python `CommandExitException`) on a
 non-zero exit and `TimeoutError` (Python `TimeoutException`) past its timeout,
 so keep your `try`/`catch`. A call Runtime handles differently throws
@@ -165,10 +164,10 @@ docs.
 | Background commands (`background: true`, `detached: true`)                                                                                                                                                                                         | `sbx.spawn(cmd)`, then `process.output()` and `wait()`                                                                             |
 | `files.write` / `fs.upload_file` / `writeFiles`                                                                                                                                                                                                    | `sbx.files.write(path, data)`; `files.upload(dir, path)` for trees                                                                 |
 | `files.read` / `fs.download_file` / `readFile`                                                                                                                                                                                                     | `sbx.files.read(path)`, `readText`, `files.download(path, dir)`                                                                    |
-| `kill()`, `delete()`, `stop()`, `terminate()`, `destroy()`                                                                                                                                                                                         | `sbx.stop()`, or `await using` / `with` to stop on exit                                                                            |
-| `setTimeout`, `timeout`                                                                                                                                                                                                                            | `timeoutSeconds` at create, `sbx.extend(seconds)`                                                                                  |
+| `kill()`, `delete()`, `stop()`, `terminate()`, `destroy()`                                                                                                                                                                                         | `sbx.delete()`; `sbx.stop()` keeps the disk for `restart`                                                                          |
+| `setTimeout`, `timeout` (optional: a sandbox runs while it works with none)                                                                                                                                                                        | `timeoutSeconds` at create, `sbx.extend(seconds)`                                                                                  |
 | Daytona `auto_stop_interval`, Modal `idle_timeout`                                                                                                                                                                                                 | `idlePauseSeconds` at create or with `sbx.update()`                                                                                |
-| Running past one lease                                                                                                                                                                                                                             | `persistent: true` (paid), or `keepAlive: true` from your process                                                                  |
+| Running past an hour, or a long session                                                                                                                                                                                                            | Nothing: with no `timeoutSeconds` it runs while it works; `persistent: true` (paid) keeps it up even when idle                     |
 | Pause and resume                                                                                                                                                                                                                                   | `sbx.pause()` and `sbx.wake()`                                                                                                     |
 | E2B `lifecycle.autoResume`, Blaxel standby                                                                                                                                                                                                         | On by default: a request to a paused sandbox wakes it (`autoWake`)                                                                 |
 | Cloudflare 0.x `getSandbox(env, name)`, Modal `Sandbox.from_name`, Blaxel `createIfNotExists`, Sprites by name                                                                                                                                     | `Sandbox.getOrCreate(name)`                                                                                                        |
@@ -193,16 +192,21 @@ docs.
 - The 0.1.0 HTTP routes were removed; each answers 410 and names its
   replacement.
 
-## 5. Test on the trial
+## 5. Make it work on the trial
 
-**Run the project's own tests, then a representative job.** Use the same
-inputs, dependency versions, output checks and deadline as before.
+**Run the project's own tests, then its real job, not a stand-in.** Use the
+same inputs, dependency versions, output checks and deadline as before. Fix what
+fails and run again, until everything that passed on the old provider passes on
+Runtime. A first command that prints `hello` checks the connection; it does not
+finish the switch.
 
 - Check that outputs match, not only that commands succeeded.
 - Check exit codes, failures and retries.
 - Record completion time over several runs, startup included.
 - List sandboxes at the end (`npx withruntime sandbox ls --json`) and stop any
   the test left running.
+- If the job hits a trial limit, stop and tell the owner which limit the error
+  named and that a top-up lifts it. Do not shrink the job to fit.
 
 ## 6. Work out the saving
 
@@ -251,11 +255,20 @@ A report in this shape, with made-up volumes:
 
 ## 7. Go live
 
+Open a pull request with the switch if you can, and tell the owner the steps
+only they can take:
+
 - The owner adds prepaid credit at
   [Usage & billing](https://withruntime.com/account/billing), any amount from
   {{topup-min}}. There is no subscription.
-- Change `funding: "trial"` to `"paid"`, or remove it, once the owner says so.
-  Never spend paid credit on your own.
+- The app needs a key where it runs: the owner creates one at
+  [API keys](https://withruntime.com/account/keys) and stores it as
+  `RUNTIME_API_KEY` in the app's secrets. The agent's own connection is for
+  this machine only.
+- The owner merges. Then check that `npx withruntime sandbox ls` shows the
+  app's sandboxes.
+- Never spend paid credit on your own: going on past the trial's hours is the
+  owner's word.
 - The old provider's account, keys and data are the owner's to close. Leave
   them as they are.
 - Send feedback on anything that slowed the switch:

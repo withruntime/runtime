@@ -12,14 +12,23 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { link } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
-import { tarHeader, unpackArchive, unpackStream } from "../src/tar";
+import { packDirectory, tarHeader, unpackArchive, unpackStream } from "../src/tar";
 
 /* A directory download unpacks an archive the sandbox built, so its contents
    are the customer's untrusted code's to choose. These archives are the ones a
    hostile sandbox would send. */
 
-type Entry = { name: string; body?: string; link?: string; dir?: boolean; type?: "L" | "K" };
+type Entry = {
+  name: string;
+  body?: string;
+  link?: string;
+  hard?: string;
+  dir?: boolean;
+  type?: "L" | "K";
+};
 
 function archive(entries: Entry[]): Uint8Array {
   const parts: Uint8Array[] = [];
@@ -30,6 +39,8 @@ function archive(entries: Entry[]): Uint8Array {
       parts.push(new Uint8Array((512 - (body.length % 512)) % 512));
     } else if (entry.dir) parts.push(tarHeader(`${entry.name}/`, 0, 0o755, "5"));
     else if (entry.link !== undefined) parts.push(tarHeader(entry.name, 0, 0o777, "2", entry.link));
+    else if (entry.hard !== undefined)
+      parts.push(tarHeader(entry.name, 0, 0o644, "1" as "0", entry.hard));
     else {
       const body = new TextEncoder().encode(entry.body ?? "");
       parts.push(tarHeader(entry.name, body.length, 0o644, "0"), body);
@@ -119,6 +130,88 @@ test("links that stay inside land intact, including GNU long link targets", asyn
     expect(await readlink(join(target, "node_modules/.bin/deep"))).toBe(`../${deep}`);
     expect(await readFile(join(target, "node_modules/.bin/deep"), "utf8")).toBe("deep()");
     expect(await readFile(join(target, "current/tool"), "utf8")).toBe("run()");
+  });
+});
+
+test("hard-linked files land with their content, as tar writes them", async () => {
+  // tar writes a file's first name as a file and every other as a hard link
+  // to it: a folder holding one file twice (1 October 2026 audit).
+  await scene(async (target, outside) => {
+    const source = join(outside, "source");
+    await mkdir(join(source, "sub"), { recursive: true });
+    await writeFile(join(source, "original.txt"), "same bytes");
+    await link(join(source, "original.txt"), join(source, "sub", "copy.txt"));
+    const packed = spawnSync("tar", ["-czf", "-", "-C", source, "."]).stdout;
+    const listed = spawnSync("tar", ["-tvzf", "-"], { input: packed }).stdout.toString();
+    expect(listed).toMatch(/link to|^h/m);
+    await unpackArchive(packed, target);
+    expect(await readFile(join(target, "original.txt"), "utf8")).toBe("same bytes");
+    expect(await readFile(join(target, "sub", "copy.txt"), "utf8")).toBe("same bytes");
+    // A later entry of the first name replaces it without changing the link's copy.
+    await unpackArchive(
+      archive([
+        { name: "a.txt", body: "first" },
+        { name: "b.txt", hard: "./a.txt" },
+        { name: "a.txt", body: "second" },
+      ]),
+      target,
+    );
+    expect(await readFile(join(target, "a.txt"), "utf8")).toBe("second");
+    expect(await readFile(join(target, "b.txt"), "utf8")).toBe("first");
+  });
+});
+
+test("a long link target and a long multibyte folder name round-trip exactly", async () => {
+  // ustar holds a 100-byte link and a 155-byte prefix; past them the writer
+  // used to cut the bytes short (1 October 2026 audit).
+  await scene(async (target, outside) => {
+    const source = join(outside, "source");
+    const folder = "é".repeat(80); // 160 bytes in UTF-8
+    const deep = join(source, folder, "ü".repeat(60));
+    await mkdir(deep, { recursive: true });
+    await writeFile(join(deep, "file.txt"), "deep");
+    const far = `${"x".repeat(60)}/${"y".repeat(60)}`; // 121 bytes
+    await symlink(far, join(source, "far"));
+    const packed = await packDirectory(source);
+    // -z: GNU tar, unlike macOS's, reads gzip from a pipe only when told.
+    const listed = spawnSync("tar", ["-tvzf", "-"], { input: packed }).stdout.toString();
+    expect(listed).toContain(far);
+    expect(listed.normalize("NFC")).toContain(`${folder}/${"ü".repeat(60)}/file.txt`);
+    await unpackArchive(packed, target);
+    expect(await readlink(join(target, "far"))).toBe(far);
+    expect(await readFile(join(target, folder, "ü".repeat(60), "file.txt"), "utf8")).toBe("deep");
+  });
+});
+
+test("a hard link must name a file the archive already carried", async () => {
+  await scene(async (target, outside) => {
+    await writeFile(join(outside, "secret.txt"), "theirs");
+    const refused = async (entries: Entry[], pattern: RegExp) =>
+      expect(unpackArchive(archive(entries), target)).rejects.toThrow(pattern);
+    await refused([{ name: "x", hard: "../outside/secret.txt" }], /leads outside the target/);
+    await refused([{ name: "x", hard: "/etc/hosts" }], /leads outside the target/);
+    await refused(
+      [
+        { name: "x", hard: "later.txt" },
+        { name: "later.txt", body: "a" },
+      ],
+      /does not carry/,
+    );
+    await refused(
+      [
+        { name: "d", link: "../outside" },
+        { name: "x", hard: "d/secret.txt" },
+      ],
+      /does not carry/,
+    );
+    await refused(
+      [
+        { name: "d", dir: true },
+        { name: "x", hard: "d" },
+      ],
+      /does not carry/,
+    );
+    expect(await exists(target)).toBe(false);
   });
 });
 

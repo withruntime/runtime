@@ -944,6 +944,15 @@ def window_seconds(auto_stop_minutes: Optional[float]) -> int:
     return int(min(3600, max(60, round(auto_stop_minutes * 60))))
 
 
+def idle_pause_of(auto_stop_minutes: Optional[float]) -> int:
+    """Daytona's autoStopInterval (minutes; 0 is never) as the idle pause of a
+    sandbox with no time limit: seconds with nothing happening in it, counted
+    by the sandbox itself (idle_pause_seconds, 0 never, at most a day)."""
+    if not auto_stop_minutes or auto_stop_minutes <= 0:
+        return 0
+    return int(min(86_400, max(60, round(auto_stop_minutes * 60))))
+
+
 def idle_seconds(auto_stop_minutes: Optional[float]) -> float:
     """Daytona's autoStopInterval (minutes; 0 is never) as seconds without a
     call before the sandbox pauses. Past an hour the lease is renewed while

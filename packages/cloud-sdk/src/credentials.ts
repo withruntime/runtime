@@ -16,6 +16,23 @@ export type SavedConnection = {
   /** The account's name when it was saved, for `runtime account`. */
   orgName?: string;
 };
+/** Saved accounts could not be updated because another command holds their
+ * lock: still `busy` after the whole wait, or `interrupted`, left by a command
+ * that died holding it. The message names the lock file to remove. */
+export class CredentialsLockedError extends Error {
+  override readonly name = "CredentialsLockedError";
+  constructor(
+    message: string,
+    readonly lockFile: string,
+    readonly reason: "busy" | "interrupted",
+  ) {
+    super(message);
+  }
+}
+/** How long a save waits for another command's update to finish. An update
+ * is one read, modify and write of small files, so only a heavily loaded
+ * machine comes near it. */
+const LOCK_WAIT_MS = 30_000;
 /** How many other accounts' connections one machine keeps beside the one in use. */
 const SAVED_ACCOUNTS = 20;
 export function connectionOrigins(env: NodeJS.ProcessEnv) {
@@ -117,7 +134,7 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
    * Never steal a lock: stale cleanup can otherwise delete a new live lock. */
   async function updateAccounts<T>(update: () => Promise<T>): Promise<T> {
     await privateDirectory(true);
-    const until = performance.now() + 10_000;
+    const until = performance.now() + LOCK_WAIT_MS;
     let handle;
     for (;;) {
       try {
@@ -134,18 +151,27 @@ export function connectionStore(env: NodeJS.ProcessEnv, directory = defaultDirec
         // The holder may not have finished writing its process id yet.
       }
       if (typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0) {
+        let gone = false;
         try {
           process.kill(pid, 0);
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ESRCH")
-            throw new Error(
-              `A previous Runtime credential update was interrupted. Remove ${lockFile} and retry.`,
-            );
+          gone = (error as NodeJS.ErrnoException).code === "ESRCH";
         }
+        // A holder that finished between our read and our check has exited
+        // too, and its lock is gone or another's: wait for the lock again.
+        // Only a lock still naming the dead process was left by one that died.
+        if (gone && (await readPrivate(lockFile, 1024, "credential update lock")) === text)
+          throw new CredentialsLockedError(
+            `A previous Runtime credential update was interrupted. Remove ${lockFile} and retry.`,
+            lockFile,
+            "interrupted",
+          );
       }
       if (performance.now() >= until)
-        throw new Error(
+        throw new CredentialsLockedError(
           `Another Runtime command is updating saved accounts. Retry when it finishes. If no command is running, remove ${lockFile} and retry.`,
+          lockFile,
+          "busy",
         );
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }

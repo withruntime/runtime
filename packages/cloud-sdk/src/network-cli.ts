@@ -17,7 +17,8 @@ import { generateWireGuardKeyPair } from "./wireguard.js";
  *   runtime network upstream-proxy set|get|remove   the account's network settings
  *   runtime network private on|off|status          your sandboxes reach each other by name
  *
- * Paid accounts only; an account that has not added credit is told so. */
+ * A dedicated address needs credit on the account, the rest a kept top-up
+ *; a refusal says which. */
 
 import type { NetworkFunding, UpstreamProxy } from "./products/network-products.js";
 import type { PrivateNetwork } from "./products/private-network.js";
@@ -47,7 +48,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   ls                                     Your domains
   get <hostname>                         One domain and its DNS records
   rm <hostname>                          Stop serving it
-  Paid accounts only. The first visit gets the certificate, in a few seconds.
+  Needs a kept top-up. The first visit gets the certificate, in a few seconds.
 `,
   port: `runtime port <command>
 
@@ -56,7 +57,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
                                          Prints address:port for your client
   ls [--sandbox <id>]                    Your open ports
   close <portId>                         Close one, its open connections too
-  Paid accounts only. TCP, carried as it is: use your service's own password and TLS.
+  Needs a kept top-up. TCP, carried as it is: use your service's own password and TLS.
 `,
   address: `runtime address <command>
 
@@ -64,7 +65,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
                                          account sends from it, for allow-lists
   ls                                     Your addresses
   release <addressId>                    Give it back; sandboxes use the shared addresses again
-  Paid accounts only.
+  Needs credit on the account.
 `,
   tunnel: `runtime tunnel <command>
 
@@ -78,7 +79,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   peer rotate <peerId> [--out runtime.conf]
                                          A new key; the old one stops working within seconds
   peer rm <peerId>                       Remove it; its tunnel ends within seconds
-  --route: your own ranges behind the peer that sandboxes may reach. Paid accounts only.
+  --route: your own ranges behind the peer that sandboxes may reach. Needs a kept top-up.
 `,
   network: `runtime network <command>
 
@@ -91,13 +92,13 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   upstream-proxy get                     The proxy in use
   upstream-proxy remove                  Connections leave directly again
   A proxy that refuses or cannot be reached fails the connection; nothing goes
-  around it. Paid accounts only.
+  around it. Needs a kept top-up.
 
   private on                             Your sandboxes reach each other by name, over TCP:
                                          <name>.sandbox.internal:<port> or <id>.sandbox.internal:<port>
   private off                            They stop; open connections between them are cut
   private status                         On or off
-  Only your own sandboxes answer. Paid accounts only, and free.
+  Only your own sandboxes answer. Needs a kept top-up; free.
 `,
 };
 
@@ -501,7 +502,7 @@ export async function networkProductCommand(
         ? "On: your sandboxes reach each other at <name>.sandbox.internal:<port> over TCP."
         : state.allowed
           ? "Off. Turn it on: runtime network private on"
-          : "Off. Reaching your sandboxes by name is for paid accounts; add credit to turn it on.";
+          : "Off. Reaching your sandboxes by name needs a kept top-up.";
     switch (rest[0]) {
       case "on":
       case "off": {

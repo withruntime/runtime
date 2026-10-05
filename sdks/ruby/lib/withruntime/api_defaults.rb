@@ -11,7 +11,7 @@ module WithRuntime
     WAIT_FOR_TIMEOUT_SECONDS = 60
     # A streamed exec's command limit when none is given: the API's longest.
     STREAMED_EXEC_TIMEOUT_SECONDS = 86_400
-    # The lease keep_alive keeps ahead of now, and so the most it extends by.
+    # The time keep_alive keeps ahead of a time limit, and so the most it extends by.
     KEEP_ALIVE_MARGIN_SECONDS = 600
   end
 end

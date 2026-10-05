@@ -293,10 +293,10 @@ There are no pause, wake or fork operations in this measurement.
 3. Run `OUT=after.json node bench.mts` (Node 22.18 or later), or use
    `OUT=after.json bun bench.mts`.
 
-`RUNS` defaults to 20 and accepts 1–100. You need enough trial time remaining;
-it never falls back to paid funding. Ctrl-C prevents further starts and lets
+`RUNS` defaults to 20 and accepts 1–100. It runs on the trial's hours first,
+then on the account's credit if it has some. Ctrl-C prevents further starts and lets
 the current attempt finish cleanup. A failed or uncertain create stops the
-benchmark after cleanup; its five-minute lease is a backstop. Cleanup failures
+benchmark after cleanup; its five-minute time limit is a backstop. Cleanup failures
 print the attempt labels for follow-up and make the command fail.
 
 For a before/after comparison, run the identical script on the same client,

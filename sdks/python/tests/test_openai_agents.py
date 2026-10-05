@@ -258,7 +258,7 @@ class OpenAIAgentsTest(unittest.TestCase):
                 manifest=Manifest(entries={"notes.md": File(content=b"from the manifest\n")},
                                   environment={"value": {"FROM_MANIFEST": "m"}}),
                 options=self.options(funding="trial", memory_mib=2048, snapshot_id="snap-1", env={"BASE": "b"},
-                                     extra={"on_lease_end": "pause"}))
+                                     max_total_cost_micros=5_000_000, extra={"on_lease_end": "pause"}))
             return session
 
         self.world.snapshots["snap-1"] = tempfile.mkdtemp()
@@ -272,7 +272,7 @@ class OpenAIAgentsTest(unittest.TestCase):
         session, result = run(flow())
         create = self.world.calls[0]
         self.assertEqual(create, ("create", {"on_lease_end": "pause", "funding": "trial", "memory_mib": 2048,
-                                             "snapshot": "snap-1"}))
+                                             "max_total_cost_micros": 5_000_000, "snapshot": "snap-1"}))
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout, b"from the manifest\nb m\n")
         self.assertIn(("stop", session.state.sandbox_id), self.world.calls)

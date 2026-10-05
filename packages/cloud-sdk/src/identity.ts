@@ -1,4 +1,5 @@
 import { RuntimeError } from "./errors.js";
+import { sandboxMarker } from "./transport.js";
 
 /** An identity token, as the API returns it. */
 export type IdentityToken = {
@@ -20,10 +21,7 @@ async function requestCredentials(): Promise<{ url: string; token: string } | nu
     try {
       // Loaded here, so the SDK still loads where there is no file system.
       const { readFile } = await import("node:fs/promises");
-      const env = JSON.parse(await readFile("/run/runtime/environment.json", "utf8")) as Record<
-        string,
-        string
-      >;
+      const env = JSON.parse(await readFile(sandboxMarker.path, "utf8")) as Record<string, string>;
       url = env.RUNTIME_ID_TOKEN_REQUEST_URL;
       token = env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
     } catch {

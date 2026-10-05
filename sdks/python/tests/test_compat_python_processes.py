@@ -68,10 +68,18 @@ class LocalProcess:
         self.id = str(self._p.pid)
         self.info = {"id": self.id, "pid": self._p.pid, "outputEncoding": kwargs.get("output_encoding", "utf8")}
     def write(self, data, eof=False):
-        file = self._master or self._p.stdin
+        if self._master:
+            # The terminal is unbuffered, so the bytes are in once written, and
+            # nothing may touch the file after: the shell can act on them and
+            # exit, and the reader close the terminal, before the next line runs
+            # (a flush here failed on Linux in 6 of 80 runs).
+            view = memoryview(data)
+            while view: view = view[self._master.write(view):]
+            return
+        file = self._p.stdin
         file.write(data)
         file.flush()
-        if eof and not self._master: file.close()
+        if eof: file.close()
     def kill(self, name="SIGTERM"):
         if self._p.poll() is None: os.killpg(self._p.pid, getattr(signal, name))
     def output_bytes(self):

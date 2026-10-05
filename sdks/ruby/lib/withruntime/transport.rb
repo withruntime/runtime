@@ -41,6 +41,21 @@ module WithRuntime
         action&.call
       end
     end
+    # How long one attempt waits for its answer to start. The API starts every
+    # answer within 120 s: Caddy answers 503 itself past that, and a longer call
+    # gets its 200 at 90 s and then its JSON (runtime-late-answer). An attempt
+    # with no answer by then is talking to a server that is gone, such as a
+    # controller that died with the call in flight while its address moved to
+    # the new leader: a client that only waits sends nothing the new leader
+    # could refuse (the leader drill on vin-5, 4 October 2026). It is sent
+    # again under the same key.
+    ANSWER_START = 125.0
+    class << self
+      attr_writer :answer_start
+
+      def answer_start = @answer_start || ANSWER_START
+    end
+
     NETWORK_ERRORS = [IOError, SystemCallError, SocketError, Timeout::Error, OpenSSL::SSL::SSLError,
                       Net::HTTPBadResponse, Net::ProtocolError, EOFError].freeze
 
@@ -68,8 +83,8 @@ module WithRuntime
 
     # The value of a JSON call: a Hash, an Array or nil.
     def json(method, path, query: nil, body: nil, **options)
-      with_connection(options) do |http|
-        response = send_call(http, method, path, query: query, body: body, **options)
+      with_connection(options, method) do |http, admitted|
+        response = send_call(http, method, path, query: query, body: body, **admitted)
         text = response.body.to_s
         text.strip.empty? ? nil : JSON.parse(text)
       rescue JSON::ParserError => e
@@ -80,20 +95,22 @@ module WithRuntime
     # A GET's body to the block a chunk at a time as it arrives. A connection
     # lost part way is raised, never retried, so no chunk is given twice.
     def chunks(path, query: nil, accept: "application/octet-stream", &block)
-      with_connection({}) do |http|
-        send_call(http, "GET", path, query: query, accept: accept, no_retry: true, &block)
+      with_connection({}, "GET") do |http, admitted|
+        send_call(http, "GET", path, query: query, accept: accept, no_retry: true, **admitted, &block)
       end
       nil
     end
 
     def bytes(method, path, query: nil, body: nil, **options)
-      with_connection(options) do |http|
-        send_call(http, method, path, query: query, body: body, **options).body.to_s.b
+      with_connection(options, method) do |http, admitted|
+        send_call(http, method, path, query: query, body: body, **admitted).body.to_s.b
       end
     end
 
     # Newline-delimited JSON events as they arrive, one Hash per event, on a
-    # connection of their own.
+    # connection of their own. A connection lost after the first event is
+    # raised, never retried, so no event is given twice; the caller resumes
+    # from its cursor.
     def events(method, path, query: nil, body: nil, cancel: nil, **options, &block)
       return enum_for(:events, method, path, query: query, body: body, cancel: cancel, **options) unless block
 
@@ -214,7 +231,12 @@ module WithRuntime
       end
     end
 
-    def with_connection(_options)
+    # A connection from the pool, waited for within the call's own deadline;
+    # the wait is taken off it, so a queued call expires as an unqueued one
+    # would, without sending anything.
+    def with_connection(options, method)
+      limit = options[:timeout] || @timeout
+      deadline = now + limit
       http = @lock.synchronize do
         loop do
           break @idle.pop unless @idle.empty?
@@ -222,12 +244,18 @@ module WithRuntime
             @open += 1
             break connect
           end
-          @freed.wait(@lock)
+          left = deadline - now
+          raise connection_error(true, method != "GET", options[:key]) if left <= 0
+
+          @freed.wait(@lock, left)
         end
       end
       healthy = false
       begin
-        result = yield http
+        left = deadline - now
+        raise connection_error(true, method != "GET", options[:key]) if left <= 0
+
+        result = yield http, options.merge(timeout: left)
         healthy = true
         result
       ensure
@@ -239,6 +267,18 @@ module WithRuntime
             @open -= 1
           end
           @freed.signal
+        end
+      end
+    end
+
+    def deadline_watchdog(http, seconds)
+      Thread.new do
+        Thread.current.report_on_exception = false
+        sleep(seconds)
+        begin
+          http.instance_variable_get(:@socket)&.io&.close
+        rescue IOError, SystemCallError
+          nil
         end
       end
     end
@@ -287,9 +327,22 @@ module WithRuntime
           request["Content-Type"] = raw ? "application/octet-stream" : "application/json"
           request.body = payload
         end
-        http.read_timeout = left
+        # Until its answer starts, a read waits at most answer_start; then the
+        # call's whole deadline again.
+        bounded = Transport.answer_start < left
+        answered = false
+        http.read_timeout = bounded ? Transport.answer_start : left
         http.write_timeout = left if http.respond_to?(:write_timeout=)
+        http.open_timeout = [left, 30].min
+        # Per-read limits do not bound a body that keeps trickling in: at the
+        # deadline the socket is closed, and the read fails as a timeout.
+        watchdog = deadline_watchdog(http, left)
         response = nil
+        # A stream that gave its consumer anything is never sent again: that
+        # would give the same events twice. The consumer's own errors are its
+        # own, never a reason to retry.
+        streamed = false
+        consumer_error = nil
         begin
           open_connection(http, cancel)
           cancel&.register do
@@ -305,11 +358,26 @@ module WithRuntime
           raise connection_error(true, write, key) if cancel&.cancelled?
           if stream
             http.request(request) do |answer|
+              answered = true
+              http.read_timeout = [deadline - now, 0.001].max
               response = answer
-              answer.read_body(&stream) if answer.code.to_i < 300
+              if answer.code.to_i < 300
+                answer.read_body do |chunk|
+                  streamed = true
+                  begin
+                    stream.call(chunk)
+                  rescue Exception => e
+                    consumer_error = e
+                    raise
+                  end
+                end
+              end
             end
           else
-            response = http.request(request)
+            response = http.request(request) do
+              answered = true
+              http.read_timeout = [deadline - now, 0.001].max
+            end
           end
           status = response.code.to_i
           if status >= 300 && status < 400
@@ -317,12 +385,17 @@ module WithRuntime
           end
         rescue *NETWORK_ERRORS => e
           http.finish if http.started?
-          late = e.is_a?(Timeout::Error) || now >= deadline || cancel&.cancelled?
-          raise connection_error(late, write, key, e) if late || no_retry || attempt >= max_retries
+          raise if e.equal?(consumer_error)
+
+          unanswered = bounded && !answered && e.is_a?(Net::ReadTimeout) && now < deadline
+          late = (e.is_a?(Timeout::Error) && !unanswered) || now >= deadline || cancel&.cancelled?
+          raise connection_error(late, write, key, e) if late || no_retry || streamed || attempt >= max_retries
 
           pause(backoff(attempt), deadline, write, key, nil, cancel)
           attempt += 1
           next
+        ensure
+          watchdog.kill
         end
         return response if status < 300
 

@@ -217,11 +217,40 @@ class Unpacker:
                     os.makedirs(destination, exist_ok=True)
                 elif kind == "2":
                     self._links.append((destination, link, name))
+                elif kind == "1":
+                    self._hard_link(destination, link, name)
                 elif kind in ("0", "7"):
                     os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    # A name already unpacked may share its file with a hard
+                    # link; writing through it would change the link's copy too.
+                    if os.path.lexists(destination):
+                        os.unlink(destination)
                     self._entry = ("file", open(destination, "wb"), destination, mode)
         if not self._left:
             self._end_body()
+
+    def _hard_link(self, destination: str, link: str, name: str) -> None:
+        """A second name for a file the archive already carried: tar writes
+        the first name as a file and every other as a hard link to it. The
+        link names a plain file unpacked earlier in this archive, or the
+        unpack fails; it never reaches outside, through a link or ahead."""
+        while link.startswith("./"):
+            link = link[2:]
+        source = os.path.normpath(os.path.join(self._root, link))
+        if os.path.isabs(link) or not link or not _inside(self._root, source) or source == self._root:
+            raise _refuse(f"Refusing an archive hard link that leads outside the target: {name} -> {link}")
+        _assert_plain(self._root, source, link)
+        if not os.path.isfile(source):
+            raise _refuse(f"Refusing an archive hard link to a file it does not carry: {name} -> {link}")
+        if source == destination:
+            return
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        if os.path.lexists(destination):
+            os.unlink(destination)
+        try:
+            os.link(source, destination)
+        except OSError:
+            shutil.copy2(source, destination)
 
     def _end_body(self) -> None:
         entry = self._entry

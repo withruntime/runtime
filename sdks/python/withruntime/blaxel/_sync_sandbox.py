@@ -1305,14 +1305,16 @@ class SandboxInstance:
             return
 
     def _renew(self, want: Optional[int] = None) -> None:
-        """Moves a pausing lease on: to ``want`` seconds ahead, or, with none,
-        to an hour ahead once less than ten minutes are left, so a sandbox in
-        use is not paused under its work. A refusal means the lease had moved
-        on already (a wake renews it); the sandbox is read again."""
+        """Moves a pausing time limit on (an hour, on a sandbox made before
+        0300): to ``want`` seconds ahead, or, with none, to an hour ahead once
+        less than ten minutes are left, so a sandbox in use is not paused under
+        its work. One with no time limit renews itself. A refusal means the
+        lease had moved on already (a wake renews it); the sandbox is read again."""
         runtime = self.withruntime
-        if runtime is None or runtime.state != "running" or runtime.info.get("onLeaseEnd") != "pause":
+        if (runtime is None or runtime.state != "running" or runtime.info.get("onLeaseEnd") != "pause"
+                or core.no_limit(runtime.info)):
             return
-        left = core.epoch(runtime.info.get("expiresAt")) - time.time()
+        left = core.end_of(runtime.info) - time.time()
         if want is None and left >= core.RENEW_BELOW_SECONDS:
             return
         need = int((want or core.LEASE_SECONDS) - left)
@@ -1434,9 +1436,11 @@ class SandboxInstance:
         memory = int(config.memory or core.DEFAULT_MEMORY)
         plan = core.plan(config.ttl, config.expires, config.lifecycle)
         fields: Dict[str, Any] = {"vcpu": core.vcpus(memory), "memory_mib": memory,
-                                  "timeout_seconds": plan.timeout_seconds, "on_lease_end": plan.on_lease_end,
+                                  "on_lease_end": plan.on_lease_end,
                                   "idle_pause_seconds": core.IDLE_PAUSE_SECONDS, "auto_wake": True,
                                   "labels": core.labels_for(config, image)}
+        if plan.timeout_seconds is not None:
+            fields["timeout_seconds"] = plan.timeout_seconds
         if not core.STOCK_IMAGE.match(image):
             fields["image"] = _image(client, image)
         if config.name:

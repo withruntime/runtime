@@ -28,8 +28,8 @@ every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), n
   sandbox ([MCP](./mcp)), and mount your S3, R2 or Google Cloud Storage bucket
   as a folder ([storage](./storage#mount-your-own-bucket)).
 - **Connected to the rest of your world:** your own domain with HTTPS, public
-  TCP ports, a dedicated outbound address and a WireGuard private network on
-  paid accounts ([networking](./networking)), and
+  TCP ports, a dedicated outbound address and a WireGuard private network once
+  the account has credit or a kept top-up ([networking](./networking)), and
   [identity tokens](./identity-tokens) that reach AWS or Google Cloud with no
   stored key.
 - **See what runs:** each sandbox's CPU and memory over time, signed webhooks
@@ -39,13 +39,13 @@ every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), n
 
 Paste this into your coding agent:
 
-> Set up Runtime Cloud for this project and switch any sandbox work it already
-> does to Runtime: read https://withruntime.com/llms.txt and follow it. When it
-> asks for my approval, show me the link and code.
+> Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
+> follow it to the end. When it asks for my approval, show me the link and code.
 
-The agent connects, runs a test and, if the project uses another sandbox
-provider, moves that code to Runtime. It reports what passed and what you save
-each month. You approve one link in your browser; there is nothing to copy.
+The agent connects and, if the project uses another sandbox provider, moves
+every call to Runtime and keeps going until your real job runs there. It
+reports what passed, what you save each month and what is left for you to go
+live. You approve one link in your browser; there is nothing to copy.
 
 ## Run your first sandbox
 
@@ -64,7 +64,7 @@ one import that changes.
 
 ```bash
 printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-npx withruntime sandbox run --trial -- python3 - < invoice.py
+npx withruntime sandbox run -- python3 - < invoice.py
 ```
 
 The first time, it connects this machine:
@@ -76,8 +76,7 @@ The first time, it connects this machine:
 
 Exit code zero means the command succeeded. Confirm cleanup with
 `npx withruntime sandbox ls --json`, and stop the test sandbox if it is still
-there. `--trial` refuses paid funding even when the account has credit. Later
-commands reuse the connection.
+there. Later commands reuse the connection.
 
 An agent running it shows you the link and code. If you approve after the
 command stopped waiting (50 seconds when no one is at a terminal), the agent
@@ -87,14 +86,14 @@ For several commands in one sandbox, this shell block stops it on exit:
 
 ```bash
 (
-  id=$(npx withruntime sandbox create --trial) || exit
+  id=$(npx withruntime sandbox create) || exit
   trap 'npx withruntime sandbox stop "${id}"' EXIT
   npx withruntime sandbox exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 )
 ```
 
 Installed with `npm install --global withruntime`, the command is `runtime`:
-`runtime sandbox run --trial -- ls`, `runtime sandbox create --trial`. See
+`runtime sandbox run -- ls`, `runtime sandbox create`. See
 [the CLI](./cli).
 
 ## Give an agent Runtime's tools
@@ -121,7 +120,7 @@ tool appears. See [MCP](./mcp) for other clients and the remote endpoint.
 ```ts
 import { Sandbox } from "withruntime";
 
-const sbx = await Sandbox.create({ funding: "trial" });
+const sbx = await Sandbox.create();
 try {
   await sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   const result = await sbx.exec("python3 /workspace/invoice.py", { check: true });
@@ -134,7 +133,7 @@ try {
 ```python
 from withruntime import Sandbox
 
-with Sandbox.create(funding="trial") as sbx:
+with Sandbox.create() as sbx:
     sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
     print(sbx.exec("python3 /workspace/invoice.py", check=True).stdout)
 ```
@@ -147,8 +146,8 @@ with Sandbox.create(funding="trial") as sbx:
   as `RUNTIME_API_KEY` from your secret manager.
 - `create()` needs no arguments. It waits until the sandbox is ready, and
   raises `start_failed` if it stops first.
-- The examples insist on trial funding, check the command's result, and stop the
-  sandbox even after an error. Export anything you need before stopping.
+- The examples check the command's result, and stop the sandbox even after an
+  error. Export anything you need before stopping.
 
 ## Connect once in your browser
 
@@ -165,9 +164,9 @@ own credential automatically, and you do not copy an API key.
 - To use a key you already have, `npx withruntime login --with-key` reads it
   from standard input, never from the command line.
 
-Trial requests never fall back to paid credit. Omitting `funding` can use
-prepaid credit after the trial is exhausted. Keep `funding: "trial"` for free
-use, and choose `funding: "paid"` when you intend to use credit.
+There is nothing to choose between the trial and credit: the trial's hours
+are spent first, then prepaid credit, and `funding` in a request is ignored.
+Once the account holds credit, its sandboxes have paid limits.
 
 ## Switch from another provider
 
@@ -189,7 +188,7 @@ that nothing ran: inspect the original resource before trying another create.
 | Error                             | What to do                                                                |
 | --------------------------------- | ------------------------------------------------------------------------- |
 | `connection_pending`              | Approve the printed request, then rerun the same command                  |
-| `trial_busy` or `trial_exhausted` | Check your trial usage; add `--paid` only when you decide to use credit   |
+| `trial_busy` or `trial_exhausted` | Check your trial usage; once the account holds credit, it runs on that    |
 | `start_failed`                    | Read the sandbox's state and `stopReason`; a stopped sandbox is not ready |
 
 See [troubleshooting](./troubleshooting) for safe retries and cleanup.

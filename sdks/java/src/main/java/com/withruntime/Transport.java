@@ -23,6 +23,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
@@ -240,6 +241,32 @@ final class Transport {
    * Sends a call and returns the response once it succeeded. The caller reads and closes the body.
    */
   HttpResponse<InputStream> send(Call call) {
+    return exchange(call, false).response();
+  }
+
+  /**
+   * Sends a call and reads its whole successful body inside the retries: a body lost part way is a
+   * transport failure like any other, sent again with the same idempotency key, and an error that
+   * carries that key once the retries are spent, so a write the server made is never made twice by
+   * a caller retrying with a new key.
+   */
+  byte[] sendWhole(Call call) {
+    return exchange(call, true).body();
+  }
+
+  /**
+   * How long one attempt waits for its answer to start. The API starts every answer within 120 s:
+   * Caddy answers 503 itself past that, and a longer call gets its 200 at 90 s and then its JSON
+   * (runtime-late-answer). An attempt with no answer by then is talking to a server that is gone,
+   * such as a controller that died with the call in flight while its address moved to the new
+   * leader: a client that only waits sends nothing the new leader could refuse (the leader drill on
+   * vin-5, 4 October 2026). It is sent again under the same key.
+   */
+  static Duration answerStart = Duration.ofSeconds(125);
+
+  private record Exchange(HttpResponse<InputStream> response, byte[] body) {}
+
+  private Exchange exchange(Call call, boolean whole) {
     boolean write = !call.method.equals("GET");
     String key = write ? (call.key != null ? call.key : UUID.randomUUID().toString()) : null;
     Duration limit = (call.timeout != null ? call.timeout : timeout).plus(call.room);
@@ -261,9 +288,11 @@ final class Transport {
         throw connectionError(true, write, key, null);
       long left = deadline - System.nanoTime();
       if (left <= 0) throw connectionError(true, write, key, null);
+      // The request's timeout ends when its headers arrive.
+      boolean bounded = answerStart.toNanos() < left;
       HttpRequest.Builder request =
           HttpRequest.newBuilder(uri)
-              .timeout(Duration.ofNanos(left))
+              .timeout(bounded ? answerStart : Duration.ofNanos(left))
               .header("Authorization", "Bearer " + apiKey)
               .header("Accept", call.accept)
               .header("X-Runtime-Client", client)
@@ -278,6 +307,7 @@ final class Transport {
       if (key != null) request.header("Idempotency-Key", key);
       if (call.wait > 0) request.header("Prefer", "wait=" + Math.min(120, call.wait));
       HttpResponse<InputStream> response;
+      byte[] answer = null;
       try {
         if (call.cancellation == null) {
           response = http.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -307,12 +337,19 @@ final class Transport {
           response.body().close();
           throw new IOException("Runtime answered a redirect (" + response.statusCode() + ")");
         }
+        if (whole && response.statusCode() < 300) {
+          try (InputStream body = response.body()) {
+            answer = body.readAllBytes();
+          }
+        }
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
         throw connectionError(true, write, key, interrupted);
       } catch (IOException failure) {
+        boolean unanswered =
+            bounded && failure instanceof HttpTimeoutException && System.nanoTime() < deadline;
         boolean late =
-            failure instanceof HttpTimeoutException
+            (failure instanceof HttpTimeoutException && !unanswered)
                 || System.nanoTime() >= deadline
                 || (call.cancellation != null && call.cancellation.cancelled());
         if (late || call.noRetry || attempt >= maxRetries)
@@ -321,7 +358,7 @@ final class Transport {
         continue;
       }
       int status = response.statusCode();
-      if (status < 300) return response;
+      if (status < 300) return new Exchange(response, answer);
       Object parsed;
       String text = readText(response);
       try {
@@ -408,26 +445,34 @@ final class Transport {
     }
   }
 
+  /**
+   * Waits for a connection slot within the call's own deadline and takes the wait off it, so a
+   * queued call expires as an unqueued one would, without sending anything.
+   */
   private void take(Call call) {
+    Duration limit = call.timeout != null ? call.timeout : timeout;
+    long started = System.nanoTime();
+    boolean write = !call.method.equals("GET");
     try {
-      slots.acquire();
+      if (!slots.tryAcquire(limit.toNanos(), TimeUnit.NANOSECONDS))
+        throw connectionError(true, write, call.key, null);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      throw connectionError(true, !call.method.equals("GET"), call.key, interrupted);
+      throw connectionError(true, write, call.key, interrupted);
     }
+    Duration left = limit.minusNanos(System.nanoTime() - started);
+    if (left.isNegative() || left.isZero()) {
+      slots.release();
+      throw connectionError(true, write, call.key, null);
+    }
+    call.timeout = left;
   }
 
   /** Sends a call and parses its JSON answer (null when empty). */
   Object json(Call call) {
     take(call);
     try {
-      HttpResponse<InputStream> response = send(call);
-      String text;
-      try (InputStream body = response.body()) {
-        text = new String(body.readAllBytes(), StandardCharsets.UTF_8);
-      } catch (IOException error) {
-        throw connectionError(false, !call.method.equals("GET"), call.key, error);
-      }
+      String text = new String(sendWhole(call), StandardCharsets.UTF_8);
       if (text.isBlank()) return null;
       try {
         return Json.parse(text);
@@ -451,12 +496,7 @@ final class Transport {
   byte[] bytes(Call call) {
     take(call);
     try {
-      HttpResponse<InputStream> response = send(call);
-      try (InputStream body = response.body()) {
-        return body.readAllBytes();
-      } catch (IOException error) {
-        throw connectionError(false, !call.method.equals("GET"), call.key, error);
-      }
+      return sendWhole(call);
     } finally {
       slots.release();
     }

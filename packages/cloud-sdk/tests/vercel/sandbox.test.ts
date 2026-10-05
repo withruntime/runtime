@@ -32,14 +32,15 @@ beforeEach(() => {
 });
 
 describe("Sandbox.create", () => {
-  test("gives Vercel's defaults: 2 vCPUs with 2048 MiB each, 5 minutes, persistent", async () => {
+  test("gives Vercel's defaults: 2 vCPUs with 2048 MiB each, persistent, and no time limit", async () => {
     const sandbox = await create();
+    // No timeout, no time limit: it runs while it works (0300).
     expect(lastCreate()).toEqual({
       vcpu: 2,
       memoryMiB: 4096,
-      timeoutSeconds: 300,
       onLeaseEnd: "pause",
     });
+    expect(sandbox.timeout).toBe(0);
     expect(sandbox.persistent).toBe(true);
     expect(sandbox.status).toBe("running");
     expect(sandbox.cwd).toBe("/vercel/sandbox");
@@ -95,7 +96,7 @@ describe("Sandbox.create", () => {
 
   test("a snapshot source starts from the Runtime snapshot with its own shape", async () => {
     await create({ source: { type: "snapshot", snapshotId: "snap-1" } });
-    expect(lastCreate()).toEqual({ snapshot: "snap-1", timeoutSeconds: 300, onLeaseEnd: "pause" });
+    expect(lastCreate()).toEqual({ snapshot: "snap-1", onLeaseEnd: "pause" });
   });
 
   test("a git source is cloned into the working directory, credentials by environment", async () => {
@@ -433,9 +434,15 @@ describe("lifecycle", () => {
   });
 
   test("delete ends it; extendTimeout moves the lease; update refuses what cannot change", async () => {
-    const sandbox = await create({ ports: [3000] });
+    const sandbox = await create({ ports: [3000], timeout: 300_000 });
     await sandbox.extendTimeout(90_000);
     expect(world.called("sandbox.extend").at(-1)).toEqual([sandbox.withruntime.id, 90]);
+    // One with no time limit has no end to move: no call at all.
+    const open = await create();
+    await open.extendTimeout(90_000);
+    await open.update({ timeout: 60_000 });
+    expect(world.called("sandbox.extend")).toHaveLength(1);
+    expect(open.timeout).toBe(0);
     await sandbox.update({ ports: [8080], networkPolicy: "deny-all" });
     expect(world.called("previews.delete")).toEqual([[3000]]);
     expect(sandbox.domain(8080)).toContain("8080-");

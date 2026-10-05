@@ -57,12 +57,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("cpu", cpu);
   }
 
-  /** How long it may run before its lease ends. Default 1800. */
+  /**
+   * A time limit, 60 to 3600 seconds. Left unset (or 0), it has none: it runs while it works and
+   * pauses when idle, until you stop it or credit runs out.
+   */
   public CreateSandbox timeoutSeconds(int seconds) {
     return set("timeoutSeconds", seconds);
   }
 
-  /** "pause" (the default) or "stop". */
+  /** What its time limit or credit running out does: "pause" (the default) or "stop". */
   public CreateSandbox onLeaseEnd(String what) {
     return set("onLeaseEnd", what);
   }
@@ -77,7 +80,10 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("autoWake", wake);
   }
 
-  /** Keep it running while credit lasts, and keep its disk after a stop. Paid only. */
+  /**
+   * Keep it running until you stop it, while credit lasts, with no idle pause unless
+   * idlePauseSeconds asks for one, and keep its disk after a stop, for restart(). Paid only.
+   */
   public CreateSandbox persistent(boolean persistent) {
     return set("persistent", persistent);
   }

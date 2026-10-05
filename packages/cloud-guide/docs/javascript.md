@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.11.0. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.11.1. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -57,12 +57,13 @@ needs Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
 `const sbx = ...` and call `await sbx.stop()` in a `finally` block.
 
 With no arguments you get the free trial while it lasts, the default region, and
-2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
+2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
+itself when idle, with no time limit. A paid sandbox
 can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
 4 GiB.
 
-Omitting `funding` can use prepaid credit after the trial is exhausted. Set
-`funding: "trial"` when you want free use only; it never falls back to paid.
+The trial's hours are spent first, then prepaid credit, with nothing to
+choose; `funding` is accepted and ignored.
 Every field is optional:
 
 ```ts
@@ -79,15 +80,16 @@ const sbx = await runtime.sandboxes.create({
   onLeaseEnd: "stop",
   network: { internet: true, allow: ["pypi.org", "*.pythonhosted.org"] },
 });
-console.log(sbx.id, sbx.info.funding, sbx.info.expiresAt);
+console.log(sbx.id, sbx.info.funding, sbx.info.endsAt);
 await sbx.stop();
 ```
 
-`timeoutSeconds` is how long the sandbox may run before its lease ends. At the
-end it pauses (the default) or stops, as `onLeaseEnd` says. A trial sandbox
-that is still working then gets its `timeoutSeconds` again, until the trial
-hours run out ([trial](./trial)); a paid one runs longer with `persistent` or
-`keepAlive`. `network` narrows
+A sandbox needs no time limit: it runs while it works and pauses itself when
+idle, until you stop it or credit or the trial hours ([trial](./trial)) run out.
+`timeoutSeconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: at the
+end it pauses (the default) or stops, as `onLeaseEnd` says, busy or not.
+`sbx.info.endsAt` is when it will stop or pause by itself, or `null` when it
+never will; `sbx.extend(seconds)` moves it later. `network` narrows
 what it can reach from its first start; see [the sandbox environment](./sandbox-environment).
 
 `env` sets variables for every command, background process, terminal, SSH
@@ -135,10 +137,10 @@ if (run.exitCode !== 0) console.error(run.stderr);
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds, or what the sandbox's lease has left when
-  that is less, and 24 hours when the output streams (`onStdout`, `onStderr`
+- The default timeout is 60 seconds, or what the sandbox's time limit has left
+  when that is less, and 24 hours when the output streams (`onStdout`, `onStderr`
   or `execStream`); the maximum is 24 hours. A command with no `timeoutMs` is
-  never refused for the lease. A timeout
+  never refused for the time limit. A timeout
   is a result (`timedOut: true`, with the output so far), not an exception.
 - `check: true` throws `CommandError` on a non-zero exit, with the result on it.
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
@@ -429,20 +431,23 @@ await sbx.files.watches.stop(watch.id);
 ```ts check
 import { Sandbox } from "withruntime";
 
-const sbx = await Sandbox.create({ timeoutSeconds: 600 });
+const sbx = await Sandbox.create({ timeoutSeconds: 600 }); // a ten-minute limit
 await sbx.exec("echo state > /workspace/state.txt");
 await sbx.pause(); // memory and files are kept; compute billing stops
 // ... later, even from another process:
 const again = await Sandbox.connect(sbx.id);
-await again.wake({ timeoutSeconds: 1200 });
-await again.extend(600); // more time before the lease ends
+await again.wake({ timeoutSeconds: 1200 }); // a new limit, from the wake
+await again.extend(600); // moves the limit ten minutes on
 await again.stop();
 ```
+
+A sandbox created without `timeoutSeconds` has no limit, so `wake()` needs no
+argument and `extend()` answers at once and changes nothing.
 
 A paused sandbox keeps its memory, its processes and its files. `pause()`
 returns once the sandbox's processors have stopped, which is where compute
 billing ends; the host then writes its memory to disk, and a wake or snapshot
-asked for meanwhile waits for that write. Wake restores it on the same host by default; [qualified cross-server transfers](./storage#wake-or-fork-on-another-server-when-enabled) can select a compatible server when enabled. See [pricing](./pricing) for what a paused sandbox costs and
+asked for meanwhile waits for that write. Wake restores it on the same host. See [pricing](./pricing) for what a paused sandbox costs and
 how long it is kept.
 
 ### Wake on request
@@ -452,8 +457,9 @@ process, terminal, desktop or code-interpreter call, or a visit to one of its
 shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers, and
 then runs. A browser that visits a shared port sees a short "Waking up" page
 that reloads itself. The wake is billed like any wake, from the moment the
-sandbox runs again, and it gets a fresh lease of its own `timeoutSeconds`, or
-keeps the lease it paused with when that ends later.
+sandbox runs again, and it runs while it works again; one with a time limit
+gets a fresh one of its own `timeoutSeconds`, or keeps the one it paused with
+when that ends later.
 
 Turn it off with `autoWake: false` at create, or later with
 `sbx.update({ autoWake: false })`. A call to a paused sandbox that cannot wake
@@ -478,25 +484,24 @@ const sbx = await Sandbox.create({ idlePauseSeconds: 600 }); // ten idle minutes
 await sbx.update({ idlePauseSeconds: 1800 }); // change it later; 0 turns it off
 ```
 
-The pause lands within about five seconds of the idle time. A sandbox that
-cannot pause (`pausable: false`) never pauses for being idle. One created before
+The pause lands within about five seconds of the idle time. One created before
 27 September 2026 keeps the idle setting it had; `sbx.info.idlePauseUnusedOnly`
 is `true` for the old default, which paused only a sandbox nothing had used.
 
 ### Keep a sandbox running
 
-Two ways, for two jobs:
+A sandbox with no time limit keeps running while it works, with nothing to
+renew. Two settings go further:
 
-- **`persistent: true`** keeps a paid sandbox running for as long as the
-  account has credit: its lease renews itself on the server, and after a stop
-  its disk is kept, billed as reserved disk, so `sbx.restart()` starts it
-  again. Set a ceiling with `maxTotalCostMicros`. `update({ persistent: false })`
-  makes it an ordinary sandbox again: running, its disk stops being billed at
-  once; stopped, its disk is deleted. `delete()` removes it for good.
-- **`keepAlive`** extends the lease from your process while it runs, which
-  suits a job or a notebook that owns the sandbox. It extends the lease so ten
-  minutes remain, once a minute, and stops when you call `stop()` or the
-  function it returns.
+- **`persistent: true`** keeps a paid sandbox running until you stop it, idle
+  or not, for as long as the account has credit. Its disk is billed and kept
+  as any sandbox's, so after a stop `sbx.restart()` starts it again. Set a
+  ceiling with `maxTotalCostMicros`. `update({ persistent: false })` makes it an
+  ordinary sandbox again. `delete()` removes it for good.
+- **`keepAlive`** moves a time limit on from your process while it runs, for a
+  sandbox created with `timeoutSeconds`. It keeps ten minutes ahead, checking
+  once a minute, and stops when you call `stop()` or the function it returns.
+  On a sandbox with no time limit it only watches.
 
 ```ts check
 import { Sandbox } from "withruntime";
@@ -507,10 +512,10 @@ const server = await Sandbox.create({
   persistent: true,
   maxTotalCostMicros: 50_000_000, // at most $50 over its life
 });
-await server.update({ persistent: false }); // back to an ordinary lease
+await server.update({ persistent: false }); // back to an ordinary sandbox
 
-// Kept running while this process holds it.
-const worker = await Sandbox.create({ keepAlive: true });
+// A one-hour limit, moved on while this process holds it.
+const worker = await Sandbox.create({ timeoutSeconds: 3600, keepAlive: true });
 const release = worker.keepAlive({ marginSeconds: 1800 }); // or later, with options
 release();
 await worker.stop();
@@ -550,8 +555,9 @@ for await (const sbx of page) console.log(sbx.id, sbx.info.name, sbx.state);
 Every list in every product returns a page: `page.data`, `page.hasMore`,
 `await page.next()` for the next page, `await page.toArray()`, and `for await`
 walks every item on every page. Filter by `name`, `labels`
-and `state`; stopped sandboxes are left out unless you pass `includeStopped: true`,
-except a persistent one, which keeps its disk and is listed with the live ones.
+and `state`; a stopped sandbox, whose disk is kept, is listed with the live
+ones, and one whose disk is gone
+only when you pass `includeStopped: true`.
 
 `await runtime.sandboxes.stopAll({ labels: { team: "search" } })` stops every
 live sandbox with all those labels, eight at a time, and returns
@@ -601,6 +607,11 @@ try {
 Every write carries an idempotency key, made for you. Timeouts, dropped
 connections, 429 and 503 are retried with the same key and a growing delay, so a
 retried create never makes two sandboxes and a retried command never runs twice.
+An attempt whose answer has not started after 125 seconds is
+sent again the same way: the API starts every answer within 120 seconds, so the
+server it was sent to is gone, as when the controller fails over mid-call.
+An answer that ran nothing (`guest_busy`, `busy`, `rate_limited`) is sent again
+until the call's deadline, or for five minutes without one, past `maxRetries`.
 For methods that accept it, pass your own `idempotencyKey` to make a retry
 safe across process restarts. A transport timeout or connection error on a
 mutation carries `error.idempotencyKey`, including the key the SDK generated.
@@ -685,7 +696,7 @@ await runtime.secrets.delete("GITHUB_TOKEN");
 ```
 
 With `header`, the proxy sets that header on every request to the hosts, with
-`format` placing the value. With `rules`, on paid accounts, only the requests a
+`format` placing the value. With `rules`, on accounts with credit, only the requests a
 rule allows by method and path carry it: a path is exact or ends in `/*`.
 Replacing a secret keeps its placeholder, so running sandboxes use the new
 value. See [security](./security#secrets-sandboxes-never-see) for the limits
@@ -736,16 +747,11 @@ holds them; an extra allocation transfers only to proven descendants of the
 copy that added it
 ([pricing](./pricing#snapshots-images-and-volumes)). Building one is not charged.
 
-A new build leaves running sandboxes alone. `sbx.switchImage("data:v2", { keep: "workspace" })`
+A new build leaves running sandboxes alone. `sbx.switchImage("data:v2")`
 moves one to it, keeping its id, `/workspace` (its home), volumes, environment
 and previews; its processes restart and the rest of its old disk is lost, so
 snapshot it first to keep everything. A switch that fails is undone
 (`switch_undone`). See [move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version).
-
-When enabled, `sbx.resize({ vcpu: 2, memoryMiB: 4096 }, { restart: true })`
-restarts a sandbox at a new size on the same server, keeping its whole disk,
-volumes, environment and previews; its programs stop, so snapshot it first to
-keep its memory too. Memory is charged on the new size from then.
 
 ## Volumes
 
@@ -768,8 +774,8 @@ server. It is backed up off that server every day and whenever you
 ask, and a backup restores as a new volume ([storage and backups](./storage)). It is charged on its full size from the
 moment it is created, written or not ([pricing](./pricing#snapshots-images-and-volumes)).
 Stopping a sandbox has it write out what it wrote to its volumes first, and so
-does a lease that runs out: the sandbox's programs are frozen just before the
-lease ends, and the write after that is not charged.
+does a time limit or credit that runs out: the sandbox's programs are frozen
+just before its end, and the write after that is not charged.
 
 `sbx.mounts.add({ provider, bucket, path, secret })` mounts your own S3, R2 or
 Google Cloud Storage bucket as a directory, and `sbx.mounts.list()` and
@@ -800,8 +806,7 @@ await runtime.snapshots.delete(snapshot.id);
 A running sandbox is paused while a snapshot or fork captures it, then woken before the call
 returns (a snapshot of a fresh sandbox is ready in {{server-snapshot}} on Runtime's servers, longer the more memory it holds); a paused one stays paused. Copies get the source's
 vCPUs, memory, disk and CPU (reserved CPU, or a raised floor), are billed as a
-create with those would be, and run on its host by default. Cross-server
-placement requires [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled) to be enabled. A snapshot is kept on that
+create with those would be, and run on its host. A snapshot is kept on that
 host and copied off it, encrypted, after its final compressed form is ready. It survives loss of the
 server once `backedUp` is `true`, meaning that copy has been checked
 ([storage and backups](./storage)); a sandbox with volumes
@@ -810,7 +815,9 @@ cannot be snapshotted.
 Snapshots default to `mode: "memory"`, which keeps files, memory and running
 processes. `await base.snapshot({ mode: "disk" })` keeps only the root
 filesystem; each sandbox created from it boots fresh without the saved
-processes. Both modes pause a running source until capture finishes, then wake
+processes, at the `vcpu`, `memoryMiB` and `diskMiB` you pass (a disk at least
+the saved size). A copy of a memory snapshot is always the snapshot's size.
+Both modes pause a running source until capture finishes, then wake
 it, and leave an already paused source paused.
 
 Where deferred compression has been qualified and enabled, a memory
@@ -827,9 +834,10 @@ original failure and `details.snapshotId`, `details.sourceSandboxId` and
 explicitly before taking another capture; a failed recovery does not erase the
 snapshot id.
 
-`fork` takes `funding` as `create` does: `"trial"` or `"paid"`. Without it, the
-copies keep the source's funding. A trial copy must fit the trial, so a sandbox
-with reserved CPU, or a floor above 250, forks only onto `"paid"`.
+Copies run on what the account's new sandboxes run on, as `create` does;
+`funding` is accepted and ignored. On an account with the trial alone, a copy
+must fit the trial, so a sandbox with reserved CPU, or a floor above 250,
+forks only once the account holds credit.
 
 The snapshot a fork takes is deleted when the fork ends, whether every copy
 started or not, and nothing is billed for it. Pass `keepSnapshot: true` to keep
@@ -839,15 +847,14 @@ it and start more copies later; it is then billed as snapshot storage.
   did start. They keep running, and billing, until you stop them.
 - **Retrying:** a failed fork is over. A retry with the same idempotency key
   answers the same error, so fork again with a new one.
-- **`pausable: false`:** a fork pauses its source for a moment, so a sandbox
-  created this way cannot be forked.
 - **A fork stops partway,** for instance because our server restarted: a source
   it paused stays paused rather than being woken with nobody asking. An account
   notice (`GET /v1/notices`) names the sandbox and the fork, says nothing was
   charged for the fork's snapshot, and says how to wake it.
 
-A snapshot is kept for `retentionDays`, 1 to 365, and 7 when omitted; delete it
-sooner with `runtime.snapshots.delete`.
+A snapshot is kept as long as you have credit, up to a year from when it was
+taken (7 days on the trial), or for `retentionDays`, 1 to 365; delete it sooner
+with `runtime.snapshots.delete`.
 
 ## Code interpreter
 
@@ -982,7 +989,7 @@ console.log(stdout);
   session acts as that key's agent, so it can never do more than the key.
 - **Money:** a session spends only what the sandbox already does. A paused
   sandbox wakes for its commands only if the sandbox wakes on requests
-  (`autoWake`, on by default), with the lease it had.
+  (`autoWake`, on by default), with the time limit it had, if any.
 - **Terminals:** a session has no WebSocket terminal. Start a process with
   `spawn(command, { pty: {}, stdin: "pipe" })`, write to it and follow its
   output.
@@ -1242,7 +1249,11 @@ console.log((await runtime.me()).orgId);
 `RUNTIME_API_URL` points the client at another API origin. Code inside a
 Runtime sandbox calls Runtime's API at `http://runtime.internal`
 ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
-Connections are kept alive and reused across calls.
+Connections are kept alive and reused across calls. A client holds at most 48
+at once (`maxConnections`), calls and streams such as a command's output
+together, and keeps 8 of them for calls; past that, calls and streams wait
+their turn instead of failing. One address may hold 64 connections to the API
+until it has used a valid key, and more after ([limits](./api#limits)).
 
 Before 0.3.0 the package was `@withruntime/cloud`. That name, and
 `runtime-cloud` and `withruntime-cloud`, stopped at 0.5.1 and get no new

@@ -91,9 +91,7 @@ test("`runtime limits` says the free trial's hours left of its total when the ac
   await withStub(ON_TRIAL, async () => {
     const { lines, out } = output();
     expect(await run(["limits"], env, out)).toBe(0);
-    expect(lines.join("\n")).toMatch(
-      /free trial\s+39 of 50 hours left, 1 held by running sandboxes/,
-    );
+    expect(lines.join("\n")).toMatch(/free trial\s+39 of 50 hours left$/m);
   });
   await withStub(LIMITED, async () => {
     const { lines, out } = output();

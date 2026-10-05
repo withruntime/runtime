@@ -342,7 +342,12 @@ export class Sandbox {
       throw new DaytonaError(`Sandbox ${this.id} was deleted and cannot start.`, 410);
     if (state === "paused" || state === "pausing")
       await guard("sandbox", () =>
-        this.#rt.wake({ timeoutSeconds: this.#options.lifecycle.windowSeconds }),
+        // One with no time limit (timeoutSeconds 0) wakes with none.
+        this.#rt.wake(
+          this.#rt.info.timeoutSeconds
+            ? { timeoutSeconds: this.#options.lifecycle.windowSeconds }
+            : {},
+        ),
       );
     this.#pausedByPause = false;
   }
@@ -401,11 +406,16 @@ export class Sandbox {
     await guard("sandbox", () => this.#live(true));
   }
 
-  /** The sandbox pauses after `interval` minutes without a call from this
-   * client; 0 never. Past an hour, while this object lives. */
+  /** The sandbox pauses after `interval` minutes with nothing happening in
+   * it; 0 never. With a time to live, after that long without a call from
+   * this client, and past an hour only while this object lives. */
   async setAutostopInterval(interval: number): Promise<void> {
     const lifecycle = this.#options.lifecycle;
     lifecycle.autoStopInterval = interval;
+    if (!this.#rt.info.timeoutSeconds) {
+      await guard("sandbox", () => this.#rt.update({ idlePauseSeconds: idlePauseOf(interval) }));
+      return;
+    }
     lifecycle.windowSeconds = windowSeconds(interval);
     lifecycle.idleSeconds = idleSeconds(interval);
     await guard("sandbox", () => this.#live());
@@ -430,6 +440,11 @@ export class Sandbox {
       delete this.#options.lifecycle.deadline;
       return;
     }
+    if (!this.#rt.info.timeoutSeconds)
+      throw new NotSupportedError(
+        "A time to live on a sandbox made without one",
+        "It has no time limit and pauses when idle; pass ttlMinutes to create(), or call stop() or delete() when the work is done.",
+      );
     const deadline = Date.parse(this.#rt.info.createdAt) + ttlMinutes * 60_000;
     if (Date.parse(this.#rt.info.expiresAt) > deadline)
       throw new NotSupportedError(
@@ -602,8 +617,16 @@ export function windowSeconds(autoStopMinutes: number): number {
   return Math.min(3600, Math.max(60, Math.round(autoStopMinutes * 60)));
 }
 
+/** Daytona's autoStopInterval (minutes; 0 is never) as the idle pause of a
+ * sandbox with no time limit: seconds with nothing happening in it, counted
+ * by the sandbox itself (`idlePauseSeconds`, 0 never, at most a day). */
+export function idlePauseOf(autoStopMinutes: number): number {
+  if (autoStopMinutes <= 0) return 0;
+  return Math.min(86_400, Math.max(60, Math.round(autoStopMinutes * 60)));
+}
+
 /** Daytona's autoStopInterval (minutes; 0 is never) as seconds without a
- * call before the sandbox pauses. */
+ * call before a sandbox with a time to live pauses. */
 export function idleSeconds(autoStopMinutes: number): number {
   if (autoStopMinutes <= 0) return Infinity;
   return Math.max(60, Math.round(autoStopMinutes * 60));

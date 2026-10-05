@@ -1,8 +1,9 @@
-"""A rival's sandbox may be asked to live longer than one Runtime lease (an
-hour at most): Vercel's execution_time_limit over an hour, Daytona's
-auto_stop_interval over an hour or 0. The drop-ins renew the lease toward the
-time asked for while their sandbox object lives, never past it. The
-TypeScript twin is packages/cloud-sdk/src/compat/lease.ts."""
+"""A rival's sandbox may be asked to live longer than one Runtime time limit
+(an hour at most): Vercel's execution_time_limit over an hour, Daytona's
+time to live over an hour. The drop-ins renew the limit toward the time asked
+for while their sandbox object lives, never past it. A sandbox created with
+no time limit renews itself on the server (0300; ``endsAt`` None) and is left
+alone. The TypeScript twin is packages/cloud-sdk/src/compat/lease.ts."""
 from __future__ import annotations
 
 import math
@@ -30,3 +31,15 @@ def extension_seconds(expires_at: float, until: float, now: float, margin: float
         return 0
     target = min(until, now + LEASE_MAX_SECONDS)
     return max(0, int(math.floor(target - expires_at)))
+
+
+def no_limit(info: Any) -> bool:
+    """Whether a sandbox has no time limit: it renews itself while it works
+    (0300), and has no end to move. An older server sends no ``endsAt``."""
+    return "endsAt" in info and info["endsAt"] is None
+
+
+def end_of(info: Any) -> float:
+    """Where a sandbox's time limit ends, as epoch seconds: ``endsAt``, or
+    ``expiresAt`` from an older server; NaN when it has none."""
+    return epoch(info.get("endsAt") or info.get("expiresAt"))

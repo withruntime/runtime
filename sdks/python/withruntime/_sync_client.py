@@ -21,8 +21,13 @@ from ._clock import sync_slots as slots
 from ._clock import sync_timeouts as timeouts
 from ._errors import DELIBERATE as _DELIBERATE
 from ._errors import WAITS_FOR_ROOM, CommandError, ConnectionError, RuntimeError, error_for
+from ._errors import NOTHING_RAN, RateLimitError, ServiceUnavailableError
+
+#: How long an answer that ran nothing (NOTHING_RAN) is retried, in seconds,
+#: for a call that has no deadline of its own.
+_NOTHING_RAN_SECONDS = 300.0
 from ._http import SyncHTTP as HTTP
-from ._http import Origin, default_base_url, reachable
+from ._http import NoAnswerStarted, Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
 from ._unpack import Unpacker
 from ._ws import SyncWebSocket as WebSocket
@@ -31,6 +36,9 @@ from ._tunnel import sync_open_forward as open_forward
 from ._version import VERSION
 from ._sync_products.watch import Watches, WatchHandle
 
+# How long snapshot() waits, pause aside, unless told: a busy 16 vCPU, 32 GiB
+# sandbox took over the old minute (4 October 2026).
+SNAPSHOT_DEADLINE_SECONDS = 600.0
 CHUNK = 1_048_576
 # Chunks of a large write in flight at once. Each chunk's reply waits on the
 # API and the guest, and the link idles while every chunk in flight waits: from
@@ -124,32 +132,82 @@ def _request_sleep(delay: float) -> None:
     current().remaining()
 
 
+#: Connections a client holds at once by default: under the 64 one address may
+#: hold to the API (api.md, "Limits"), with room for a second client.
+DEFAULT_MAX_CONNECTIONS = 48
+#: Connections kept for answers read whole, however many streams are open: a
+#: stream's reader that makes a call never waits behind streams.
+_KEPT_FOR_CALLS = 8
+
+
+class _Hold:
+    """A call's hold on its connection slots, taken in order and given back
+    together. A call sleeping between tries lends them out, since a sleep holds
+    no connection, and takes them again before it sends: a thousand creates
+    waiting out a full region or a 429 would otherwise keep every other call
+    of this client, the stop that frees room included, queued behind them."""
+
+    def __init__(self, *slots: Any) -> None:
+        self._slots, self._held = slots, 0
+
+    def __enter__(self) -> "_Hold":
+        self.take()
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.lend()
+
+    def take(self) -> None:
+        try:
+            while self._held < len(self._slots):
+                self._slots[self._held].take()
+                self._held += 1
+        except BaseException:
+            self.lend()
+            raise
+
+    def lend(self) -> None:
+        while self._held:
+            self._held -= 1
+            self._slots[self._held].give()
+
+
 class _Transport:
     """One connection pool, one retry policy, one error shape for every product.
-    Over HTTP/1.1 each call in flight holds a connection, so answers read whole
-    are held to ``max_connections`` at once and the rest wait their turn, reusing
-    those connections: a hundred calls at once stay under the edge's limit per
-    address. Streams are long-lived and do not wait behind them."""
+    Over HTTP/1.1 each call in flight holds a connection, and one address may
+    hold 64 to the API before it has used a valid key: past that its edge
+    holds new ones back until one closes. So a client holds at most
+    ``max_connections`` at once, answers and streams together, and the rest
+    wait their turn, first come first served, rather than fail.
+    Streams (a command's output, a download, a watch) take at most
+    ``max_connections`` less _KEPT_FOR_CALLS of them. A terminal or tunnel's
+    WebSocket is not counted."""
 
     def __init__(self, api_key: str, base_url: str, timeout: float, max_retries: int,
-                 max_connections: int = 32, wait_for_capacity: float = 120) -> None:
+                 max_connections: int = DEFAULT_MAX_CONNECTIONS, wait_for_capacity: float = 120) -> None:
         if api_key and any(c.isspace() for c in api_key):
             raise _missing_key()
         # Empty: the key `runtime login` saved for this machine, found on first use.
         self._key: Optional[str] = api_key or None
+        # The saved key is found by the origin as given, as `runtime login` saved
+        # it; the calls go where that origin is reachable from here, which in a
+        # sandbox is runtime.internal.
+        self._given = base_url
         self.origin = Origin(reachable(base_url))
         self.base_url = self.origin.base
         self._http = HTTP(self.origin)
         self._timeout = timeout
         self._max_retries = max_retries
-        self._slots = slots(max(1, max_connections))
+        most = max(1, max_connections)
+        self._slots = slots(most)
+        self._streams = slots(max(1, most - _KEPT_FOR_CALLS))
         # What sandboxes.create waits for room by default, in seconds.
         self.wait_for_capacity = max(0.0, float(wait_for_capacity))
 
     def _api_key(self) -> str:
         if self._key is None:
             from ._connection import saved_key
-            self._key = saved_key(self.base_url)
+            self._key = saved_key(self._given)
             if self._key is None:
                 raise _missing_key()
         return self._key
@@ -170,7 +228,8 @@ class _Transport:
                    accept: str = "application/json", timeout: Optional[float] = None, retry: bool = True,
                    wait_for_capacity: float = 0, deadline: Optional[float] = None,
                    on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
-                   read_body: bool = False, unlimited_body: bool = False) -> Any:
+                   read_body: bool = False, unlimited_body: bool = False,
+                   hold: Optional[_Hold] = None) -> Any:
         """Sends a call and returns the response once it succeeded. Retries
         transport failures, 429, 502, 503 and 504 with backoff, with the same
         Idempotency-Key every time, so a retried write never happens twice.
@@ -190,13 +249,21 @@ class _Transport:
         per_call = scope.timeout(timeout if timeout is not None else self._timeout)
         room_until = time.monotonic() + wait_for_capacity
         room_attempt = 0
+        # An answer that ran nothing is sent again until the call's deadline.
+        idle_until = deadline if deadline is not None else time.monotonic() + _NOTHING_RAN_SECONDS
+        idle_attempt = 0
         attempt = 0
         def retry_pause(delay):
+            if hold is not None:
+                hold.lend()
             try:
                 _request_sleep(delay)
+                if hold is not None:
+                    hold.take()
             except timeouts() as error:
                 raise RuntimeError("The request deadline expired.", code="request_timeout", idempotency_key=key) from error
         while True:
+            late = False
             try:
                 scope.remaining()
                 extra = {} if deadline is None else {"deadline": deadline}
@@ -212,7 +279,7 @@ class _Transport:
                     failed = _late_failure(text)
                     if failed is None:
                         return Answered(status, response.headers, text)
-                    status = failed
+                    status, late = failed, True
                 elif 200 <= status < 300:
                     if not read_body:
                         return response
@@ -221,7 +288,8 @@ class _Transport:
                 else:
                     text = response.read()
             except (OSError, ValueError, *timeouts()) as error:
-                if (deadline is not None and time.monotonic() >= deadline) or (scope.configured and isinstance(error, timeouts())):
+                if (deadline is not None and time.monotonic() >= deadline) or (
+                        scope.configured and isinstance(error, timeouts()) and not isinstance(error, NoAnswerStarted)):
                     raise RuntimeError("The request deadline expired.", code="request_timeout", idempotency_key=key) from error
                 if not retry or attempt >= self._max_retries:
                     via, hint = describe_route(self.origin.tls, self.origin.host, self.origin.port, error)
@@ -254,6 +322,21 @@ class _Transport:
                 retry_pause(pause)
                 room_attempt += 1
                 continue
+            # Nothing ran: safe to send again for any call, past max_retries,
+            # with growing waits, until the deadline; then this refusal stands.
+            # A late answer's failure came after the work began, so only a
+            # guest's own refusal (guest_busy, before anything is journaled)
+            # still says nothing ran.
+            if status in (429, 503) and error.code in NOTHING_RAN and (not late or error.code == "guest_busy"):
+                header = response.headers.get("retry-after")
+                base = (error.retry_after_ms / 1000 if error.retry_after_ms is not None
+                        else float(header) if header and header.isdigit() and int(header) > 0 else 0.25)
+                pause = min(30.0, base * 2 ** min(idle_attempt, 3)) * random.uniform(0.9, 1.1)
+                idle_attempt += 1
+                if pause >= idle_until - time.monotonic():
+                    raise error
+                retry_pause(pause)
+                continue
             if (not retry or status not in (429, 502, 503, 504) or error.code in _DELIBERATE
                     or attempt >= self._max_retries):
                 raise error
@@ -264,14 +347,15 @@ class _Transport:
             attempt += 1
 
     def json(self, method: str, path: str, **kwargs: Any) -> Any:
-        with self._slots:
-            response = self.send(method, path, read_body=True, **kwargs)
+        with _Hold(self._slots) as hold:
+            response = self.send(method, path, read_body=True, hold=hold, **kwargs)
             text = response.read()
         return json.loads(text) if text else None
 
     def bytes(self, method: str, path: str, **kwargs: Any) -> bytes:
-        with self._slots:
-            response = self.send(method, path, accept="application/octet-stream", read_body=True, **kwargs)
+        with _Hold(self._slots) as hold:
+            response = self.send(method, path, accept="application/octet-stream", read_body=True,
+                                       hold=hold, **kwargs)
             return response.read()
 
     def file_bytes(self, path: str, query: dict[str, Any]) -> bytes:
@@ -283,9 +367,9 @@ class _Transport:
         25 September 2026 a 50 MB file came back 44 MB long with no error."""
         attempt = 0
         while True:
-            with self._slots:
+            with _Hold(self._slots) as hold:
                 response = self.send("GET", path, query=query, accept="application/octet-stream",
-                                           read_body=True, unlimited_body=True)
+                                           read_body=True, unlimited_body=True, hold=hold)
                 data = response.read()
             problem = _check_body(response.headers, data)
             if problem is None:
@@ -299,37 +383,47 @@ class _Transport:
         """A file's bytes as they arrive. Raises ``download_incomplete`` at the
         end if they fall short of the length the API promised; never retried
         part way."""
-        response = self.send("GET", path, query=query, accept="application/octet-stream")
-        expected = _promised_length(response.headers)
-        got = 0
+        hold = _Hold(self._streams, self._slots)
+        hold.take()
         try:
-            for data in response.chunks():
-                got += len(data)
-                if expected is not None and got > expected:
+            response = self.send("GET", path, query=query, accept="application/octet-stream", hold=hold)
+            expected = _promised_length(response.headers)
+            got = 0
+            try:
+                for data in response.chunks():
+                    got += len(data)
+                    if expected is not None and got > expected:
+                        raise _incomplete(got, expected)
+                    yield data
+                if expected is not None and got != expected:
                     raise _incomplete(got, expected)
-                yield data
-            if expected is not None and got != expected:
-                raise _incomplete(got, expected)
+            finally:
+                response.close()
         finally:
-            response.close()
+            hold.lend()
 
     def events(self, method: str, path: str, *, deadline: Optional[float] = None,
                      **kwargs: Any) -> Iterator[dict[str, Any]]:
         extra = {} if deadline is None else {"deadline": deadline}
-        response = self.send(method, path, accept="application/x-ndjson", **kwargs, **extra)
-        lines = None
+        hold = _Hold(self._streams, self._slots)
+        hold.take()
         try:
-            lines = response.lines() if deadline is None else response.lines(deadline=deadline)
-            for line in lines:
-                yield json.loads(line)
-        finally:
-            # The line reader owns its subscription timer. Stop/join it before
-            # releasing the response, even when someone retains the iterator.
+            response = self.send(method, path, accept="application/x-ndjson", hold=hold, **kwargs, **extra)
+            lines = None
             try:
-                if lines is not None:
-                    _close_events(lines)
+                lines = response.lines() if deadline is None else response.lines(deadline=deadline)
+                for line in lines:
+                    yield json.loads(line)
             finally:
-                response.close()
+                # The line reader owns its subscription timer. Stop/join it before
+                # releasing the response, even when someone retains the iterator.
+                try:
+                    if lines is not None:
+                        _close_events(lines)
+                finally:
+                    response.close()
+        finally:
+            hold.lend()
 
     def websocket(self, path: str, query: dict[str, Any]) -> WebSocket:
         socket = WebSocket(self.origin, path + _query(query), {
@@ -504,9 +598,12 @@ class _OutputCursor:
 
     def pass_event(self, event: dict[str, Any]) -> list[dict[str, Any]]:
         if event["type"] == "error":
-            raise RuntimeError(event["error"].get("message", "Stream failed."),
-                               code=event["error"].get("code", "stream_failed"),
-                               request_id=event["error"].get("requestId"))
+            # As the status the API would have answered it, so a passing
+            # failure (a host restarting) is followed again, not the end.
+            failure = event["error"] if isinstance(event["error"], dict) else {}
+            status = failure.get("status") if isinstance(failure.get("status"), int) else 0
+            raise error_for(status, {"error": {"code": "stream_failed", "message": "Stream failed.", **failure}},
+                            None)
         if event["type"] == "truncated":
             self.cursor = max(self.cursor, event.get("resumeAt", 0))
         out = []
@@ -521,11 +618,20 @@ class _OutputCursor:
 
 
 def _cut_off(error: BaseException) -> bool:
-    """A stream cut off by the network rather than refused by Runtime: worth
-    reconnecting to from the cursor."""
+    """A stream cut off by the network, or refused by a failure that passes by
+    itself (a busy API, a 429, a host restarting), rather than refused for
+    good: worth reconnecting to from the cursor."""
     if isinstance(error, ConnectionError):
         return True
+    if isinstance(error, (RateLimitError, ServiceUnavailableError)):
+        return error.status in (429, 502, 503, 504) and error.code not in _DELIBERATE
     return isinstance(error, (OSError, TimeoutError, ValueError)) and not isinstance(error, RuntimeError)
+
+
+#: How long a follow keeps reconnecting while every attempt fails, in seconds.
+#: A command runs for hours whether or not anyone reads it; a few minutes of a
+#: deploy, a network blip or a busy API must not end the read of it.
+_FOLLOW_OUTAGE_SECONDS = 300.0
 
 
 class Process:
@@ -571,9 +677,13 @@ class Process:
             raise ValueError("timeout_seconds must be a nonnegative finite number")
         deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
         read = _OutputCursor(cursor)
-        idle = 0
+        # Clean closes in a row with nothing new: given up after four. Failed
+        # reconnections (a cut, a busy API, a host restarting) are waited out
+        # with backoff for _FOLLOW_OUTAGE_SECONDS: the command runs on.
+        idle = failures = 0
+        failing_since: Optional[float] = None
         while True:
-            before, resumed = read.cursor, False
+            before, resumed, failure = read.cursor, False, None
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 raise RuntimeError("Process output deadline exceeded.", code="request_timeout")
@@ -602,9 +712,34 @@ class Process:
                     raise RuntimeError("Process output deadline exceeded.", code="request_timeout") from error
                 if not _cut_off(error):
                     raise
+                failure = error
             finally:
                 _close_events(events)
-            idle = 0 if resumed or read.cursor > before else idle + 1
+            if resumed or read.cursor > before:
+                idle = failures = 0
+                failing_since = None
+                continue
+            if failure is None:
+                idle += 1
+            else:
+                now = time.monotonic()
+                failing_since = now if failing_since is None else failing_since
+                if now - failing_since >= _FOLLOW_OUTAGE_SECONDS:
+                    raise ConnectionError(
+                        f"Lost the output stream of process {self.id} for {int(_FOLLOW_OUTAGE_SECONDS // 60)} "
+                        "minutes; the command may still be running.",
+                        code="connection_error", details={"sandboxId": self.sandbox_id, "processId": self.id},
+                        hint=f"Follow it again: runtime sandbox logs {self.sandbox_id} {self.id} -f") from failure
+                # Within this call's own deadline, and the caller's request
+                # scope (an E2B command's timeout): past either, the failure
+                # stands.
+                from ._request_scope import current
+                ends = [end for end in (deadline, current().deadline) if end is not None]
+                if ends and now >= min(ends):
+                    raise failure
+                delay = min(5.0, 0.05 * 2 ** failures)
+                failures += 1
+                sleep(min([delay, *(end - now for end in ends)]))
             if idle > 3:
                 raise ConnectionError(
                     f"The output stream of process {self.id} keeps closing before it ends.",
@@ -1235,31 +1370,33 @@ class Sandbox:
     def pause(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "Sandbox":
         return self._lifecycle("pause", wait, idempotency_key=idempotency_key)
 
-    def switch_image(self, image: str, *, keep: str,
+    def switch_image(self, image: str, *, keep: str = "workspace",
                            idempotency_key: Optional[str] = None) -> "Sandbox":
         """Moves it to another image (id, name, name:tag or name@version),
         keeping its id, /workspace (its home: dotfiles, pip --user and npm -g
         installs), volumes, environment, name and previews. Its processes
         restart, and everything else on its old disk (sudo installs, apt
-        packages, /etc) is lost, which ``keep="workspace"`` says you know;
-        snapshot it first to keep everything. A running sandbox is paused
-        first. A switch that fails is undone (``switch_undone``), the sandbox
-        on its old image with nothing lost. Charged as a wake."""
+        packages, /etc) is lost; snapshot it first to keep everything. A
+        running sandbox is paused first. A switch that fails is undone
+        (``switch_undone``), the sandbox on its old image with nothing lost.
+        Charged as a wake. ``keep`` is optional: "workspace" is the only
+        value, and it is sent either way, so an API from before it was
+        optional accepts the call too."""
         self.info = self._t.json("POST", self._path(":switch-image"), body={"image": image, "keep": keep},
                                        wait=120, idempotency_key=idempotency_key)
         return self
 
-    def resize(self, *, restart: bool, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
+    def resize(self, *, restart: bool = True, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
                      idempotency_key: Optional[str] = None) -> "Sandbox":
         """Gives it more or fewer vCPUs or more or less memory by a restart:
         its id, whole disk, volumes, environment, name and previews stay, and
-        its programs stop, which ``restart=True`` says you know (snapshot it
-        first to keep its memory too). A running sandbox is paused, or stopped
+        its programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped
         if it is persistent, and comes back running at the new size on the
         same server; a paused or stopped one is started. Memory bills on the
         new size from then. Refused, with nothing changed, when the server has
         no room (``no_capacity``), above your quota or the trial's 2 vCPU and
-        4 GiB, or while a snapshot or fork of it is being taken."""
+        4 GiB, or while a snapshot or fork of it is being taken. ``restart``
+        is optional and True is the only value the API takes."""
         body: dict[str, Any] = {"restart": restart}
         if vcpu is not None:
             body["vcpu"] = vcpu
@@ -1280,9 +1417,10 @@ class Sandbox:
 
     def wake(self, wait: bool = True, timeout_seconds: Optional[int] = None,
                    idempotency_key: Optional[str] = None) -> "Sandbox":
-        """Carries on a paused sandbox; ``timeout_seconds`` is its new lease.
-        Waking one that is already awake is done, not an error (unless a new
-        lease was asked for, which was not given)."""
+        """Carries on a paused sandbox; for one with a time limit,
+        ``timeout_seconds`` is its new one. Waking one that is already awake
+        is done, not an error (unless a new limit was asked for, which was not
+        given)."""
         try:
             return self._lifecycle("wake", wait, {} if timeout_seconds is None else {"timeoutSeconds": timeout_seconds},
                                          idempotency_key)
@@ -1295,7 +1433,9 @@ class Sandbox:
             return self
 
     def extend(self, seconds: int, idempotency_key: Optional[str] = None) -> "Sandbox":
-        """More time before the lease ends (at most an hour ahead of now)."""
+        """More time before its time limit ends (at most an hour ahead of
+        now). A sandbox with no time limit needs none: the call answers at
+        once and changes nothing."""
         return self._lifecycle("extend", False, {"seconds": seconds}, idempotency_key)
 
     def update(self, idempotency_key: Optional[str] = None, **settings: Any) -> "Sandbox":
@@ -1304,18 +1444,21 @@ class Sandbox:
         started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
         from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
-        ``persistent`` (keep it running while credit lasts
-        and keep its disk after a stop; paid only) and
+        ``persistent`` (keep it running until stopped, while credit lasts,
+        never idle-paused; its disk is billed and kept as any sandbox's; paid
+        only) and
         ``max_total_cost_micros`` (None removes the cap)."""
         return self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
 
     def keep_alive(self, every_seconds: float = 60, margin_seconds: int = KEEP_ALIVE_MARGIN_SECONDS) -> Callable[[], None]:
-        """Keeps a running sandbox's lease ahead of now, in the background,
-        until ``stop()`` or the function it returns ends it: every
-        ``every_seconds`` it extends the lease so that ``margin_seconds``
-        (60 to 3600) remain, never more than the hour ahead the API allows.
-        Running time is billed as it is used. A paused sandbox is left paused
-        (a request wakes it unless auto_wake is off); a stopped one ends it."""
+        """Keeps a sandbox with a time limit running past it, in the
+        background, until ``stop()`` or the function it returns ends it:
+        every ``every_seconds`` it extends the limit so that
+        ``margin_seconds`` (60 to 3600) remain, never more than the hour ahead
+        the API allows. A sandbox with no time limit (``endsAt`` None) needs
+        none, and is only watched. Running time is billed as it is used. A
+        paused sandbox is left paused (a request wakes it unless auto_wake is
+        off); a stopped one ends it."""
         self.stop_keep_alive()
         state: dict[str, Any] = {"on": True}
         margin = min(3600, max(60, int(margin_seconds)))
@@ -1327,8 +1470,9 @@ class Sandbox:
                     self.refresh()
                     if self.state in ("stopped", "stopping"):
                         break
-                    if self.state == "running":
-                        need = math.ceil(margin - _seconds_until(self.info.get("expiresAt")))
+                    # No time limit: nothing to extend (an older server sends no endsAt).
+                    if self.state == "running" and not ("endsAt" in self.info and self.info["endsAt"] is None):
+                        need = math.ceil(margin - _seconds_until(self.info.get("endsAt") or self.info.get("expiresAt")))
                         if need >= 1:
                             self.extend(min(3600, need))
                 except RuntimeError:
@@ -1361,11 +1505,13 @@ class Sandbox:
 
     def snapshot(self, *, name: Optional[str] = None, labels: Optional[dict[str, str]] = None,
                        retention_days: Optional[int] = None, mode: Optional[str] = None,
-                       idempotency_key: Optional[str] = None) -> dict[str, Any]:
+                       idempotency_key: Optional[str] = None,
+                       timeout_seconds: Optional[float] = None) -> dict[str, Any]:
         """Keep a whole-machine snapshot, or a disk-only snapshot with mode='disk'.
         A running source stays paused until capture finishes, then wakes; an
-        already paused source stays paused. Capture waits at most 60 seconds;
-        restoring the original running state may take additional time."""
+        already paused source stays paused. Capture waits ``timeout_seconds``
+        (ten minutes unless given); a capture still running then keeps its
+        source paused, and the snapshot_timeout error names the snapshot."""
         if mode is not None and mode not in ("memory", "disk"):
             raise ValueError("Snapshot mode must be memory or disk")
         from ._request_scope import Limits, request_scope
@@ -1378,11 +1524,15 @@ class Sandbox:
         running = self.state == "running"
         snapshot = None
         primary_error = None
+        # A capture still running at the deadline needs its source paused: the
+        # worker fails one whose source woke (4 October 2026).
+        late = False
         try:
             if running:
                 self.pause()
             try:
-                with request_scope(60):
+                with request_scope(timeout_seconds if timeout_seconds and timeout_seconds > 0
+                                   else SNAPSHOT_DEADLINE_SECONDS):
                     snapshot = self._t.json("POST", self._path(":snapshot"),
                                                   body={k: v for k, v in body.items() if v is not None},
                                                   wait=10, idempotency_key=idempotency_key)
@@ -1392,8 +1542,16 @@ class Sandbox:
             except (RuntimeError, *timeouts()) as error:
                 if isinstance(error, RuntimeError) and error.code != "request_timeout":
                     raise
-                raise RuntimeError("Snapshot capture did not finish within one minute.", code="snapshot_timeout",
-                                   details={"snapshotId": snapshot["id"]} if snapshot else None) from error
+                if snapshot is None:
+                    raise RuntimeError("Snapshot capture ran past its deadline.", code="snapshot_timeout") from error
+                late = running
+                raise RuntimeError(
+                    f"Snapshot {snapshot['id']} was still capturing at the deadline."
+                    + (" The sandbox stays paused until it ends: waking it now would fail the capture." if running else ""),
+                    code="snapshot_timeout",
+                    hint=f"Wait until snapshots.get('{snapshot['id']}') is ready"
+                         + (", then wake the sandbox" if running else "") + ", or pass a longer timeout_seconds.",
+                    details={"snapshotId": snapshot["id"], "sourceSandboxId": self.id}) from error
             if snapshot["state"] != "ready":
                 raise RuntimeError(snapshot.get("error") or f"Snapshot capture ended in state {snapshot['state']}.",
                                    code="snapshot_failed", status=409, details={"snapshotId": snapshot["id"]})
@@ -1405,7 +1563,7 @@ class Sandbox:
             primary_error = error
             raise
         finally:
-            if running:
+            if running and not late:
                 # Capture's deadline must never prevent restoring the source.
                 try:
                     with request_scope(captured=Limits()):
@@ -1441,7 +1599,7 @@ class Sandbox:
         return sandboxes if count is not None else sandboxes[0]
 
     def restart(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "Sandbox":
-        """Starts a stopped persistent sandbox again from its disk (memory is not kept)."""
+        """Starts a stopped sandbox again from its disk (memory is not kept)."""
         return self._lifecycle("restart", wait, idempotency_key=idempotency_key)
 
     def __enter__(self) -> "Sandbox":
@@ -1470,7 +1628,8 @@ class Sandboxes:
         """Creates a sandbox and waits until it is running. Every field is
         optional (name, labels, env (variables for every command, terminal
         and SSH session in it; values are never shown again), funding, region, vcpu, memory_mib, disk_mib,
-        cpu, cpu_floor_millis, timeout_seconds, pausable, on_lease_end,
+        cpu, cpu_floor_millis, timeout_seconds (a time limit, 60 to 3600; leave it
+        out for none: it runs while it works and pauses when idle), on_lease_end,
         max_cost_micros, network={"internet": True, "deny": [...]}, and
         image, snapshot, volumes and the rest of _CREATE_FIELDS; a misspelled one
         raises TypeError, naming the one meant).
@@ -1649,11 +1808,16 @@ class Runtime:
     it keeps its connections open. ``with Runtime() as runtime:``."""
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, *, timeout: float = 300,
-                 max_retries: int = 4, max_connections: int = 32, wait_for_capacity: float = 120) -> None:
+                 max_retries: int = 4, max_connections: int = DEFAULT_MAX_CONNECTIONS,
+                 wait_for_capacity: float = 120) -> None:
         """``wait_for_capacity``: seconds ``sandboxes.create`` keeps retrying,
         with the same key and input, when the trial's slots, the account's
         quota or the region is full (trial_busy, quota_exceeded, no_capacity
-        and the like). 0 fails at once."""
+        and the like). 0 fails at once. ``max_connections``: connections held
+        at once, calls and streams (a command's output, a download) together;
+        more wait their turn and reuse them. Default 48: one address may hold
+        64 connections to the API before it has used a valid key. 8 are kept
+        for calls whatever the streams hold."""
         self._t = _Transport(api_key or os.environ.get("RUNTIME_API_KEY", ""),
                              base_url or default_base_url(), timeout, max_retries,
                              max_connections, wait_for_capacity)

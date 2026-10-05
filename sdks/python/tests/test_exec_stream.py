@@ -110,6 +110,111 @@ class ExecStream(unittest.TestCase):
             self.assertEqual(sum("/output" in t for t in wire.targets), 4)
 
 
+class Spell(Wire):
+    """The output route answers a spell of passing failures first: a 503 busy,
+    a 429, an error event from a host restarting and a dropped connection."""
+
+    def __init__(self, routes, is_async):
+        super().__init__(routes, is_async)
+        self.spell = [("status", 503, "busy"), ("status", 429, "rate_limited"), ("event", 503, "host_unavailable"),
+                      ("cut", 0, ""), ("status", 503, "host_unavailable")]
+
+    def send(self, method, target, headers, data, timeout):
+        if not target.split("?")[0].endswith("/processes/p1/output") or not self.spell:
+            return super().send(method, target, headers, data, timeout)
+        self.targets.append(f"{method} {target}")
+        kind, status, code = self.spell.pop(0)
+        if kind == "event":
+            lines = [{"type": "error", "error": {"code": code, "status": status, "message": "m"}}]
+        else:
+            lines = []
+        body = json.dumps({"error": {"code": code, "status": status, "message": "m", "retryAfterMs": 1}}).encode()
+        answer_status = status if kind == "status" else 200
+        fail = kind == "cut"
+        is_async = self.is_async
+        encoded = [json.dumps(line) for line in lines]
+
+        class Answer:
+            def __init__(self):
+                self.status, self.headers = answer_status, {}
+
+            if is_async:
+                async def read(self, limit=None):
+                    return body
+
+                async def lines(self):
+                    for line in encoded:
+                        yield line
+                    if fail:
+                        raise OSError("connection reset")
+
+                async def close(self):
+                    return None
+            else:
+                def read(self, limit=None):
+                    return body
+
+                def lines(self):
+                    yield from encoded
+                    if fail:
+                        raise OSError("connection reset")
+
+                def close(self):
+                    return None
+        answer = Answer()
+        if self.is_async:
+            async def later():
+                return answer
+            return later()
+        return answer
+
+
+class Outage(unittest.TestCase):
+    """A thousand agents each follow a long command, reconnecting every 110 s.
+    A reconnect that meets a busy API, a 429, a host restarting or a dropped
+    connection keeps following: the command is still running. Four such in a
+    row used to end the exec with "keeps closing" and fail the agent's task."""
+
+    def test_a_long_command_outlives_a_spell_of_refusals_and_cuts(self):
+        routes = {":exec": ([{"type": "start", "processId": "p1"}, {"type": "stdout", "data": "a\n", "offset": 0},
+                             {"type": "continue", "processId": "p1", "cursor": 2}], False),
+                  "/processes/p1/output": ([{"type": "stdout", "data": "b\n", "offset": 2}, EXIT], False)}
+        for is_async in (False, True):
+            wire = Spell(routes, is_async)
+            runtime = (AsyncRuntime if is_async else Runtime)(api_key="rk", base_url="https://api.example.test",
+                                                               max_retries=0)
+            runtime._t._http = wire
+            if is_async:
+                async def go():
+                    sbx = await runtime.sandboxes.get(ID)
+                    return await sbx.exec("x", on_stdout=lambda _: None)
+                result = asyncio.run(go())
+            else:
+                result = runtime.sandboxes.get(ID).exec("x", on_stdout=lambda _: None)
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.stdout, "a\nb\n")
+            self.assertEqual(sum("/output" in t for t in wire.targets), 6)
+
+    def test_a_deliberate_refusal_still_ends_the_follow_at_once(self):
+        routes = {":exec": ([{"type": "start", "processId": "p1"}], True)}
+        for is_async in (False, True):
+            wire = Spell(routes, is_async)
+            wire.spell = [("status", 503, "unavailable")]
+            runtime = (AsyncRuntime if is_async else Runtime)(api_key="rk", base_url="https://api.example.test",
+                                                               max_retries=0)
+            runtime._t._http = wire
+            with self.assertRaises(Exception) as caught:
+                if is_async:
+                    async def go():
+                        sbx = await runtime.sandboxes.get(ID)
+                        return await sbx.exec("x", on_stdout=lambda _: None)
+                    asyncio.run(go())
+                else:
+                    runtime.sandboxes.get(ID).exec("x", on_stdout=lambda _: None)
+            self.assertEqual(getattr(caught.exception, "code", None), "unavailable")
+            self.assertEqual(sum("/output" in t for t in wire.targets), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
 

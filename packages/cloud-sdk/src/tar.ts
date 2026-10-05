@@ -1,5 +1,7 @@
 import {
   chmod,
+  copyFile,
+  link as hardLink,
   lstat,
   mkdir,
   mkdtemp,
@@ -18,31 +20,41 @@ import { Readable } from "node:stream";
 import { createGunzip, gzipSync } from "node:zlib";
 import { RuntimeError } from "./errors.js";
 
-/* A small ustar writer and reader for directory uploads and downloads, so the
-   SDK needs no dependency. Regular files, directories and symbolic links;
-   names up to 255 bytes through the ustar prefix field. */
+/* A small tar writer and reader for directory uploads and downloads, so the
+   SDK needs no dependency. Regular files, directories, symbolic links and,
+   reading, hard links. A name that does not fit the ustar name and prefix
+   fields, or a link target longer than 100 bytes, travels in a GNU long-name
+   or long-link entry, which GNU tar, BusyBox tar and every SDK's reader
+   take; nothing is cut short. */
 
-export function tarHeader(
-  name: string,
+const encode = (value: string) => new TextEncoder().encode(value);
+
+/** The ustar prefix and name of `name`, split at a slash so that each fits
+ * its field in bytes, or null when no split fits. */
+function ustarName(name: string): { prefix: Uint8Array; short: Uint8Array } | null {
+  const bytes = encode(name);
+  if (bytes.length <= 100) return { prefix: new Uint8Array(), short: bytes };
+  for (let split = name.lastIndexOf("/"); split > 0; split = name.lastIndexOf("/", split - 1)) {
+    const prefix = encode(name.slice(0, split));
+    const short = encode(name.slice(split + 1));
+    if (short.length > 100) return null;
+    if (prefix.length <= 155) return { prefix, short };
+  }
+  return null;
+}
+
+function headerBlock(
+  short: Uint8Array,
+  prefix: Uint8Array,
   size: number,
   mode: number,
-  type: "0" | "5" | "2",
-  link = "",
-  mtime = 0,
+  type: string,
+  link: Uint8Array,
+  mtime: number,
 ): Uint8Array {
   const block = new Uint8Array(512);
-  const bytes = new TextEncoder().encode(name);
-  let prefix = new Uint8Array();
-  let short = bytes;
-  if (bytes.length > 100) {
-    const split = name.lastIndexOf("/", 155);
-    if (split <= 0 || new TextEncoder().encode(name.slice(split + 1)).length > 100)
-      throw new Error(`Path too long for a tar archive: ${name}`);
-    prefix = new TextEncoder().encode(name.slice(0, split));
-    short = new TextEncoder().encode(name.slice(split + 1));
-  }
   const put = (offset: number, value: string | Uint8Array, length: number) => {
-    const data = typeof value === "string" ? new TextEncoder().encode(value) : value;
+    const data = typeof value === "string" ? encode(value) : value;
     block.set(data.subarray(0, length), offset);
   };
   const octal = (value: number, length: number) =>
@@ -62,6 +74,39 @@ export function tarHeader(
   for (const byte of block) sum += byte;
   put(148, sum.toString(8).padStart(6, "0") + "\0 ", 8);
   return block;
+}
+
+/** A GNU long-name ("L") or long-link ("K") entry carrying `value`. */
+function longEntry(type: "L" | "K", value: Uint8Array): Uint8Array {
+  const size = value.length + 1;
+  const out = new Uint8Array(512 + Math.ceil(size / 512) * 512);
+  out.set(
+    headerBlock(encode("././@LongLink"), new Uint8Array(), size, 0o644, type, new Uint8Array(), 0),
+  );
+  out.set(value, 512);
+  return out;
+}
+
+/** One entry's header: the ustar block, after the long-name and long-link
+ * entries it needs. A whole number of 512-byte blocks. */
+export function tarHeader(
+  name: string,
+  size: number,
+  mode: number,
+  type: "0" | "5" | "2",
+  link = "",
+  mtime = 0,
+): Uint8Array {
+  const parts: Uint8Array[] = [];
+  let fitted = ustarName(name);
+  if (!fitted) {
+    parts.push(longEntry("L", encode(name)));
+    fitted = { prefix: new Uint8Array(), short: encode(name).subarray(0, 100) };
+  }
+  const target = encode(link);
+  if (target.length > 100) parts.push(longEntry("K", target));
+  parts.push(headerBlock(fitted.short, fitted.prefix, size, mode, type, target, mtime));
+  return parts.length === 1 ? parts[0]! : new Uint8Array(Buffer.concat(parts));
 }
 
 export async function packDirectory(root: string): Promise<Uint8Array> {
@@ -370,8 +415,14 @@ async function unpackEntries(bytes: Bytes, root: string, signal?: AbortSignal): 
     } else if (type === "2") {
       links.push({ destination, link, name });
       await skip();
+    } else if (type === "1") {
+      await hardLinkEntry(root, destination, link, name);
+      await skip();
     } else if (type === "0" || type === "\0" || type === "7") {
       await mkdir(dirname(destination), { recursive: true });
+      // A name already unpacked may share its file with a hard link; writing
+      // through it would change the link's copy too.
+      await unlink(destination).catch(() => undefined);
       const file = await open(destination, "w");
       try {
         for await (const part of bytes.take(size)) {
@@ -390,6 +441,28 @@ async function unpackEntries(bytes: Bytes, root: string, signal?: AbortSignal): 
       for await (const _ of bytes.take(padding));
     } else await skip();
   }
+}
+
+/** A second name for a file the archive already carried: tar writes the
+ * first name as a file and every other as a hard link to it. The link names
+ * a plain file unpacked earlier in this archive, or the unpack fails; it
+ * never reaches outside, through a link or ahead. */
+async function hardLinkEntry(root: string, destination: string, link: string, name: string) {
+  const named = link.replace(/^(\.\/)+/, "");
+  const source = resolve(root, named);
+  if (!named || isAbsolute(named) || source === root || !source.startsWith(root + sep))
+    throw new Error(
+      `Refusing an archive hard link that leads outside the target: ${name} -> ${link}`,
+    );
+  await assertPlain(root, source, named);
+  if (!(await lstat(source).catch(() => undefined))?.isFile())
+    throw new Error(
+      `Refusing an archive hard link to a file it does not carry: ${name} -> ${link}`,
+    );
+  if (source === destination) return;
+  await mkdir(dirname(destination), { recursive: true });
+  await unlink(destination).catch(() => undefined);
+  await hardLink(source, destination).catch(() => copyFile(source, destination));
 }
 
 /** Moves what was unpacked in `from` into `to`, merging with what is there

@@ -48,15 +48,14 @@ name, or through `getByExternalId`, use the same Runtime key.
   resumes on the next call. On Runtime it pauses after 60 seconds without a
   call (Runtime's shortest idle pause; Blaxel's is about 15 seconds), keeping
   its memory, files and processes, and wakes by itself on the next command,
-  file call or preview visit. Its lease is Runtime's longest, an hour, and the
-  adapter renews it in the background while the sandbox is in use; when a lease
-  does run out the sandbox pauses rather than ends.
+  file call or preview visit. It has no time limit, so a sandbox in use is
+  never paused on a clock.
 - **How long it is kept:** Blaxel keeps a sandbox until it is deleted or its
   TTL ends. A paused Runtime sandbox is kept 365 days when no TTL, expiry or
   lifecycle is given. With one, it is never deleted before Blaxel would delete
   it, and may be kept longer:
-  - a `ttl`, `expires`, `ttl-max-age` or `date` within the hour is a lease that
-    ends the sandbox at that time, or later if the sandbox paused and woke;
+  - a `ttl`, `expires`, `ttl-max-age` or `date` within the hour is a time limit
+    that ends the sandbox at that time, or later if the sandbox paused and woke;
   - any other deadline, and any `ttl-idle`, keeps a paused sandbox that many
     days, rounded up, counted from each pause; with several, the shortest wins;
   - at most 365 days.
@@ -161,9 +160,9 @@ Some differences are not refusals:
   The old idle pause comes back once no `keepAlive` process runs, when a client
   sees one end (a waited exec, `wait` or `get`), stops or kills one, or calls
   `SandboxInstance.get`. With no such call, the sandbox pauses when it has been
-  idle for that `timeout`. A `keepAlive` process past Runtime's hour-long lease
-  is paused with the sandbox when the lease ends with no call to renew it, and
-  carries on at the next call.
+  idle for that `timeout`. On a sandbox with a time limit, a `keepAlive`
+  process past it is paused with the sandbox when the limit ends with no call
+  to renew it, and carries on at the next call.
 - **A name is not refused while its process runs:** a second process may take a
   running process's name, and `get(name)` answers the newest.
 - **`process.list()` leaves each process's output empty** (Blaxel includes a

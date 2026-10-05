@@ -1,5 +1,6 @@
 import type { Sandbox } from "../sandbox.js";
 import type { RequestOptions, Transport } from "../transport.js";
+import { whileInstalling } from "../wait.js";
 
 export type SandboxBrowser =
   | { running: false }
@@ -38,29 +39,17 @@ export function sandboxBrowser(t: Transport, sandbox: Sandbox) {
   return {
     /** Starts Chromium and returns its CDP address. The first start in a
      * sandbox installs Chromium, about a minute; this waits for it (up to 10
-     * minutes). Starting a running browser returns it as it is. */
+     * minutes, or the call's timeoutMs). Starting a running browser returns it
+     * as it is. */
     async start(input: BrowserStartOptions = {}, options?: RequestOptions) {
-      const deadline = Date.now() + 600_000;
-      for (;;) {
-        try {
-          return await t.json<Extract<SandboxBrowser, { running: true }>>({
-            method: "POST",
-            path: `${base()}:start`,
-            body: input,
-            ...options,
-          });
-        } catch (error) {
-          const code = (error as { code?: string }).code;
-          if (
-            (code !== "browser_installing" && code !== "desktop_installing") ||
-            Date.now() > deadline
-          )
-            throw error;
-          await new Promise((resolve) =>
-            setTimeout(resolve, (error as { retryAfterMs?: number }).retryAfterMs ?? 10_000),
-          );
-        }
-      }
+      return whileInstalling(["browser_installing", "desktop_installing"], options, (request) =>
+        t.json<Extract<SandboxBrowser, { running: true }>>({
+          method: "POST",
+          path: `${base()}:start`,
+          body: input,
+          ...request,
+        }),
+      );
     },
     /** Whether it runs, and a fresh cdpUrl when it does. */
     get: (options?: RequestOptions) =>

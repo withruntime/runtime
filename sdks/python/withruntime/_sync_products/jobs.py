@@ -4,8 +4,9 @@
 #     job = runtime.jobs.create("nightly-report", cron="0 3 * * *", timezone="Europe/Berlin",
 #                                     command=["python3", "/workspace/report.py"])
 #
-# Each run is a paid sandbox, billed at the sandbox rates through the same holds
-# and spending limits; the trial's hours do not fund jobs. When jobs are switched
+# Each run is a sandbox, paid for as one: from the free trial's hours first while
+# the run fits the trial's size and count, then from credit at the sandbox rates,
+# through the same holds and spending limits. When jobs are switched
 # off where you call, every method raises ServiceUnavailableError (code
 # ``unavailable``) at once, and retrying does not change it.
 from __future__ import annotations
@@ -33,11 +34,12 @@ JOB_DEFAULTS: dict[str, Any] = {
     "startSeconds": JOB_START_SECONDS,
 }
 # A run is one sandbox: at most 16 vCPU and 64 GiB, a disk no smaller than the
-# system image, and paid for at most an hour.
+# system image and no larger than 400 GiB, and paid for at most an hour.
 JOB_LIMITS: dict[str, int] = {
     "maxVcpu": 16,
     "maxMemoryMiB": 65536,
     "minDiskMiB": 3072,
+    "maxDiskMiB": 409600,
     "maxDurationSeconds": 3600,
     "maxAttempts": 5,
     "maxSecrets": 16,
@@ -123,6 +125,9 @@ def job_body(name: str, *, command: Union[list[str], dict[str, Any]], at: Any = 
     if size["diskMiB"] < JOB_LIMITS["minDiskMiB"]:
         raise _invalid(f"A run's disk is at least {JOB_LIMITS['minDiskMiB']} MiB, the size of the system image; "
                        f"asked for {size['diskMiB']}.", "compute.diskMiB")
+    if size["diskMiB"] > JOB_LIMITS["maxDiskMiB"]:
+        raise _invalid(f"A run's disk is at most {JOB_LIMITS['maxDiskMiB']} MiB "
+                       f"({JOB_LIMITS['maxDiskMiB'] // 1024} GiB); asked for {size['diskMiB']}.", "compute.diskMiB")
     if timeout > size["durationSeconds"] or size["durationSeconds"] > JOB_LIMITS["maxDurationSeconds"]:
         raise _invalid(f"timeout_seconds ({timeout}) must fit in the time a run is paid for "
                        f"(compute durationSeconds {size['durationSeconds']}), which is at most "

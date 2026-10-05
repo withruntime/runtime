@@ -96,6 +96,12 @@ class AsyncSlots:
     async def __aexit__(self, *_: Any) -> None:
         self._gate.release()
 
+    async def take(self) -> None:
+        await self.__aenter__()
+
+    async def give(self) -> None:
+        await self.__aexit__()
+
 
 class SyncSlots:
     def __init__(self, limit: int) -> None:
@@ -109,6 +115,12 @@ class SyncSlots:
 
     def __exit__(self, *_: Any) -> None:
         self._gate.release()
+
+    def take(self) -> None:
+        self.__enter__()
+
+    def give(self) -> None:
+        self.__exit__()
 
 
 async_slots = AsyncSlots

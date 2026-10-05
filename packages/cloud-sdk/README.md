@@ -31,8 +31,8 @@ Node 22 call `await sbx.stop()`). With no arguments you get the free
 trial while it lasts (100 free hours, up to eight sandboxes running at once), 2 vCPU, 4 GiB of
 memory and a 4 GiB disk. The current default image includes NumPy, pandas and
 matplotlib; see the [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-Omitting `funding` can use prepaid credit after the trial is exhausted. Use
-`Sandbox.create({ funding: "trial" })` for free use only; it never falls back to paid.
+The trial's hours are spent first, then prepaid credit, with nothing to
+choose; `funding` is accepted and ignored.
 
 The sandbox object does the rest:
 
@@ -45,7 +45,7 @@ The sandbox object does the rest:
   directories with `upload` and `download`;
 - `pause`, `wake`, `extend`, `fork` and `snapshot` (a paused sandbox also wakes
   by itself on the next call), `update` for its name, environment, automatic
-  wake, idle pause and persistence, `keepAlive` to extend its lease while your
+  wake, idle pause and persistence, `keepAlive` to move a time limit on while your
   process runs, `switchImage` to move it to a new image keeping /workspace,
   and `delete` to remove it for good;
 - `interpreter`, `network`, `previews`, `desktop`, `mounts` (your S3, R2 or

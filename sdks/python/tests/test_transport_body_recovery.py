@@ -3,7 +3,7 @@ import asyncio
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from withruntime import AsyncRuntime, ConnectionError, Runtime, RuntimeError
 from withruntime._request_scope import request_scope
@@ -152,10 +152,16 @@ class BodyRecovery(unittest.TestCase):
                 world.close()
 
     def test_scope_expiring_during_retry_wait_keeps_typed_error_and_key(self):
+        # The retry waits 5 s and the scope is 1 s, so the scope ends in the
+        # wait and never before the first answer. With a 50 ms scope and the
+        # real 125 to 375 ms wait, a loaded check machine could spend the 50 ms
+        # before the first request was answered, and no key was recorded.
         for asynchronous in (False, True):
             world = World("length", failures=10)
             try:
-                with request_scope(0.05), self.assertRaises(RuntimeError) as caught:
+                with patch("withruntime._sync_client._backoff", return_value=5.0), \
+                        patch("withruntime._async_client._backoff", return_value=5.0), \
+                        request_scope(1.0), self.assertRaises(RuntimeError) as caught:
                     self.call(world, asynchronous)
                 self.assertEqual(caught.exception.code, "request_timeout")
                 self.assertEqual(caught.exception.idempotency_key, world.keys[0])

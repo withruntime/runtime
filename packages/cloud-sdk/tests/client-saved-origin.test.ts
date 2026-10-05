@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Runtime } from "../src/client";
 import { connectionOrigins, connectionStore } from "../src/credentials";
+import { sandboxMarker } from "../src/transport";
 
 const DUMMY_KEY = `rtcloud_11111111-2222-4333-8444-555555555555_${"A".repeat(43)}`;
 const OTHER_DUMMY_KEY = `rtcloud_11111111-2222-4333-8444-555555555555_${"B".repeat(43)}`;
@@ -15,15 +16,19 @@ const ENV_NAMES = [
 ] as const;
 let directory: string;
 let previous: Record<string, string | undefined>;
+const marker = sandboxMarker.path;
 beforeEach(async () => {
   previous = Object.fromEntries(ENV_NAMES.map((name) => [name, process.env[name]]));
   directory = await mkdtemp(join(tmpdir(), "runtime-client-origin-"));
+  // Outside a sandbox unless a test writes this file, wherever the tests run.
+  sandboxMarker.path = join(directory, "environment.json");
   process.env.XDG_CONFIG_HOME = directory;
   delete process.env.RUNTIME_API_KEY;
   process.env.RUNTIME_API_URL = "https://api.withruntime.com";
   process.env.RUNTIME_AUTH_URL = "https://withruntime.com";
 });
 afterEach(async () => {
+  sandboxMarker.path = marker;
   for (const name of ENV_NAMES) {
     if (previous[name] === undefined) delete process.env[name];
     else process.env[name] = previous[name];
@@ -81,6 +86,18 @@ test("normalized constructor origin retains the matching saved credential", asyn
   expect(record.calls).toEqual([
     { origin: "https://api.withruntime.com", keyMatchesProduction: true, keyMatchesOther: false },
   ]);
+});
+
+test("inside a sandbox the key saved for the public API is used, and the call goes to runtime.internal", async () => {
+  await save("https://api.withruntime.com");
+  await writeFile(sandboxMarker.path, "{}");
+  for (const options of [{}, { baseUrl: "https://api.withruntime.com" }]) {
+    const record = recorder();
+    await new Runtime({ ...options, fetch: record.fetcher }).me();
+    expect(record.calls).toEqual([
+      { origin: "http://runtime.internal", keyMatchesProduction: true, keyMatchesOther: false },
+    ]);
+  }
 });
 
 test("a constructor origin chooses its own saved connection rather than the environment's", async () => {

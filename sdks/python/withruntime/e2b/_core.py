@@ -230,7 +230,9 @@ DEFAULT_VCPU = 2
 """E2B's default machine: 2 vCPU and 512 MiB (docs.e2b.dev/billing, checked 23 September 2026)."""
 DEFAULT_MEMORY_MIB = 512
 DEFAULT_TIMEOUT = 300
-"""E2B's default sandbox timeout, in seconds."""
+"""E2B's default sandbox timeout, in seconds. Not sent: a sandbox created with
+no timeout has no time limit on Runtime, running while it works and pausing
+when idle (0300). Kept for code that imports it."""
 MIN_LEASE, MAX_LEASE = 60, 3600
 LONGEST_TIMEOUT = 86_400
 """E2B's longest sandbox timeout, 24 hours (its Pro plan), in seconds."""
@@ -595,15 +597,22 @@ def sandbox_info(info: Dict[str, Any]) -> SandboxInfo:
     return SandboxInfo(
         sandbox_id=info["id"], sandbox_domain=None, template_id=template, name=info.get("name"),
         metadata=dict(info.get("labels") or {}), started_at=_date(info.get("createdAt")),
-        end_at=_date(info.get("expiresAt")), state="paused" if state == "stopped" else state,
+        # With no time limit, where it is paid up to: always ahead, moving on.
+        end_at=_date(info.get("endsAt") or info.get("expiresAt")), state="paused" if state == "stopped" else state,
         cpu_count=int(info.get("vcpu", 0)), memory_mb=int(info.get("memoryMiB", 0)), envd_version="runtime",
         lifecycle=SandboxInfoLifecycle(on_timeout="kill" if info.get("onLeaseEnd") == "stop" else "pause",
                                        auto_resume=info.get("autoWake") is True))
 
 
+def no_limit(info: Dict[str, Any]) -> bool:
+    """Whether the sandbox has no time limit: it renews itself while it works
+    (0300), and has no end to move. An older server sends no ``endsAt``."""
+    return "endsAt" in info and info["endsAt"] is None
+
+
 def seconds_later(info: Dict[str, Any], timeout: float) -> float:
     """How many seconds past the current end ``now + timeout`` is."""
-    return time.time() + timeout - _date(info.get("expiresAt")).timestamp()
+    return time.time() + timeout - _date(info.get("endsAt") or info.get("expiresAt")).timestamp()
 
 
 def list_filter(query: Optional[SandboxQuery], limit: Optional[int], next_token: Optional[str],

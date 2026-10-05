@@ -486,10 +486,11 @@ class AsyncSandbox:
         ten minutes (or half the limit) is left, or now with ``force``; then
         looks again in a minute while the limit runs past the lease."""
         runtime = self.withruntime
-        if self._kept_until_end or runtime.state != "running":
+        # No time limit: it renews itself on the server (0300).
+        if self._kept_until_end or runtime.state != "running" or core.no_limit(runtime.info):
             return
         margin = math.inf if force else min(600.0, self.execution_time_limit.total_seconds() / 2)
-        extra = core.extension_seconds(core.epoch(runtime.info.get("expiresAt")), self._until(), time.time(), margin)
+        extra = core.extension_seconds(core.end_of(runtime.info), self._until(), time.time(), margin)
         if extra >= 1:
             try:
                 await runtime.extend(extra)
@@ -505,9 +506,9 @@ class AsyncSandbox:
         self._schedule()
 
     def _schedule(self) -> None:
-        if self._kept_until_end or self._timer is not None:
+        if self._kept_until_end or self._timer is not None or core.no_limit(self.withruntime.info):
             return
-        expires = core.epoch(self.withruntime.info.get("expiresAt"))
+        expires = core.end_of(self.withruntime.info)
         if not math.isfinite(expires) or self._until() <= expires:
             return
         try:
@@ -735,10 +736,13 @@ class AsyncSandbox:
 
     async def extend_execution_time_limit(self, duration: Any) -> "AsyncSandbox":
         """Moves the end ``duration`` later. Past an hour from now, the lease
-        follows while this object lives."""
+        follows while this object lives. A sandbox with no time limit has no
+        end to move, and nothing changes."""
         total = core.seconds(duration) or 0
         if total < 1:
             raise ValueError("duration must be at least one second.")
+        if core.no_limit(self.withruntime.info):
+            return self
         self._limit = self.execution_time_limit.total_seconds() + math.ceil(total)
         await self._live()
         await self._keep(force=True)
@@ -752,7 +756,8 @@ class AsyncSandbox:
     async def update(self, *, ports: Optional[List[int]] = None, execution_time_limit: Any = None,
                      network_policy: Any = None, snapshot_expiration: Any = None, **other: Any) -> "AsyncSandbox":
         """Changes what Runtime can change on a sandbox: ports, the time limit
-        (later only), network policy and snapshot expiration."""
+        (later only; a sandbox with no time limit keeps none), network policy
+        and snapshot expiration."""
         given = [name for name, value in other.items() if value is not None]
         if given:
             raise NotSupportedError(f"Changing {given[0]} on an existing sandbox",
@@ -762,9 +767,9 @@ class AsyncSandbox:
         ports = _validated_ports(ports)
         rules = core.network_rules(network_policy) if network_policy is not None else None
         retention = core.retention_days(snapshot_expiration) if snapshot_expiration is not None else None
-        if execution_time_limit is not None:
+        if execution_time_limit is not None and not core.no_limit(self.withruntime.info):
             wanted = core.time_limit(execution_time_limit)
-            if self._session_start + wanted < core.epoch(self.withruntime.info.get("expiresAt")) - 1:
+            if self._session_start + wanted < core.end_of(self.withruntime.info) - 1:
                 raise NotSupportedError("A time limit that ends earlier than the current lease",
                                         "Runtime leases only move later. Call stop() when the work is done.")
             self._limit = wanted
@@ -848,7 +853,10 @@ async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[
                         f"Build it as a Runtime image with that name: `npx withruntime image build --dockerfile "
                         f"Dockerfile --name {image}`.")
                 fields["image"] = listing.data[0]["id"]
-    fields.update(timeout_seconds=core.lease_seconds(execution_time_limit), on_lease_end="pause" if keep else "stop")
+    # No execution_time_limit, no time limit: it runs while it works (0300).
+    if execution_time_limit is not None:
+        fields["timeout_seconds"] = core.lease_seconds(execution_time_limit)
+    fields["on_lease_end"] = "pause" if keep else "stop"
     if name:
         fields["name"] = name
     if tags:
@@ -857,7 +865,8 @@ async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[
         fields["network"] = core.network_rules(network_policy)
     fields.update(runtime_create or {})
     runtime = await _guard("sandbox", lambda: client.sandboxes.create(**fields))
-    box = AsyncSandbox(runtime, client, env, keep, core.time_limit(execution_time_limit))
+    box = AsyncSandbox(runtime, client, env, keep,
+                       None if execution_time_limit is None else core.time_limit(execution_time_limit))
     box._schedule()
     try:
         await box._setup(source, ports, snapshot_expiration)
@@ -893,7 +902,8 @@ def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, s
     ports = _validated_ports(ports)
     if snapshot_expiration is not None:
         core.retention_days(snapshot_expiration)
-    core.time_limit(execution_time_limit)
+    if execution_time_limit is not None:
+        core.time_limit(execution_time_limit)
     if network_policy is not None:
         core.network_rules(network_policy)
     runtime_client = _client(token, client)

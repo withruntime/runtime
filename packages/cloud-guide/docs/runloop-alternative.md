@@ -17,7 +17,7 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
   and runs its next command {{server-wake-command}} after the request that
   wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB of saved state a month.
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
@@ -26,7 +26,7 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
   GB-hour. Even with both CPUs busy the whole time, the example job costs {{cost:runtime:busy}}
   on Runtime and {{cost:runloop:busy}} on Runloop.
 - **Pause keeps memory, on every account.** A paused Runtime sandbox wakes
-  with its processes still running, kept for 1 to 365 days. A suspended Runloop
+  with its processes still running, kept while you have credit. A suspended Runloop
   devbox keeps only its disk, its processes must be restarted, and suspend and
   resume come with Runloop's Pro plan.
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
@@ -88,7 +88,7 @@ Runloop  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:runloop:cpu}}       = {{par
 
 Plan fees, storage while suspended, network, taxes and free credit are left out
 of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}}
-out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's
+out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's
 terms.
 
 ## How to switch

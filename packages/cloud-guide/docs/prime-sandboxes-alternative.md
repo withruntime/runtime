@@ -15,7 +15,7 @@ Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-
   actually uses, so time spent waiting on a model costs only a small floor, {{cpu-floor-share}}. Even with both CPUs busy the whole minute, the example
   job costs {{cost:runtime:busy}} on Runtime and {{cost:prime}} on Prime.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
   month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
   Runtime's servers.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
@@ -24,7 +24,7 @@ Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-
 - **Cheaper memory.** {{memory-rate}} per GiB-hour against Prime's {{rate:prime:memory}}, and memory
   is most of what an agent sandbox costs while it waits.
 - **Pause and fork now.** A paused Runtime sandbox keeps its memory and
-  running processes for 1 to 365 days, and a fork copies a running sandbox into
+  running processes while you have credit, and a fork copies a running sandbox into
   up to {{fork-copies}} copies. Prime lists snapshots, and saving, restoring and forking a
   sandbox mid-run, as coming soon.
 - **Prices that do not lapse.** Prime's published rates hold through
@@ -38,7 +38,7 @@ Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Read-only keys, a daily spending limit per key and
-  `maxCostMicros` on each create keep an agent inside its budget, and every
+  `maxTotalCostMicros` on each sandbox keep an agent inside its budget, and every
   write takes an idempotency key.
 
 **Also included:** a code interpreter, network allow and deny lists, custom
@@ -53,17 +53,17 @@ WireGuard private networks. See [products](./products).
 Prime's figures come from its sandbox documentation and launch post, checked
 {{checked:prime}}.
 
-|                    | Runtime                                                                           | Prime Sandboxes                                    |
-| ------------------ | --------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Isolation          | Firecracker microVM, own kernel                                                   | Hardware-virtualized microVM, own guest kernel     |
-| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                    | {{rate:prime:cpu}} per vCPU-hour while running     |
-| Memory billing     | {{memory-rate}} per reserved GiB-hour                                             | {{rate:prime:memory}} per GiB-hour while running   |
-| Disk while it runs | Included                                                                          | {{rate:prime:disk}} per GiB-hour; 5 GiB by default |
-| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                    | Up to 16 vCPUs, 64 GiB and 128 GiB of disk         |
-| Pause and fork     | Files, memory and processes; forks of a running sandbox                           | Snapshots and forks listed as coming soon          |
-| At once            | {{paid-sandboxes}} on a paid account; {{new-account-sandboxes}} in its first week | 1,024 per account to start                         |
-| Plan fee           | None; prepaid credit from {{topup-min}}                                           | None; rates published through 22 December 2026     |
-| Free start         | {{trial-hours}} sandbox hours, no card                                            | None published                                     |
+|                    | Runtime                                                        | Prime Sandboxes                                    |
+| ------------------ | -------------------------------------------------------------- | -------------------------------------------------- |
+| Isolation          | Firecracker microVM, own kernel                                | Hardware-virtualized microVM, own guest kernel     |
+| CPU billing        | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:prime:cpu}} per vCPU-hour while running     |
+| Memory billing     | {{memory-rate}} per reserved GiB-hour                          | {{rate:prime:memory}} per GiB-hour while running   |
+| Disk while it runs | Included                                                       | {{rate:prime:disk}} per GiB-hour; 5 GiB by default |
+| Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Up to 16 vCPUs, 64 GiB and 128 GiB of disk         |
+| Pause and fork     | Files, memory and processes; forks of a running sandbox        | Snapshots and forks listed as coming soon          |
+| At once            | {{paid-sandboxes}} on a paid account                           | 1,024 per account to start                         |
+| Plan fee           | None; prepaid credit from {{topup-min}}                        | None; rates published through 22 December 2026     |
+| Free start         | {{trial-hours}} sandbox hours, no card                         | None published                                     |
 
 ## Cost for the same job
 
@@ -90,7 +90,7 @@ Prime    CPU    1,000 × 60 s / 3,600 × 2 × {{rate:prime:cpu}}       = {{part:
 
 Network, taxes and free allowances are left out of both. On Runtime, inbound
 traffic is free, and each account's first {{outbound-allowance}} out a month is free, then
-{{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
+{{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 
@@ -115,8 +115,7 @@ await Promise.all(episodes.map((episode) => episode.stop()));
 ## When Prime Sandboxes may fit better
 
 - **Thousands at once from day one.** An account starts at 1,024 active
-  sandboxes and 4,096 vCPUs. A paid Runtime account runs 100, after a first week
-  at {{new-account-sandboxes}}, and raises it on request.
+  sandboxes and 4,096 vCPUs. A paid Runtime account runs 100, and raises it on request.
 - **Training on Prime Intellect.** Prime Sandboxes are built for agentic RL
   training on Prime's own platform, and Prime Tunnels reach inference running
   on its cluster nodes.

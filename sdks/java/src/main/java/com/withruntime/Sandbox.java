@@ -148,12 +148,17 @@ public final class Sandbox implements AutoCloseable {
     return lifecycle("wake", null, true, null);
   }
 
-  /** Carries on a paused sandbox with a new lease. */
+  /**
+   * Carries on a paused sandbox; {@code lease} is its new time limit, for a sandbox that has one.
+   */
   public Sandbox wake(Duration lease) {
     return lifecycle("wake", Map.of("timeoutSeconds", lease.toSeconds()), true, null);
   }
 
-  /** More time before the lease ends, at most an hour ahead of now. */
+  /**
+   * Moves a sandbox's time limit on, at most an hour ahead of now. A sandbox with no time limit
+   * answers at once and nothing changes.
+   */
   public Sandbox extend(Duration by) {
     return lifecycle("extend", Map.of("seconds", by.toSeconds()), false, null);
   }
@@ -177,10 +182,11 @@ public final class Sandbox implements AutoCloseable {
   }
 
   /**
-   * Keeps a running sandbox's lease ahead of now on a background thread, until {@link #stop()},
-   * {@link #stopKeepAlive()} or {@link #close()}: every {@code every} it extends the lease so that
-   * {@code margin} remains, never more than the hour ahead the API allows. Running time is billed
-   * as it is used. A paused sandbox is left paused; a stopped one ends the loop.
+   * Keeps a sandbox with a time limit running past it on a background thread, until {@link
+   * #stop()}, {@link #stopKeepAlive()} or {@link #close()}: every {@code every} it extends the
+   * limit so that {@code margin} remains, never more than the hour ahead the API allows. A sandbox
+   * with no time limit needs none and is only watched. Running time is billed as it is used. A
+   * paused sandbox is left paused; a stopped one ends the loop.
    */
   public synchronized void keepAlive(Duration every, Duration margin, Consumer<Exception> onError) {
     stopKeepAlive();
@@ -203,7 +209,7 @@ public final class Sandbox implements AutoCloseable {
               timer.shutdown();
               return;
             }
-            Instant expires = info.expiresAt();
+            Instant expires = limitEnd(info);
             if ("running".equals(state) && expires != null) {
               long left = Duration.between(Instant.now(), expires).toSeconds();
               long need = keep - left;
@@ -216,6 +222,17 @@ public final class Sandbox implements AutoCloseable {
         0,
         period,
         TimeUnit.SECONDS);
+  }
+
+  /**
+   * Where a sandbox's time limit ends, or null when it has none: it renews itself (timeoutSeconds
+   * 0, or persistent) unless endsAt says its renewal stopped. An older server sends no endsAt and a
+   * timeout of at least a minute.
+   */
+  static Instant limitEnd(SandboxInfo info) {
+    if (info.endsAt() != null) return info.endsAt();
+    if (info.timeoutSeconds() == 0 || info.persistent()) return null;
+    return info.expiresAt();
   }
 
   /** Ends a keep-alive, if one runs. */

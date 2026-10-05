@@ -14,7 +14,7 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
   sandbox runs. Runtime measures the CPU your code actually uses, so time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
   month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
   Runtime's servers.
 - **Back from a pause in milliseconds.** E2B states a resume takes {{speed:e2b:wake}} and a
@@ -28,8 +28,8 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
   and {{memory-rate}} per GiB-hour of memory against {{rate:e2b:memory}}. Even with every CPU busy
   the whole time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:e2b}} on E2B.
 - **No plan fee for long sessions.** E2B caps a session at 1 hour on Hobby and
-  needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox runs as long as you
-  keep extending its lease, with no plan at all: prepaid credit from {{topup-min}}.
+  needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox has no time limit:
+  it runs while it works, with no plan at all: prepaid credit from {{topup-min}}.
 - **A one-line switch.** `withruntime/e2b` runs code written for E2B's SDK, in
   JavaScript and Python, including the code interpreter. Run `runtime switch --from e2b` before your
   first top-up and it is matched, up to {{switching-max}}.
@@ -52,7 +52,7 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any create with `maxCostMicros`. Every write takes an
+  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
   idempotency key and the SDKs retry with it, so a lost response never creates
   a second sandbox.
 
@@ -68,17 +68,17 @@ networks. See [products](./products).
 E2B's figures come from its public pricing and documentation, checked
 {{checked:e2b}}.
 
-|                  | Runtime                                                                                                                         | E2B                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Isolation        | Firecracker microVM, own kernel                                                                                                 | Firecracker microVM, own kernel                        |
-| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                                                                  | {{rate:e2b:cpu}} per allocated vCPU-hour               |
-| Memory billing   | {{memory-rate}} per reserved GiB-hour                                                                                           | {{rate:e2b:memory}} per GiB-hour                       |
-| Plan fee         | None; prepaid credit from {{topup-min}}                                                                                         | Hobby {{term:e2b:hobby}}; Pro {{term:e2b:pro}} a month |
-| Free start       | {{trial-hours}} sandbox hours, no card                                                                                          | {{term:e2b:credit}} of usage credit on Hobby           |
-| Session length   | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
-| Pause and resume | Files, memory and running processes                                                                                             | Files, memory and running processes                    |
-| Interfaces       | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs                                                                | API, CLI, MCP server, JavaScript and Python SDKs       |
-| Agent sign-in    | Browser approval; no key in the agent's config                                                                                  | API key                                                |
+|                  | Runtime                                                                     | E2B                                                    |
+| ---------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Isolation        | Firecracker microVM, own kernel                                             | Firecracker microVM, own kernel                        |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:e2b:cpu}} per allocated vCPU-hour               |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:e2b:memory}} per GiB-hour                       |
+| Plan fee         | None; prepaid credit from {{topup-min}}                                     | Hobby {{term:e2b:hobby}}; Pro {{term:e2b:pro}} a month |
+| Free start       | {{trial-hours}} sandbox hours, no card                                      | {{term:e2b:credit}} of usage credit on Hobby           |
+| Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
+| Pause and resume | Files, memory and running processes                                         | Files, memory and running processes                    |
+| Interfaces       | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs            | API, CLI, MCP server, JavaScript and Python SDKs       |
+| Agent sign-in    | Browser approval; no key in the agent's config                              | API key                                                |
 
 ## Cost for the same job
 
@@ -106,7 +106,7 @@ Plan fees, storage, network, taxes and free credits are left out of both.
 `runtime compare --from e2b` prices your own usage the same way, with
 sandboxes the free trial paid for at the standard rates, so trial time never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
-first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing)
+first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
 
 ## How to switch
@@ -131,11 +131,11 @@ from withruntime.e2b import Sandbox  # was: from e2b import Sandbox
 
 `withruntime/e2b/code-interpreter` and `withruntime.e2b.code_interpreter`
 replace E2B's code interpreter packages. Sandboxes get E2B's defaults: 2 vCPU,
-512 MiB and a 300-second timeout, after which they stop. They use the free
-trial while the account has trial time, then prepaid credit; pass
-`runtime: { create: { funding: "trial" } }` (Python
-`runtime_create={"funding": "trial"}`) while you test, so a test never spends
-credit.
+512 MiB and a 300-second timeout, after which they stop. Unlike E2B's, they
+pause after {{idle-pause}} with nothing happening and wake on the next call;
+`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the free
+trial while the account has trial time, then prepaid credit, with nothing to
+choose.
 
 `commands.run` returns the command's whole output and, as E2B's does, throws
 `CommandExitError` (Python `CommandExitException`) on a non-zero exit and
@@ -144,7 +144,7 @@ error handling keeps working. If any output was lost before it was read, the
 result's `truncated` is set and a warning says so.
 
 A call Runtime handles differently, such as E2B templates, workload identity or
-ending a sandbox earlier than its lease, throws `NotSupportedError` before
+ending a sandbox earlier than its time limit, throws `NotSupportedError` before
 anything happens and names what to use instead. `E2B.md` in the package lists
 every mapping.
 
@@ -182,8 +182,6 @@ and `{ check: true }`, as above, makes it throw `CommandError` instead.
 
 - **Self-hosting.** E2B publishes its runtime under Apache-2.0, so you can run
   it on your own servers. Runtime is a hosted service.
-- **Keeping paused sandboxes forever.** E2B keeps a paused sandbox with no
-  expiry. Runtime keeps one for the retention you set, up to 365 days.
 
 ## Sources
 

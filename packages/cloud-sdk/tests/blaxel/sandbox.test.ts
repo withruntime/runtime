@@ -30,7 +30,7 @@ describe("SandboxInstance.create", () => {
       memoryMiB: 4096,
       idlePauseSeconds: 60,
       autoWake: true,
-      timeoutSeconds: 3600,
+      // No time limit: it runs while it works and pauses when idle (0300).
       onLeaseEnd: "pause",
       labels: { "blaxel/image": "blaxel/base-image:latest", "blaxel/memory": "4096" },
     });
@@ -210,7 +210,8 @@ describe("SandboxInstance.create", () => {
       withruntime: { create: { funding: "paid" } },
     });
     expect(world.called("sandbox.retention").at(-1)![1]).toBe(1);
-    expect(lastCreate()).toMatchObject({ timeoutSeconds: 3600, onLeaseEnd: "pause" });
+    expect(lastCreate()).toMatchObject({ onLeaseEnd: "pause" });
+    expect(lastCreate()).not.toHaveProperty("timeoutSeconds");
   });
 
   test("the trial keeps its own retention: no call is made for it", async () => {
@@ -226,10 +227,9 @@ describe("SandboxInstance.create", () => {
   });
 
   test("lifetimes: the soonest deadline wins and each rounds up to whole days", () => {
-    expect(lifetimeOf({})).toEqual({ timeoutSeconds: 3600, onLeaseEnd: "pause", days: 365 });
+    expect(lifetimeOf({})).toEqual({ onLeaseEnd: "pause", days: 365 });
     expect(lifetimeOf({ ttl: "1w" }).days).toBe(7);
     expect(lifetimeOf({ ttl: "1h30m" })).toEqual({
-      timeoutSeconds: 3600,
       onLeaseEnd: "pause",
       days: 1,
     });
@@ -517,13 +517,22 @@ describe("updates", () => {
 });
 
 describe("the live sandbox", () => {
-  test("a lease near its end is renewed once, in the background", async () => {
-    const sandbox = await create();
+  test("a time limit near its end (an older sandbox's hour) is renewed once, in the background", async () => {
+    const sandbox = await create({ withruntime: { create: { timeoutSeconds: 3600 } } });
     fake(sandbox).info.expiresAt = new Date(Date.now() + 60_000).toISOString();
     fake(sandbox).fileMap.set("/workspace/a", new TextEncoder().encode("a"));
     await Promise.all([sandbox.fs.read("a"), sandbox.fs.read("a")]);
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(world.called("sandbox.extend")).toEqual([[sandbox.withruntime.id, 3600]]);
+  });
+
+  test("one with no time limit is never extended: it renews itself", async () => {
+    const sandbox = await create();
+    fake(sandbox).info.expiresAt = new Date(Date.now() + 60_000).toISOString();
+    fake(sandbox).fileMap.set("/workspace/a", new TextEncoder().encode("a"));
+    await sandbox.fs.read("a");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(world.called("sandbox.extend")).toEqual([]);
   });
 
   test("a sandbox paused with autoWake off is woken before the call", async () => {

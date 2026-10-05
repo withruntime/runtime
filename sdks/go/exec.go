@@ -166,6 +166,8 @@ func (s *Sandbox) stream(ctx context.Context, cmd command, opts *ExecOptions) it
 		if opts.Timeout > 0 {
 			timeout = opts.Timeout + time.Minute
 		}
+		processID := ""
+		var cursor int64
 		for event, err := range events[OutputEvent](ctx, s.c, &call{
 			method:  http.MethodPost,
 			path:    s.path(":exec"),
@@ -178,6 +180,10 @@ func (s *Sandbox) stream(ctx context.Context, cmd command, opts *ExecOptions) it
 				return
 			}
 			switch event.Type {
+			case "start":
+				processID = event.ProcessID
+			case "stdout", "stderr":
+				cursor = event.Offset + int64(len(event.Data))
 			case "continue":
 				for followed, err := range s.follow(ctx, event.ProcessID, event.Cursor) {
 					if !yield(followed, err) || err != nil {
@@ -189,7 +195,24 @@ func (s *Sandbox) stream(ctx context.Context, cmd command, opts *ExecOptions) it
 				yield(OutputEvent{}, streamError(event))
 				return
 			}
-			if !yield(event, nil) {
+			if !yield(event, nil) || event.Type == "exit" {
+				return
+			}
+		}
+		// The stream closed before the command's exit. Its output is kept on
+		// the sandbox, so follow it from where this stream stopped; an end
+		// with no exit is never a result.
+		if processID == "" {
+			yield(OutputEvent{}, &Error{
+				Code:           "connection_error",
+				Message:        "The exec stream closed before the command started.",
+				Hint:           "Run it again; to be sure it runs once, pass the same IdempotencyKey.",
+				IdempotencyKey: opts.IdempotencyKey,
+			})
+			return
+		}
+		for followed, err := range s.follow(ctx, processID, cursor) {
+			if !yield(followed, err) || err != nil {
 				return
 			}
 		}
@@ -207,11 +230,15 @@ func streamError(event OutputEvent) *Error {
 }
 
 // follow yields a process's output events from cursor until it exits, across
-// the server's stream slices.
+// the server's stream slices. A stream that closes before the exit is
+// followed again from where it stopped; four in a row with nothing new are
+// an error, never an end.
 func (s *Sandbox) follow(ctx context.Context, processID string, cursor int64) iter.Seq2[OutputEvent, error] {
 	return func(yield func(OutputEvent, error) bool) {
+		idle := 0
 		for {
 			resumed := false
+			before := cursor
 			for event, err := range events[OutputEvent](ctx, s.c, &call{
 				method:  http.MethodGet,
 				path:    s.path("/processes/" + url.PathEscape(processID) + "/output"),
@@ -239,7 +266,17 @@ func (s *Sandbox) follow(ctx context.Context, processID string, cursor int64) it
 					return
 				}
 			}
-			if !resumed {
+			if resumed || cursor > before {
+				idle = 0
+				continue
+			}
+			if idle++; idle > 3 {
+				yield(OutputEvent{}, &Error{
+					Code:    "connection_error",
+					Message: "The output stream of process " + processID + " keeps closing before it ends.",
+					Hint:    "Read what it printed so far: Sandbox.Process, then Process.Output.",
+					Details: map[string]any{"sandboxId": s.ID(), "processId": processID},
+				})
 				return
 			}
 		}

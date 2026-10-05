@@ -5,47 +5,53 @@ import { join } from "node:path";
 import { GuestFiles } from "../../src/compat/files";
 import type { Sandbox } from "../../src/sandbox";
 
-test("a file appearing after the existence check survives and the skipped copy fails", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "runtime-copy-race-"));
-  try {
-    const source = join(directory, "source"),
-      target = join(directory, "target");
-    await writeFile(source, "new source");
-    let checked = false;
-    const files = new GuestFiles(
-      async () =>
-        ({
-          files: {
-            exists: async () => {
-              checked = true;
-              return false;
+/* A skipping mv -n succeeds before coreutils 9.2 (and on macOS) and fails from
+   it on, saying "not replacing", as in a Runtime sandbox (4 October 2026). */
+for (const [mv, skip] of [
+  ["mv -n --", "succeeds"],
+  ['echo "mv: not replacing $2" >&2; false', "fails"],
+] as const)
+  test(`a file appearing after the existence check survives and the skipped copy fails (mv -n ${skip})`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "runtime-copy-race-"));
+    try {
+      const source = join(directory, "source"),
+        target = join(directory, "target");
+      await writeFile(source, "new source");
+      let checked = false;
+      const files = new GuestFiles(
+        async () =>
+          ({
+            files: {
+              exists: async () => {
+                checked = true;
+                return false;
+              },
             },
-          },
-          exec: async (argv: string[]) => {
-            expect(checked).toBe(true);
-            // GNU -T forbids treating a raced directory as a container. This
-            // macOS fixture uses only file targets and drops that unavailable flag.
-            const command = argv.map((value) =>
-              value.replace("mv -n -T --", 'printf winner > "$2"; mv -n --'),
-            );
-            if (argv[0] === "cp") await writeFile(target, "winner"); // original source differential
-            const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
-            const [stdout, stderr, status] = await Promise.all([
-              new Response(child.stdout).text(),
-              new Response(child.stderr).text(),
-              child.exited,
-            ]);
-            if (status !== 0) throw new Error(stderr || stdout || `Command exited ${status}`);
-          },
-        }) as unknown as Sandbox,
-    );
-    await expect(files.copy(source, target)).rejects.toThrow("Destination exists");
-    expect(await readFile(target, "utf8")).toBe("winner");
-    expect((await readdir(directory)).sort()).toEqual(["source", "target"]);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+            exec: async (argv: string[]) => {
+              expect(checked).toBe(true);
+              // GNU -T forbids treating a raced directory as a container. This
+              // macOS fixture uses only file targets and drops that unavailable flag.
+              const command = argv.map((value) =>
+                value.replace("mv -n -T --", `printf winner > "$2"; ${mv}`),
+              );
+              if (argv[0] === "cp") await writeFile(target, "winner"); // original source differential
+              const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+              const [stdout, stderr, status] = await Promise.all([
+                new Response(child.stdout).text(),
+                new Response(child.stderr).text(),
+                child.exited,
+              ]);
+              if (status !== 0) throw new Error(stderr || stdout || `Command exited ${status}`);
+            },
+          }) as unknown as Sandbox,
+      );
+      await expect(files.copy(source, target)).rejects.toThrow("Destination exists");
+      expect(await readFile(target, "utf8")).toBe("winner");
+      expect((await readdir(directory)).sort()).toEqual(["source", "target"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
 test("the original existing-destination refusal performs no command", async () => {
   let commands = 0;

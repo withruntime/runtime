@@ -22,15 +22,18 @@ type SandboxInfo struct {
 	DiskMiB        int    `json:"diskMiB"`
 	CPU            string `json:"cpu"`
 	CPUFloorMillis int    `json:"cpuFloorMillis"`
-	Pausable       bool   `json:"pausable"`
-	TimeoutSeconds int    `json:"timeoutSeconds"`
+	// Deprecated: always true for a sandbox created since 5 October 2026:
+	// every sandbox can pause.
+	Pausable bool `json:"pausable"`
+	// TimeoutSeconds is its time limit; 0 is none: it runs while it works.
+	TimeoutSeconds int `json:"timeoutSeconds"`
 	// IdlePauseSeconds pauses it after this many idle seconds; 0 is never.
 	IdlePauseSeconds int `json:"idlePauseSeconds"`
 	// AutoWake: a request (exec, files, a visit to a shared port) wakes it
 	// when paused.
 	AutoWake bool `json:"autoWake"`
-	// Persistent: its lease renews itself while credit lasts, and its disk is
-	// kept after a stop.
+	// Persistent: it runs until stopped while credit lasts, never paused for
+	// idleness or a time limit, and its disk is kept after a stop.
 	Persistent bool `json:"persistent"`
 	// LastActiveAt is the last exec, file, terminal, desktop or preview
 	// request, to within a minute.
@@ -38,8 +41,14 @@ type SandboxInfo struct {
 	OnLeaseEnd   string     `json:"onLeaseEnd"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	ReadyAt      *time.Time `json:"readyAt"`
-	ExpiresAt    *time.Time `json:"expiresAt"`
-	EndedAt      *time.Time `json:"endedAt"`
+	// ExpiresAt is where it is paid up to: ahead of now, moving on by itself
+	// while it runs. Not when it ends; that is EndsAt.
+	ExpiresAt *time.Time `json:"expiresAt"`
+	// EndsAt is when it stops or pauses by itself: its time limit, or where
+	// its funding ends once credit or a spending limit stops its renewal. Nil
+	// when it never will, and when it is not running.
+	EndsAt  *time.Time `json:"endsAt"`
+	EndedAt *time.Time `json:"endedAt"`
 	// StopReason says why a sandbox stopped, when it did.
 	StopReason      *string    `json:"stopReason"`
 	PausedAt        *time.Time `json:"pausedAt"`
@@ -107,21 +116,27 @@ type CreateOptions struct {
 	DiskMiB        int    `json:"diskMiB,omitempty"`
 	CPU            string `json:"cpu,omitempty"`
 	CPUFloorMillis int    `json:"cpuFloorMillis,omitempty"`
-	// TimeoutSeconds is how long it may run before its lease ends. Default 1800.
-	TimeoutSeconds int   `json:"timeoutSeconds,omitempty"`
-	Pausable       *bool `json:"pausable,omitempty"`
-	// OnLeaseEnd is "pause" (the default) or "stop".
+	// TimeoutSeconds is a time limit, 60 to 3600 seconds. Left 0, it has none:
+	// it runs while it works and pauses when idle, until you stop it or
+	// credit runs out.
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// Deprecated: ignored since 5 October 2026: every sandbox can pause.
+	Pausable *bool `json:"pausable,omitempty"`
+	// OnLeaseEnd is what its time limit or credit running out does: "pause"
+	// (the default) or "stop".
 	OnLeaseEnd string `json:"onLeaseEnd,omitempty"`
 	// IdlePauseSeconds pauses it after this many seconds in which nothing
 	// happens in it: no request, no command or terminal running, no open
-	// connection, no network traffic and no CPU use (10 to 86400). Left 0, a
-	// pausable sandbox pauses after 60. To never pause it, pass
+	// connection, no network traffic and no CPU use (10 to 86400). Left 0, it
+	// pauses after 60 unless Persistent. To never pause it, pass
 	// Extra: map[string]any{"idlePauseSeconds": 0}. A request wakes it.
 	IdlePauseSeconds int `json:"idlePauseSeconds,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it. Default true.
 	AutoWake *bool `json:"autoWake,omitempty"`
-	// Persistent keeps it running while credit lasts and keeps its disk after
-	// a stop, for Restart. Paid only.
+	// Persistent keeps it running until you stop it, while credit lasts, with
+	// no idle pause unless IdlePauseSeconds asks for one. Its disk is billed
+	// as any sandbox's, and kept after a stop, for Restart, as any sandbox's
+	// is. Paid only.
 	Persistent bool `json:"persistent,omitempty"`
 	// MaxTotalCostMicros is the most it may cost over its whole life.
 	MaxTotalCostMicros int64 `json:"maxTotalCostMicros,omitempty"`
@@ -234,7 +249,8 @@ type Me struct {
 // SandboxSettings are what Sandbox.Update changes; nil fields stay as they
 // are.
 type SandboxSettings struct {
-	Name   *string           `json:"name,omitempty"`
+	Name *string `json:"name,omitempty"`
+	// Labels replaces every label; an empty, non-nil map removes them all.
 	Labels map[string]string `json:"labels,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it.
 	AutoWake *bool `json:"autoWake,omitempty"`

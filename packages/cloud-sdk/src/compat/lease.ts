@@ -1,10 +1,12 @@
 import { RuntimeError } from "../errors.js";
 
-/* A rival's sandbox may be asked to live longer than one Runtime lease (an
-   hour at most, ARCHITECTURE.md section 10): Vercel's `timeout` over an hour,
-   Daytona's `autoStopInterval` over an hour or 0. The drop-ins keep the lease
-   reaching toward the time asked for while their sandbox object lives, one
-   extension at a time, never past that time. */
+/* A rival's sandbox may be asked to live longer than one Runtime time limit
+   (an hour at most, ARCHITECTURE.md section 10): Vercel's `timeout` over an
+   hour, Daytona's `autoStopInterval` over an hour. The drop-ins keep the
+   limit reaching toward the time asked for while their sandbox object lives,
+   one extension at a time, never past that time. A sandbox created with no
+   time limit renews itself on the server (0300; `endsAt` null) and is left
+   alone. */
 
 /** The most one lease runs ahead of now. */
 export const LEASE_MAX_SECONDS = 3600;
@@ -12,7 +14,7 @@ export const LEASE_MAX_SECONDS = 3600;
 /** What the keeper needs of a Runtime sandbox. */
 export interface Leased {
   readonly state: string;
-  readonly info: { expiresAt: string };
+  readonly info: { expiresAt: string; endsAt?: string | null };
   extend(seconds: number): Promise<unknown>;
   refresh(): Promise<unknown>;
 }
@@ -63,7 +65,9 @@ export class LeaseKeeper {
   /** Starts the timer when the lease must outlive the next extension. */
   #schedule() {
     if (this.#ended || this.#timer) return;
-    const expiresAt = Date.parse(this.#sandbox().info.expiresAt);
+    const info = this.#sandbox().info;
+    if (info.endsAt === null) return;
+    const expiresAt = Date.parse(info.endsAt ?? info.expiresAt);
     if (!Number.isFinite(expiresAt) || this.#until() <= expiresAt) return;
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
@@ -85,9 +89,10 @@ export class LeaseKeeper {
 
   async #extend(now: boolean) {
     const sandbox = this.#sandbox();
-    if (sandbox.state !== "running") return;
+    // No time limit: the server renews it, and an extension would change nothing.
+    if (sandbox.state !== "running" || sandbox.info.endsAt === null) return;
     const seconds = extensionSeconds(
-      Date.parse(sandbox.info.expiresAt),
+      Date.parse(sandbox.info.endsAt ?? sandbox.info.expiresAt),
       this.#until(),
       Date.now(),
       now ? Infinity : this.#marginMs(),

@@ -62,7 +62,7 @@ Every response carries `x-request-id`. Every error has one shape:
     "code": "trial_busy",
     "status": 409,
     "message": "The trial runs 8 sandboxes at once; ... are running.",
-    "hint": "Stop one (runtime sandbox stop <id>), or pass funding: \"paid\" to use prepaid credit.",
+    "hint": "Stop or pause one (runtime sandbox stop <id>). Once the account holds prepaid credit, it runs more at once.",
     "details": { "sandboxIds": ["..."], "concurrent": 8 },
     "requestId": "req_0mud1dtgjogtn2z8t6y"
   }
@@ -76,32 +76,39 @@ carries internal detail, only a fixed message and the request id.
 your request's, was reported to us automatically, with its `requestId`. Retry with the same key; write to us only if it keeps
 failing.
 
-| Status   | Codes you may see                                                                                                                            | Safe next step                                                                                                                |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `invalid_trial`, `disk_too_small`                                               | Fix the named fields                                                                                                          |
-| 401      | `unauthorized`                                                                                                                               | Check the key                                                                                                                 |
-| 402      | `trial_exhausted`, `insufficient_funds`, `spending_limit_reached`                                                                            | Add credit, pay with `funding: "paid"`, or read `GET /v1/limits`                                                              |
-| 402      | `payment_required`, `trial_unavailable`                                                                                                      | A paid-only feature, or no trial on this account: add credit ([pricing](./pricing#how-many-at-once) says what counts as paid) |
-| 402      | `account_blocked`                                                                                                                            | A payment is disputed or under review; the message says what clears it                                                        |
-| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`                                  | Do not work around a refusal                                                                                                  |
-| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                                    | Check the id, name or path                                                                                                    |
-| 405      | `method_not_allowed`                                                                                                                         | Use the method this page lists for the path                                                                                   |
-| 409      | `no_capacity`, `trial_busy`, `trial_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing`                                 | Clears when something else ends or finishes: wait, then retry with the same key                                               |
-| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached`, `fence_conflict` | Resolve the state, then retry                                                                                                 |
-| 409      | `lease_too_short`                                                                                                                            | The command's timeout outlasts the lease: extend the sandbox, or give the command a shorter timeout                           |
-| 422      | `idempotency_key_reused`                                                                                                                     | Same key, same body; or a new key for new work                                                                                |
-| 426      | `upgrade_required`                                                                                                                           | Move to this API version                                                                                                      |
-| 429      | `rate_limited`, `trial_build_limit`                                                                                                          | Wait `Retry-After`, then retry with the same key                                                                              |
-| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                                                  | Retry after `Retry-After` with the same key (the SDKs do)                                                                     |
-| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`                                                                                    | Switched off here on purpose; retrying will not help                                                                          |
-| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                                                 | Something in your sandbox failed; the message says what                                                                       |
-| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                                          | A fault on our side, reported to us; retry with the same key                                                                  |
+| Status   | Codes you may see                                                                                                          | Safe next step                                                                                                                            |
+| -------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `invalid_trial`, `disk_too_small`                             | Fix the named fields                                                                                                                      |
+| 401      | `unauthorized`                                                                                                             | Check the key                                                                                                                             |
+| 402      | `trial_exhausted`, `insufficient_funds`, `spending_limit_reached`                                                          | Add credit (sandboxes then run on it), or read `GET /v1/limits`                                                                           |
+| 402      | `payment_required`, `trial_unavailable`                                                                                    | A feature that needs credit or a kept top-up, or no trial on this account; the message says which ([pricing](./pricing#how-many-at-once)) |
+| 402      | `account_blocked`                                                                                                          | A payment is disputed or under review; the message says what clears it                                                                    |
+| 402      | `pilot_hours_used`                                                                                                         | This pilot's sandbox hours are used: its sandboxes pause, memory kept. Tell the account's owner                                           |
+| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`                | Do not work around a refusal                                                                                                              |
+| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                  | Check the id, name or path                                                                                                                |
+| 405      | `method_not_allowed`                                                                                                       | Use the method this page lists for the path                                                                                               |
+| 409      | `no_capacity`, `trial_busy`, `trial_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing`               | Clears when something else ends or finishes: wait, then retry with the same key                                                           |
+| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached` | Resolve the state, then retry                                                                                                             |
+| 409      | `time_limit_too_short`                                                                                                     | The command's timeout outlasts the sandbox's time limit or its funded time: extend it, add credit, or give the command a shorter timeout  |
+| 422      | `idempotency_key_reused`                                                                                                   | Same key, same body; or a new key for new work                                                                                            |
+| 426      | `upgrade_required`                                                                                                         | Move to this API version                                                                                                                  |
+| 429      | `rate_limited`, `trial_build_limit`                                                                                        | Wait `Retry-After`, then retry with the same key                                                                                          |
+| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                                | Retry after `Retry-After` with the same key (the SDKs do)                                                                                 |
+| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`                                                                  | Switched off here on purpose; retrying will not help                                                                                      |
+| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                               | Something in your sandbox failed; the message says what                                                                                   |
+| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                        | A fault on our side, reported to us; retry with the same key                                                                              |
 
 **Temporary refusals are safe to retry.** `no_capacity`, `busy`,
 `host_unavailable`, `rate_limited` and `trial_busy` clear on their own: retry
 with the same key, a growing delay and a bounded deadline.
 
 - The SDKs retry the 429 and 503 codes themselves.
+- `guest_busy`, `busy` and `rate_limited` mean nothing ran. The SDKs send such
+  a call again, with the same key and a delay that grows from `Retry-After`
+  to eight times it, until the call's own deadline, or for
+  five minutes when it has none, however many retries `maxRetries` allows.
+  Then the refusal itself is returned. A sandbox under heavy load can answer
+  `guest_busy` for tens of seconds; the call is then slow, not failed.
 - An SDK create also waits out `trial_busy`, `quota_exceeded` and
   `no_capacity`, for up to two minutes by default, then returns the refusal.
   The error's `retryable` is `true` for `trial_busy` and `no_capacity`, for a
@@ -132,9 +139,25 @@ These limits are protection, not quotas, and a refusal costs nothing.
 
 - **Per key:** about 50 requests a second, in bursts of up to 200, with 128
   served at once. Past that, a request waits its turn for up to five seconds
-  before it is refused.
-- **Per organization:** 192 requests in flight across all its keys, and 64
-  terminals open, at most 12 of them in one sandbox.
+  before it is refused. A key may have as many served at once as its
+  organization (below) when that is more; its rate stays the same.
+- **Per organization:** 192 requests in flight across all its keys, and two
+  more for each sandbox it holds that is not stopped, up to 1,024, so every
+  sandbox can stream a command and a watch at once; a new sandbox's two come
+  within half a minute. Also 64 terminals open, at most 12 of them in one
+  sandbox.
+- **Per address:** 64 connections open to the API at once, and 50 new ones a
+  second in bursts of 100. Once a request from the address carries a valid
+  key, it may hold its organization's room instead for the next 10 minutes,
+  renewed by each such request: 256 connections and 200 new ones a second, and
+  more for an organization with more requests in flight. Past a limit a new
+  connection is not answered, so the client's own retry brings it in a second
+  or so later, once a connection closes or the address has its room. A streaming
+  answer (a command's output, a download, a watch) holds its connection until
+  it ends. The SDKs hold each client to 48 connections, calls and streams
+  together, keep 8 of them for calls, and queue the rest, so a client waits
+  for a connection rather than fail: a thousand streamed commands at once
+  from one client are read 40 at a time.
 
 Over a limit you get 429 with `Retry-After`.
 Streaming responses count as requests in flight until their bodies finish or
@@ -150,39 +173,39 @@ you cancel them. Receiving the headers does not release a request slot.
 | `POST /v1/sandboxes/{id}:stop`         | Stop. Answers at once, where compute billing ends; a kept disk is written out after                                             |
 | `DELETE /v1/sandboxes/{id}`            | Delete for good, in any state (see "Deleting a sandbox" below)                                                                  |
 | `POST /v1/sandboxes/{id}:pause`        | Answers once the processors stop, where compute billing ends; memory and files are then saved                                   |
-| `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; `timeoutSeconds` sets its next lease                                                                  |
-| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before the lease ends                                                                                   |
-| `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` to keep a paused sandbox, 1 to 365                                                                               |
-| `POST /v1/sandboxes/{id}:restart`      | Start a stopped persistent sandbox again from its disk                                                                          |
+| `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; for one with a time limit, `timeoutSeconds` sets the new one                                          |
+| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before its time limit; a sandbox with none answers at once, unchanged                                   |
+| `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` keeps a paused or stopped sandbox 1 to 365 days; `null`, the default, while you have credit                      |
+| `POST /v1/sandboxes/{id}:restart`      | Start a stopped sandbox again from its kept disk                                                                                |
 | `POST /v1/sandboxes/{id}:update`       | Change `name`, `labels`, `env`, `autoWake`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`, `tailscale` (`null` leaves) |
 | `POST /v1/sandboxes/{id}:switch-image` | Move it to another image, keeping `/workspace` (see "Switching its image" below)                                                |
 
 The create body:
 
-| Field                | Default                                      | Notes                                                                                                                                                                                                                                                                      |
-| -------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`, `labels`     | none                                         | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                                             |
-| `env`                | none                                         | Environment variables for every command, process, terminal, SSH session and image start command in it (see "Its environment" below)                                                                                                                                        |
-| `funding`            | trial while it lasts, then paid              | `"trial"` never falls back to paid credit                                                                                                                                                                                                                                  |
-| `region`             | the default region                           | Use a region listed for your account                                                                                                                                                                                                                                       |
-| `vcpu`               | 2                                            | At most 16 on a paid sandbox, 2 on the trial                                                                                                                                                                                                                               |
-| `memoryMiB`          | 4096                                         | At least 128; at most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a size outside that is refused with `invalid_request` naming the field                                                                                                                        |
-| `diskMiB`            | 4096                                         | At least 3,072; at most 10,240 on the trial. A paid sandbox may ask for up to 16,777,216, and is placed only on a server with that much free disk                                                                                                                          |
-| `cpu`                | `"shared"`                                   | `"reserved"` guarantees every vCPU                                                                                                                                                                                                                                         |
-| `cpuFloorMillis`     | 50                                           | Guaranteed CPU while shared, in thousandths of a vCPU: at most `vcpu` x 1000 (16,000 at 16 vCPU), and 250 on the trial                                                                                                                                                     |
-| `timeoutSeconds`     | 1800                                         | How long it may run before its lease ends, 60 to 3600. On the trial, a sandbox still working at its end is extended until the trial hours run out                                                                                                                          |
-| `onLeaseEnd`         | `"pause"`                                    | `"pause"` keeps memory and files when `timeoutSeconds` runs out; wake it later. `"stop"` ends it, and an ordinary sandbox's disk with it. `"stop"` is the default with `pausable: false`                                                                                   |
-| `pausable`           | true                                         |                                                                                                                                                                                                                                                                            |
-| `idlePauseSeconds`   | {{idle-pause-seconds}}                       | Pause after this many seconds with nothing happening: no request, no command or terminal running, no open connection, no traffic and no CPU use. 0 is never, otherwise {{idle-pause-min}} to {{idle-pause-max}}. Not set on a sandbox that cannot pause or is `persistent` |
-| `autoWake`           | true                                         | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                                         |
-| `persistent`         | false                                        | Paid only: the lease renews itself while credit lasts, and a stopped sandbox keeps its disk for `:restart`. Set to `false` with `:update` and a stopped one's disk is deleted                                                                                              |
-| `maxTotalCostMicros` | none                                         | The most the sandbox may cost over its whole life                                                                                                                                                                                                                          |
-| `getOrCreate`        | false                                        | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                                            |
-| `network`            | every public port (paid), 80 and 443 (trial) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                             |
-| `maxCostMicros`      | none                                         | Refuse the create if its first lease would cost more                                                                                                                                                                                                                       |
-| `image`, `volumes`   | none                                         | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`. An image with a start command answers once its ready check passes, in `start`                                                                                        |
-| `snapshot`           | none                                         | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                               |
-| `tailscale`          | none                                         | Paid only: `{authKeySecret, hostname?, tags?}` joins your Tailscale network once it runs (see "On your tailnet" below)                                                                                                                                                     |
+| Field                     | Default                                      | Notes                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`, `labels`          | none                                         | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                                                                                                                                     |
+| `env`                     | none                                         | Environment variables for every command, process, terminal, SSH session and image start command in it (see "Its environment" below)                                                                                                                                                                                                                                |
+| `funding`                 | ignored                                      | Accepted and ignored: the trial's hours are spent first, then prepaid credit, and an account that holds credit gets paid limits                                                                                                                                                                                                                                    |
+| `region`                  | the default region                           | Use a region listed for your account                                                                                                                                                                                                                                                                                                                               |
+| `vcpu`                    | 2                                            | At most 16 on a paid sandbox, 2 on the trial                                                                                                                                                                                                                                                                                                                       |
+| `memoryMiB`               | 4096                                         | At least 128; at most 65,536 (64 GiB) on a paid sandbox, 4,096 on the trial; a size outside that is refused with `invalid_request` naming the field                                                                                                                                                                                                                |
+| `diskMiB`                 | 4096                                         | At least 3,072; at most 409,600 ({{max-disk}}), and 10,240 on the trial. A larger disk is refused with `invalid_request`, naming the maximum. A sandbox is placed only on a server with that much free disk                                                                                                                                                        |
+| `cpu`                     | `"shared"`                                   | `"reserved"` guarantees every vCPU: the same as `cpuFloorMillis` at `vcpu` x 1000, which it sets, ignoring any other `cpuFloorMillis`; not on the trial                                                                                                                                                                                                            |
+| `cpuFloorMillis`          | 50                                           | Guaranteed CPU, in thousandths of a vCPU: at most `vcpu` x 1000 (16,000 at 16 vCPU), and 250 on the trial. The highest, `vcpu` x 1000, is what `cpu: "reserved"` sets                                                                                                                                                                                              |
+| `timeoutSeconds`          | 0, none                                      | A time limit you choose, 60 to 86,400 seconds (24 hours): it pauses or stops when that runs out, busy or not. Left out (or 0), it has none: it runs while it works and pauses when idle, until you stop it or credit or trial hours run out                                                                                                                        |
+| `onTimeout`, `onLeaseEnd` | `"pause"`                                    | `"pause"` keeps memory and files when its time limit, credit or trial hours run out; wake it later. `"stop"` stops it and keeps its disk for `:restart`; `"delete"` stops it and deletes its disk. `onLeaseEnd` is its older name                                                                                                                                  |
+| `idlePauseSeconds`        | {{idle-pause-seconds}}                       | Pause after this many seconds with nothing happening: no request, no command or terminal running, no open connection, no traffic and no CPU use. 0 is never, otherwise {{idle-pause-min}} to {{idle-pause-max}}. Not set on a `persistent` sandbox                                                                                                                 |
+| `autoWake`                | true                                         | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                                                                                                                                 |
+| `persistent`              | false                                        | Paid only: it runs until you stop it, while credit lasts, with no idle pause unless you set one. Its disk is billed as any sandbox's                                                                                                                                                                                                                               |
+| `maxTotalCostMicros`      | none                                         | The most the sandbox may cost over its whole life                                                                                                                                                                                                                                                                                                                  |
+| `maxCostMicros`           | none                                         | Deprecated, still accepted from older clients: use `maxTotalCostMicros`                                                                                                                                                                                                                                                                                            |
+| `pausable`                | ignored                                      | Deprecated, still accepted from older clients and ignored: every sandbox can pause, fork and be snapshotted. One created with `pausable: false` before 5 October 2026 can only be stopped; a pause, fork or snapshot of it answers `not_pausable`                                                                                                                  |
+| `getOrCreate`             | false                                        | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                                                                                                                                    |
+| `network`                 | every public port (paid), 80 and 443 (trial) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                                                                                                                     |
+| `image`, `volumes`        | none                                         | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`: `mode` `"rw"` (default) or `"snapshot"`, a read-only copy of the volume for any number of sandboxes, unrelated to sandbox snapshots ([storage](./storage#attaching-a-volume)). An image with a start command answers once its ready check passes, in `start` |
+| `snapshot`                | none                                         | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                                                                                                                       |
+| `tailscale`               | none                                         | Paid only: `{authKeySecret, hostname?, tags?}` joins your Tailscale network once it runs (see "On your tailnet" below)                                                                                                                                                                                                                                             |
 
 Sizes are limits you ask for. The server checks their combinations against
 account limits and the host's measured capacity.
@@ -192,8 +215,8 @@ command, file, process, terminal, desktop or interpreter call reaches it, and
 the call runs once it is running, usually within a second. A visit
 to one of its shared ports wakes it too: an API client's request waits up to
 30 seconds, and a browser is shown a page that reloads itself. The wake is an
-ordinary wake: a fresh lease of the sandbox's own `timeoutSeconds`, or the lease
-it paused with when that ends later, billed from the moment it runs. With `autoWake: false` the call fails with `sandbox_paused`
+ordinary wake: it runs while it works again, or for a sandbox with a time limit
+gets a fresh one of its own `timeoutSeconds`, or keeps the one it paused with when that ends later, billed from the moment it runs. With `autoWake: false` the call fails with `sandbox_paused`
 until `:wake`. A wake that cannot be paid for fails with the refusal, such as
 `insufficient_funds`, and leaves the sandbox paused.
 
@@ -203,22 +226,45 @@ held name fails with `name_taken` (409); `details.sandboxId` names the holder
 when your key can reach it. With `getOrCreate: true` the create answers the
 holder instead, woken if paused and restarted if stopped and persistent, with
 `reused: true`; the other fields apply only when it creates one. A sandbox that
-stops for good gives its name up and keeps it in its own record.
+is deleted, or stops without keeping its disk, gives its name up and keeps it
+in its own record.
 
-**Running for longer than a lease.** `persistent: true`, at create or with
-`:update`, renews the lease on the server while the account has credit, up to
-`maxTotalCostMicros`, and keeps the disk after a stop, billed as reserved disk.
-A stopped persistent sandbox is listed with the live ones. `:update` with
-`{"persistent": false}` makes it an ordinary sandbox again: a running one stops
-paying for its disk at once, and a stopped one has its disk deleted. It is
-refused while the sandbox is paused; wake or stop it first. To end one for
-good in any state, delete it. Without persistence, `:extend` moves the lease later, up to an hour ahead of now; the
-SDKs' `keepAlive` calls it for you. A trial sandbox that is still working when
-its lease is about to end (a command, terminal, SSH session or port forward
-open, CPU in use or traffic moving in the last ten seconds) is extended by its
-own `timeoutSeconds` each time, until the trial hours run out; then it pauses
-as any lease's end does. A paid sandbox's lease ends on time: use `persistent`
-or `keepAlive` to run longer.
+**How long it runs.** A sandbox runs while it works and pauses itself when idle;
+there is no time limit unless you set one. Nothing needs extending: it runs on
+credit, or a trial sandbox on its trial hours. It pauses (or stops, with `onTimeout: "stop"`) when it is
+idle for `idlePauseSeconds`, when you stop it, or when credit, trial hours, a
+spending limit or `maxTotalCostMicros` run out. `endsAt` says when it will stop
+or pause by itself, and is `null` when it never will: it has no time limit and
+its funding goes on. It names a time when the sandbox has a time limit, or once
+credit or a limit stops its funding.
+
+**A time limit.** `timeoutSeconds` from 60 to 86,400 (24 hours) at create sets
+one: the sandbox pauses or stops then, as `onTimeout` says, busy or not.
+`:extend` moves it later, up to 24 hours ahead of now (the SDKs' `keepAlive`
+does it for you), and `endsAt` answers the new end. A wake starts the limit
+again from the wake: the sandbox's own length, or the `timeoutSeconds` the wake
+names. An extend of a sandbox with no time limit answers at once and changes
+nothing, so older code that extends keeps working. A persistent sandbox has no
+time limit, whatever `timeoutSeconds` says. On the trial, a limit longer than
+the hours left is cut to them, and the answer's `timeoutSeconds` says so: the
+sandbox pauses when the hours end either way.
+
+**Keep it running until you stop it.** `persistent: true`, at create or with
+`:update`, keeps it running with no idle pause (unless `idlePauseSeconds` sets
+one) while the account has credit, up to `maxTotalCostMicros`. Its disk is
+billed as any sandbox's, and a stop keeps it as any stop does. `:update` with
+`{"persistent": false}` makes it an ordinary sandbox again.
+
+**A stop keeps the disk; only a delete removes it.** A stopped sandbox reads
+`diskKept: true`, is listed with the live ones, and is billed for its disk as
+[paused storage](./pricing#paused-storage) until you delete it. `:restart`
+starts it again from that disk, its memory gone. A read-write volume stays
+attached to it until it is deleted, so delete it before attaching the volume
+elsewhere. One created with `onTimeout: "delete"` has its disk deleted when
+its time limit ends. A raw HTTP client
+says it knows this with `x-runtime-client: http/2026-10-04`; a stop from a
+client that names an older version, or none, keeps the disk free for three
+days and then deletes it. To end a sandbox for good in any state, delete it.
 
 **Its environment.** `env` at create sets variables that every command,
 background process, terminal, SSH session and the image's start command in the
@@ -253,14 +299,14 @@ or without the same key. A read-only key cannot delete. A sandbox a job or a
 managed service runs in is ended by that job or service instead.
 
 **Switching its image.** `POST /v1/sandboxes/{id}:switch-image` with
-`{"image": "web:v2", "keep": "workspace"}` moves a sandbox to another image and
+`{"image": "web:v2"}` moves a sandbox to another image and
 keeps its id and name, `/workspace` (its home: dotfiles, `pip install` and
 `npm install -g`), volumes, environment, labels, previews and ports. Its
 processes restart, and the new image's start command runs as at create.
-Everything else on its old disk is lost (`sudo` and apt installs, `/etc`), so
-`keep` must be `"workspace"`; without it the answer is
-`switch_keeps_workspace_only` (400) and nothing changes. Snapshot it first to
-keep everything. A running sandbox is paused first; a paused one, or a stopped
+Everything else on its old disk is lost (`sudo` and apt installs, `/etc`).
+`keep: "workspace"`, which older clients send, is accepted and changes nothing;
+any other `keep` is refused with `switch_keeps_workspace_only` (400) and
+nothing changes. Snapshot it first to keep everything. A running sandbox is paused first; a paused one, or a stopped
 persistent one, is switched as it is; a stopped ordinary one kept no disk
 (`switch_needs_disk`, 409). It is charged as a wake. The answer comes once the
 sandbox runs the new image. If anything fails, the switch is undone and the
@@ -269,27 +315,6 @@ with its files and memory as they were. The image must be ready, on the
 sandbox's server (`image_on_another_host`, 409), different from the one it runs
 (`image_unchanged`, 409) and fit its disk (`disk_too_small`, 409); copying
 `/workspace` may take up to {{switch-copy-time}}.
-
-**Changing its size, when enabled.** This is disabled by default and omitted
-from OpenAPI and MCP until enabled; until then it answers
-`resize_unavailable` (503). `POST /v1/sandboxes/{id}:resize` with
-`{"vcpu": 2, "memoryMiB": 4096, "restart": true}` (either size, or both) gives a
-sandbox a new size by a restart. It keeps its id and name, its whole disk,
-volumes, environment, labels, previews and ports; its programs stop and its
-image's start command runs again. `restart` must be `true`; without it the
-answer is `resize_needs_restart` (400) and nothing changes. Snapshot it first to
-keep its memory too. A running sandbox is paused first, or stopped if it is
-persistent; a sandbox that can do neither is refused before anything stops
-(`resize_needs_disk`, 409), and one that does not get there is left as it is
-(`resize_not_halted`, 409). The answer comes once it runs at the new size, on
-the same server. Memory is charged on the new size from then, at the same
-rates. Nothing changes when the server has no room (`no_capacity`, 409), the
-size is above your quota (`quota_exceeded`) or the trial's 2 vCPU and 4 GiB
-(`invalid_trial`, 400), it is the size it has (`size_unchanged`, 409), or a
-snapshot or fork of it is being taken (`resize_during_snapshot`, 409; retry).
-If the server cannot boot it at the new size, it stays paused or stopped with
-its disk and the new size (`resize_not_started`, 409), and its next wake or
-restart starts it at that size.
 
 **On your tailnet.** A paid sandbox can join your own Tailscale network.
 Store an auth key for jobs (`printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs`),
@@ -313,7 +338,7 @@ logged or written to the sandbox's disk. [Networking](./networking#your-tailscal
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or what the lease has left when that is less; at
+fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or trial hours end sooner; at
 most 24 hours)
 and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
 is put over the sandbox's own environment; its values are never echoed and are
@@ -322,7 +347,11 @@ stored only as hashes.
 **Streaming.** With `"stream": true` the answer is NDJSON, one event a line:
 `start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time
 limit it sends `continue` with a cursor, and `…/output?follow=true&cursor=`
-resumes from it. A streamed command has no output limit.
+resumes from it. A stream that fails ends with `error`, which carries the
+`code` and `status` the answer would have had and the `cursor`; after a 429 or
+a 5xx, follow again from that cursor, since the command runs on. The SDKs do,
+for up to five minutes of failures in a row. A streamed command has no output
+limit.
 
 **Output limits.** The JSON answer holds at most 64 KiB (65,536 bytes) of each
 stream for a command with a `timeoutMs` of 60,000 or less, and up to 1 MiB of
@@ -355,8 +384,11 @@ own code uses the bearer header. See
 
 ## Tunnels
 
+This is a connection from your code into one sandbox, not the WireGuard tunnel
+that joins your own network to your sandboxes
+([domains, TCP ports, addresses and the tunnel](#domains-tcp-ports-addresses-and-the-tunnel)).
 `GET /v1/sandboxes/{id}/tunnel` with `Upgrade: websocket` and the bearer header
-opens a tunnel into the sandbox: TCP connections to any port on its loopback,
+opens one into the sandbox: TCP connections to any port on its loopback,
 and SSH logins, several at once over the one socket. It needs the key's `exec`
 permission, like a command. The CLI (`runtime sandbox ssh`, `runtime sandbox port-forward`)
 and the SDKs (`sbx.tunnel()`, `sbx.forwardPort()`, `forward_port()`) speak it
@@ -519,46 +551,15 @@ no fresh token. Sessions still cannot create or rotate previews, or use MCP.
 | `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry`                                                                         | Webhooks                                                                                       |
 | `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                                                                                            | OpenTelemetry export                                                                           |
 
-**Shared volumes, when enabled.** This feature is disabled by default and
-omitted from OpenAPI and MCP until enabled. Enabled deployments accept
-`shared: true` at volume creation. The mode is immutable; a restore from
-`fromBackup` inherits the source volume's mode and refuses a contradictory
-`shared` value. Disabled deployments omit the create field and refuse it
-as an unknown field; restoring a shared backup is unavailable (503).
-
-`POST /v1/volumes/{id}:attach` accepts `{sandboxId, path}`.
-`POST /v1/volumes/{id}/attachments/{attachmentId}:detach` requests detach,
-and `GET /v1/volumes/{id}/attachments/{attachmentId}` reads the saved receipt.
-The three routes answer unavailable (503) when the feature is disabled.
-A receipt contains `id`, `volumeId`, `sandboxId`, `path`, `mode`, `state`,
-`generation`, `error`, `attachedAt` and `changedAt`. Its state is `attaching`,
-`active`, `detaching` or `detached`; `mode` is `rw`. A waiter timeout or
-cancellation does not cancel committed work. A busy detach keeps the mount
-and records the error; free it before retrying with a new idempotency key.
-See [shared volumes](./storage#shared-volumes-when-enabled).
-
-**Volume growth, when enabled.** This feature is disabled by default and
-omitted from OpenAPI and MCP until enabled. `POST /v1/volumes/{id}:resize`
-accepts `{sizeMiB}` and grows a detached ordinary volume on its current server.
-It refuses shrinking or shared volumes with `invalid_request` (400), live
-attachments with `volume_attached` (409), and an active operation or a backup
-still being copied off the server with `operation_pending` (409). A backup
-asked for while the volume grows is refused with `volume_not_ready` (409).
-When disabled it answers `unavailable` (503).
-
-The volume remains `ready`; its nullable `resize` record contains `id`,
-`operationId`, `sizeMiB`, `state`, `generation` and `error`. Follow the record's
-`pending`, `running`, `completed` or `failed` state, rather than treating a
-returned ready volume as completed growth. Attach and delete wait for an
-active operation. Old confirmed size and billing continue until completion;
-the storage rate is unchanged. See [volume growth](./storage#growing-a-volume-when-enabled).
-
 Snapshots accept `mode: "memory"` (the default) or `mode: "disk"` in
 `POST /v1/sandboxes/{id}:snapshot`. Memory snapshots keep files and running
 processes. Disk snapshots keep only the root filesystem; a sandbox created
-from one boots fresh with no saved processes. Both require a paused source
-without attached volumes and keep the same source size, ownership, retention
-and storage pricing. The returned snapshot includes its `mode`. Keep the
+from one boots fresh with no saved processes, at the `vcpu`, `memoryMiB` and
+`diskMiB` the create asks for (each one left out is the snapshot's), with a
+disk at least the saved size. A copy of a memory snapshot continues the saved
+machine, so it is the snapshot's size; naming a different size is
+`400 invalid_request`. Both require a paused source without attached volumes
+and keep the same ownership, retention and storage pricing. The returned snapshot includes its `mode`. Keep the
 source paused until the snapshot's state is `ready` or `failed`; `Prefer: wait`
 can return while capture is still in progress.
 
@@ -570,11 +571,7 @@ are not charged. While compression is pending, `backedUp` is false and
 `durability.state` is `none`. Its off-server copy is queued after compression.
 See [snapshot storage](./storage#snapshots-survive-their-server).
 
-Wakes and copies stay on the source server by default. Cross-server transfer
-is disabled until an operator-qualified deployment enables it; then compatible
-same-region placement may be used when the source cannot fit the wake or
-copy. Existing image, volume and private-placement constraints still apply.
-See [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled).
+Wakes and copies run on the source's server.
 
 Forks:
 
@@ -592,7 +589,6 @@ Forks:
   Its `details.startedSandboxIds` names the copies that did start; they keep
   running until stopped. A retry with the same `Idempotency-Key` answers that
   same error.
-- A sandbox created with `pausable: false` cannot be forked (`not_pausable`).
 - If a fork stops partway and left its source paused, the source stays paused.
   `GET /v1/notices` holds a `fork-left-paused` notice naming the sandbox, the
   fork's key and how to wake it.
@@ -611,22 +607,21 @@ account's `orgName`, and the `role` of the member who made the key (`owner`,
 `GET /v1/usage` says what the account has and has used. Money is integer
 microdollars in strings (1,000,000 is one dollar), exact however large:
 
-| Field       | What it is                                                        |
-| ----------- | ----------------------------------------------------------------- |
-| `credited`  | Every credit ever added: purchases and grants                     |
-| `spent`     | Settled usage, including what refunds and disputes took back      |
-| `held`      | Reserved against running and paused work, not yet settled         |
-| `expired`   | Credit that expired, or grant credit taken back                   |
-| `available` | What can still be spent: `credited - spent - expired - held`      |
-| `takenBack` | The part of `spent` that refunds and disputes took                |
-| `trial`     | `{totalMs, usedMs, reservedMs, availableMs}`, or null             |
-| `outbound`  | This month's outbound traffic, below                              |
-| `resources` | The newest hundred resources, with what each used and was charged |
+| Field       | What it is                                                             |
+| ----------- | ---------------------------------------------------------------------- |
+| `credited`  | Every credit ever added: purchases and grants                          |
+| `spent`     | Settled usage, including what refunds and disputes took back           |
+| `expired`   | Credit that expired, or grant credit taken back                        |
+| `available` | What can still be spent, after what running sandboxes are about to use |
+| `takenBack` | The part of `spent` that refunds and disputes took                     |
+| `trial`     | `{totalMs, usedMs, availableMs}`, or null                              |
+| `outbound`  | This month's outbound traffic, below                                   |
+| `resources` | The newest hundred resources, with what each used and was charged      |
 
 Each resource carries `resourceId`, `name`, `kind`, `state`, `createdAt`,
 `vcpu` and `memoryMiB` (null for a kind with no size), `runningSeconds` (the
-billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates`, and
-`chargedMicros` and `heldMicros`. `chargedMicros` covers every meter, outbound
+billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates` and
+`chargedMicros`. `chargedMicros` covers every meter, outbound
 traffic included. Divide it by `runningSeconds` for what a run cost a second.
 
 `outbound` is the account's outbound traffic this calendar month, UTC:
@@ -641,8 +636,7 @@ spending limit could not cover; it is never charged later
 `GET /v1/usage/export?since=2026-09-01T00:00:00Z&until=2026-10-01T00:00:00Z`
 reads settled usage for every product visible to the key. `since` is inclusive
 and `until` exclusive, both UTC ISO timestamps ending in `Z`; the filter uses
-when an interval settled, rather than when its resource was created. Pending
-holds are excluded.
+when an interval settled, rather than when its resource was created.
 
 The answer is `{since, until, data, nextCursor, csv}`. Rows name the interval
 and resource, kind, meter, funding, interval start/end, settlement time, billed
@@ -676,15 +670,13 @@ hundred resources in `GET /v1/usage`.
   every read, no change and no spending) or `selected` (the actions the key
   names).
 - `daily.limitMicros` is the most the key's agent may commit in any 24 hours,
-  or null when the owner set no limit. `usedMicros` counts settled charges plus
-  money still on hold.
+  or null when the owner set no limit. `usedMicros` counts what is charged and
+  what its running sandboxes are about to use.
 - Past the limit, a create, wake, extension or renewal fails with 402
   `spending_limit_reached` and charges nothing.
 - `trial` is the account's free trial, the same figures as `GET /v1/usage`:
-  `{totalMs, usedMs, reservedMs, availableMs}` in milliseconds, or null when
-  the account has none, as here. `availableMs` is what a new trial sandbox can
-  still use. A trial sandbox that has not ended holds its whole lease in
-  `reservedMs`, and what it did not use comes back when it ends.
+  `{totalMs, usedMs, availableMs}` in milliseconds, or null when the account
+  has none, as here. `availableMs` is what a new trial sandbox can still use.
 
 A limit is set, changed or removed only on the website, at
 [API keys](https://withruntime.com/account/keys): by the member who made the key,
@@ -730,7 +722,7 @@ not a sandbox's:
 | `POST /v1/tunnel/peers/{id}:rotate`              | `{publicKey?}`: a new key for the peer                                   |
 | `DELETE /v1/tunnel/peers/{id}`                   | Remove a peer                                                            |
 
-An account that has not added credit gets `payment_required` (402).
+A dedicated address needs credit on the account; the rest need a kept top-up. Without it a request gets `payment_required` (402).
 
 ## Pages
 

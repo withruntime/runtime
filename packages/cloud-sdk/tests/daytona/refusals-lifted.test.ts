@@ -351,38 +351,36 @@ describe("running as another Linux user", () => {
 });
 
 describe("autoStopInterval past an hour, or 0", () => {
-  test("120 minutes: the lease is renewed an hour at a time until 120 idle minutes", async () => {
+  /* Since 0300 a sandbox with no time to live has no time limit: the
+     interval is its idle pause, counted by the sandbox itself, and nothing
+     here extends anything, so a long command is never frozen for want of
+     calls from this object. */
+  test("120 minutes: no time limit, paused after 120 idle minutes by the sandbox", async () => {
     jest.useFakeTimers();
     const sandbox = await daytona.create({ autoStopInterval: 120 });
-    expect(world.called("sandboxes.create").at(-1)![0]).toMatchObject({ timeoutSeconds: 3600 });
-    const runtime = fake(sandbox);
-    const start = Date.now();
+    const create = world.called("sandboxes.create").at(-1)![0] as Record<string, unknown>;
+    expect(create).toMatchObject({ idlePauseSeconds: 7200 });
+    expect(create).not.toHaveProperty("timeoutSeconds");
     await sandbox.process.executeCommand("true");
-    const end = () => Date.parse(runtime.info.expiresAt);
-    const settle = async () => {
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-    };
-    // No calls: the keeper renews while the object lives.
     for (let minute = 0; minute < 180; minute++) {
       jest.advanceTimersByTime(60_000);
-      await settle();
-    }
-    expect(world.called("sandbox.extend").length).toBeGreaterThan(0);
-    // Never past 120 minutes after the last call.
-    expect(end()).toBeLessThanOrEqual(start + 120 * 60_000 + 1000);
-    expect(end()).toBeGreaterThan(start + 115 * 60_000);
-  });
-
-  test("0: never paused for idleness while the object lives", async () => {
-    jest.useFakeTimers();
-    const sandbox = await daytona.create({ autoStopInterval: 0 });
-    const runtime = fake(sandbox);
-    await sandbox.process.executeCommand("true");
-    for (let minute = 0; minute < 300; minute++) {
-      jest.advanceTimersByTime(60_000);
       for (let i = 0; i < 20; i++) await Promise.resolve();
     }
-    expect(Date.parse(runtime.info.expiresAt)).toBeGreaterThan(Date.now() + 25 * 60_000);
+    expect(world.called("sandbox.extend")).toHaveLength(0);
+  });
+
+  test("0: never paused for idleness, with no time limit", async () => {
+    await daytona.create({ autoStopInterval: 0 });
+    const create = world.called("sandboxes.create").at(-1)![0] as Record<string, unknown>;
+    expect(create).toMatchObject({ idlePauseSeconds: 0 });
+    expect(create).not.toHaveProperty("timeoutSeconds");
+  });
+
+  test("a time to live is a time limit, kept by the lease", async () => {
+    await daytona.create({ ttlMinutes: 30 });
+    const create = world.called("sandboxes.create").at(-1)![0] as Record<string, unknown>;
+    expect(create).toMatchObject({ timeoutSeconds: 900, onLeaseEnd: "stop" });
+    expect(create).not.toHaveProperty("idlePauseSeconds");
   });
 });
 

@@ -282,8 +282,12 @@ export class Devboxes {
         vcpu: p.custom_cpu_cores ?? size?.[0],
         memoryMiB: p.custom_gb_memory ? p.custom_gb_memory * 1024 : size?.[1],
         diskMiB: p.custom_disk_size ? p.custom_disk_size * 1024 : size?.[2],
-        timeoutSeconds: p.keep_alive_time_seconds ?? 3600,
-        idlePauseSeconds: 0,
+        // keep_alive_time_seconds is the customer's limit, with no idle pause
+        // before it. None is no time limit (0300): it runs while it works and
+        // pauses when idle.
+        ...(p.keep_alive_time_seconds === undefined || p.keep_alive_time_seconds === null
+          ? {}
+          : { timeoutSeconds: p.keep_alive_time_seconds, idlePauseSeconds: 0 }),
         onLeaseEnd: "stop",
       },
       input.environment_variables ?? undefined,

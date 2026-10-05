@@ -3,8 +3,8 @@ import { Page } from "../page.js";
 import { RuntimeError, ServiceUnavailableError } from "../errors.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
-/** A run's sandbox. Every field has a default; a run is a paid sandbox of this
- * size, billed at the sandbox rates. */
+/** A run's sandbox. Every field has a default; a run is a sandbox of this
+ * size, on the trial's hours first and then on credit at the sandbox rates. */
 export type JobCompute = {
   region: string;
   vcpu: number;
@@ -126,11 +126,12 @@ export const JOB_DEFAULTS = {
   startSeconds: JOB_START_SECONDS,
 };
 /** A run is one sandbox: at most 16 vCPU and 64 GiB, a disk no smaller than
- * the system image, and paid for at most an hour. */
+ * the system image and no larger than 400 GiB, and paid for at most an hour. */
 export const JOB_LIMITS = {
   maxVcpu: 16,
   maxMemoryMiB: 65_536,
   minDiskMiB: 3072,
+  maxDiskMiB: 409_600,
   maxDurationSeconds: 3600,
   maxAttempts: 5,
   maxSecrets: 16,
@@ -215,6 +216,11 @@ export function jobBody(input: CreateJob): Record<string, unknown> {
       `A run's disk is at least ${JOB_LIMITS.minDiskMiB} MiB, the size of the system image; asked for ${compute.diskMiB}.`,
       "compute.diskMiB",
     );
+  if (compute.diskMiB > JOB_LIMITS.maxDiskMiB)
+    throw invalid(
+      `A run's disk is at most ${JOB_LIMITS.maxDiskMiB} MiB (${JOB_LIMITS.maxDiskMiB / 1024} GiB); asked for ${compute.diskMiB}.`,
+      "compute.diskMiB",
+    );
   if (
     timeoutSeconds > compute.durationSeconds ||
     compute.durationSeconds > JOB_LIMITS.maxDurationSeconds
@@ -260,8 +266,9 @@ export function switchedOff(product: string) {
 }
 
 /** Scheduled jobs: a command run in a fresh sandbox, once or on a cron
- * schedule. Each run is a paid sandbox, charged at the sandbox rates through
- * the same holds and spending limits; the trial's hours do not fund jobs.
+ * schedule. Each run is a sandbox, paid for as one: from the free trial's
+ * hours first while the run fits the trial's size and count, then from credit
+ * at the sandbox rates, through the same holds and spending limits.
  *
  *   const job = await runtime.jobs.create({
  *     name: "nightly-report",

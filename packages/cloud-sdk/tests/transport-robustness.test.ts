@@ -330,3 +330,251 @@ for (const read of ["send", "json"] as const) {
     expect(calls).toBe(0);
   });
 }
+
+/* A thousand creates from one client meet a full region, or a 429: each waits
+   before trying again. Waiting holds no connection, so it must not hold one of
+   the client's connection slots either: with every slot asleep, the stop that
+   would free room, or any read, sat behind them for up to two minutes. */
+for (const refusal of [
+  { code: "no_capacity", status: 503, room: true },
+  { code: "rate_limited", status: 429, room: false },
+] as const) {
+  test(`a call waiting out ${refusal.code} lends its connection slot to the next call`, async () => {
+    const order: string[] = [];
+    let refused = false;
+    const t = transport(
+      (async (url: string, init: RequestInit) => {
+        const path = new URL(url).pathname;
+        order.push(`${init.method} ${path}`);
+        if (path === "/v1/sandboxes" && !refused) {
+          refused = true;
+          return Response.json(
+            {
+              error: {
+                code: refusal.code,
+                status: refusal.status,
+                message: "m",
+                retryAfterMs: 300,
+              },
+            },
+            { status: refusal.status },
+          );
+        }
+        return Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      { maxConnections: 1 },
+    );
+    const create = t.json({
+      method: "POST",
+      path: "/v1/sandboxes",
+      body: {},
+      ...(refusal.room ? { waitForCapacityMs: 5000 } : {}),
+    });
+    while (!refused) await Bun.sleep(1);
+    const started = performance.now();
+    await t.json({ method: "GET", path: "/v1/me" });
+    expect(performance.now() - started).toBeLessThan(200);
+    await create;
+    expect(order).toEqual(["POST /v1/sandboxes", "GET /v1/me", "POST /v1/sandboxes"]);
+  });
+}
+
+/* One address may hold 64 connections to the API; past that its edge resets
+   them. A thousand agents' commands from one orchestrator each held a stream
+   with no limit, and got resets. Streams and calls now share the client's
+   cap: the rest wait their turn, and a few connections are always kept for
+   calls, so a stream's reader that makes a call is never stuck behind
+   streams. */
+test("streams and calls together hold at most maxConnections, and calls keep their own", async () => {
+  let open = 0;
+  let peak = 0;
+  const gates: Array<() => void> = [];
+  const t = transport(
+    (async (url: string) => {
+      open++;
+      peak = Math.max(peak, open);
+      if (new URL(url).pathname === "/v1/me") {
+        open--;
+        return Response.json({ ok: true });
+      }
+      const encoder = new TextEncoder();
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"type":"start"}\n'));
+            gates.push(() => {
+              open--;
+              controller.close();
+            });
+          },
+        }),
+      );
+    }) as unknown as typeof fetch,
+    { maxConnections: 12 },
+  );
+  // Twenty streams that stay open until told: four of the twelve stay free.
+  const readers = Array.from({ length: 20 }, async () => {
+    const seen: unknown[] = [];
+    for await (const event of t.events({ method: "GET", path: "/v1/stream" })) seen.push(event);
+    return seen;
+  });
+  while (gates.length < 4) await Bun.sleep(1);
+  await Bun.sleep(20);
+  expect(gates.length).toBe(4);
+  // A call is answered at once beside them, however many streams wait.
+  await Promise.all(Array.from({ length: 6 }, () => t.json({ method: "GET", path: "/v1/me" })));
+  expect(peak).toBeLessThanOrEqual(12);
+  // Each stream that ends lets the next one in, until all twenty are read.
+  let closed = 0;
+  while (closed < 20) {
+    while (gates.length === 0) await Bun.sleep(1);
+    gates.shift()!();
+    closed++;
+  }
+  for (const seen of await Promise.all(readers)) expect(seen).toEqual([{ type: "start" }]);
+  expect(peak).toBeLessThanOrEqual(12);
+});
+
+test("a download stream gives its connection back when read, cancelled or past its deadline", async () => {
+  let calls = 0;
+  const t = transport(
+    (async (_url: string, init: RequestInit) => {
+      calls++;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+            init.signal?.addEventListener("abort", () => controller.error(init.signal!.reason));
+          },
+        }),
+        { headers: { "x-content-length": "3" } },
+      );
+    }) as unknown as typeof fetch,
+    { maxConnections: 9 },
+  );
+  // One stream slot (nine less the eight kept for calls): each download must
+  // give it back for the next to start.
+  const cancelled = await t.fileStream({ method: "GET", path: "/v1/a" });
+  await cancelled.cancel();
+  const late = await t.fileStream({ method: "GET", path: "/v1/b", timeoutMs: 30 });
+  const lateReader = late.getReader();
+  await lateReader.read();
+  await Bun.sleep(60);
+  const third = await Promise.race([
+    t.fileStream({ method: "GET", path: "/v1/c" }),
+    Bun.sleep(500).then(() => "still queued"),
+  ]);
+  expect(third).not.toBe("still queued");
+  expect(calls).toBe(3);
+});
+
+/* A server under disk pressure answers `guest_busy` ("nothing ran") several
+   times in a row. Each such answer guarantees the call did nothing, so it is
+   sent again, with the same key, until the caller's deadline: the worst a
+   customer sees is slowness. A call that may have run is never replayed. */
+test("guest_busy is retried past maxRetries until it clears, with the same key", async () => {
+  const keys: (string | null)[] = [];
+  let refusals = 9;
+  const t = transport(
+    (async (_url: string, init: RequestInit) => {
+      keys.push(new Headers(init.headers).get("idempotency-key"));
+      if (refusals-- > 0)
+        return Response.json(
+          { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 1 } },
+          { status: 503 },
+        );
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch,
+    { maxRetries: 2 },
+  );
+  await expect(t.json({ method: "POST", path: "/v1/sandboxes/s:exec", body: {} })).resolves.toEqual(
+    {
+      ok: true,
+    },
+  );
+  expect(keys).toHaveLength(10);
+  expect(new Set(keys).size).toBe(1);
+});
+
+test("a call that cannot be replayed is still sent again after an answer that ran nothing", async () => {
+  let calls = 0;
+  const t = transport((async () => {
+    calls++;
+    if (calls <= 3)
+      return Response.json(
+        { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 1 } },
+        { status: 503 },
+      );
+    return Response.json({ ok: true });
+  }) as unknown as typeof fetch);
+  await t.json({ method: "POST", path: "/v1/x", body: {}, retry: false });
+  expect(calls).toBe(4);
+  // A passing failure that may have run is not replayed for such a call.
+  let others = 0;
+  const strict = transport((async () => {
+    others++;
+    return Response.json(
+      { error: { code: "host_unavailable", status: 503, message: "m", retryAfterMs: 1 } },
+      { status: 503 },
+    );
+  }) as unknown as typeof fetch);
+  await expect(
+    strict.json({ method: "POST", path: "/v1/x", body: {}, retry: false }),
+  ).rejects.toMatchObject({ code: "host_unavailable" });
+  expect(others).toBe(1);
+});
+
+test("guest_busy that never clears ends at the caller's deadline with its own error", async () => {
+  let calls = 0;
+  const t = transport((async () => {
+    calls++;
+    return Response.json(
+      { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
+      { status: 503 },
+    );
+  }) as unknown as typeof fetch);
+  const started = performance.now();
+  const error = await t
+    .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
+    .catch((error: unknown) => error);
+  expect(performance.now() - started).toBeLessThan(400);
+  expect(error).toMatchObject({ code: "guest_busy", status: 503 });
+  expect(calls).toBeGreaterThan(5);
+});
+
+/* The leader drill on vin-5, 4 October 2026: a call in flight when the
+   controller died waited, its connection silent, until its deadline, and
+   failed. An attempt whose answer has not started by ANSWER_START_MS is sent
+   again under the same key. */
+test("an attempt whose answer never starts is sent again under the same key", async () => {
+  const keys: (string | undefined)[] = [];
+  const server = createServer((request, response) => {
+    keys.push(request.headers["idempotency-key"] as string | undefined);
+    if (keys.length === 1) return; // a server that is gone: the connection stays, silent
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as { port: number };
+  try {
+    const t = new Transport({
+      apiKey: "rk_test",
+      baseUrl: `http://localhost:${port}`,
+      answerStartMs: 200,
+      timeoutMs: 5_000,
+    });
+    const started = performance.now();
+    const answer = await t.json<{ ok: boolean }>({
+      method: "POST",
+      path: "/v1/feedback",
+      idempotencyKey: "same-key",
+      body: {},
+    });
+    expect(answer).toEqual({ ok: true });
+    expect(keys).toEqual(["same-key", "same-key"]);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from .._compat_lease import no_limit  # noqa: F401 - the adapter's name for it
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Blaxel's names --------------------------------------------------
@@ -930,10 +931,9 @@ process runs any more."""
 KEEP = "RUNTIME_BLAXEL_KEEP"
 """Names a process's own env, which wins over the sandbox's."""
 RESTART_NOTE = re.compile(r"\n\[Process failed with exit code \d+\. Attempting restart (\d+)/")
-STANDBY: Dict[str, Any] = {"timeout_seconds": LEASE_SECONDS, "on_lease_end": "pause",
-                           "idle_pause_seconds": IDLE_PAUSE_SECONDS, "auto_wake": True}
-"""Blaxel's standby on Runtime: pause after a minute idle or at the lease's
-end, wake on the next request."""
+STANDBY: Dict[str, Any] = {"on_lease_end": "pause", "idle_pause_seconds": IDLE_PAUSE_SECONDS, "auto_wake": True}
+"""Blaxel's standby on Runtime: no time limit, pause after a minute idle, wake
+on the next request (0300)."""
 RUNTIME_KEEP_DAYS = 30
 """How long Runtime keeps a paid sandbox paused unless told otherwise. A trial
 sandbox is kept seven days, which no call changes (pricing guide, checked 27
@@ -978,6 +978,12 @@ def epoch(value: Any) -> float:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
 
 
+def end_of(info: Mapping[str, Any]) -> float:
+    """Where a sandbox's time limit ends: ``endsAt``, or ``expiresAt`` from an
+    older server."""
+    return epoch(info.get("endsAt") or info.get("expiresAt"))
+
+
 def iso(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -987,7 +993,9 @@ class Plan:
     """How long Runtime keeps a sandbox, from Blaxel's ttl, expires and
     lifecycle. Never shorter than Blaxel would."""
 
-    timeout_seconds: int = LEASE_SECONDS
+    timeout_seconds: Optional[int] = None
+    """A time limit, for a deadline within the hour; None is none: it runs
+    while it works and pauses when idle (0300)."""
     on_lease_end: str = "pause"
     retention_days: int = KEEP_DAYS
 

@@ -8,7 +8,7 @@
 export const WAIT_FOR_TIMEOUT_SECONDS = 60;
 /** A streamed exec's command limit when none is given: the API's longest. */
 export const STREAMED_EXEC_TIMEOUT_MS = 86_400_000;
-/** The lease keepAlive keeps ahead of now, and so the most it extends by. */
+/** The time keepAlive keeps ahead of a time limit, and so the most it extends by. */
 export const KEEP_ALIVE_MARGIN_SECONDS = 600;
 /** A webhook watch runs until stopped. */
 export const WEBHOOK_WATCH_TIMEOUT_MS = 0;

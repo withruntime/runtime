@@ -17,7 +17,7 @@ Weighing more than two? [Morph Cloud alternatives](/compare/morph-alternatives) 
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
   and runs its next command {{server-wake-command}} after the request that
   wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB of saved state a month.
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside, and {{uptime-credit}} of a short month's charges back as credit
   automatically ([Uptime Promise](/legal/sla)).
@@ -36,7 +36,7 @@ Weighing more than two? [Morph Cloud alternatives](/compare/morph-alternatives) 
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any create with `maxCostMicros`. Every write takes an
+  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
   idempotency key, so a lost response never creates a second sandbox.
 
 **Also included:** a code interpreter, network allow and deny lists, custom
@@ -82,7 +82,7 @@ Morph    Size   1,000 × 60 s / 3,600 × 2 MCU × {{rate:morph:unit}} = {{part:m
 
 Plan fees, included credit, storage, network and taxes are left out of both. On
 Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month
-is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
+is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 

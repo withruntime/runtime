@@ -16,7 +16,7 @@ Weighing more than two? [Fly.io alternatives for agent sandboxes](/compare/fly-i
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
   and runs its next command {{server-wake-command}} after the request that
   wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB of saved state a month.
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
@@ -24,7 +24,7 @@ Weighing more than two? [Fly.io alternatives for agent sandboxes](/compare/fly-i
   second it is started, busy or not. Runtime bills measured CPU, so time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Memory survives a pause, for as long as you choose.** A paused Runtime
-  sandbox keeps its processes for the retention you set, 1 to 365 days. A
+  sandbox keeps its processes while you have credit. A
   Sprite drops its memory when it goes cold, at a time you do not choose, and a
   Machine's root disk is temporary.
 - **Sized to the job.** You set vCPUs and memory for each sandbox and are billed
@@ -55,7 +55,7 @@ ports, dedicated outbound addresses and WireGuard private networks. See
 
 This compares Runtime with Fly.io's two ways to run agent code: Sprites, its
 sandboxes for agents, and Machines, its general-purpose VMs. Fly.io's figures
-come from its public pricing and documentation, checked 23 September 2026, with
+come from its public pricing and documentation, checked 2 October 2026, with
 Machines at the rates of its Ashburn (`iad`) region.
 
 |                | Runtime                                                          | Fly Sprites                                               | Fly Machines                                                                           |
@@ -66,7 +66,7 @@ Machines at the rates of its Ashburn (`iad`) region.
 | Size           | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart   | Memory managed by Fly, 100 GB disk                        | Up to 16 performance vCPUs and 128 GB                                                  |
 | Plan fee       | None; prepaid credit from {{topup-min}}                          | None required; optional monthly plans                     | None; pay as you go                                                                    |
 | Free start     | {{trial-hours}} sandbox hours, no card                           | {{term:fly-sprites:credit}} of trial credit               | Not stated on the pricing page                                                         |
-| When idle      | Pause keeps files and memory; paid retention 1–365 days          | Pauses itself; memory kept at first, the disk kept always | Root disk is temporary; volumes keep files; suspend, 2 GB or less                      |
+| When idle      | Pause keeps files and memory; kept while you have credit         | Pauses itself; memory kept at first, the disk kept always | Root disk is temporary; volumes keep files; suspend, 2 GB or less                      |
 | Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs | API, CLI, MCP server; JavaScript, Python, Go, Elixir SDKs | Machines API and flyctl                                                                |
 
 ## Cost for the same job
@@ -82,13 +82,13 @@ Runtime   CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}        = {{part:runtime:c
           Total                                          {{cost:runtime}}
 
 Sprites   CPU    1,000 × 20 s / 3,600 × {{rate:fly-sprites:cpu}}         = {{part:fly-sprites:cpu}}
-          Memory 1,000 × 60 s / 3,600 × 4 × {{rate:fly-sprites:memory}}  = {{part:fly-sprites:memory}}
+          Memory 1,000 × 90 s / 3,600 × 4 × {{rate:fly-sprites:memory}}  = {{part:fly-sprites:memory}}
           Total                                          {{cost:fly-sprites}}
 
 Machines  Size   1,000 × 60 s / 3,600 × {{rate:fly-machines:size}}       = {{part:fly-machines:size}}
 ```
 
-- **Saving:** {{saving:fly-sprites}} against Sprites ({{less:fly-sprites}} per 1,000 runs) and 55% against
+- **Saving:** {{saving:fly-sprites}} against Sprites ({{less:fly-sprites}} per 1,000 runs) and {{saving:fly-machines}} against
   Machines ({{less:fly-machines}} per 1,000 runs).
 - **Per month:** at 100,000 runs, {{cost:runtime:100000}} on Runtime against {{cost:fly-sprites:100000}} on Sprites
   and {{cost:fly-machines:100000}} on Machines.
@@ -96,8 +96,7 @@ Machines  Size   1,000 × 60 s / 3,600 × {{rate:fly-machines:size}}       = {{p
   {{cost:fly-sprites:busy}} on Sprites and {{cost:fly-machines}} on Machines.
 
 A Sprite bills the memory it actually uses, so a job that uses 1 GB pays {{cost:fly-sprites:2x1x60x20x1000}}
-in total, and a Sprite stays awake for about 30 seconds after its last activity
-unless you delete it. A Machine's performance vCPUs are whole cores kept for
+in total, and every figure here includes the 30 seconds or so a Sprite stays awake, and billed, after its run. A Machine's performance vCPUs are whole cores kept for
 it, which Runtime's default shared CPU is not; Runtime's `cpu: "reserved"` keeps
 every vCPU for you too.
 
@@ -106,7 +105,7 @@ shared vCPUs are guaranteed 6.25% of a core each and start with a small burst
 allowance, so a new one would not fit 20 CPU-seconds into the minute. Storage,
 network, plan fees, taxes and free credits are left out of all three. On
 Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month
-is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for Runtime's terms.
+is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
 
@@ -147,14 +146,15 @@ sandbox instead and stop it when the job ends.
 ## When Fly.io may fit better
 
 - **Regions.** Machines run in 18 regions. Runtime runs in one US region.
-- **Very cheap sleep.** A sleeping Sprite's disk costs {{outbound-rate}} per GB-month.
-  Runtime's paused storage, which also keeps memory, costs {{paused-storage-rate}} per GB-month.
+- **Very cheap sleep.** A sleeping Sprite's disk costs {{term:fly-sprites:cold-storage}} per GB-month,
+  its cold storage rate ([Fly.io pricing](https://fly.io/pricing/), read 4 October 2026).
+  Runtime's paused storage, which also keeps memory, costs {{paused-storage-rate}} per GB (10⁹ bytes) a month.
 - **A wider platform today.** Machines, volumes and Managed Postgres sit in the
   same account.
 
 ## Sources
 
-Checked 23 September 2026; Machine suspend rechecked 25 September 2026.
+Prices checked 2 October 2026; Machine suspend rechecked 25 September 2026.
 
 - [Fly.io pricing](https://fly.io/pricing/) for Machines and Sprites
 - [Sprites](https://fly.io/sprites/) and its pricing questions

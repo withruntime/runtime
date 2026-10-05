@@ -260,11 +260,20 @@ export class FakeSandbox {
       onLeaseEnd: input.onLeaseEnd ?? "pause",
       createdAt: new Date(1_800_000_000_000).toISOString(),
       expiresAt: new Date(
-        Date.now() + ((input.timeoutSeconds as number) ?? 1800) * 1000,
+        Date.now() + ((input.timeoutSeconds as number) || 1800) * 1000,
       ).toISOString(),
+      // As the API answers since 0300: no timeoutSeconds is no time limit,
+      // shown as 0 with no end, and the lease renews itself.
+      timeoutSeconds: input.timeoutSeconds ?? 0,
       ...(input.image ? { image: input.image } : {}),
       ...(input.snapshot ? { snapshot: input.snapshot } : {}),
     };
+    // A limited one ends where it is paid up to; one with none never does.
+    const limited = Boolean(input.timeoutSeconds);
+    Object.defineProperty(this.info, "endsAt", {
+      get: () => (limited ? this.info.expiresAt : null),
+      enumerable: true,
+    });
   }
   get state() {
     return this.info.state;
@@ -553,6 +562,8 @@ export class FakeSandbox {
   }
   async extend(seconds: number) {
     this.world.record("sandbox.extend", this.id, seconds);
+    // One with no time limit answers at once and changes nothing (0300).
+    if (this.info.endsAt === null) return this;
     this.info.expiresAt = new Date(Date.parse(this.info.expiresAt) + seconds * 1000).toISOString();
     return this;
   }

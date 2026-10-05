@@ -325,6 +325,11 @@ func (s *Sandbox) Update(ctx context.Context, settings SandboxSettings, opts *Li
 	if err := json.Unmarshal(encoded, &body); err != nil {
 		return err
 	}
+	// omitempty drops an empty map, and an empty map is how every label is
+	// removed.
+	if settings.Labels != nil {
+		body["labels"] = settings.Labels
+	}
 	if settings.RemoveMaxTotalCost {
 		body["maxTotalCostMicros"] = nil
 	} else if settings.MaxTotalCostMicros != nil {
@@ -344,11 +349,12 @@ type KeepAliveOptions struct {
 	OnError func(error)
 }
 
-// KeepAlive keeps a running sandbox's lease ahead of now, in the background,
-// until Stop, StopKeepAlive or ctx ends it: every Every it extends the lease
-// so that Margin remains, never more than the hour ahead the API allows.
-// Running time is billed as it is used, as for any extension. A paused
-// sandbox is left paused; a stopped one ends the loop.
+// KeepAlive keeps a sandbox with a time limit running past it, in the
+// background, until Stop, StopKeepAlive or ctx ends it: every Every it
+// extends the limit so that Margin remains, never more than the hour ahead
+// the API allows. A sandbox with no time limit (EndsAt nil) needs none, and
+// is only watched. Running time is billed as it is used. A paused sandbox is
+// left paused; a stopped one ends the loop.
 func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 	if opts == nil {
 		opts = &KeepAliveOptions{}
@@ -384,8 +390,8 @@ func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 				if info.State == "stopped" || info.State == "stopping" {
 					return
 				}
-				if info.State == "running" && info.ExpiresAt != nil {
-					need := margin - time.Until(*info.ExpiresAt)
+				if end := limitEnd(info); info.State == "running" && end != nil {
+					need := margin - time.Until(*end)
 					if need >= time.Second {
 						if err := s.Extend(loop, min(time.Hour, need.Round(time.Second)+time.Second), nil); err != nil && loop.Err() == nil && opts.OnError != nil {
 							opts.OnError(err)
@@ -398,6 +404,20 @@ func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 			}
 		}
 	}()
+}
+
+// limitEnd is where a sandbox's time limit ends, or nil when it has none: it
+// renews itself (timeoutSeconds 0, or persistent) unless EndsAt says its
+// renewal stopped. An older server sends no EndsAt and a timeout of at least
+// a minute.
+func limitEnd(info SandboxInfo) *time.Time {
+	if info.EndsAt != nil {
+		return info.EndsAt
+	}
+	if info.TimeoutSeconds == 0 || info.Persistent {
+		return nil
+	}
+	return info.ExpiresAt
 }
 
 // StopKeepAlive ends a KeepAlive, if one runs.
@@ -417,7 +437,8 @@ func (s *Sandbox) Pause(ctx context.Context, opts *LifecycleOptions) error {
 }
 
 // Wake carries on a paused sandbox, with its memory and processes, on its own
-// host. timeout, when not zero, is its new lease.
+// host. timeout, when not zero, is its new time limit for a sandbox that has
+// one; a sandbox with none keeps running while it works.
 func (s *Sandbox) Wake(ctx context.Context, timeout time.Duration, opts *LifecycleOptions) error {
 	body := map[string]any{}
 	if timeout > 0 {
@@ -426,8 +447,8 @@ func (s *Sandbox) Wake(ctx context.Context, timeout time.Duration, opts *Lifecyc
 	return s.lifecycle(ctx, "wake", opts, body, true)
 }
 
-// Extend gives the sandbox more time before its lease ends, at most an hour
-// ahead of now.
+// Extend moves a sandbox's time limit on, at most an hour ahead of now. A
+// sandbox with no time limit answers at once and nothing changes.
 func (s *Sandbox) Extend(ctx context.Context, by time.Duration, opts *LifecycleOptions) error {
 	return s.lifecycle(ctx, "extend", opts, map[string]any{"seconds": int(by.Seconds())}, false)
 }

@@ -53,12 +53,13 @@ with Sandbox.create() as sbx:
 running. Leaving the `with` block stops it, even after an exception.
 
 With no arguments you get the free trial while it lasts, the default region, and
-2 vCPU, 4 GiB of memory and a 4 GiB disk for up to 30 minutes. A paid sandbox
+2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
+itself when idle, with no time limit. A paid sandbox
 can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
 4 GiB.
 
-Omitting `funding` can use prepaid credit after the trial is exhausted. Set
-`funding="trial"` when you want free use only; it never falls back to paid.
+The trial's hours are spent first, then prepaid credit, with nothing to
+choose; `funding` is accepted and ignored.
 Every field is optional and takes snake_case names:
 
 ```python
@@ -75,14 +76,15 @@ sbx = runtime.sandboxes.create(
     on_lease_end="stop",
     network={"internet": True, "allow": ["pypi.org", "*.pythonhosted.org"]},
 )
-print(sbx.id, sbx.info["funding"], sbx.info["expiresAt"])
+print(sbx.id, sbx.info["funding"], sbx.info["endsAt"])
 sbx.stop()
 ```
 
-`timeout_seconds` is how long the sandbox may run before its lease ends; then
-it pauses or stops, as `on_lease_end` says. A trial sandbox that is still
-working then gets its `timeout_seconds` again, until the trial hours run out
-([trial](./trial)); a paid one runs longer with `persistent` or `keep_alive`.
+A sandbox needs no time limit: it runs while it works and pauses itself when
+idle, until you stop it or credit or the trial hours ([trial](./trial)) run out.
+`timeout_seconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: then it
+pauses or stops, as `on_lease_end` says, busy or not. `sbx.info["endsAt"]` is
+when it will stop or pause by itself, or `None` when it never will.
 
 `env` sets variables for every command, background process, terminal, SSH
 session and image start command in the sandbox, for its whole life; a
@@ -148,10 +150,10 @@ with Sandbox.create() as sbx:
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
-- The default timeout is 60 seconds, or what the sandbox's lease has left when
-  that is less, and 24 hours when the output streams (`on_stdout`,
+- The default timeout is 60 seconds, or what the sandbox's time limit has left
+  when that is less, and 24 hours when the output streams (`on_stdout`,
   `on_stderr` or `exec_stream`); the maximum is 24 hours. A command with no
-  `timeout_ms` is never refused for the lease. A
+  `timeout_ms` is never refused for the time limit. A
   timeout is a result (`timed_out=True`, with the output so far), not an
   exception.
 - `check=True` raises `CommandError` on a non-zero exit.
@@ -367,14 +369,17 @@ with Sandbox.create() as sbx:
 ```python check
 from withruntime import Sandbox
 
-sbx = Sandbox.create(timeout_seconds=600)
+sbx = Sandbox.create(timeout_seconds=600)  # a ten-minute limit
 sbx.exec("echo state > /workspace/state.txt")
 sbx.pause()  # memory and files are kept; compute billing stops
 again = Sandbox.connect(sbx.id)
-again.wake(timeout_seconds=1200)
-again.extend(600)
+again.wake(timeout_seconds=1200)  # a new limit, from the wake
+again.extend(600)  # moves the limit ten minutes on
 again.stop()
 ```
+
+A sandbox created without `timeout_seconds` has no limit, so `wake()` needs no
+argument and `extend()` answers at once and changes nothing.
 
 `pause()` returns once the sandbox's processors have stopped, which is where
 compute billing ends; the host then writes its memory to disk, and a wake or
@@ -383,9 +388,9 @@ snapshot asked for meanwhile waits for that write.
 A paused sandbox also wakes by itself when a request needs it: an `exec`, a
 file, process, terminal, desktop or code-interpreter call, or a visit to one of
 its shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers.
-The wake is billed like any wake, from the moment it runs again, with a fresh
-lease of its own `timeout_seconds`, or the lease it paused with when that ends
-later. Turn it off with `auto_wake=False` at create
+The wake is billed like any wake, from the moment it runs again, and it runs
+while it works again; one with a time limit gets a fresh one of its own
+`timeout_seconds`, or keeps the one it paused with when that ends later. Turn it off with `auto_wake=False` at create
 or `sbx.update(auto_wake=False)`; a call to a paused sandbox then fails with
 `sandbox_paused` until you call `wake()`.
 
@@ -406,21 +411,22 @@ sbx.stop()
 
 ### Keep a sandbox running
 
-`persistent=True` keeps a paid sandbox running for as long as the account has
-credit: its lease renews itself on the server, and after a stop its disk is
-kept, billed as reserved disk, so `sbx.restart()` starts it again.
-`update(persistent=False)` makes it an ordinary sandbox again: running, its
-disk stops being billed at once; stopped, its disk is deleted, which is how you
-delete it. `keep_alive()` extends the lease from your process instead, so ten minutes
-remain, once a minute, until `stop()` or the function it returns.
+A sandbox with no time limit keeps running while it works, with nothing to
+renew. `persistent=True` goes further: it keeps a paid sandbox running until
+you stop it, idle or not, for as long as the account has credit. Its disk is
+billed and kept as any sandbox's, so after a stop `sbx.restart()` starts it
+again. `update(persistent=False)` makes it an ordinary sandbox again;
+`delete()` removes it. `keep_alive()` moves a time limit on from your process, for a
+sandbox created with `timeout_seconds`, keeping ten minutes ahead, until
+`stop()` or the function it returns; on one with no limit it only watches.
 
 ```python check
 from withruntime import Sandbox
 
 server = Sandbox.create(funding="paid", persistent=True, max_total_cost_micros=50_000_000)
-server.update(persistent=False)  # back to an ordinary lease
+server.update(persistent=False)  # back to an ordinary sandbox
 
-worker = Sandbox.create()
+worker = Sandbox.create(timeout_seconds=3600)  # a one-hour limit, moved on below
 release = worker.keep_alive(margin_seconds=1800)
 release()
 worker.stop()
@@ -491,7 +497,9 @@ subclasses of `withruntime.RuntimeAPIError`. `RuntimeAPIError` and
 `RuntimeError` and `ConnectionError`. The old exports remain aliases of the
 same classes, so existing catches keep working. Every write carries an idempotency
 key, made for you; transport failures, 429 and 503 are retried with the same
-key, so a retry never makes two sandboxes or runs a command twice.
+key, so a retry never makes two sandboxes or runs a command twice. An answer
+that ran nothing (`guest_busy`, `busy`, `rate_limited`) is sent again until the
+call's deadline, or for five minutes without one, past `max_retries`.
 Interrupted complete response bodies are retried with the same key too;
 streamed output is never replayed after it reaches your code. A failed body
 read or retry delay carries the original `error.idempotency_key`.
@@ -502,11 +510,15 @@ input answers with the first one's result instead of doing it twice; the same
 key with different input is refused with `idempotency_key_reused`.
 
 ```python
+from uuid import uuid4
+
 from withruntime import Runtime
 
+job = uuid4().hex  # your job's own id: keep it for every retry of this job
+
 with Runtime() as runtime:
-    with runtime.sandboxes.create(idempotency_key="job-42-sandbox") as sbx:
-        sbx.exec(["python3", "-c", "print(42)"], idempotency_key="job-42-step-1")
+    with runtime.sandboxes.create(idempotency_key=f"job-{job}-sandbox") as sbx:
+        sbx.exec(["python3", "-c", "print(42)"], idempotency_key=f"job-{job}-step-1")
 ```
 
 **A create waits for room.** When every trial slot is taken (`trial_busy`), the
@@ -559,21 +571,17 @@ Past the limit, a create, wake, extension or renewal fails with a
 not retried. A read-only key asking to change anything gets
 `PermissionDeniedError`. See [security](./security).
 
-Cap a single create with `max_cost_micros`, in millionths of a dollar. The
-create is refused before anything starts if its first lease, priced as if every
-vCPU were busy for all of it, would cost more:
+Cap one sandbox's whole life with `max_total_cost_micros`, in millionths of a
+dollar. When it has cost that much it stops, and `stopReason` reads
+`lifetime_cap`:
 
 ```python check
-from withruntime import ConflictError, Runtime
+from withruntime import Runtime
 
 with Runtime() as runtime:
-    try:
-        # At most 5 cents for this sandbox's first lease.
-        sbx = runtime.sandboxes.create(funding="paid", vcpu=2, timeout_seconds=600,
-                                       max_cost_micros=50_000)
-        sbx.stop()
-    except ConflictError as error:
-        print(error.code)  # "budget_exceeded": ask for less, or raise the cap
+    # At most 50 cents over this sandbox's whole life.
+    sbx = runtime.sandboxes.create(funding="paid", max_total_cost_micros=500_000)
+    sbx.stop()
 ```
 
 ## Secrets your sandboxes never see
@@ -601,7 +609,7 @@ with Runtime() as runtime:
 ```
 
 With `header`, the proxy sets that header on every request to the hosts, with
-`format` placing the value. With `rules`, on paid accounts, only the requests a
+`format` placing the value. With `rules`, on accounts with credit, only the requests a
 rule allows by method and path carry it: a path is exact or ends in `/*`.
 Replacing a secret keeps its placeholder, so
 running sandboxes use the new value. See
@@ -643,12 +651,11 @@ sandbox from the image runs and when its create answers
 `images.resolve(ref)`, `images.tag(ref, tag)`, `images.untag(ref, tag)`,
 `images.follow_logs(id, on_log)` and `images.registries.set(registry,
 username=..., password=...)` for private images do the rest; see
-[custom images](./images). `sbx.switch_image("data:v2", keep="workspace")` moves
+[custom images](./images). `sbx.switch_image("data:v2")` moves
 a running sandbox to a new build, keeping its id, `/workspace` (its home),
 volumes, environment and previews; its processes restart and the rest of its
 old disk is lost ([move a sandbox to a new version](./images#move-a-sandbox-to-a-new-version)).
-When enabled, `sbx.resize(memory_mib=4096, vcpu=2, restart=True)` restarts it at
-a new size on the same server, keeping its whole disk; its programs stop. A volume lives on one server and is backed up off it
+A volume lives on one server and is backed up off it
 daily; `volumes.backup(id)` and `volumes.restore(backup_id)` make and restore a
 backup ([storage and backups](./storage)). `sbx.mounts.add(provider="s3", bucket=..., path=..., secret=...)`,
 `list()` and `remove(path)` mount your own bucket without the sandbox holding
@@ -657,8 +664,8 @@ its key ([mount your own bucket](./storage#mount-your-own-bucket)). Images, volu
 
 Forks and snapshots:
 
-- `fork` takes `funding` as a create does; without it, the copies keep the
-  source's funding.
+- Copies run on what the account's new sandboxes run on, as a create does;
+  `funding` is accepted and ignored.
 - Copies keep the source's size and CPU (reserved CPU, or a raised floor) and
   are billed as a create with those would be. A trial copy must fit the trial.
 - The snapshot a fork takes is deleted when the fork ends, whether every copy
@@ -666,18 +673,17 @@ Forks and snapshots:
 - If a copy fails, the error's `details["startedSandboxIds"]` names the copies
   that did start; they keep running until stopped. A retry with the same
   idempotency key answers the same error.
-- A sandbox created with `pausable=False` cannot be forked.
 - If a fork stops partway and left its source paused, the source stays paused,
   and an account notice says so and how to wake it.
-- Copies run on the source's server by default. Cross-server placement requires
-  [qualified transfers](./storage#wake-or-fork-on-another-server-when-enabled)
-  to be enabled. A kept snapshot is stored on its source server and
+- Copies run on the source's server. A kept snapshot is stored on its source server and
   copied off it, encrypted, after its final compressed form is ready. It survives loss of the server once
   `backedUp` is `True`, meaning that copy has been checked
   ([storage and backups](./storage)).
 - Snapshots default to `mode="memory"`, keeping files, memory and running
   processes. `base.snapshot(mode="disk")` keeps only the root filesystem;
-  each copy boots fresh without the saved processes. Both modes pause a
+  each copy boots fresh without the saved processes, at the `vcpu`,
+  `memory_mib` and `disk_mib` you pass (a disk at least the saved size). A
+  copy of a memory snapshot is always the snapshot's size. Both modes pause a
   running source until capture finishes, then wake it; an already paused
   source stays paused.
 
@@ -816,7 +822,7 @@ rules; a host the rules refuse is a warning, never a change.
 
 ## Domains, TCP ports, addresses, the tunnel and your own proxy
 
-Paid accounts only; see [networking](./networking).
+They need a kept top-up, and a dedicated address credit; see [networking](./networking).
 
 ```python check
 domain = runtime.domains.add("app.example.com", sandbox_id=sbx.id, port=3000)
@@ -917,6 +923,11 @@ with Runtime(max_retries=4, timeout=120) as runtime:
 `RUNTIME_API_URL` points the client at another API origin. Code inside a
 Runtime sandbox calls Runtime's API at `http://runtime.internal`
 ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
+A client holds at most 48 connections at once (`max_connections`), calls and
+streams such as a command's output together, and keeps 8 of them for calls;
+past that, calls and streams wait their turn instead of failing. One address
+may hold 64 connections to the API until it has used a valid key, and more
+after ([limits](./api#limits)).
 
 Before 0.3.0 the package was `withruntime-cloud`, imported as `runtime_cloud`.
 That name stopped at 0.5.1 and gets no new releases: install `withruntime` and

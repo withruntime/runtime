@@ -10,7 +10,9 @@ import {
 } from "./client.js";
 import { DaytonaError, DaytonaNotFoundError, guard, NotSupportedError } from "./errors.js";
 import type { Image } from "./image.js";
+import { LEASE_MAX_SECONDS } from "../compat/lease.js";
 import {
+  idlePauseOf,
   idleSeconds,
   networkRules,
   notFound,
@@ -412,12 +414,21 @@ export class Daytona implements AsyncDisposable {
             memoryMiB: Math.round(resources.memory * 1024),
             diskMiB: Math.round(resources.disk * 1024),
           }),
-      timeoutSeconds: lifecycle.deadline
-        ? Math.max(
-            60,
-            Math.min(lifecycle.windowSeconds, Math.floor((lifecycle.deadline - Date.now()) / 1000)),
-          )
-        : lifecycle.windowSeconds,
+      // A time to live is a time limit, kept by the lease. Without one there
+      // is none: it runs while it works and autoStopInterval is its idle
+      // pause, counted by the sandbox itself, so a long command is never
+      // frozen for want of calls from this client (0300).
+      ...(lifecycle.deadline
+        ? {
+            timeoutSeconds: Math.max(
+              60,
+              Math.min(
+                lifecycle.windowSeconds,
+                Math.floor((lifecycle.deadline - Date.now()) / 1000),
+              ),
+            ),
+          }
+        : { idlePauseSeconds: idlePauseOf(lifecycle.autoStopInterval) }),
       onLeaseEnd: lifecycle.ephemeral || lifecycle.deadline ? "stop" : "pause",
       ...(params.name ? { name: params.name } : {}),
       ...(labels ? { labels } : {}),
@@ -519,14 +530,24 @@ export class Daytona implements AsyncDisposable {
       language: runtime.info.labels[LANGUAGE_LABEL] ?? "python",
       public: false,
       ...(user ? { user } : {}),
-      lifecycle: {
-        windowSeconds: runtime.info.timeoutSeconds,
-        idleSeconds: runtime.info.timeoutSeconds,
-        ephemeral: onLeaseEnd === "stop",
-        autoStopInterval: Math.round(runtime.info.timeoutSeconds / 60),
-        autoArchiveInterval: 0,
-        autoDeleteInterval: -1,
-      },
+      lifecycle: runtime.info.timeoutSeconds
+        ? {
+            windowSeconds: runtime.info.timeoutSeconds,
+            idleSeconds: runtime.info.timeoutSeconds,
+            ephemeral: onLeaseEnd === "stop",
+            autoStopInterval: Math.round(runtime.info.timeoutSeconds / 60),
+            autoArchiveInterval: 0,
+            autoDeleteInterval: -1,
+          }
+        : {
+            // No time limit: its idle pause is its autoStopInterval.
+            windowSeconds: LEASE_MAX_SECONDS,
+            idleSeconds: Infinity,
+            ephemeral: onLeaseEnd === "stop",
+            autoStopInterval: Math.round((runtime.info.idlePauseSeconds ?? 0) / 60),
+            autoArchiveInterval: 0,
+            autoDeleteInterval: -1,
+          },
     });
   }
 

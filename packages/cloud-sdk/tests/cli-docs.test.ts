@@ -106,14 +106,31 @@ const dispatched = (word: string) =>
   new RegExp(`(case |[!=]== |\\[)"${word}"|"${word}":`).test(source);
 const options = (text: string) => [...text.matchAll(/--[a-z][a-z0-9-]*/g)].map((m) => m[0]);
 
-/** `runtime billing` pays in stablecoins, switched off on the deployment
- * until Marc turns it on (1f621467); its guide comes with it. */
+/** Commands of a feature switched off on the deployment, whose guide
+ * comes with it. `runtime billing` pays in stablecoins, until Marc turns it
+ * on (1f621467). Resize, volume growth and shared volumes are off until the
+ * server's switches are set (WORKLIST, "Sandbox features round, 2 October
+ * 2026"); their passages left the guides on 4 October 2026, and the server's
+ * own codes are held the same way (packages/cloud/tests/docs-completeness.test.ts,
+ * SWITCHED_OFF). The CLI cannot read a server's switch, so these stay listed
+ * until the guide comes back. */
 const SWITCHED_OFF = new Set([
   "runtime billing topup",
   "runtime billing status",
   "runtime billing claim",
   "--new-account",
   "--accept-terms",
+  // RUNTIME_CLOUD_SANDBOX_RESIZE_ENABLED.
+  "runtime sandbox resize",
+  "--restart",
+  // RUNTIME_CLOUD_VOLUME_RESIZE_ENABLED.
+  "runtime volume resize",
+  // RUNTIME_CLOUD_SHARED_VOLUMES_ENABLED.
+  "runtime volume attach",
+  "runtime volume attachment",
+  "runtime volume detach",
+  "--shared",
+  "--path",
 ]);
 
 test("the guide reader reads shorthand under a named command, and only there", () => {

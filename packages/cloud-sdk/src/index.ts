@@ -100,7 +100,8 @@ export type * from "./types.js";
  * does the same with an explicit client. */
 export class Sandbox extends SandboxClass {
   /** Creates a sandbox (every field optional) and waits until it is running.
-   * `keepAlive: true` (or its options) extends its lease in the background
+   * With no `timeoutSeconds` it runs while it works and pauses when idle.
+   * `keepAlive: true` (or its options) carries one with a time limit past it
    * until you stop it; see `sandbox.keepAlive()`. */
   static async create(
     input: CreateSandbox & { wait?: boolean; keepAlive?: boolean | KeepAliveOptions } = {},

@@ -3,12 +3,12 @@
 Runtime uses Firecracker microVMs on Runtime-operated dedicated servers.
 
 - Each sandbox has its own Linux kernel, disk and guest environment.
-- CPU, memory, disk, network rules, leases and billing are enforced on the host,
+- CPU, memory, disk, network rules, time limits and billing are enforced on the host,
   outside the guest.
 - Host credentials, control sockets and provider credentials never reach
   customers.
 - Tests on our own servers exercise guest separation, selected private-address
-  refusals, restart recovery and host-side lease expiry.
+  refusals, restart recovery and time limits ending on the host.
 
 ## Keys and secrets
 
@@ -54,12 +54,16 @@ your prepaid balance.
   dashboards and CI checks.
 - **Daily spending limit.** Set one on any key that can spend, when you create
   it or later from its row. It is the most that key's agent may commit in any
-  24 hours: settled charges plus money still on hold. It counts everything the
-  agent's sandboxes cost, including renewals and parked storage. When a create,
+  24 hours, counting what is already charged and what running sandboxes are
+  about to use. It counts everything the
+  agent's sandboxes cost, including renewals and parked storage. An
+  account-wide key's limit also counts what it asks for on another key's
+  sandbox: a wake, an extension or a restart, and then the renewals that carry
+  that sandbox to the end of its `timeoutSeconds`. When a create,
   wake, extension or renewal would pass it, that request fails with
   `spending_limit_reached` (HTTP 402) and nothing is charged. A running sandbox
-  keeps its current lease; one that needs a renewal past the limit stops or
-  pauses when its lease ends. Room comes back as older spending leaves the
+  keeps the time it is already funded for; one whose next renewal would pass
+  the limit stops or pauses at the end of that time. Room comes back as older spending leaves the
   24-hour window.
 
 An owner, admin or developer of the account can create a key, of either kind:
@@ -79,8 +83,8 @@ An owner, admin or developer of the account can create a key, of either kind:
 - Every key made, revoked or limited, and every connection approved, is in the
   account's [audit log](./teams#audit-log), with who did it and from where.
 
-A create can also carry `maxCostMicros`: it is refused if its first lease would
-cost more.
+A sandbox can also carry `maxTotalCostMicros`, the most it may cost over its
+whole life: it stops there, with `stopReason` `lifetime_cap`.
 
 Set a limit above what the agent's paused sandboxes cost in a day. If storage
 for a paused sandbox cannot be paid for, it is treated like storage on an empty
@@ -92,8 +96,7 @@ balance: you are notified, and after seven days unpaid it is deleted.
 use `HTTP_PROXY` and programs that open raw sockets are held to the same rules;
 nothing in the guest, root included, can go around it.
 
-- A paid sandbox of an account that has made a purchase reaches any public host
-  on any port. A trial sandbox reaches ports 443 and 80.
+- A paid sandbox of an account with a kept top-up reaches any public host on any port. A trial sandbox reaches ports 443 and 80.
 - A few ports are never reachable (telnet, Windows RPC, NetBIOS and SMB, IRC),
   and mail ports open only when support enables mail for your account.
 - Private and internal addresses are refused. Code that retries one, such as a
@@ -120,17 +123,22 @@ nothing in the guest, root included, can go around it.
   with an API key, like any other caller. The host sends each request on to
   the public API over HTTPS and reaches nothing else of its own. See
   [Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox).
-- Each sandbox has limits on concurrent connections, bandwidth and bytes per
-  day, so one sandbox cannot crowd out others. A paid sandbox gets {{paid-bandwidth}},
-  {{paid-bandwidth-sustained}} sustained after its first {{paid-bandwidth-burst}}, and {{paid-daily-transfer}} a day; a trial
-  sandbox {{trial-bandwidth}}, with {{trial-daily-transfer}} a day for the whole trial account
-  ([the sandbox environment](./sandbox-environment#the-network)).
+- Each sandbox has limits on concurrent connections, upload speed and bytes
+  per day, and shares its server's link fairly with the others, so one sandbox
+  cannot crowd out others. A paid sandbox uploads at up to {{paid-upload}}, {{paid-upload-sustained}}
+  sustained after its first {{paid-upload-burst}}, and moves {{paid-daily-transfer}} a day; a trial sandbox
+  uploads at up to {{trial-upload}}, with {{trial-daily-transfer}} a day for the whole trial account.
+  Uploads are limited because they are what spam and floods use; downloads
+  are not ([the sandbox environment](./sandbox-environment#the-network)).
 
 Inbound connections require a preview, a proved custom domain, an allocated
 TCP port or an authorized private tunnel. Each reaches only the sandbox port
 and account it was granted. A preview is private with an expiring token unless
-you make it public, which a paid sandbox can do; a trial sandbox's previews
-are always private. Preview addresses are under `runtimehost.com`, never under
+you make it public, which a paid sandbox of an account with a kept top-up
+can do; a trial sandbox's previews are always private. While an account is
+blocked, or every purchase it made is refunded in full, its public previews
+need the token like private ones, and they are public again once it pays.
+Preview addresses are under `runtimehost.com`, never under
 `withruntime.com`, so sandbox content never shares an origin with your account.
 Rotating a preview token refuses every token issued before it, and closes
 connections opened with one, before the call returns. Making a preview private
@@ -177,7 +185,7 @@ await runtime.secrets.set("GITHUB_TOKEN", {
   to any other host carries the placeholder, which is worthless.
 - With `header`, the proxy sets that header on every HTTPS request to the hosts,
   replacing one the sandbox sent, so code needs no placeholder at all.
-- With `rules`, on paid accounts, the value goes only into the requests a rule
+- With `rules`, on accounts with credit, the value goes only into the requests a rule
   allows, by method and path, decided for each request on a connection. A path
   is exact (`/v1/chat/completions`) or a prefix ending in `/*`
   (`/repos/acme/*`). Before matching, the proxy removes `.` and `..` segments
@@ -186,8 +194,8 @@ await runtime.secrets.set("GITHUB_TOKEN", {
   slash, a semicolon or a backslash, gets no secret that has rules. Up to 16
   rules of up to 16 paths each. In the CLI, from `withruntime` 0.7.0, give `--allow "GET,HEAD /repos/acme/*"` once per rule, or
   `--allow /v1/chat/completions` for every method; in the SDKs,
-  `rules: [{ methods: ["GET"], paths: ["/repos/acme/*"] }]`. An account that
-  has not added credit gets `payment_required` (402).
+  `rules: [{ methods: ["GET"], paths: ["/repos/acme/*"] }]`. An account with
+  no credit gets `payment_required` (402).
 - The value is sealed to the servers' key when you store it. No API, tool or
   command returns it, and a sandbox never holds it: not in its environment, its
   memory or its disk, so a prompt injection or a stolen sandbox cannot leak it.
@@ -210,8 +218,9 @@ await runtime.secrets.set("GITHUB_TOKEN", {
 - Replacing a secret keeps its placeholder; running sandboxes use the new value
   within seconds. Deleting one erases the value; it does not revoke the key at
   its provider.
-- Up to 50 secrets per account, each at most 8 KiB of visible ASCII, with up to
-  16 hosts. The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
+- Up to {{sandbox-secrets}} secrets for sandboxes (`--host`) per account, each at most 8 KiB of
+  visible ASCII, with up to 16 hosts. Secrets for jobs (`--jobs`) have their
+  own limit, {{paid-secrets}} per account ([jobs](./jobs#secrets-in-a-job)). The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
   and `DELETE /v1/egress-secrets/{name}`; the MCP tool is
   `runtime_secrets`, with `set`, `list` and `delete`.
 
@@ -261,13 +270,12 @@ await runtime.network.upstreamProxy.set({
 ## Root inside the sandbox
 
 The sandbox user has passwordless `sudo`. Root inside the guest controls the
-guest and nothing else: CPU, memory, disk, network rules, leases and billing are
+guest and nothing else: CPU, memory, disk, network rules, time limits and billing are
 enforced on the host.
 
 ## Lifetimes and storage
 
-A host-side lease bounds execution even if management is unavailable. A stopped
-sandbox is not a separately promised backup. Export important results before you
+A stopped sandbox is not a separately promised backup. Export important results before you
 stop it.
 
 ## Browser-approved agent connections

@@ -1,6 +1,7 @@
 import type { Sandbox } from "../sandbox.js";
 import type { RequestOptions, Transport } from "../transport.js";
 import type { Preview } from "./previews.js";
+import { whileInstalling } from "../wait.js";
 
 export type MouseButton = "left" | "middle" | "right";
 export type DesktopWindow = {
@@ -60,25 +61,12 @@ export function sandboxDesktop(t: Transport, sandbox: Sandbox) {
     t.json<T>({ method: "POST", path: `${base()}:act`, body, ...options });
   return {
     /** Starts the desktop. The first start in a sandbox installs it, which
-     * takes a minute or two; this waits for that (up to 10 minutes). */
+     * takes a minute or two; this waits for that (up to 10 minutes, or the
+     * call's timeoutMs). */
     async start(size: { width?: number; height?: number } = {}, options?: RequestOptions) {
-      const deadline = Date.now() + 600_000;
-      for (;;) {
-        try {
-          return await t.json<DesktopStart>({
-            method: "POST",
-            path: `${base()}:start`,
-            body: size,
-            ...options,
-          });
-        } catch (error) {
-          const code = (error as { code?: string }).code;
-          if (code !== "desktop_installing" || Date.now() > deadline) throw error;
-          await new Promise((resolve) =>
-            setTimeout(resolve, (error as { retryAfterMs?: number }).retryAfterMs ?? 10_000),
-          );
-        }
-      }
+      return whileInstalling(["desktop_installing"], options, (request) =>
+        t.json<DesktopStart>({ method: "POST", path: `${base()}:start`, body: size, ...request }),
+      );
     },
     stop: (options?: RequestOptions) =>
       t.json<{ ok: boolean }>({ method: "POST", path: `${base()}:stop`, ...options }),
@@ -124,18 +112,9 @@ export function sandboxDesktop(t: Transport, sandbox: Sandbox) {
     /** Opens `url` in Chromium on the desktop. Right after a sandbox's first
      * start, Chromium may still be installing; this waits for it. */
     async open(url: string, options?: RequestOptions) {
-      const deadline = Date.now() + 600_000;
-      for (;;) {
-        try {
-          return await act({ action: "open", url }, options);
-        } catch (error) {
-          const code = (error as { code?: string }).code;
-          if (code !== "desktop_installing" || Date.now() > deadline) throw error;
-          await new Promise((resolve) =>
-            setTimeout(resolve, (error as { retryAfterMs?: number }).retryAfterMs ?? 10_000),
-          );
-        }
-      }
+      return whileInstalling(["desktop_installing"], options, (request) =>
+        act({ action: "open", url }, request),
+      );
     },
     /** Starts a program on the desktop, detached. */
     launch: (argv: string[], options?: RequestOptions) => act({ action: "launch", argv }, options),

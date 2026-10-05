@@ -66,7 +66,7 @@ class Create(Base):
     def test_blaxel_defaults_and_standby(self):
         box = self.create({"name": "one"})
         self.assertEqual(self.last_create(), {
-            "vcpu": 2, "memory_mib": 4096, "timeout_seconds": 3600, "on_lease_end": "pause",
+            "vcpu": 2, "memory_mib": 4096, "on_lease_end": "pause",
             "idle_pause_seconds": 60, "auto_wake": True, "name": "one",
             "labels": {"blaxel/image": "blaxel/base-image:latest", "blaxel/memory": "4096"}})
         self.assertEqual(self.world.called("sandbox.retention")[-1][1], 365)
@@ -155,18 +155,21 @@ class Create(Base):
         self.assertEqual(self.world.called("sandboxes.create"), [])
 
     def test_ttl_and_lifecycle_never_delete_earlier_than_blaxel(self):
+        # 0: no time limit, so it runs while it works and pauses when idle (0300).
         cases = [({"ttl": "30m"}, 1800, "stop", 1), ({"ttl": "1h"}, 3600, "stop", 1),
-                 ({"ttl": "2h"}, 3600, "pause", 1), ({"ttl": "2d"}, 3600, "pause", 2),
+                 ({"ttl": "2h"}, 0, "pause", 1), ({"ttl": "2d"}, 0, "pause", 2),
                  ({"ttl": "30s"}, 60, "stop", 1),
                  ({"lifecycle": {"expirationPolicies": [{"type": "ttl-idle", "value": "30m", "action": "delete"}]}},
-                  3600, "pause", 1),
-                 ({"lifecycle": {"expiration_policies": [{"type_": "ttl-max-age", "value": "10d"}]}}, 3600, "pause",
+                  0, "pause", 1),
+                 ({"lifecycle": {"expiration_policies": [{"type_": "ttl-max-age", "value": "10d"}]}}, 0, "pause",
                   10),
                  ({"expires": datetime.now(timezone.utc) + timedelta(minutes=20)}, None, "stop", 1)]
         for config, lease, end, days in cases:
             self.create(config)
             fields = self.last_create()
-            if lease is not None:
+            if lease == 0:
+                self.assertNotIn("timeout_seconds", fields, config)
+            elif lease is not None:
                 self.assertEqual(fields["timeout_seconds"], lease, config)
             else:
                 self.assertTrue(1100 <= fields["timeout_seconds"] <= 1200)
@@ -538,7 +541,8 @@ class Processes(Base):
         update = self.world.called("sandbox.update")[-1][1]
         # The idle pause to give back stays the one before any keep_alive.
         self.assertEqual((update["idle_pause_seconds"], update["labels"]["blaxel/idlePauseSeconds"]), (0, "60"))
-        self.assertTrue(3490 <= self.world.called("sandbox.extend")[-1][1] <= 3500)
+        # No time limit: the idle pause alone keeps it, and nothing is extended.
+        self.assertEqual(self.world.called("sandbox.extend"), [])
 
     def test_the_idle_pause_comes_back_when_the_last_keep_alive_process_ends(self):
         self.keep_running()
@@ -599,7 +603,8 @@ class Processes(Base):
                 process.end(0)
         self.keep_running()
         self.world.finish_on_wait = later
-        box = self.create()
+        # A sandbox made before 0300, with an hour's time limit.
+        box = self.create(runtime_create={"timeout_seconds": 3600})
         self.runtime(box).info["expiresAt"] = core.iso(time.time() + 120)
         box.process.exec({"command": "long", "wait_for_completion": True})
         self.assertEqual(len(self.world.called("sandbox.extend")), 1)

@@ -110,12 +110,14 @@ module WithRuntime
     # Saves the sandbox's memory and files; compute billing stops.
     def pause(wait: true, idempotency_key: nil) = lifecycle("pause", {}, wait, idempotency_key)
 
-    # Carries on a paused sandbox, with its memory and processes; +timeout_seconds+ is its new lease.
+    # Carries on a paused sandbox, with its memory and processes;
+    # +timeout_seconds+ is its new time limit, for a sandbox that has one.
     def wake(wait: true, timeout_seconds: nil, idempotency_key: nil)
       lifecycle("wake", timeout_seconds ? { "timeoutSeconds" => timeout_seconds } : {}, wait, idempotency_key)
     end
 
-    # More time before the lease ends, at most an hour ahead of now.
+    # Moves a sandbox's time limit on, at most an hour ahead of now. A sandbox
+    # with no time limit answers at once and nothing changes.
     def extend_lease(seconds, idempotency_key: nil) = lifecycle("extend", { "seconds" => seconds }, false, idempotency_key)
 
     # Days (1 to 365) a paused sandbox is kept before it is deleted.
@@ -133,11 +135,12 @@ module WithRuntime
       lifecycle("update", body, false, idempotency_key)
     end
 
-    # Keeps a running sandbox's lease ahead of now on a background thread, until
-    # +stop+ or +stop_keep_alive+: every +every+ seconds it extends the lease so
-    # that +margin+ seconds remain, never more than the hour ahead the API
-    # allows. Running time is billed as it is used. A paused sandbox is left
-    # paused; a stopped one ends the loop.
+    # Keeps a sandbox with a time limit running past it on a background thread,
+    # until +stop+ or +stop_keep_alive+: every +every+ seconds it extends the
+    # limit so that +margin+ seconds remain, never more than the hour ahead the
+    # API allows. A sandbox with no time limit needs none and is only watched.
+    # Running time is billed as it is used. A paused sandbox is left paused; a
+    # stopped one ends the loop.
     def keep_alive(every: 60, margin: ApiDefaults::KEEP_ALIVE_MARGIN_SECONDS, &on_error)
       stop_keep_alive
       every = [10, every].max
@@ -148,7 +151,7 @@ module WithRuntime
             refresh
             break if %w[stopped stopping].include?(state)
 
-            expires = @info["expiresAt"]
+            expires = Sandbox.limit_end(@info)
             if state == "running" && expires
               need = (margin - (Time.parse(expires) - Time.now)).ceil
               extend_lease([3600, need].min) if need >= 1
@@ -161,6 +164,17 @@ module WithRuntime
       end
       @keep_alive.report_on_exception = false
       self
+    end
+
+    # Where a sandbox's time limit ends, or nil when it has none: it renews
+    # itself (timeoutSeconds 0, or persistent) unless endsAt says its renewal
+    # stopped. An older server sends no endsAt and a timeout of at least a
+    # minute.
+    def self.limit_end(info)
+      return info["endsAt"] if info["endsAt"]
+      return nil if info["timeoutSeconds"].to_i.zero? || info["persistent"]
+
+      info["expiresAt"]
     end
 
     # Ends a keep-alive, if one runs.
@@ -242,41 +256,86 @@ module WithRuntime
       longest = ApiDefaults::STREAMED_EXEC_TIMEOUT_SECONDS
       body = command_body(command, cwd, env, stdin, timeout || longest).merge("stream" => true)
       handed_over = nil
-      @t.events("POST", path(":exec"), body: body, key: idempotency_key,
-                                       timeout: timeout ? timeout + 60 : longest) do |event|
-        case event["type"]
-        when "continue" then handed_over = event
-        when "error" then raise stream_error(event)
-        else yield event
+      process_id = nil
+      cursor = 0
+      exited = false
+      begin
+        @t.events("POST", path(":exec"), body: body, key: idempotency_key,
+                                         timeout: timeout ? timeout + 60 : longest) do |event|
+          case event["type"]
+          when "continue" then handed_over = event
+          when "error" then raise stream_error(event)
+          else
+            process_id = event["processId"] if event["type"] == "start"
+            cursor = event["offset"] + event["data"].bytesize if %w[stdout stderr].include?(event["type"])
+            exited = true if event["type"] == "exit"
+            yield event
+          end
+          break if handed_over || exited
         end
-        break if handed_over
+      rescue ConnectionError => e
+        raise if e.code != "connection_error" || process_id.nil?
       end
-      follow(handed_over["processId"], handed_over["cursor"], &block) if handed_over
+      return follow(handed_over["processId"], handed_over["cursor"], &block) if handed_over
+      return if exited
+
+      # The stream closed before the command's exit. Its output is kept on the
+      # sandbox, so follow it from where this stream stopped; an end with no
+      # exit is never a result.
+      if process_id.nil?
+        raise ConnectionError.new("The exec stream closed before the command started.",
+                                  code: "connection_error", idempotency_key: idempotency_key,
+                                  hint: "Run it again; to be sure it runs once, pass the same idempotency_key.")
+      end
+      follow(process_id, cursor, &block)
     end
 
-    # A process's output events from +cursor+ until it exits, across the server's stream slices.
+    # A process's output events from +cursor+ until it exits, across the
+    # server's stream slices. A stream that closes or is cut before the exit
+    # is followed again from where it stopped; four in a row with nothing new
+    # are an error, never an end.
     def follow(process_id, cursor = 0)
       return enum_for(:follow, process_id, cursor) unless block_given?
 
+      idle = 0
       loop do
         resume = nil
         exited = false
-        @t.events("GET", path("/processes/#{Transport.segment(process_id)}/output"),
-                  query: { "cursor" => cursor, "follow" => "true" }, timeout: 180) do |event|
-          case event["type"]
-          when "continue"
-            resume = event["cursor"]
-            break
-          when "stdout", "stderr" then cursor = event["offset"] + event["data"].bytesize
-          when "error" then raise stream_error(event)
-          when "exit" then exited = true
+        before = cursor
+        cut = false
+        begin
+          @t.events("GET", path("/processes/#{Transport.segment(process_id)}/output"),
+                    query: { "cursor" => cursor, "follow" => "true" }, timeout: 180) do |event|
+            case event["type"]
+            when "continue"
+              resume = event["cursor"]
+              break
+            when "stdout", "stderr" then cursor = event["offset"] + event["data"].bytesize
+            when "error" then raise stream_error(event)
+            when "exit" then exited = true
+            end
+            yield event
+            break if exited
           end
-          yield event
-          break if exited
-        end
-        break if exited || resume.nil?
+        rescue ConnectionError => e
+          raise if e.code != "connection_error"
 
-        cursor = resume
+          cut = true
+        end
+        break if exited
+
+        cursor = [cursor, resume].max if resume
+        if resume || cursor > before
+          idle = 0
+          next
+        end
+        idle += 1
+        if idle > 3
+          raise ConnectionError.new("The output stream of process #{process_id} keeps closing before it ends.",
+                                    code: "connection_error",
+                                    hint: "Read what it printed so far: runtime sandbox logs #{id} #{process_id}")
+        end
+        sleep([0.05 * (2**idle), 2].min) if cut
       end
     end
 

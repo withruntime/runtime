@@ -19,7 +19,7 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
   {{idle-pause}} with nothing happening in it, keeps its memory and processes,
   and runs its next command {{server-wake-command}} after the request that
   wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB of saved state a month.
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
@@ -31,8 +31,8 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
   with memory chosen apart from CPU. A MicroVM's baseline tops out at 4 vCPUs
   and 8 GB, always 2 GB per vCPU.
 - **Sessions that last.** A MicroVM keeps its state for up to 8 hours. A Runtime
-  sandbox runs as long as you extend its lease, or stays up with
-  `persistent: true`, and a paused one keeps its memory for 1 to 365 days.
+  sandbox has no time limit: it runs while it works, or stays up idle with
+  `persistent: true`, and a paused one keeps its memory while you have credit.
 - **Fork a running machine.** A Runtime fork copies a sandbox as it is now,
   memory and processes included, into up to {{fork-copies}} running copies.
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
@@ -43,7 +43,7 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
   goes into a prompt or a config file, and the [MCP server](./mcp) reuses the
   same connection.
 - **Guardrails for agents.** Read-only keys, a daily spending limit per key and
-  `maxCostMicros` on each create keep an agent inside its budget, and every
+  `maxTotalCostMicros` on each sandbox keep an agent inside its budget, and every
   write takes an idempotency key.
 
 **Also included:** a code interpreter, network allow and deny lists, custom
@@ -58,17 +58,17 @@ WireGuard private networks. See [products](./products).
 Lambda MicroVMs' figures come from AWS's public pricing and product pages,
 checked {{checked:lambda-microvms}}. Rates are for Arm (Graviton) in US East (N. Virginia).
 
-|                | Runtime                                                        | AWS Lambda MicroVMs                                                              |
-| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                                | Firecracker microVM                                                              |
-| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{=$10 rate:lambda-microvms:cpu / 3600}} per baseline vCPU-second while running  |
-| Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{=$10 rate:lambda-microvms:memory / 3600}} per baseline GB-second while running |
-| Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Baseline up to 4 vCPUs and 8 GB, 2 GB per vCPU                                   |
-| Session length | Leases extended as needed, or `persistent`                     | State kept up to 8 hours                                                         |
-| Suspend        | Files, memory and processes, kept 1 to 365 days                | Memory and disk in a snapshot, at {{paused-storage-rate}} per GB-month           |
-| Free start     | {{trial-hours}} sandbox hours, no card                         | No free tier for MicroVMs                                                        |
-| Plan fee       | None; prepaid credit from {{topup-min}}                        | None; an AWS account                                                             |
-| Agent sign-in  | Browser approval; no key in the agent's config                 | AWS credentials and IAM                                                          |
+|                | Runtime                                                        | AWS Lambda MicroVMs                                                                  |
+| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Isolation      | Firecracker microVM, own kernel                                | Firecracker microVM                                                                  |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{=$10 rate:lambda-microvms:cpu / 3600}} per baseline vCPU-second while running      |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{=$10 rate:lambda-microvms:memory / 3600}} per baseline GB-second while running     |
+| Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Baseline up to 4 vCPUs and 8 GB, 2 GB per vCPU                                       |
+| Session length | No time limit: runs while it works, or `persistent`            | State kept up to 8 hours                                                             |
+| Suspend        | Files, memory and processes, kept while you have credit        | Memory and disk in a snapshot, at {{paused-storage-rate}} per GB (10⁹ bytes) a month |
+| Free start     | {{trial-hours}} sandbox hours, no card                         | No free tier for MicroVMs                                                            |
+| Plan fee       | None; prepaid credit from {{topup-min}}                        | None; an AWS account                                                                 |
+| Agent sign-in  | Browser approval; no key in the agent's config                 | AWS credentials and IAM                                                              |
 
 ## Cost for the same job
 
@@ -95,7 +95,7 @@ Lambda   CPU    1,000 × 60 s × 2 × {{=$10 rate:lambda-microvms:cpu / 3600}}  
 
 Snapshot storage and its reads and writes, data transfer, taxes and credits are
 left out of both. On Runtime, inbound traffic is free, and each account's first
-{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for
+{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch

@@ -14,7 +14,7 @@ Weighing more than two? [Modal Sandbox alternatives](/compare/modal-alternatives
   sandbox requested or the CPU it used, so a requested core is billed while it
   waits. Runtime measures the CPU your code actually uses, with a floor of {{cpu-floor-share}}. There is no request to size in advance.
 - **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB a
+  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
   month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
   Runtime's servers.
 - **Starts in milliseconds.** Modal states its sandboxes start in {{speed:modal:create}}.
@@ -31,7 +31,7 @@ Weighing more than two? [Modal Sandbox alternatives](/compare/modal-alternatives
   boundary between sandboxes. Modal uses gVisor, a user-space kernel that
   intercepts system calls. See [security](./security).
 - **Pause with memory, on every sandbox.** A paused Runtime sandbox wakes with
-  its processes still running, kept for 1 to 365 days. Forks copy a running
+  its processes still running, kept while you have credit. Forks copy a running
   sandbox, memory and processes included.
 - **Nothing to set up first.** One call creates a sandbox, with no app or
   project. Outside Modal, a Modal sandbox needs an App.
@@ -65,15 +65,15 @@ ports and WireGuard private networks. See [products](./products).
 Modal's figures come from its public pricing and documentation, checked
 {{checked:modal}}.
 
-|                | Runtime                                                                                                                         | Modal Sandboxes                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Isolation      | Firecracker microVM, own kernel                                                                                                 | gVisor, a user-space kernel that intercepts system calls                                                               |
-| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor                                                                  | {{=$4 rate:modal:cpu * 2}} per physical core-hour (2 vCPUs), request or use                                            |
-| Memory billing | {{memory-rate}} per reserved GiB-hour                                                                                           | {{=$4 rate:modal:memory}} per GiB-hour, request or use                                                                 |
-| Plan fee       | None; prepaid credit from {{topup-min}}                                                                                         | Starter {{term:modal:starter}} with {{term:modal:starter-credit}} a month of compute; Team {{term:modal:team}} a month |
-| Free start     | {{trial-hours}} sandbox hours, no card                                                                                          | {{term:modal:starter-credit}} of compute a month on Starter                                                            |
-| Session length | Leases of up to an hour, extended as often as needed, or persistent while credit lasts; pauses itself after {{idle-pause}} idle | Up to 24 hours; snapshots carry state beyond that                                                                      |
-| Setup          | One call; no app or project                                                                                                     | A Modal App is needed outside Modal                                                                                    |
+|                | Runtime                                                                     | Modal Sandboxes                                                                                                        |
+| -------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Isolation      | Firecracker microVM, own kernel                                             | gVisor, a user-space kernel that intercepts system calls                                                               |
+| CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{=$4 rate:modal:cpu * 2}} per physical core-hour (2 vCPUs), request or use                                            |
+| Memory billing | {{memory-rate}} per reserved GiB-hour                                       | {{=$4 rate:modal:memory}} per GiB-hour, request or use                                                                 |
+| Plan fee       | None; prepaid credit from {{topup-min}}                                     | Starter {{term:modal:starter}} with {{term:modal:starter-credit}} a month of compute; Team {{term:modal:team}} a month |
+| Free start     | {{trial-hours}} sandbox hours, no card                                      | {{term:modal:starter-credit}} of compute a month on Starter                                                            |
+| Session length | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | Up to 24 hours; snapshots carry state beyond that                                                                      |
+| Setup          | One call; no app or project                                                 | A Modal App is needed outside Modal                                                                                    |
 
 ## Cost for the same job
 
@@ -100,7 +100,7 @@ Modal    CPU    1,000 × 60 s × 1 core × {{=$8 rate:modal:cpu * 2 / 3600}} = {
 A smaller request lowers Modal's figure, but it also caps what the sandbox can
 use when it needs more. Plan fees, storage, network, taxes and free credits are
 left out of both. On Runtime, inbound traffic is free, and each account's first
-{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB. See [pricing](./pricing) for
+{{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch

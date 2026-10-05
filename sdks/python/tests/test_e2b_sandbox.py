@@ -88,10 +88,24 @@ class Base(unittest.TestCase):
 
 class Create(Base):
     def test_e2b_defaults_and_funding_left_to_runtime(self):
+        import time
         sbx = self.create()
-        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 512, "timeout_seconds": 300,
-                                              "on_lease_end": "stop"})
+        # No timeout, no time limit: it runs while it works and pauses when
+        # idle (0300), never killed at E2B's five minutes in the middle of work.
+        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 512, "on_lease_end": "stop"})
         self.assertEqual(sbx.sandbox_id, self.fake(sbx).id)
+        self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())
+        # Its end_at is a time ahead, and set_timeout has no end to move.
+        self.assertGreater(sbx.get_info().end_at.timestamp(), time.time())
+        sbx.set_timeout(600)
+        self.assertEqual(self.world.called("sandbox.extend"), [])
+
+    def test_a_timeout_is_the_limit_the_customer_set(self):
+        import time
+        sbx = self.create(timeout=600)
+        self.assertEqual(self.last_create()["timeout_seconds"], 600)
+        self.assertAlmostEqual(sbx.get_info().end_at.timestamp(), time.time() + 600, delta=5)
+        self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())
 
     def test_maps_timeout_metadata_internet_and_lifecycle(self):
         self.create(timeout=120, metadata={"job": "x"}, allow_internet_access=False,
@@ -178,7 +192,7 @@ class Create(Base):
         self.assertIn("--name abc123xyz", str(caught.exception))
         uuid = "99999999-2222-4333-8444-555555555555"
         self.create(uuid)
-        self.assertEqual(self.last_create(), {"snapshot": uuid, "timeout_seconds": 300, "on_lease_end": "stop"})
+        self.assertEqual(self.last_create(), {"snapshot": uuid, "on_lease_end": "stop"})
         self.world.forks_enabled = False
         with self.assertRaises(NotSupportedException) as caught:
             self.create(uuid)

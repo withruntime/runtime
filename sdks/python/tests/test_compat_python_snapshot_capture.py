@@ -50,7 +50,9 @@ class SnapshotCapture(unittest.TestCase):
             Sandbox(transport, {"id": "owned", "state": "running"}).snapshot(mode="other")
         self.assertEqual(events, [])
 
-    def test_async_wait_and_capture_timeout_restore_running_source(self):
+    def test_async_capture_wakes_after_ready_and_stays_paused_past_the_deadline(self):
+        # Waking a source mid-capture fails the capture (4 October 2026): past
+        # the deadline the source stays paused and the error names the snapshot.
         async def run(timeout):
             sync, events = self.fixture()
             class Transport:
@@ -63,12 +65,29 @@ class SnapshotCapture(unittest.TestCase):
                     with self.assertRaises(RuntimeError) as error:
                         await box.snapshot(mode="disk")
                     self.assertEqual(error.exception.code, "snapshot_timeout")
+                    self.assertEqual(error.exception.details, {"snapshotId": "snap", "sourceSandboxId": "owned"})
+                    self.assertEqual(sync.state, "paused")
+                    self.assertFalse(any(path.endswith(":wake") for _, path, _ in events))
                 else:
                     self.assertEqual((await box.snapshot(mode="disk"))["mode"], "disk")
-            self.assertEqual(sync.state, "running")
-            self.assertTrue(events[-1][1].endswith(":wake"))
+                    self.assertEqual(sync.state, "running")
+                    self.assertTrue(events[-1][1].endswith(":wake"))
         asyncio.run(run(False))
         asyncio.run(run(True))
+
+    def test_capture_deadline_is_ten_minutes_unless_given(self):
+        # It was one minute, whatever the caller needed (4 October 2026).
+        from withruntime import _request_scope
+        for given, expected in ((None, 600.0), (1800, 1800)):
+            seen = []
+            real = _request_scope.request_scope
+            def scope(*args, **kwargs):
+                if args: seen.append(args[0])
+                return real(*args, **kwargs)
+            transport, _ = self.fixture()
+            with patch("withruntime._sync_client.sleep"), patch.object(_request_scope, "request_scope", scope):
+                Sandbox(transport, {"id": "owned", "state": "running"}).snapshot(mode="disk", timeout_seconds=given)
+            self.assertIn(expected, seen)
 
 
 class SnapshotMetadata(unittest.TestCase):

@@ -5,6 +5,8 @@ export type SandboxInfo = {
   kind: "sandbox";
   name: string | null;
   labels: Record<string, string>;
+  /** @deprecated Read `state`. An older, coarser name for it, still sent for
+   * older clients. */
   status: "pending" | "active" | "paused" | "stopping" | "stopped";
   state: "starting" | "running" | "pausing" | "paused" | "resuming" | "stopping" | "stopped";
   region: string;
@@ -14,7 +16,10 @@ export type SandboxInfo = {
   diskMiB: number;
   cpu: "shared" | "reserved";
   cpuFloorMillis: number;
+  /** @deprecated Always true for a sandbox created since 5 October 2026:
+   * every sandbox can pause. */
   pausable: boolean;
+  /** Its time limit in seconds; 0 is none: it runs while it works. */
   timeoutSeconds: number;
   /** Pauses after this many idle seconds; 0 is never. */
   idlePauseSeconds?: number;
@@ -23,19 +28,31 @@ export type SandboxInfo = {
   idlePauseUnusedOnly?: boolean;
   /** A request (exec, files, terminal, a visit to a shared port) wakes it when paused. */
   autoWake?: boolean;
-  /** Its lease renews itself while credit lasts, and its disk is kept after a stop. */
+  /** Runs until stopped while credit lasts, never paused for idleness or a
+   * time limit, and its disk is kept after a stop. */
   persistent?: boolean;
   /** The last exec, file, terminal, desktop or preview request, to within a minute. */
   lastActiveAt?: string | null;
   onLeaseEnd: "pause" | "stop";
   createdAt: string;
   readyAt: string | null;
+  /** Paid up to: a time ahead of now that moves on by itself while it runs.
+   * Not when it ends; that is `endsAt`. */
   expiresAt: string;
+  /** When it stops or pauses by itself: its time limit, or where its funding
+   * ends once credit or a spending limit stops its renewal. Null when it
+   * never will, and when it is not running. Absent from older servers. */
+  endsAt?: string | null;
   endedAt: string | null;
+  /** Why it stopped or paused, such as `requested`, `idle` or `time_limit`
+   * (its `timeoutSeconds` ran out). A server before 4 October 2026 sent
+   * `lease_expired` for `time_limit`. */
   stopReason: string | null;
   pausedAt: string | null;
   pausedExpiresAt: string | null;
   chargedMicros: number;
+  /** @deprecated Read `chargedMicros` and `runtime.usage()`. Still sent for
+   * older clients. */
   heldMicros: number;
   simulated?: boolean;
   replayed?: boolean;
@@ -77,25 +94,31 @@ export type CreateSandbox = {
   diskMiB?: number;
   cpu?: "shared" | "reserved";
   cpuFloorMillis?: number;
-  /** How long it may run before its lease ends. Default 1800. */
+  /** A time limit, 60 to 3600 seconds. Leave it out (or 0) for none: the
+   * sandbox runs while it works and pauses when idle, until you stop it or
+   * credit runs out. */
   timeoutSeconds?: number;
+  /** @deprecated Ignored since 5 October 2026: every sandbox can pause. */
   pausable?: boolean;
-  /** What happens when timeoutSeconds runs out: "pause" (default) or "stop". */
+  /** What happens when its time limit or credit runs out: "pause" (default) or "stop". */
   onLeaseEnd?: "pause" | "stop";
   /** Pause after this many seconds in which nothing happens in it: no
    * request, no command or terminal running, no open connection, no network
-   * traffic and no CPU use. Default 60 for a pausable sandbox; 0 never;
+   * traffic and no CPU use. Default 60 unless persistent; 0 never;
    * otherwise 10 to 86400. A request wakes it again. */
   idlePauseSeconds?: number;
   /** A request to a paused sandbox wakes it. Default true. */
   autoWake?: boolean;
-  /** Keep it running while credit lasts (its lease renews itself) and keep its
-   * disk after a stop, for restart(). Paid only. */
+  /** Keep it running until you stop it, while credit lasts, with no idle
+   * pause unless idlePauseSeconds asks for one. Its disk is billed as any
+   * sandbox's, and kept after a stop, for restart(), as any sandbox's is.
+   * Paid only. */
   persistent?: boolean;
   /** The most it may cost over its whole life, in microdollars. */
   maxTotalCostMicros?: number;
   /** With name: return the sandbox that already has the name, woken if paused. */
   getOrCreate?: boolean;
+  /** @deprecated Use `maxTotalCostMicros`. Still accepted for older clients. */
   maxCostMicros?: number;
   /** Network rules from the first start; the same shape as sandbox.network.set.
    * Omit for the public web on ports 80 and 443. */
@@ -167,7 +190,10 @@ export type OutputEvent =
   | { type: "exit"; exitCode: number | null; state: string; timedOut: boolean; durationMs?: number }
   | { type: "truncated"; droppedBytes: number; resumeAt: number }
   | { type: "continue"; processId: string; cursor: number }
-  | { type: "error"; error: { code: string; message: string; requestId?: string } };
+  | {
+      type: "error";
+      error: { code: string; message: string; status?: number; requestId?: string };
+    };
 
 export type BinaryOutputEvent =
   | Exclude<OutputEvent, { type: "stdout" | "stderr" }>
@@ -194,6 +220,8 @@ export type Usage = {
   unit: "microdollars";
   credited: string;
   spent: string;
+  /** What running sandboxes and the hour ahead of stored items are about to
+   * use, already taken out of `available`. */
   held: string;
   /** Credit that expired, or grant credit taken back. */
   expired: string;
@@ -201,7 +229,13 @@ export type Usage = {
   available: string;
   /** The part of spent that refunds and disputes took. */
   takenBack: string;
-  trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
+  trial: {
+    totalMs: number;
+    usedMs: number;
+    /** @deprecated Read `availableMs`. Still sent for older clients. */
+    reservedMs: number;
+    availableMs: number;
+  } | null;
   /** Outbound traffic this calendar month, UTC: the first `allowanceBytes` an
    * account sends are free, and the rest is charged at the rate in the pricing
    * guide (https://withruntime.com/docs/pricing#network-products). */
@@ -214,6 +248,23 @@ export type Usage = {
     chargedMicros: string;
     /** What the balance or a spending limit could not cover; never charged. */
     writtenOffMicros: string;
+  } | null;
+  /** The account's pilot while it serves its sandboxes, a free run agreed
+   * with Runtime: `hours` sandbox-hours of running time, `usedMs` and
+   * `leftMs` of it used and left. Null on every other account. */
+  pilot?: {
+    id: string;
+    sandboxes: number;
+    vcpu: number;
+    memoryMiB: number;
+    diskMiB: number;
+    startsAt: string;
+    endsAt: string;
+    graceEndsAt: string;
+    endedAt: string | null;
+    hours: number;
+    usedMs: number;
+    leftMs: number;
   } | null;
   resources: Array<Record<string, unknown>>;
   [key: string]: unknown;
@@ -241,7 +292,8 @@ export type SandboxSettings = {
   /** Pause after this many seconds with no activity, counted from now; 0
    * never, otherwise 10 to 86400. */
   idlePauseSeconds?: number;
-  /** Keep it running while credit lasts and keep its disk after a stop. Paid only. */
+  /** Keep it running until you stop it, while credit lasts, and keep its disk
+   * after a stop. Paid only. */
   persistent?: boolean;
   /** Lifetime cap in microdollars; null removes it. */
   maxTotalCostMicros?: number | null;
@@ -262,11 +314,11 @@ export type DeletedSandbox = {
   replayed?: boolean;
 };
 
-/** How `sandbox.keepAlive()` extends the lease. */
+/** How `sandbox.keepAlive()` moves on the time limit of a sandbox that has one. */
 export type KeepAliveOptions = {
   /** How often it checks, in seconds. Default 60. */
   everySeconds?: number;
-  /** How much lease it keeps ahead of now, in seconds (60 to 3600). Default 600. */
+  /** How much of its time limit it keeps ahead of now, in seconds (60 to 3600). Default 600. */
   marginSeconds?: number;
   /** Called with an error an extension met; the loop carries on. */
   onError?: (error: unknown) => void;

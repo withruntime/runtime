@@ -10,7 +10,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from .._async_client import AsyncRuntime
-from .._compat_lease import epoch, extension_seconds
+from .._compat_lease import end_of, extension_seconds, no_limit
 
 from . import _core as core
 from ._async_io import AsyncPtyHandle, call, catch_up, finish, later, pty_options, start
@@ -851,9 +851,13 @@ class AsyncSandbox:
         self.public = public
         self.snapshot = snapshot
         timeout = int(runtime.info.get("timeoutSeconds") or 900)
+        unlimited = runtime.info.get("timeoutSeconds") == 0
         self._lifecycle = lifecycle or core.Lifecycle(
-            window_seconds=timeout, ephemeral=runtime.info.get("onLeaseEnd") == "stop",
-            auto_stop_interval=round(timeout / 60), auto_archive_interval=0, auto_delete_interval=-1)
+            # No time limit (0300): its idle pause is its autoStopInterval.
+            window_seconds=3600 if unlimited else timeout, ephemeral=runtime.info.get("onLeaseEnd") == "stop",
+            auto_stop_interval=round(int(runtime.info.get("idlePauseSeconds") or 0) / 60) if unlimited
+            else round(timeout / 60),
+            auto_archive_interval=0, auto_delete_interval=-1)
         if self._lifecycle.idle_seconds is None:
             self._lifecycle.idle_seconds = float(self._lifecycle.window_seconds)
         self._user: Optional[str] = user or (runtime.info.get("labels") or {}).get(core.USER_LABEL) or None
@@ -946,10 +950,11 @@ class AsyncSandbox:
         left, or as far as it may go with ``force``; then looks again in a
         minute while autoStop runs past the lease (over an hour, or 0)."""
         runtime = self.withruntime
-        if self._kept_until_end or runtime.state != "running":
+        # No time limit: it renews itself on the server (0300).
+        if self._kept_until_end or runtime.state != "running" or no_limit(runtime.info):
             return
         margin = math.inf if force else self._lifecycle.window_seconds / 2
-        extra = extension_seconds(epoch(runtime.info.get("expiresAt")), self._until(), time.time(), margin)
+        extra = extension_seconds(end_of(runtime.info), self._until(), time.time(), margin)
         if extra >= 1:
             try:
                 await runtime.extend(extra)
@@ -963,9 +968,9 @@ class AsyncSandbox:
         self._schedule()
 
     def _schedule(self) -> None:
-        if self._kept_until_end or self._timer is not None:
+        if self._kept_until_end or self._timer is not None or no_limit(self.withruntime.info):
             return
-        expires = epoch(self.withruntime.info.get("expiresAt"))
+        expires = end_of(self.withruntime.info)
         if not math.isfinite(expires) or self._until() <= expires:
             return
         try:
@@ -1006,7 +1011,9 @@ class AsyncSandbox:
         if state in ("stopped", "stopping"):
             raise DaytonaError(f"Sandbox {self.id} was deleted and cannot start.", 410)
         if state in ("paused", "pausing"):
-            await _guard("sandbox", lambda: self.withruntime.wake(timeout_seconds=self._lifecycle.window_seconds))
+            # One with no time limit (timeoutSeconds 0) wakes with none.
+            limit = self._lifecycle.window_seconds if self.withruntime.info.get("timeoutSeconds") else None
+            await _guard("sandbox", lambda: self.withruntime.wake(timeout_seconds=limit))
         self._paused_by_pause = False
 
     async def stop(self, timeout: Optional[float] = 60, force: bool = False) -> None:
@@ -1054,7 +1061,13 @@ class AsyncSandbox:
         await self._live(force=True)
 
     async def set_autostop_interval(self, interval: int) -> None:
+        """The sandbox pauses after ``interval`` minutes with nothing happening
+        in it; 0 never. With a time to live, after that long without a call
+        from this client, and past an hour only while this object lives."""
         self._lifecycle.auto_stop_interval = interval
+        if not self.withruntime.info.get("timeoutSeconds"):
+            await _guard("sandbox", lambda: self.withruntime.update(idle_pause_seconds=core.idle_pause_of(interval)))
+            return
         self._lifecycle.window_seconds = core.window_seconds(interval)
         self._lifecycle.idle_seconds = core.idle_seconds(interval)
         await self._live()
@@ -1288,11 +1301,15 @@ class AsyncDaytona:
             fields.update(vcpu=resources.cpu or core.DEFAULT_CPU,
                           memory_mib=int((resources.memory or core.DEFAULT_MEMORY_GIB) * 1024),
                           disk_mib=int((resources.disk or core.DEFAULT_DISK_GIB) * 1024))
-        timeout_seconds = lifecycle.window_seconds
+        # A time to live is a time limit, kept by the lease. Without one there
+        # is none: it runs while it works and autoStopInterval is its idle
+        # pause, counted by the sandbox itself, so a long command is never
+        # frozen for want of calls from this client (0300).
         if lifecycle.deadline is not None:
-            timeout_seconds = max(60, min(timeout_seconds, int(lifecycle.deadline - time.time())))
-        fields.update(timeout_seconds=timeout_seconds,
-                      on_lease_end="stop" if lifecycle.ephemeral or lifecycle.deadline else "pause")
+            fields["timeout_seconds"] = max(60, min(lifecycle.window_seconds, int(lifecycle.deadline - time.time())))
+        else:
+            fields["idle_pause_seconds"] = core.idle_pause_of(lifecycle.auto_stop_interval)
+        fields["on_lease_end"] = "stop" if lifecycle.ephemeral or lifecycle.deadline else "pause"
         if params.name:
             fields["name"] = params.name
         language = str(getattr(params.language, "value", params.language) or self.default_language)

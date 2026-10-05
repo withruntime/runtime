@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from withruntime import (AsyncRuntime, InvalidRequestError, Runtime, SecretPartlyStoredError,
                          ServiceUnavailableError)
+from withruntime._sync_products.jobs import job_body
 
 JOB_ID = "11111111-1111-4111-8111-111111111111"
 RUN_ID = "22222222-2222-4222-8222-222222222222"
@@ -110,6 +111,7 @@ class JobsTest(unittest.TestCase):
             for kwargs, pattern in [
                 ({"at": 1, "compute": {"vcpu": 32}}, "at most 16 vCPU"),
                 ({"at": 1, "compute": {"diskMiB": 512}}, "at least 3072 MiB"),
+                ({"at": 1, "compute": {"diskMiB": 409601}}, "at most 409600 MiB"),
                 ({"cron": "0 3 * *"}, "five fields"),
                 ({"at": "tomorrow"}, "must be a time"),
                 ({}, "at= for one run or cron="),
@@ -118,6 +120,10 @@ class JobsTest(unittest.TestCase):
                 with self.assertRaisesRegex(InvalidRequestError, pattern):
                     runtime.jobs.create("x", command=["true"], **kwargs)
         self.assertEqual(Stub.seen, [])
+
+    def test_the_largest_disk_is_accepted(self):
+        body = job_body("x", command=["true"], at=1, compute={"diskMiB": 409600})
+        self.assertEqual(body["compute"]["diskMiB"], 409600)
 
     def test_switched_off_names_the_product_and_is_not_retried(self):
         Stub.mode = "off"

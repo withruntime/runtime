@@ -12,6 +12,12 @@ from typing import Any, Optional
 DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previews_unavailable",
                         "network_unavailable", "network_rules_unavailable", "secrets_unavailable",
                         "identity_unavailable", "env_unavailable"})
+# Refusals that guarantee nothing ran: a sandbox running as many commands as it
+# can (guest_busy), and the API's own limits, which answer before any work
+# starts (busy, rate_limited). Sending such a call again is always safe, so the
+# SDK does, with backoff, until the call's deadline (five minutes when it has
+# none), however many retries it allows otherwise.
+NOTHING_RAN = frozenset({"guest_busy", "busy", "rate_limited"})
 # Refusals that pass on their own: a host frees room, a trial slot frees.
 _PASSING = frozenset({"no_capacity", "trial_busy"})
 # Refusals of a create that clear when a sandbox stops or pauses, or a host
