@@ -1,8 +1,4 @@
-import {
-  KEEP_ALIVE_MARGIN_SECONDS,
-  STREAMED_EXEC_TIMEOUT_MS,
-  WAIT_FOR_TIMEOUT_SECONDS,
-} from "./api-defaults.js";
+import { STREAMED_EXEC_TIMEOUT_MS } from "./api-defaults.js";
 import {
   CommandError,
   ConnectionError,
@@ -13,7 +9,7 @@ import {
   RuntimeError,
   ServiceUnavailableError,
 } from "./errors.js";
-import { Page } from "./page.js";
+import type { Page } from "./page.js";
 import {
   type FileEvent,
   sandboxWatches,
@@ -21,7 +17,7 @@ import {
   type WatchHandle,
   type WatchOptions,
 } from "./products/watch.js";
-import { Transport, type Query, type RequestOptions } from "./transport.js";
+import { Transport, type RequestOptions } from "./transport.js";
 import type {
   CommandResult,
   DeletedSandbox,
@@ -29,19 +25,19 @@ import type {
   FileEntry,
   OutputEvent,
   BinaryOutputEvent,
-  KeepAliveOptions,
   ProcessInfo,
   SandboxInfo,
   SandboxSettings,
 } from "./types.js";
 import { sandboxFactories, type SandboxExtensions } from "./products/index.js";
-import type { Snapshot, SnapshotOptions } from "./snapshots.js";
 import { Tunnel, type PortForward } from "./tunnel.js";
 import { pause } from "./wait.js";
 import type { StreamUploadSource } from "./file-source.js";
+import { Machine, machinePage, requestOnly, type MachineProduct } from "./machine.js";
 
-/** How long snapshot() waits, pause and capture together, unless told. */
-const SNAPSHOT_DEADLINE_MS = 10 * 60_000;
+/** Sandboxes, as a product of the machine engine (machine.ts). */
+export const SANDBOXES: MachineProduct = { plural: "sandboxes", noun: "Sandbox" };
+
 const CHUNK = 1_048_576;
 /** Chunks of a large write in flight at once. Each chunk's reply waits on the
  * API and the guest, and the link idles while every chunk in flight waits:
@@ -97,19 +93,6 @@ function requestScope(options: RequestOptions) {
   return { request, check, wait };
 }
 
-/** DELETE /v1/sandboxes/{id}, for `sandbox.delete()` and
- * `runtime.sandboxes.delete(id)`. */
-export function deleteSandbox(
-  t: Transport,
-  id: string,
-  options: RequestOptions = {},
-): Promise<DeletedSandbox> {
-  return t.json<DeletedSandbox>({
-    method: "DELETE",
-    path: `/v1/sandboxes/${enc(id)}`,
-    ...options,
-  });
-}
 /* Web APIs only, so the sandbox's commands, processes and files work in a
    browser with a session token (Sandbox.fromSession): no Buffer, no
    node:crypto. */
@@ -149,25 +132,20 @@ function commandBody(command: string | readonly string[], options: ExecOptions) 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
 export interface Sandbox extends SandboxExtensions {}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
-export class Sandbox implements AsyncDisposable {
-  #info: SandboxInfo;
-  #keepAlive: (() => void) | undefined;
+export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbox> {
   readonly #t: Transport;
   readonly files: Files;
   readonly processes: Processes;
   /** Short-lived tokens that let a browser reach this sandbox directly. */
   readonly sessions: SandboxSessions;
   constructor(transport: Transport, info: SandboxInfo) {
+    super(SANDBOXES, transport, info);
     this.#t = transport;
-    this.#info = info;
     this.files = new Files(transport, info.id);
     this.processes = new Processes(transport, info.id);
     this.sessions = new SandboxSessions(transport, info.id);
     for (const [name, make] of sandboxFactories())
       Object.defineProperty(this, name, { value: make(transport, this), enumerable: false });
-  }
-  get id(): string {
-    return this.#info.id;
   }
   /** A sandbox reached with a session token instead of an API key, for code in
    * a browser: commands and their streams, processes, files and previews of
@@ -199,48 +177,6 @@ export class Sandbox implements AsyncDisposable {
       ...(session.fetch ? { fetch: session.fetch } : {}),
     });
     return new Sandbox(transport, { id: session.sandboxId } as SandboxInfo);
-  }
-  /** The API's latest answer. `start`, the report of an image's start
-   * command, is the create's alone: the API keeps no record of it, so a
-   * later read of this sandbox keeps it here. */
-  #keep(info: SandboxInfo): void {
-    const start = this.#info?.start;
-    this.#info = info.start === undefined && start !== undefined ? { ...info, start } : info;
-  }
-  /** What the API last said about this sandbox. `refresh()` asks again. */
-  get info(): SandboxInfo {
-    return this.#info;
-  }
-  get state(): SandboxInfo["state"] {
-    return this.#info.state;
-  }
-  async refresh(options: RequestOptions = {}): Promise<this> {
-    this.#keep(
-      await this.#t.json<SandboxInfo>({
-        method: "GET",
-        path: `/v1/sandboxes/${enc(this.id)}`,
-        ...options,
-      }),
-    );
-    return this;
-  }
-  /** Waits (server-side, no polling) until the sandbox reaches `state`. */
-  async waitFor(
-    state: "running" | "paused" | "stopped",
-    options: { timeoutSeconds?: number } & RequestOptions = {},
-  ) {
-    this.#keep(
-      await this.#t.json<SandboxInfo>({
-        method: "GET",
-        path: `/v1/sandboxes/${enc(this.id)}`,
-        query: {
-          waitFor: state,
-          timeoutSeconds: options.timeoutSeconds ?? WAIT_FOR_TIMEOUT_SECONDS,
-        },
-        ...options,
-      }),
-    );
-    return this;
   }
 
   /** Runs a command and returns its exit code and output. A string runs under
@@ -465,275 +401,6 @@ export class Sandbox implements AsyncDisposable {
     }
   }
 
-  async stop(options: RequestOptions & { wait?: boolean } = {}): Promise<this> {
-    this.#keepAlive?.();
-    return this.#lifecycle("stop", options);
-  }
-  async pause(options: RequestOptions & { wait?: boolean } = {}): Promise<this> {
-    return this.#lifecycle("pause", options);
-  }
-  /** Deletes it for good: stops it if it runs or is paused, deletes its disk
-   * and paused memory, revokes its previews and ports, and removes it from
-   * lists. Its snapshots, usage and audit entries stay. Deleting it again
-   * answers the same. */
-  async delete(options: RequestOptions = {}): Promise<DeletedSandbox> {
-    this.#keepAlive?.();
-    return deleteSandbox(this.#t, this.id, options);
-  }
-  /** Carries on a paused sandbox; for one with a time limit,
-   * `timeoutSeconds` is its new one. */
-  async wake(
-    options: RequestOptions & { wait?: boolean; timeoutSeconds?: number } = {},
-  ): Promise<this> {
-    const { timeoutSeconds, ...rest } = options;
-    try {
-      return await this.#lifecycle(
-        "wake",
-        rest,
-        timeoutSeconds === undefined ? {} : { timeoutSeconds },
-      );
-    } catch (error) {
-      // Waking one that is already awake is done, not a mistake. With a new
-      // lease asked for, the refusal stands: it was not given.
-      if (!(error instanceof RuntimeError) || error.code !== "not_paused" || timeoutSeconds)
-        throw error;
-      await this.refresh(requestOnly(rest));
-      if (this.state !== "running" && this.state !== "starting") throw error;
-      return this;
-    }
-  }
-  /** More time before its time limit ends (at most an hour ahead of now). A
-   * sandbox with no time limit needs none: the call answers at once and
-   * changes nothing. */
-  async extend(seconds: number, options: RequestOptions = {}): Promise<this> {
-    return this.#lifecycle("extend", { ...options, wait: false }, { seconds });
-  }
-  /** Changes its name, labels, automatic wake, idle pause or persistence;
-   * fields left out stay as they are. `persistent: true` keeps it running
-   * while credit lasts (paid only). */
-  async update(settings: SandboxSettings, options: RequestOptions = {}): Promise<this> {
-    return this.#lifecycle("update", { ...options, wait: false }, { ...settings });
-  }
-  /** Moves it to another image (id, name, name:tag or name@version), keeping
-   * its id, /workspace (its home: dotfiles, pip --user and npm -g installs),
-   * volumes, environment, name and previews. Its processes restart, and
-   * everything else on its old disk (sudo installs, apt packages, /etc) is
-   * lost; snapshot it first to keep everything. A running sandbox is paused
-   * first. A switch that fails is undone (`switch_undone`), the sandbox on
-   * its old image with nothing lost. Charged as a wake. `keep` is optional:
-   * "workspace" is the only value, and it is sent either way, so an API from
-   * before it was optional accepts the call too. */
-  async switchImage(
-    image: string,
-    options: RequestOptions & { keep?: "workspace" } = {},
-  ): Promise<this> {
-    const { keep = "workspace", ...rest } = options;
-    this.#keep(
-      await this.#t.json<SandboxInfo>({
-        method: "POST",
-        path: `/v1/sandboxes/${enc(this.id)}:switch-image`,
-        body: { image, keep },
-        // A pause, two boots and the copy between them.
-        wait: 120,
-        ...requestOnly(rest),
-      }),
-    );
-    return this;
-  }
-  /** Gives it more or fewer vCPUs or more or less memory by a restart: its id,
-   * whole disk, volumes, environment, name and previews stay, and its
-   * programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped if it is
-   * persistent, and comes back running at the new size on the same server; a
-   * paused or stopped one is started. Memory bills on the new size from then.
-   * Refused, with nothing changed, when the server has no room
-   * (`no_capacity`), above your quota or the trial's 2 vCPU and 4 GiB, or
-   * while a snapshot or fork of it is being taken. `restart` is optional:
-   * true is the only value, and it is sent either way, so an API from before
-   * it was optional accepts the call too. */
-  async resize(
-    size: { vcpu?: number; memoryMiB?: number },
-    options: RequestOptions & { restart?: true } = {},
-  ): Promise<this> {
-    const { restart = true, ...rest } = options;
-    this.#keep(
-      await this.#t.json<SandboxInfo>({
-        method: "POST",
-        path: `/v1/sandboxes/${enc(this.id)}:resize`,
-        body: { ...size, restart },
-        // A pause or stop and a cold boot.
-        wait: 120,
-        ...requestOnly(rest),
-      }),
-    );
-    return this;
-  }
-  /** Keeps a sandbox with a time limit running past it, in the background,
-   * until stop() or the returned function ends it: every `everySeconds` (60)
-   * it extends the limit so that `marginSeconds` (600) remain, never more
-   * than the hour ahead the API allows. A sandbox with no time limit
-   * (`endsAt` null) needs none, and is only watched. Running time is billed
-   * as it is used. A paused sandbox is left paused (a request wakes it,
-   * unless autoWake is off); a stopped one ends the loop. It does not keep a
-   * Node or Bun process alive by itself. */
-  keepAlive(options: KeepAliveOptions = {}): () => void {
-    this.#keepAlive?.();
-    const every = Math.max(10, options.everySeconds ?? 60) * 1000;
-    const margin = Math.min(3600, Math.max(60, options.marginSeconds ?? KEEP_ALIVE_MARGIN_SECONDS));
-    let ended = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const end = () => {
-      ended = true;
-      if (timer) clearTimeout(timer);
-      if (this.#keepAlive === end) this.#keepAlive = undefined;
-    };
-    const tick = async () => {
-      if (ended) return;
-      try {
-        await this.refresh();
-        if (this.state === "stopped" || this.state === "stopping") return end();
-        // No time limit: nothing to extend (an older server sends no endsAt).
-        if (this.state === "running" && this.info.endsAt !== null) {
-          const left = (Date.parse(this.info.endsAt ?? this.info.expiresAt) - Date.now()) / 1000;
-          const need = Math.ceil(margin - left);
-          if (need >= 1) await this.extend(Math.min(3600, need));
-        }
-      } catch (error) {
-        options.onError?.(error);
-      }
-      if (ended) return;
-      timer = setTimeout(() => void tick(), every);
-      (timer as { unref?: () => void }).unref?.();
-    };
-    this.#keepAlive = end;
-    void tick();
-    return end;
-  }
-  /** Days a paused sandbox is kept before deletion (1 to 365). */
-  async setRetention(days: number, options: RequestOptions = {}): Promise<this> {
-    return this.#lifecycle("retention", { ...options, wait: false }, { days });
-  }
-  /** Keeps this sandbox's whole machine (files, memory, running processes) as
-   * a snapshot to start new sandboxes from. A running sandbox is paused for
-   * the moment it takes, then woken; a paused one stays paused. Past
-   * `timeoutMs` (ten minutes unless given) mid-capture, it stays paused and
-   * the error names the snapshot. */
-  async snapshot(options: SnapshotOptions & RequestOptions = {}): Promise<Snapshot> {
-    const { idempotencyKey, signal, timeoutMs, ...body } = options;
-    if (body.mode !== undefined && body.mode !== "memory" && body.mode !== "disk")
-      throw new TypeError("Snapshot mode must be memory or disk.");
-    signal?.throwIfAborted();
-    // One minute, whatever `timeoutMs` said, was too short: pausing a busy
-    // 16 vCPU, 32 GiB sandbox writes its memory out first (4 October 2026).
-    const until =
-      performance.now() + (timeoutMs && timeoutMs > 0 ? timeoutMs : SNAPSHOT_DEADLINE_MS);
-    let running = false;
-    /** The capture in progress, once the server has one. */
-    let capturing: string | undefined;
-    let late = false;
-    const request = (): RequestOptions => {
-      signal?.throwIfAborted();
-      const left = Math.ceil(until - performance.now());
-      if (left <= 0 && capturing) {
-        late = true;
-        throw new RuntimeError({
-          code: "snapshot_timeout",
-          status: 0,
-          message: `Snapshot ${capturing} was still capturing at the deadline.${running ? " The sandbox stays paused until it ends: waking it now would fail the capture." : ""}`,
-          hint: `Wait until runtime.snapshots.get("${capturing}") is ready${running ? ", then wake the sandbox" : ""}, or pass a longer timeoutMs.`,
-          details: { snapshotId: capturing, sourceSandboxId: this.id },
-        });
-      }
-      if (left <= 0)
-        throw new RuntimeError({
-          code: "snapshot_timeout",
-          status: 0,
-          message: "Snapshot capture ran past its deadline.",
-        });
-      return { ...(signal ? { signal } : {}), timeoutMs: left };
-    };
-    await this.refresh(request());
-    // Straight after a fork or a wake the sandbox is still `resuming`, and
-    // after a pause still `pausing`: wait for where it is going, or a
-    // snapshot of it is refused as not paused (user lane, 23 September 2026).
-    if (this.state === "resuming" || this.state === "starting")
-      await this.waitFor("running", request());
-    else if (this.state === "pausing") await this.waitFor("paused", request());
-    running = this.state === "running";
-    // Check before entering cleanup: an abort during refresh must not pause or wake.
-    const pauseOptions = running ? request() : undefined;
-    let captured: Snapshot | undefined;
-    let primary: unknown;
-    let failed = false;
-    try {
-      if (running) await this.pause(pauseOptions);
-      let snapshot = await this.#t.json<Snapshot>({
-        method: "POST",
-        path: `/v1/sandboxes/${enc(this.id)}:snapshot`,
-        body,
-        wait: 10,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-        ...request(),
-      });
-      captured = snapshot;
-      // Prefer: wait is bounded on the server. A capture still in progress
-      // must keep its source paused, or the worker refuses it after we wake.
-      while (snapshot.state === "capturing") {
-        capturing = snapshot.id;
-        request();
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        snapshot = await this.#t.json<Snapshot>({
-          method: "GET",
-          path: `/v1/snapshots/${enc(snapshot.id)}`,
-          ...request(),
-        });
-      }
-      if (snapshot.state !== "ready")
-        throw new RuntimeError({
-          code: "snapshot_failed",
-          status: 409,
-          message: snapshot.error ?? `Snapshot capture ended in state ${snapshot.state}.`,
-          details: { snapshotId: snapshot.id },
-        });
-      if (body.mode === "disk" && snapshot.mode !== "disk")
-        throw new RuntimeError({
-          code: "snapshot_mode_mismatch",
-          status: 409,
-          message: "The server did not confirm a disk-only snapshot.",
-          details: { snapshotId: snapshot.id },
-        });
-      captured = snapshot;
-    } catch (error) {
-      failed = true;
-      primary = error;
-      // A request cut off by the deadline mid-capture is late all the same.
-      if (capturing && performance.now() >= until) late = true;
-    }
-    // A capture still running needs its source paused: the worker fails one
-    // whose source woke. The timeout says so and leaves the wake to the caller.
-    if (running && !late) {
-      try {
-        await this.wake();
-      } catch (wakeError) {
-        const recovery = {
-          ...(captured ? { snapshotId: captured.id } : {}),
-          sourceSandboxId: this.id,
-          sourceWakeError: {
-            ...(wakeError instanceof RuntimeError ? { code: wakeError.code } : {}),
-            message: wakeError instanceof Error ? wakeError.message : String(wakeError),
-          },
-        };
-        const reported = failed ? primary : wakeError;
-        if (reported instanceof Error && Object.isExtensible(reported)) {
-          if (reported instanceof RuntimeError)
-            Object.assign(reported, { details: { ...reported.details, ...recovery } });
-          else Object.assign(reported, recovery);
-        }
-        if (!failed) throw wakeError;
-      }
-    }
-    if (failed) throw primary;
-    return captured!;
-  }
   /** Copies of this sandbox as it is now (files, memory, running processes),
    * each its own sandbox, answered once they run. A running sandbox is paused
    * for the moment its snapshot takes, then woken. One without `count`; an
@@ -775,34 +442,6 @@ export class Sandbox implements AsyncDisposable {
     });
     const sandboxes = reply.sandboxes.map((info) => new Sandbox(this.#t, info));
     return options.count === undefined ? sandboxes[0]! : sandboxes;
-  }
-  /** Starts a stopped persistent sandbox again from its disk (memory is not kept). */
-  async restart(options: RequestOptions & { wait?: boolean } = {}): Promise<this> {
-    return this.#lifecycle("restart", options);
-  }
-  async #lifecycle(
-    verb: string,
-    options: RequestOptions & { wait?: boolean },
-    body: Record<string, unknown> = {},
-  ): Promise<this> {
-    this.#keep(
-      await this.#t.json<SandboxInfo>({
-        method: "POST",
-        path: `/v1/sandboxes/${enc(this.id)}:${verb}`,
-        body,
-        wait: options.wait === false ? 0 : 60,
-        ...requestOnly(options),
-      }),
-    );
-    return this;
-  }
-  async [Symbol.asyncDispose](): Promise<void> {
-    this.#keepAlive?.();
-    if (this.#info.state === "stopped") return;
-    await this.stop({ wait: false }).catch(() => undefined);
-  }
-  toJSON(): SandboxInfo {
-    return this.#info;
   }
 }
 
@@ -882,16 +521,6 @@ function pick(options: RequestOptions): RequestOptions {
     ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs + 60_000 } : {}),
-  };
-}
-
-/** Any other call's request options, as the caller gave them: `timeoutMs` is
- * the call's whole deadline, and 0 turns it off. */
-function requestOnly(options: RequestOptions): RequestOptions {
-  return {
-    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-    ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   };
 }
 
@@ -1998,26 +1627,19 @@ export class Files {
   }
 }
 
+/** One page of `runtime.sandboxes.list()`, and the pages after it. */
 export function sandboxPage(
   t: Transport,
   body: { data: SandboxInfo[]; nextCursor: string | null },
   query: Record<string, unknown>,
   options: RequestOptions = {},
 ): Page<Sandbox> {
-  return new Page(
-    body.data.map((info) => new Sandbox(t, info)),
-    body.nextCursor,
-    async (cursor) =>
-      sandboxPage(
-        t,
-        await t.json({
-          method: "GET",
-          path: "/v1/sandboxes",
-          query: Object.assign({}, query, { cursor }) as Query,
-          ...options,
-        }),
-        query,
-        options,
-      ),
+  return machinePage(
+    SANDBOXES,
+    t,
+    (transport, info) => new Sandbox(transport, info),
+    body,
+    query,
+    options,
   );
 }

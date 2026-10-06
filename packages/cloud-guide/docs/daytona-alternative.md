@@ -45,7 +45,7 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   hostname, with HTTPS, from one command ([custom domains](./networking#custom-domains)).
   On Daytona, a preview under your own domain needs a preview proxy you deploy
   and run yourself.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -73,7 +73,7 @@ Daytona's figures come from its public pricing and documentation, checked
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                                     | {{rate:daytona:memory}} per GiB-hour                                      |
 | Disk             | Included while running; paused storage {{paused-storage-rate}} per GB (10⁹ bytes) a month | First 5 GiB free, then {{term:daytona:disk}} per GiB-hour, stopped or not |
 | Plan fee         | None; prepaid credit from {{topup-min}}                                                   | None published                                                            |
-| Free start       | {{trial-hours}} sandbox hours, no card                                                    | {{term:daytona:credit}} of compute                                        |
+| Free start       | {{included-machine}} every month, no card                                                 | {{term:daytona:credit}} of compute                                        |
 | Pause and resume | Files and memory, every sandbox                                                           | Files and memory on VM sandboxes                                          |
 | Snapshots, forks | Copies of a running sandbox, with memory and processes                                    | Memory snapshots on VM sandboxes                                          |
 | Agent sign-in    | Browser approval; no key in the agent's config                                            | API key                                                                   |
@@ -102,7 +102,7 @@ Daytona  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:daytona:cpu}} = {{part:dayt
 
 Disk, network, taxes and free credits are left out of both.
 `runtime compare --from daytona` prices your own usage the same way, with
-sandboxes the free trial paid for at the standard rates, so trial time never
+sandboxes the included usage paid for at the standard rates, so included usage never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
 first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
@@ -110,7 +110,7 @@ for Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Daytona calls on a branch, tests them on the free trial, and tells
+replaces the Daytona calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -129,8 +129,7 @@ from withruntime.daytona import Daytona  # was: from daytona import Daytona
 
 Sandboxes get Daytona's defaults: 1 vCPU, 1 GiB of memory and a 3 GiB disk,
 pausing after 15 minutes without calls. `stop()` pauses a sandbox with its
-files and its memory, and `start()` carries on. They use the free trial while
-the account has trial time, then prepaid credit.
+files and its memory, and `start()` carries on. They use the included usage first, then prepaid credit.
 
 PTY sessions, computer use, a `user` from your image, an `autoStopInterval`
 over an hour (or `0`), and list filters and sorting work as on Daytona. A call
@@ -154,7 +153,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

@@ -17,7 +17,7 @@ from withruntime.daytona import AsyncDaytona  # was: from daytona import AsyncDa
 ```
 
 The mapping was written against `@daytona/sdk` 0.220.0 and `daytona` 0.220.0
-on PyPI, checked 29 September 2026. The exact releases and artifact hashes
+on PyPI, and checked against `@daytona/sdk` 0.222.0 on 5 October 2026. The exact releases and artifact hashes
 are kept in `compatibility-lock.json`.
 
 ## Keys

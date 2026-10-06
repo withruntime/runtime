@@ -3,7 +3,7 @@ sync twin. The generator swaps each async_* name for its sync_* partner."""
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable, Iterable, TypeVar
+from typing import Any, Awaitable, Callable, Iterable, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -66,14 +66,17 @@ class AsyncSlots:
     """At most ``limit`` holders at once; the rest wait their turn. The
     semaphore is made on first use, inside the running event loop."""
 
-    def __init__(self, limit: int) -> None:
+    def __init__(self, limit: int, on_wait: Optional[Callable[[], None]] = None) -> None:
         self._limit = limit
+        self._on_wait = on_wait
         self._gate: Any = None
 
     async def __aenter__(self) -> None:
         if self._gate is None:
             import asyncio
             self._gate = asyncio.Semaphore(self._limit)
+        if self._on_wait is not None and self._gate.locked():
+            self._on_wait()
         from ._request_scope import current
         from ._http import within
         remaining = current().remaining()
@@ -104,12 +107,17 @@ class AsyncSlots:
 
 
 class SyncSlots:
-    def __init__(self, limit: int) -> None:
+    def __init__(self, limit: int, on_wait: Optional[Callable[[], None]] = None) -> None:
         import threading
         self._gate = threading.BoundedSemaphore(limit)
+        self._on_wait = on_wait
 
     def __enter__(self) -> None:
         from ._request_scope import current
+        if self._gate.acquire(blocking=False):
+            return
+        if self._on_wait is not None:
+            self._on_wait()
         if not self._gate.acquire(timeout=current().remaining()):
             raise TimeoutError("The request deadline expired waiting for an SDK slot")
 

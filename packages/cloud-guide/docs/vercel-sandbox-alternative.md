@@ -44,7 +44,7 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
   log come with every Runtime account ([single sign-on](./single-sign-on)).
   Vercel sells SAML single sign-on as an add-on for Pro teams and keeps
   directory sync for Enterprise.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -67,7 +67,7 @@ Vercel's figures come from its public pricing and documentation, checked
 | CPU billing      | {{cpu-rate}} per active vCPU-hour, with a small floor                       | {{rate:vercel:cpu}} per active CPU-hour              |
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:vercel:memory}} per provisioned GB-hour       |
 | Plan             | None; prepaid credit from {{topup-min}}                                     | Hobby allowance free; usage beyond it needs Pro      |
-| Free start       | {{trial-hours}} sandbox hours, no card                                      | 5 active CPU-hours and 420 GB-hours a month on Hobby |
+| Free start       | {{included-machine}} every month, no card                                   | 5 active CPU-hours and 420 GB-hours a month on Hobby |
 | Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 45 minutes on Hobby, 24 hours on Pro                 |
 | Stop and resume  | Pause keeps files, memory and processes                                     | Stop keeps the filesystem; processes start again     |
 | Snapshots, forks | Files, memory and running processes                                         | The filesystem                                       |
@@ -102,7 +102,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Vercel calls on a branch, tests them on the free trial, and tells
+replaces the Vercel calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -122,8 +122,7 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 Sandboxes get Vercel's defaults: 2 vCPUs with 2048 MiB each, a 5-minute
 timeout, and persistence, so `stop()` pauses a sandbox and the next call or
 `Sandbox.get({ name })` wakes it. Ports listed at create get public addresses,
-and `domain(port)` answers from them. They use the free trial while the account
-has trial time, then prepaid credit.
+and `domain(port)` answers from them. They use the included usage first, then prepaid credit.
 
 With no timeout a sandbox has no time limit: it runs while it works. A timeout
 over an hour works too: the sandbox object moves Runtime's hour-long limit on
@@ -149,7 +148,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   console.log((await box.exec("echo hello", { check: true })).stdout);
 } finally {

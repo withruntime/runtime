@@ -892,8 +892,7 @@ def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, s
                    **_private: Any) -> Any:
     """Creates a sandbox with Vercel's defaults (2 vCPUs with 2048 MiB each,
     5 minutes, persistent). Await it, or use it as a context manager that
-    stops (and by default destroys) it. Funding is left to Runtime: the free
-    trial while the account has trial time, then prepaid credit.
+    stops (and by default destroys) it. Funding is left to Runtime: the included usage first, then prepaid credit.
     ``runtime_create`` passes Runtime fields (snake_case)."""
     core.refuse_create(mounts, network_id, region, failover_regions)
     if snapshot_retention is not None:

@@ -89,6 +89,19 @@ function absolute(path: string) {
   return path.startsWith("/") ? path : `${HOME}/${path.replace(/^\.\//, "")}`;
 }
 
+/** E2B's home, which E2B code expects in the paths it gets back. */
+const E2B_HOME = "/home/user";
+
+/** A path as E2B gives it back: one the caller asked for relative to the home
+ * is shown under /home/user, as E2B shows it, when /home/user leads to
+ * /workspace (`linked`), so it names the same file. A path the caller gave in
+ * full comes back as given. */
+function shown(path: string, asked: string, linked: boolean): string {
+  if (asked.startsWith("/") || !linked) return path;
+  if (path === HOME) return E2B_HOME;
+  return path.startsWith(`${HOME}/`) ? E2B_HOME + path.slice(HOME.length) : path;
+}
+
 function refuse(opts: FilesystemRequestOpts & { metadata?: Record<string, string> }) {
   if (opts.metadata && Object.keys(opts.metadata).length)
     throw new NotSupportedError(
@@ -98,13 +111,33 @@ function refuse(opts: FilesystemRequestOpts & { metadata?: Record<string, string
 }
 
 const PERMISSIONS = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+/** The first letter of envd's permissions, Go's FileMode string. */
+const KIND_LETTER: Record<string, string> = { directory: "d", symlink: "L" };
 
-function entryInfo(entry: FileEntry): EntryInfo {
+/** The sandbox user as E2B names it: Runtime's is `runtime`, E2B's `user`. */
+function e2bUser(name: string | undefined): string {
+  return name === "runtime" ? "user" : (name ?? "");
+}
+
+/** A link's target as envd gives it: absolute, a relative one taken from the
+ * link's own directory. */
+function linkTarget(path: string, target: string): string {
+  if (target.startsWith("/")) return target;
+  const parts = path.split("/").slice(0, -1);
+  for (const part of target.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part && part !== ".") parts.push(part);
+  }
+  return `/${parts.filter(Boolean).join("/")}`;
+}
+
+function entryInfo(entry: FileEntry, asked: string, linked: boolean): EntryInfo {
   const mode = parseInt(entry.mode, 8) || 0;
   const bits = mode & 0o777;
+  const path = shown(entry.path, asked, linked);
   return {
     name: entry.name,
-    path: entry.path,
+    path,
     ...(entry.type === "file"
       ? { type: FileType.FILE }
       : entry.type === "directory"
@@ -115,10 +148,15 @@ function entryInfo(entry: FileEntry): EntryInfo {
     size: entry.size,
     mode,
     permissions:
-      PERMISSIONS[(bits >> 6) & 7]! + PERMISSIONS[(bits >> 3) & 7]! + PERMISSIONS[bits & 7]!,
-    owner: entry.owner ?? "",
-    group: entry.group ?? "",
-    ...(entry.symlinkTarget ? { symlinkTarget: entry.symlinkTarget } : {}),
+      (KIND_LETTER[entry.type] ?? "-") +
+      PERMISSIONS[(bits >> 6) & 7]! +
+      PERMISSIONS[(bits >> 3) & 7]! +
+      PERMISSIONS[bits & 7]!,
+    owner: e2bUser(entry.owner),
+    group: e2bUser(entry.group),
+    ...(entry.symlinkTarget
+      ? { symlinkTarget: shown(linkTarget(entry.path, entry.symlinkTarget), asked, linked) }
+      : {}),
     modifiedTime: new Date(entry.modifiedAt),
   };
 }
@@ -139,7 +177,7 @@ const basename = (path: string) => path.split("/").filter(Boolean).pop() ?? path
 
 /** `sandbox.files`: E2B's filesystem module over Runtime's files API. Relative
  * paths resolve against the home directory, as in E2B (Runtime's is
- * /workspace). */
+ * /workspace), and come back under /home/user, as E2B gives them. */
 export class Filesystem {
   readonly #ctx: SandboxContext;
   constructor(ctx: SandboxContext) {
@@ -154,6 +192,11 @@ export class Filesystem {
     await this.#ctx.ensureHome(path);
     opts.signal?.throwIfAborted();
     return absolute(path);
+  }
+  /** Whether a path asked relative to the home may be shown under /home/user.
+   * Asked at the start of a call, it is learned beside the call itself. */
+  #linked(path: string): Promise<boolean> {
+    return path.startsWith("/") ? Promise.resolve(false) : this.#ctx.homeIsWorkspace();
   }
   /** The calls as another Linux user, or undefined for the sandbox's own. */
   async #as(opts: FilesystemRequestOpts): Promise<FilesAs | undefined> {
@@ -227,22 +270,28 @@ export class Filesystem {
     opts: FilesystemWriteOpts,
   ): Promise<WriteInfo> {
     const file = await this.#path(path, opts);
+    const linked = this.#linked(path);
     const as = await this.#as(opts);
     const bytes = await bytesOf(data);
     if (as) await as.write(file, bytes);
     else await guard("file", () => this.#files.write(file, bytes, request(opts)));
-    return { name: basename(file), type: FileType.FILE, path: file };
+    return { name: basename(file), type: FileType.FILE, path: shown(file, path, await linked) };
   }
 
   /** A directory's entries, hidden ones included; `depth` goes deeper. */
   async list(path: string, opts: FilesystemListOpts = {}): Promise<EntryInfo[]> {
+    if (opts.depth !== undefined && opts.depth < 1)
+      throw new InvalidArgumentError("depth should be at least one");
     const dir = await this.#path(path, opts);
+    const linked = this.#linked(path);
     const as = await this.#as(opts);
-    if (as) return (await as.list(dir, opts.depth ?? 1)).map(entryInfo);
-    const entries = await guard("file", () =>
-      this.#files.list(dir, { depth: opts.depth ?? 1, hidden: true, ...request(opts) }),
-    );
-    return entries.map(entryInfo);
+    const entries = as
+      ? await as.list(dir, opts.depth ?? 1)
+      : await guard("file", () =>
+          this.#files.list(dir, { depth: opts.depth ?? 1, hidden: true, ...request(opts) }),
+        );
+    const home = await linked;
+    return entries.map((entry) => entryInfo(entry, path, home));
   }
 
   /** Makes a directory and its parents. False when it already existed. */
@@ -265,7 +314,7 @@ export class Filesystem {
       await guard("file", () =>
         this.#files.rename(from, to, { overwrite: true, ...request(opts) }),
       );
-    return this.getInfo(to, opts);
+    return this.getInfo(newPath, opts);
   }
 
   /** Removes a file, or a directory with everything in it. */
@@ -285,11 +334,12 @@ export class Filesystem {
 
   async getInfo(path: string, opts: FilesystemRequestOpts = {}): Promise<EntryInfo> {
     const target = await this.#path(path, opts);
+    const linked = this.#linked(path);
     const as = await this.#as(opts);
-    if (as) return entryInfo(await as.stat(target));
+    if (as) return entryInfo(await as.stat(target), path, await linked);
     const stat = await guard("file", () => this.#files.stat(target, request(opts)));
     if (!stat.exists) throw new FileNotFoundError(`${target} does not exist.`);
-    return entryInfo(stat);
+    return entryInfo(stat, path, await linked);
   }
 
   /** E2B's watchDir on Runtime's file watch. A local deadline preserves
@@ -314,6 +364,10 @@ export class Filesystem {
     if (!Number.isFinite(lifetime) || lifetime < 0)
       throw new InvalidArgumentError("timeoutMs must be a nonnegative finite number.");
     const target = await this.#path(path, opts);
+    // envd watches only a directory; Runtime's watch also takes a file.
+    const stat = await guard("file", () => this.#files.stat(target, request(opts)));
+    if (stat.exists && stat.type !== "directory")
+      throw new InvalidArgumentError(`${target} is not a directory; watchDir watches a directory.`);
     const prefix = target.endsWith("/") ? target : `${target}/`;
     let exited = false;
     let native: WatchHandle | undefined;
@@ -391,10 +445,22 @@ export class Filesystem {
                 if (!(error instanceof FileNotFoundError)) throw error;
               }
             }
+            const name = event.path.startsWith(prefix)
+              ? event.path.slice(prefix.length)
+              : event.path;
             if (!exited)
               await onEvent({
-                name: event.path.startsWith(prefix) ? event.path.slice(prefix.length) : event.path,
+                name,
                 type: event.type as FilesystemEventType,
+                ...(entry ? { entry } : {}),
+              });
+            // Runtime writes a file whole, by a rename into place, which the
+            // watch sees as a create; envd writes in place, which is a write.
+            // Code written for E2B waits for the write (5 October 2026).
+            if (!exited && event.type === "create" && !event.isDir)
+              await onEvent({
+                name,
+                type: FilesystemEventType.WRITE,
                 ...(entry ? { entry } : {}),
               });
           },

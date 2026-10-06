@@ -1288,8 +1288,7 @@ class AsyncDaytona:
                      runtime_create: Optional[Dict[str, Any]] = None) -> AsyncSandbox:
         """Creates a sandbox with Daytona's defaults (1 vCPU, 1 GiB, 3 GiB
         disk, pausing after 15 minutes without calls). Funding is left to
-        Runtime: the free trial while the account has trial time, then prepaid
-        credit. ``runtime_create`` passes Runtime fields (snake_case)."""
+        Runtime: the included usage first, then prepaid credit. ``runtime_create`` passes Runtime fields (snake_case)."""
         params = params or CreateSandboxFromSnapshotParams()
         core.refuse_create(params)
         lifecycle = core.lifecycle_of(params)

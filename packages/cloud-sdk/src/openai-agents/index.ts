@@ -11,7 +11,7 @@
  *
  *   const agent = new SandboxAgent({ name: "Coder", instructions: "Fix the failing test." });
  *   await run(agent, "Go.", {
- *     sandbox: { client: new RuntimeCloudSandboxClient({ create: { funding: "trial" } }) },
+ *     sandbox: { client: new RuntimeCloudSandboxClient() },
  *   });
  *
  * Needs `@openai/agents` 0.18 or newer beside this package. The key comes from

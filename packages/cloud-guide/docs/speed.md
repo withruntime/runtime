@@ -40,8 +40,8 @@ last column.
 - **When and where:** one run from 23:21 to 23:45 UTC, one request at a time,
   with no errors, on Runtime's server in Virginia that serves every customer
   today, with guest kernel 6.1. The client was Node 24.20.0 with `withruntime`
-  0.8.4 from npm and no retries, on a trial account.
-- **What ran:** the trial's default sandbox, 2 vCPU, 4 GiB of memory and 4 GiB
+  0.8.4 from npm and no retries, on an account without credit.
+- **What ran:** the default sandbox, 2 vCPU, 4 GiB of memory and 4 GiB
   of disk, which the server keeps a few spares of, started ahead of time; all
   100 warm creates were handed one. The template row is 2 vCPU and 2 GiB, a
   shape with no spare, restored from a saved template. The first command was
@@ -112,8 +112,7 @@ Virginia, and each of those calls pays one.
 The script at the end of this page ran 20 sequential starts at 02:35 UTC, then
 20 more straight after, from a MacBook Pro in the US Mountain time zone with
 Node 24.20.0 and `withruntime` 0.8.1 from npm. Runtime runs in one region, in
-Virginia, so these are the times your own code sees, network included. Each
-trial sandbox had 2 vCPU, 4 GiB memory and 4 GiB disk, with shared CPU, ran
+Virginia, so these are the times your own code sees, network included. Each sandbox, without credit, had 2 vCPU, 4 GiB memory and 4 GiB disk, with shared CPU, ran
 `python3 -c pass` as its first command, and was stopped before the next began.
 
 | Step                               | Median | p95    | Repeat median | Repeat p95 |
@@ -133,8 +132,7 @@ attempt and its cleanup; these are observations, not a latency promise.
 ### Fork, snapshot, pause and wake, 28 September 2026
 
 Ten rounds from the same laptop at 02:29 UTC, through the public API with
-`withruntime` 0.8.1, one source sandbox at a time. The source was the same
-trial default shape, running a Python web server.
+`withruntime` 0.8.1, one source sandbox at a time. The source was the same default shape without credit, running a Python web server.
 
 | Step                                                | Median | p95    | Samples |
 | --------------------------------------------------- | ------ | ------ | ------- |
@@ -264,7 +262,7 @@ At 00:09 UTC, one after another:
   zone, on its usual connection, with Node 24.20.0 and `withruntime` 0.5.0 from
   npm. Opening a connection to the API took 67 ms, which is about one network
   round trip. Runtime runs in one region, in Virginia.
-- **What ran:** the free trial's default sandbox (2 vCPU, 4 GiB of memory, 4 GiB
+- **What ran:** the default sandbox (2 vCPU, 4 GiB of memory, 4 GiB
   of disk, shared CPU), started from the default template, one at a time. Each
   was stopped before the next began.
 - **Percentiles:** p95 and p99 are nearest-rank. With 30 samples p99 is the
@@ -281,8 +279,7 @@ once, about 140 ms here.
 ## Run the latest measurement yourself
 
 This measures the same workload as the startup table under "From your own
-machine": sequential trial
-starts, 2 vCPU, 4 GiB memory, 4 GiB disk, then `python3 -c pass` as the first
+machine": sequential starts without credit, 2 vCPU, 4 GiB memory, 4 GiB disk, then `python3 -c pass` as the first
 command. It opens the API connection before timing, disables automatic request
 and capacity retries, and confirms each sandbox is stopped before the next.
 There are no pause, wake or fork operations in this measurement.
@@ -293,7 +290,7 @@ There are no pause, wake or fork operations in this measurement.
 3. Run `OUT=after.json node bench.mts` (Node 22.18 or later), or use
    `OUT=after.json bun bench.mts`.
 
-`RUNS` defaults to 20 and accepts 1–100. It runs on the trial's hours first,
+`RUNS` defaults to 20 and accepts 1–100. It runs without credit's hours first,
 then on the account's credit if it has some. Ctrl-C prevents further starts and lets
 the current attempt finish cleanup. A failed or uncertain create stops the
 benchmark after cleanup; its five-minute time limit is a backstop. Cleanup failures

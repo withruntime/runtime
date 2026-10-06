@@ -11,14 +11,13 @@ public final class Sandboxes {
     this.t = transport;
   }
 
-  /** Creates a sandbox on the free trial (while it lasts) and waits until it runs. */
+  /** Creates a sandbox on the included usage (while it lasts) and waits until it runs. */
   public Sandbox create() {
     return create(new CreateSandbox());
   }
 
   /**
-   * Creates a sandbox and, unless {@link CreateSandbox#noWait()}, waits until it is running. When
-   * every trial slot or the account's quota is taken, it waits for one to free, up to the
+   * Creates a sandbox and, unless {@link CreateSandbox#noWait()}, waits until it is running. When every slot without credit or the account's quota is taken, it waits for one to free, up to the
    * client's waitForCapacity (two minutes by default).
    */
   public Sandbox create(CreateSandbox options) {

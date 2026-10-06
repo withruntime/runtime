@@ -22,16 +22,18 @@ export const DELIBERATE: ReadonlySet<string> = new Set([
  * safe, so the SDK does, with backoff, until the call's deadline (five
  * minutes when it has none), however many retries it allows otherwise. */
 export const NOTHING_RAN: ReadonlySet<string> = new Set(["guest_busy", "busy", "rate_limited"]);
-/** Refusals that pass on their own: a host frees room, a trial slot frees. */
-const PASSING = new Set(["no_capacity", "trial_busy"]);
+/** Refusals that pass on their own: a host frees room, a sandbox of an
+ * account without credit stops. */
+const PASSING = new Set(["no_capacity", "no_credit_running_limit", "no_credit_total_limit"]);
 /** Refusals of a create that clear when a sandbox stops or pauses, or a host
- * frees room: the trial's slots, an email domain's trial slots, the account's
- * quota and the region's capacity. `sandboxes.create` waits them out, retrying
+ * frees room: an account without credit's eight at once and its total, an
+ * email domain's, the account's quota and the region's capacity. `sandboxes.create` waits them out, retrying
  * with the same key and input, for up to `waitForCapacityMs`. */
 export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
-  "trial_busy",
-  "trial_domain_limit",
-  "trial_capacity",
+  "no_credit_running_limit",
+  "no_credit_total_limit",
+  "no_credit_domain_limit",
+  "no_credit_capacity_full",
   "quota_exceeded",
   "no_capacity",
   // A volume whose last sandbox is stopping: free within seconds.
@@ -69,13 +71,13 @@ export class RuntimeError extends Error {
     if (init.retryAfterMs !== undefined) this.retryAfterMs = init.retryAfterMs;
   }
   /** Retrying this exact call (the SDK keeps the key) is safe and may work.
-   * True for no_capacity and trial_busy as well, which clear by themselves when
-   * a host frees room or a trial sandbox stops. `sandboxes.create` already
+   * True for no_capacity and no_credit_running_limit as well, which clear by themselves when
+   * a host frees room or a sandbox without credit stops. `sandboxes.create` already
    * waits for those (see `waitForCapacityMs`), so seeing one from a create
    * means the wait ran out or was switched off. */
   get retryable(): boolean {
     if (DELIBERATE.has(this.code)) return false;
-    // A fork asking for more copies than the trial runs at once never fits.
+    // A fork asking for more copies than an account without credit runs at once never fits.
     if (PASSING.has(this.code)) return this.details?.field !== "count";
     return [0, 429, 502, 503, 504].includes(this.status);
   }

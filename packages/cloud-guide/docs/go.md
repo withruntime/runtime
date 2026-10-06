@@ -37,7 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	sbx, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{Funding: "trial"})
+	sbx, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,10 +55,10 @@ func main() {
 ```
 
 `Create` returns once the sandbox is running. `opts` may be `nil`: with no
-options you get the free trial while it lasts, the default region, and 2 vCPU,
+options you get the included usage while it lasts, the default region, and 2 vCPU,
 4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
 when idle, with no time limit (`TimeoutSeconds` sets one, 60 to 86,400; `EndsAt`
-is nil while none applies). The trial's hours are spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
+is nil while none applies). The included usage is spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
 
 ```go
 package main
@@ -353,7 +353,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	sbx, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{Funding: "trial"})
+	sbx, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	copies, err := again.Fork(ctx, &withruntime.ForkOptions{Count: 2, Funding: "trial"})
+	copies, err := again.Fork(ctx, &withruntime.ForkOptions{Count: 2})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fromSnapshot, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{Snapshot: snapshot.ID, Funding: "trial"})
+	fromSnapshot, err := client.Sandboxes.Create(ctx, &withruntime.CreateOptions{Snapshot: snapshot.ID})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -788,7 +788,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `Retryable()` says whether trying the same call again may work.
 
-**A create waits for room.** When every trial slot is taken (`trial_busy`), the
+**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `Sandboxes.Create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.

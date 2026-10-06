@@ -27,11 +27,12 @@ console.log(result.exitCode, result.stdout);
 
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
 `await using` stops it when the block ends (Node 24, Bun or TypeScript; on
-Node 22 call `await sbx.stop()`). With no arguments you get the free
-trial while it lasts (100 free hours, up to eight sandboxes running at once), 2 vCPU, 4 GiB of
+Node 22 call `await sbx.stop()`). With no arguments you get the
+included usage, a 1 GB machine running all month every month with no card (up to
+eight sandboxes running at once without credit), 2 vCPU, 4 GiB of
 memory and a 4 GiB disk. The current default image includes NumPy, pandas and
 matplotlib; see the [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-The trial's hours are spent first, then prepaid credit, with nothing to
+The included usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 
 The sandbox object does the rest:

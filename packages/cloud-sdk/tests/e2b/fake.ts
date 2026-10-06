@@ -32,10 +32,13 @@ export class FakeWorld {
   readonly images: Array<{ id: string; name: string | null; state: string }> = [];
   readonly snapshots = new Set<string>();
   forksEnabled = true;
+  /** When set, a process's output fails with it, as when its sandbox is gone. */
+  outputError: Error | undefined;
   /** How exec and spawn answer; the default says what it ran. */
   exec: (command: string, options: Record<string, unknown>) => ExecAnswer = (command) => ({
     exitCode: 0,
-    stdout: `ran ${command}\n`,
+    // The /home/user link, as on an image with no /home/user of its own.
+    stdout: String(command).includes("ln -s /workspace /home/user") ? "same\n" : `ran ${command}\n`,
   });
   /** The events a spawned process produces. */
   output: (command: string, options?: Record<string, unknown>) => OutputEvent[] = (
@@ -95,6 +98,14 @@ export class FakeWorld {
       async create(input: Record<string, unknown>, options: unknown) {
         world.record("sandboxes.create", input, options);
         if (input.snapshot && !world.forksEnabled) throw unavailable();
+        // The API resolves an image's id, name, name:tag or name@version in
+        // the create itself, and answers image_not_found for none.
+        const image = input.image as string | undefined;
+        if (
+          image !== undefined &&
+          !world.images.some((one) => one.id === image || one.name === image.replace(/[:@].*$/, ""))
+        )
+          throw notFound("image_not_found", `This account has no image named ${image}.`);
         const sandbox = new FakeSandbox(world, world.id(), input);
         world.sandboxes.set(sandbox.id, sandbox);
         return sandbox;
@@ -140,7 +151,18 @@ export class FakeWorld {
         if (!world.snapshots.delete(id)) throw notFound("not_found", "No such snapshot.");
       },
     };
-    return { sandboxes, images, snapshots } as unknown as Runtime;
+    // GET /v1/me: who the key is.
+    const me = async (options: unknown) => {
+      world.record("me", options);
+      return {
+        orgId: "org-1",
+        orgName: "Acme",
+        principalId: "p-1",
+        credentialId: "c-1",
+        apiVersion: "1",
+      };
+    };
+    return { sandboxes, images, snapshots, me } as unknown as Runtime;
   }
 }
 
@@ -190,7 +212,7 @@ export class FakeProcess {
   constructor(
     private readonly world: FakeWorld,
     readonly id: string,
-    readonly command: string,
+    command: string | readonly string[],
     stdinOpen: boolean,
     private readonly events: OutputEvent[],
   ) {
@@ -199,7 +221,7 @@ export class FakeProcess {
       kind: "process",
       state: "running",
       exitCode: null,
-      command,
+      command: guestCommand(command),
       cwd: "/workspace",
       pty: false,
       stdinOpen,
@@ -209,6 +231,7 @@ export class FakeProcess {
   }
   async *output(options: { cursor?: number; signal?: AbortSignal } = {}) {
     this.world.record("process.output", this.id, options.cursor ?? 0);
+    if (this.world.outputError) throw this.world.outputError;
     for (const event of this.events) {
       await Promise.resolve();
       if (options.signal?.aborted) return;
@@ -227,6 +250,12 @@ export class FakeProcess {
   }
 }
 
+/** A process's `command` as the guest agent records it: a shell string runs
+ * as `bash -c`, and the words are joined by spaces and cut at 256 characters. */
+export function guestCommand(command: string | readonly string[]): string {
+  return (typeof command === "string" ? ["bash", "-c", command] : command).join(" ").slice(0, 256);
+}
+
 export class FakeSandbox {
   readonly id: string;
   info: Record<string, unknown> & {
@@ -239,6 +268,8 @@ export class FakeSandbox {
   /** Runtime refuses a public share, whatever the funding reads. */
   refusePublic = false;
   watchEvents: { type: string; path: string; isDir: boolean }[] = [];
+  /** What files.list answers instead of the written files, when set. */
+  listing: Record<string, unknown>[] | undefined;
   readonly processList: FakeProcess[] = [];
   readonly contexts = new Map<string, Record<string, unknown>>();
 
@@ -257,7 +288,11 @@ export class FakeSandbox {
       funding: input.funding ?? "paid",
       vcpu: input.vcpu ?? 2,
       memoryMiB: input.memoryMiB ?? 4096,
+      // As the API answers since 0381: onTimeout, and onLeaseEnd, its older name.
+      onTimeout: input.onLeaseEnd ?? "pause",
       onLeaseEnd: input.onLeaseEnd ?? "pause",
+      autoWake: input.autoWake ?? true,
+      stopReason: null,
       createdAt: new Date(1_800_000_000_000).toISOString(),
       expiresAt: new Date(
         Date.now() + ((input.timeoutSeconds as number) || 1800) * 1000,
@@ -265,11 +300,11 @@ export class FakeSandbox {
       // As the API answers since 0300: no timeoutSeconds is no time limit,
       // shown as 0 with no end, and the lease renews itself.
       timeoutSeconds: input.timeoutSeconds ?? 0,
-      ...(input.image ? { image: input.image } : {}),
-      ...(input.snapshot ? { snapshot: input.snapshot } : {}),
+      // The API's answer names neither the image nor the snapshot.
     };
-    // A limited one ends where it is paid up to; one with none never does.
-    const limited = Boolean(input.timeoutSeconds);
+    // A limited one ends where it is paid up to; one with none never does,
+    // and neither does a persistent one, as a pilot's are (0254).
+    const limited = Boolean(input.timeoutSeconds) && input.persistent !== true;
     Object.defineProperty(this.info, "endsAt", {
       get: () => (limited ? this.info.expiresAt : null),
       enumerable: true,
@@ -311,6 +346,7 @@ export class FakeSandbox {
       },
       async list(path: string, options: Record<string, unknown>) {
         world.record("files.list", path, options);
+        if (sandbox.listing) return sandbox.listing;
         return [...sandbox.fileMap.entries()]
           .filter(([file]) => file.startsWith(`${path}/`))
           .map(([file, bytes]) => ({
@@ -379,11 +415,12 @@ export class FakeSandbox {
       /** Delivers the events the test put in `watchEvents`, then waits for stop. */
       async watch(
         path: string,
-        onEvent: (event: { type: string; path: string; isDir: boolean }) => void,
+        onEvent: (event: { type: string; path: string; isDir: boolean }) => void | Promise<void>,
         options: { onExit?: (reason: string) => void } & Record<string, unknown>,
       ) {
         world.record("files.watch", path, { ...options, onExit: undefined });
-        for (const event of sandbox.watchEvents) onEvent(event);
+        // As the SDK's watch delivers them: one at a time, each awaited.
+        for (const event of sandbox.watchEvents) await onEvent(event);
         return {
           stop: async () => {
             world.record("files.watch.stop", path);
@@ -520,7 +557,7 @@ export class FakeSandbox {
     const process = new FakeProcess(
       this.world,
       `proc-${this.processList.length + 1}`,
-      text,
+      command,
       false,
       events,
     );
@@ -533,14 +570,14 @@ export class FakeSandbox {
       if (event.type === "exit") process.info.state = "exited";
     }
   }
-  async spawn(command: string, options: Record<string, unknown>) {
+  async spawn(command: string | string[], options: Record<string, unknown>) {
     this.world.record("sandbox.spawn", command, options);
     const process = new FakeProcess(
       this.world,
       `proc-${this.processList.length + 1}`,
       command,
       options.stdin === "pipe",
-      this.world.output(command, options),
+      this.world.output(command as string, options),
     );
     this.processList.push(process);
     return process;
@@ -553,7 +590,16 @@ export class FakeSandbox {
   async pause(options: unknown) {
     this.world.record("sandbox.pause", this.id, options);
     this.info.state = "paused";
+    this.info.stopReason = "requested";
     return this;
+  }
+  /** Deleted for good: a read answers not_found after it, and a second
+   * delete answers the same as the first, as the API does. */
+  async delete(options: unknown) {
+    this.world.record("sandbox.delete", this.id, options);
+    this.world.sandboxes.delete(this.id);
+    this.info.state = "stopped";
+    return { id: this.id, kind: "sandbox", status: "deleted", state: "stopping" };
   }
   async wake(options: unknown) {
     this.world.record("sandbox.wake", this.id, options);

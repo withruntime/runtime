@@ -44,7 +44,7 @@ Weighing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-sa
 - **Switching credit.** Run `runtime switch --from cloudflare` before your first
   top-up and that top-up is matched, up to {{switching-max}}
   ([switching credit](./pricing#switching-credit)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file.
 
@@ -68,7 +68,7 @@ documentation, checked {{checked:cloudflare}}.
 | Memory billing | {{memory-rate}} per reserved GiB-hour                                                     | {{rate:cloudflare:memory}} per provisioned GiB-hour                  |
 | Disk           | Included while running; paused storage {{paused-storage-rate}} per GB (10⁹ bytes) a month | {{rate:cloudflare:disk}} per provisioned GB-hour                     |
 | Plan fee       | None; prepaid credit from {{topup-min}}                                                   | Workers Paid, at least {{term:cloudflare:workers-paid}} a month      |
-| Free start     | {{trial-hours}} sandbox hours, no card                                                    | No free tier; the plan includes 375 vCPU-minutes a month             |
+| Free start     | {{included-machine}} every month, no card                                                 | No free tier; the plan includes 375 vCPU-minutes a month             |
 | Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                            | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU             |
 | When idle      | Pause keeps files and memory; kept while you have credit                                  | Filesystem-only snapshots; processes restart                         |
 | Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs                          | A TypeScript SDK called from a Cloudflare Worker                     |
@@ -111,7 +111,7 @@ each account's first {{outbound-allowance}} out a month is free, then {{outbound
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Cloudflare calls on a branch, tests them on the free trial, and tells
+replaces the Cloudflare calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -137,7 +137,7 @@ Runtime, from any server:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);
@@ -183,7 +183,6 @@ export default {
     const runtime = new Runtime({ apiKey: env.RUNTIME_API_KEY });
     // A backstop: the sandbox stops after 5 minutes even if this request is cut off.
     const box = await runtime.sandboxes.create({
-      funding: "trial",
       timeoutSeconds: 300,
       onLeaseEnd: "stop",
     });

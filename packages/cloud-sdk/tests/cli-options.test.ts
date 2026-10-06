@@ -139,7 +139,7 @@ test("a create waiting for a trial slot says so on standard error, once", async 
       ? Response.json(
           {
             error: {
-              code: "trial_busy",
+              code: "no_credit_running_limit",
               message: "All eight trial slots are running.",
               retryAfterMs: 5,
             },

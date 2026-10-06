@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A create's fields, every one optional. With none you get the free trial while it lasts, the
+ * A create's fields, every one optional. With none you get the included usage while it lasts, the
  * default region and a 2 vCPU / 4 GiB machine for up to 30 minutes.
  */
 public final class CreateSandbox extends Params<CreateSandbox> {
@@ -31,7 +31,7 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("labels", new LinkedHashMap<>(labels));
   }
 
-  /** "trial" or "paid". Unset: the trial while it lasts, then prepaid credit. Trial never falls back to paid. */
+  /** Accepted and ignored: the included usage is used first, then prepaid credit. */
   public CreateSandbox funding(String funding) {
     return set("funding", funding);
   }
@@ -126,7 +126,7 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return this;
   }
 
-  /** Replaces the client's wait for a full trial, quota or region; zero fails at once. */
+  /** Replaces the client's wait for full slots without credit, a full quota or a full region; zero fails at once. */
   public CreateSandbox waitForCapacity(Duration wait) {
     this.waitForCapacity = wait;
     return this;

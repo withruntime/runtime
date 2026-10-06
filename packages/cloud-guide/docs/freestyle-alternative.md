@@ -38,7 +38,7 @@ Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -68,7 +68,7 @@ checked {{checked:freestyle}}.
 | Sizes              | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | 4 vCPUs and 8 GiB free; 8 and 16 Hobby; 32 and 64 Pro                                            |
 | At once            | {{paid-sandboxes}} paid, no plan                               | 10 free, 40 Hobby, 400 Pro                                                                       |
 | Plan fee           | None; prepaid credit from {{topup-min}}                        | Free $0; Hobby {{term:freestyle:hobby}} and Pro {{term:freestyle:pro}} a month, counted to usage |
-| Free start         | {{trial-hours}} sandbox hours, no card                         | 200 vCPU-hours and 400 GiB-hours of memory a month                                               |
+| Free start         | {{included-machine}} every month, no card                      | 200 vCPU-hours and 400 GiB-hours of memory a month                                               |
 | Pause              | Files, memory and processes, kept while you have credit        | Hibernate with memory, billed as storage while paused                                            |
 
 ## Cost for the same job
@@ -103,7 +103,7 @@ terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Freestyle calls on a branch, tests them on the free trial, and
+replaces the Freestyle calls on a branch, tests them on the included usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge.
 

@@ -59,7 +59,7 @@ Account
                                                The account's audit log (owner or admin keys)
   sso                                          Single sign-on and SCIM directory sync (owner or
                                                admin keys); an owner changes it on the website
-  usage [--csv]                                Balance, trial time and charges; --csv, each resource
+  usage [--csv]                                Balance, included usage and charges; --csv, each resource
   usage export --since <UTC time> --until <UTC time>
                                                Every settlement in the range as CSV; --json, each page
   limits                                       Whether this key is read-only, and its daily spending limit
@@ -781,16 +781,18 @@ export async function run(
     const [who, spend] = await Promise.all([rt.me(), rt.usage().catch(() => undefined)]);
     const trialLeft = spend?.trial ? spend.trial.availableMs / 3_600_000 : 0;
     const credit = spend ? BigInt(spend.available) : 0n;
+    // A pilot's sandboxes run on the pilot, before anything else and free.
     const funding = !spend
       ? undefined
       : [
+          ...(spend.pilot ? [pilotFunding(spend.pilot)] : []),
           ...(trialLeft > 0
             ? [
-                `free trial, ${trialLeft.toLocaleString("en-US", { maximumFractionDigits: 1 })} hours left`,
+                `included usage, ${trialLeft.toLocaleString("en-US", { maximumFractionDigits: 1 })} hours left without credit`,
               ]
             : []),
           ...(credit > 0n ? [`${dollars(credit)} of credit`] : []),
-        ].join("; ") || "no trial time or credit left: runtime billing";
+        ].join("; ") || "no included usage or credit left: runtime billing";
     print(
       table([
         ["organization", who.orgName ? `${who.orgName} (${who.orgId})` : who.orgId],
@@ -850,7 +852,10 @@ export async function run(
     return 0;
   }
   if (command === "limits") {
-    const l = await (await client(env)).limits.get();
+    const rt = await client(env);
+    // The usage call only adds the pilot's line: a key that cannot read it
+    // still gets its limits.
+    const [l, spend] = await Promise.all([rt.limits.get(), rt.usage().catch(() => undefined)]);
     // As `usage` shows money: $0.0014 of spend read $0.00 until 30 September 2026.
     const usd = (micros: string) => dollars(micros);
     const access =
@@ -870,7 +875,13 @@ export async function run(
         ],
         ["used, last 24 hours", usd(l.daily.usedMicros)],
         ...(l.daily.remainingMicros === null ? [] : [["left", usd(l.daily.remainingMicros)]]),
-        ...(l.trial ? [["free trial", trialLeft(l.trial)]] : []),
+        ...(l.trial ? [["free time", trialLeft(l.trial)]] : []),
+        ...(spend?.pilot
+          ? [
+              ["pilot", pilotFunding(spend.pilot)],
+              ["pilot sandbox hours", pilotLeft(spend.pilot)],
+            ]
+          : []),
       ]),
       l,
     );
@@ -1166,7 +1177,7 @@ export async function run(
   throw unknown("command", command, COMMANDS);
 }
 
-/** `runtime usage` for a person: the balance, the trial and what each kind
+/** `runtime usage` for a person: the balance, the included usage and what each kind
  * of resource was charged, in dollars. --json keeps every figure, and each
  * resource with its rates and CPU time. */
 /** One row per resource, for a spreadsheet: when it ran, how big it was, how
@@ -1226,16 +1237,46 @@ export function usageCsv(u: Usage): string {
 const hours = (ms: number) =>
   (ms / 3_600_000).toLocaleString("en-US", { maximumFractionDigits: 1 });
 
-/** The free trial's time left, as `runtime usage` and `runtime limits` say it. */
-function trialLeft(trial: { totalMs: number; availableMs: number }): string {
-  return `${hours(trial.availableMs)} of ${hours(trial.totalMs)} hours left`;
+/** The machine time left without credit, as `runtime usage` and `runtime
+ * limits` say it: this month's included usage, as hours at 2 vCPU and 4 GiB,
+ * or for an account given free hours before 5 October 2026, those hours too. */
+function trialLeft(trial: NonNullable<Usage["trial"]>): string {
+  const renews = trial.renewsAt ? `, renews ${trial.renewsAt.slice(0, 10)}` : "";
+  return trial.totalMs > 0
+    ? `${hours(trial.availableMs)} hours left (${hours(trial.totalMs)} free hours given before 5 October 2026, and the included usage${renews})`
+    : `${hours(trial.availableMs)} hours at 2 vCPU and 4 GiB left this month${renews}`;
+}
+
+/** This month's included usage, one row per product, as `runtime usage`
+ * says it. */
+function allowanceRows(allowances: NonNullable<Usage["allowances"]>): string[][] {
+  const amount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  return allowances.map((a) => [
+    `included ${a.pool.replace(/-/g, " ")}`,
+    `${amount(a.left)} of ${amount(a.quantity)} ${a.unit}s left`,
+  ]);
+}
+
+/** What a pilot gives, as `runtime whoami` and `runtime limits` say it: the
+ * sandboxes it runs free and until when, past which credit does not run
+ * them. */
+function pilotFunding(pilot: NonNullable<Usage["pilot"]>): string {
+  const at = (iso: string) => `${iso.slice(0, 16).replace("T", " ")} UTC`;
+  return `a pilot: up to ${pilot.sandboxes.toLocaleString("en-US")} sandboxes free, running until ${at(pilot.graceEndsAt)}; credit does not run it; to extend it, write to support`;
 }
 
 /** A pilot's sandbox hours left, as `runtime usage` says them. */
 function pilotLeft(pilot: NonNullable<Usage["pilot"]>): string {
   const left = `${hours(pilot.leftMs)} of ${pilot.hours.toLocaleString("en-US")} left`;
+  // How long they last at the rate its sandboxes run now (an API before
+  // 0414 does not say how many run).
+  const running = pilot.running ?? 0;
+  const pace =
+    running > 0
+      ? `; at ${running.toLocaleString("en-US")} running, about ${hours(pilot.leftMs / running)} hours`
+      : "";
   return pilot.leftMs > 0
-    ? `${left}; new pilot sandboxes until ${pilot.endsAt.slice(0, 16).replace("T", " ")} UTC`
+    ? `${left}${pace}; new pilot sandboxes until ${pilot.endsAt.slice(0, 16).replace("T", " ")} UTC`
     : "This pilot's sandbox hours are used.";
 }
 
@@ -1258,7 +1299,8 @@ function usageSummary(u: Usage): string {
     ["set aside for running sandboxes and this hour's storage", dollars(micros(u.held))],
   ];
   if (micros(u.expired) > 0n) rows.push(["expired or taken back", dollars(micros(u.expired))]);
-  if (u.trial) rows.push(["free trial", trialLeft(u.trial)]);
+  if (u.trial) rows.push(["free time", trialLeft(u.trial)]);
+  if (u.allowances) rows.push(...allowanceRows(u.allowances));
   if (u.pilot) rows.push(["pilot sandbox hours", pilotLeft(u.pilot)]);
   if (u.outbound) {
     const gib = (bytes: number) =>
@@ -1270,7 +1312,15 @@ function usageSummary(u: Usage): string {
     ]);
   }
   const kinds = new Map<string, { count: number; charged: bigint; held: bigint }>();
-  for (const resource of u.resources ?? []) {
+  // Every resource, by kind, from an API that totals them (6 October 2026);
+  // an older one sends only its hundred newest, counted here.
+  for (const k of u.kinds ?? [])
+    kinds.set(k.kind, {
+      count: k.resources,
+      charged: micros(k.chargedMicros),
+      held: micros(k.heldMicros),
+    });
+  for (const resource of u.kinds ? [] : (u.resources ?? [])) {
     const kind = typeof resource.kind === "string" ? resource.kind : "other";
     const entry = kinds.get(kind) ?? { count: 0, charged: 0n, held: 0n };
     entry.count++;
@@ -1466,7 +1516,7 @@ function runningTime(seconds: number): string {
   return `${shown} ${unit}${shown === "1" ? "" : "s"}`;
 }
 
-/** The sandboxes the free trial paid for, said beside what was priced. */
+/** The sandboxes free usage paid for, said beside what was priced. */
 function trialNote(trial: number, all: number, trialSeconds: number): string {
   if (!trial) return "";
   const which =
@@ -1475,7 +1525,7 @@ function trialNote(trial: number, all: number, trialSeconds: number): string {
         ? "It"
         : "All of them"
       : `${trial} of them, ${runningTime(trialSeconds)} of that time,`;
-  return ` ${which} ran on the free trial, which charged nothing; Runtime's side prices ${trial === 1 ? "it" : "them"} at the standard rates, what the same work costs on paid credit.`;
+  return ` ${which} ran on free usage, which charged nothing; Runtime's side prices ${trial === 1 ? "it" : "them"} at the standard rates, what the same work costs on paid credit.`;
 }
 
 async function switching(
@@ -3196,7 +3246,7 @@ export async function imageCommand(
 const JOB_HELP = `runtime job <command>
 
   A job runs a command in a fresh sandbox, once or on a schedule. Each run spends
-  the free trial's hours first, then credit at the sandbox rates.
+  the included usage first, then credit at the sandbox rates.
 
   create <name> (--cron "<min hour day month weekday>" [--timezone Europe/Berlin] | --at <time|now>)
          [--vcpu 2] [--memory 4096] [--disk 4096] [--cpu shared|reserved] [--cpu-floor <thousandths>]
@@ -3683,7 +3733,7 @@ const CREATE_FLAGS = [
   "get-or-create",
 ];
 /** Says on standard error, once for each reason, why a create has not
- * answered yet: it is waiting for a trial slot or room, which can take up to
+ * answered yet: it is waiting for a slot without credit or room, which can take up to
  * two minutes, and silence reads as a hang. */
 function waiting(out: Out): (refusal: RuntimeError) => void {
   const said = new Set<string>();

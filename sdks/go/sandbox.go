@@ -16,7 +16,7 @@ import (
 type SandboxService struct{ c *Client }
 
 // Create makes a sandbox and, unless NoWait is set, waits until it is
-// running. opts may be nil. When every trial slot or the account's quota is
+// running. opts may be nil. When every slot without credit or the account's quota is
 // taken it waits for one to free, up to the client's WaitForCapacity.
 func (s *SandboxService) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, error) {
 	if opts == nil {

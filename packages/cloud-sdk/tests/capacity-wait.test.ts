@@ -46,8 +46,8 @@ const client = (fetcher: typeof fetch, waitForCapacityMs?: number) =>
 
 test("a create waits out a full trial, then succeeds with the same key and input", async () => {
   const { fetcher, keys, bodies } = refusing([
-    { code: "trial_busy", details: { sandboxIds: ["a"], concurrent: 8 } },
-    { code: "trial_busy", details: { sandboxIds: ["a"], concurrent: 8 } },
+    { code: "no_credit_running_limit", details: { sandboxIds: ["a"], concurrent: 8 } },
+    { code: "no_credit_running_limit", details: { sandboxIds: ["a"], concurrent: 8 } },
   ]);
   const sbx = await client(fetcher).sandboxes.create({ funding: "trial", labels: { ci: "1" } });
   expect(sbx.id).toBe("sbx");
@@ -58,15 +58,15 @@ test("a create waits out a full trial, then succeeds with the same key and input
 });
 
 test("the paid limit, an email domain's trial limit and a full region are waited out too", async () => {
-  for (const code of ["quota_exceeded", "trial_domain_limit", "no_capacity"]) {
+  for (const code of ["quota_exceeded", "no_credit_domain_limit", "no_capacity"]) {
     const { fetcher, keys } = refusing([{ code }]);
     await client(fetcher).sandboxes.create({});
     expect(keys).toHaveLength(2);
   }
-  // trial_capacity is a 503: waited for as room, not spent from maxRetries.
+  // no_credit_capacity_full is a 503: waited for as room, not spent from maxRetries.
   const { fetcher, keys } = refusing(
     Array.from({ length: 6 }, () => ({
-      code: "trial_capacity",
+      code: "no_credit_capacity_full",
       status: 503,
     })),
   );
@@ -80,14 +80,16 @@ test("the paid limit, an email domain's trial limit and a full region are waited
 });
 
 test("when the wait runs out, the original refusal is thrown", async () => {
-  const { fetcher, keys } = refusing(Array.from({ length: 1000 }, () => ({ code: "trial_busy" })));
+  const { fetcher, keys } = refusing(
+    Array.from({ length: 1000 }, () => ({ code: "no_credit_running_limit" })),
+  );
   const started = performance.now();
   const error = await client(fetcher, 200)
     .sandboxes.create({})
     .catch((e: unknown) => e);
   const took = performance.now() - started;
   expect(error).toBeInstanceOf(ConflictError);
-  expect(error).toMatchObject({ code: "trial_busy", status: 409 });
+  expect(error).toMatchObject({ code: "no_credit_running_limit", status: 409 });
   expect(keys.length).toBeGreaterThan(2);
   expect(took).toBeGreaterThanOrEqual(190);
   expect(took).toBeLessThan(1500);
@@ -100,9 +102,9 @@ test("when the wait runs out, the original refusal is thrown", async () => {
 });
 
 test("waitForCapacityMs: 0 fails at once, on the client or on one call", async () => {
-  const first = refusing([{ code: "trial_busy" }]);
+  const first = refusing([{ code: "no_credit_running_limit" }]);
   await expect(client(first.fetcher, 0).sandboxes.create({})).rejects.toMatchObject({
-    code: "trial_busy",
+    code: "no_credit_running_limit",
   });
   expect(first.keys).toHaveLength(1);
   const second = refusing([{ code: "quota_exceeded" }]);
@@ -113,9 +115,11 @@ test("waitForCapacityMs: 0 fails at once, on the client or on one call", async (
 });
 
 test("a request that can never fit is not waited for, and only a create waits", async () => {
-  const never = refusing([{ code: "trial_busy", details: { field: "count", concurrent: 8 } }]);
+  const never = refusing([
+    { code: "no_credit_running_limit", details: { field: "count", concurrent: 8 } },
+  ]);
   await expect(client(never.fetcher).sandboxes.create({})).rejects.toMatchObject({
-    code: "trial_busy",
+    code: "no_credit_running_limit",
   });
   expect(never.keys).toHaveLength(1);
   // A fork's failure names copies that started, and its key replays that
@@ -125,17 +129,17 @@ test("a request that can never fit is not waited for, and only a create waits", 
     if (init.method === "GET") return Response.json(running);
     if (new URL(url).pathname.endsWith(":fork")) forks++;
     return Response.json(
-      { error: { code: "trial_busy", status: 409, message: "full", retryAfterMs: 5 } },
+      { error: { code: "no_credit_running_limit", status: 409, message: "full", retryAfterMs: 5 } },
       { status: 409 },
     );
   }) as unknown as typeof fetch;
   const sbx = await client(forking).sandboxes.get("sbx");
-  await expect(sbx.fork()).rejects.toMatchObject({ code: "trial_busy" });
+  await expect(sbx.fork()).rejects.toMatchObject({ code: "no_credit_running_limit" });
   expect(forks).toBe(1);
 });
 
 test("runtime.sandboxes.getOrCreate sends the name with getOrCreate, and waits for room like a create", async () => {
-  const { fetcher, bodies, keys } = refusing([{ code: "trial_busy" }]);
+  const { fetcher, bodies, keys } = refusing([{ code: "no_credit_running_limit" }]);
   const sbx = await client(fetcher).sandboxes.getOrCreate("dev", { vcpu: 2 });
   expect(sbx.id).toBe("sbx");
   expect(keys).toHaveLength(2);
@@ -145,8 +149,8 @@ test("runtime.sandboxes.getOrCreate sends the name with getOrCreate, and waits f
 
 test("a create says why it waits, before each wait, so a person is not left with silence", async () => {
   const { fetcher } = refusing([
-    { code: "trial_busy", details: { concurrent: 8 } },
-    { code: "trial_busy", details: { concurrent: 8 } },
+    { code: "no_credit_running_limit", details: { concurrent: 8 } },
+    { code: "no_credit_running_limit", details: { concurrent: 8 } },
   ]);
   const heard: Array<[string, number]> = [];
   await client(fetcher).sandboxes.create(
@@ -154,14 +158,14 @@ test("a create says why it waits, before each wait, so a person is not left with
     { onCapacityWait: (refusal, waitMs) => heard.push([refusal.code, waitMs]) },
   );
   expect(heard).toEqual([
-    ["trial_busy", 5],
-    ["trial_busy", 5],
+    ["no_credit_running_limit", 5],
+    ["no_credit_running_limit", 5],
   ]);
 });
 
 test("Sandbox.create takes the create options, as runtime.sandboxes.create does", async () => {
   const { Sandbox } = await import("../src/index");
-  const { fetcher, keys } = refusing([{ code: "trial_busy" }]);
+  const { fetcher, keys } = refusing([{ code: "no_credit_running_limit" }]);
   await expect(
     Sandbox.create({}, { client: client(fetcher), waitForCapacityMs: 0 }),
   ).rejects.toBeInstanceOf(ConflictError);

@@ -66,7 +66,7 @@ def disconnect(task):
 
 
 def command_events(handle):
-    from ._core import translate
+    from ._core import command_failure, translate
     import time
     if handle._disconnected or handle._exit is not None:
         return
@@ -99,7 +99,7 @@ def command_events(handle):
             elif kind == "exit": handle._exit = event
             elif kind == "truncated": handle._truncated = True
     except Exception as error:
-        handle._failure = translate(error, "sandbox")
+        handle._failure = command_failure(translate(error, "sandbox"))
         raise handle._failure from error
     finally:
         if handle._exit is not None or handle._failure is not None or handle._disconnected:
@@ -228,6 +228,8 @@ class WatchHandle:
                 except core.FileNotFoundException:
                     pass
             result.append(core.FilesystemEvent(name, core.FilesystemEventType(event["type"]), entry))
+            if core.written_whole(event):
+                result.append(core.FilesystemEvent(name, core.FilesystemEventType.WRITE, entry))
         return result
 
 
@@ -244,6 +246,7 @@ def watch_directory(filesystem: Any, path: str, user: Any = None, request_timeou
                                         "Watch it as the sandbox's own user (leave user out); Runtime's watch "
                                         "reports changes made by anyone.")
         target = filesystem._path(path, user)
+        core.only_directory(target, filesystem._files.stat(target))
         native = filesystem._files.watch(target, recursive=recursive, timeout_ms=0)
         return target, native
     try:

@@ -55,7 +55,7 @@ from withruntime.inspect_ai import RuntimeSandboxEnvironmentConfig
 from_dockerfile = Task(sandbox=("runtime", "Dockerfile"))
 from_compose = Task(sandbox=("runtime", "compose.yaml"))
 configured = Task(
-    sandbox=("runtime", RuntimeSandboxEnvironmentConfig(image="python:3.12-slim", funding="trial", memory_mib=2048))
+    sandbox=("runtime", RuntimeSandboxEnvironmentConfig(image="python:3.12-slim", memory_mib=2048))
 )
 ```
 
@@ -69,18 +69,18 @@ again only when those files change.
 `RuntimeSandboxEnvironmentConfig` takes these, all optional. A compose file can
 set them under `x-runtime` on the service.
 
-| Field                            | What it does                                                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `image`                          | A container image such as `python:3.12-slim`, built once as a Runtime image                                                    |
-| `dockerfile`                     | A Dockerfile's path; its folder is the build context                                                                           |
-| `runtime_image`                  | A Runtime image (id, name or `name:tag`), used as it is                                                                        |
-| `funding`                        | Accepted and ignored: the trial's hours are spent first, then prepaid credit                                                   |
-| `vcpu`, `memory_mib`, `disk_mib` | The sandbox's size. On the trial, at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request runs at that size, with a warning |
-| `user`                           | Who commands and file operations run as when Inspect names no user: `root` by default                                          |
-| `workdir`                        | Where relative paths and commands start: `/workspace` by default, or the Dockerfile's `WORKDIR`                                |
-| `env`                            | Variables for every command                                                                                                    |
-| `network`                        | Network rules from the start, such as `{"internet": False}`                                                                    |
-| `region`, `labels`, `build`      | The region, your own labels, and build limits such as `{"disk_mib": 16384}`                                                    |
+| Field                            | What it does                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `image`                          | A container image such as `python:3.12-slim`, built once as a Runtime image                                                      |
+| `dockerfile`                     | A Dockerfile's path; its folder is the build context                                                                             |
+| `runtime_image`                  | A Runtime image (id, name or `name:tag`), used as it is                                                                          |
+| `funding`                        | Accepted and ignored: the included usage is spent first, then prepaid credit                                                     |
+| `vcpu`, `memory_mib`, `disk_mib` | The sandbox's size. Without credit, at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request runs at that size, with a warning |
+| `user`                           | Who commands and file operations run as when Inspect names no user: `root` by default                                            |
+| `workdir`                        | Where relative paths and commands start: `/workspace` by default, or the Dockerfile's `WORKDIR`                                  |
+| `env`                            | Variables for every command                                                                                                      |
+| `network`                        | Network rules from the start, such as `{"internet": False}`                                                                      |
+| `region`, `labels`, `build`      | The region, your own labels, and build limits such as `{"disk_mib": 16384}`                                                      |
 
 From a compose service, `cpus` and `mem_limit` (or `deploy.resources.limits`)
 set the size, `working_dir`, `environment` and `user` carry over, and
@@ -114,11 +114,10 @@ async backend.
 
 ## Limits to plan for
 
-- The trial runs {{trial-sandboxes}} sandboxes at once, so the sandbox asks Inspect for
+- An account without credit runs {{trial-sandboxes}} sandboxes at once, so the sandbox asks Inspect for
   eight at a time. On a paid account raise it with `--max-sandboxes`; see
   [pricing](./pricing#how-many-at-once).
-- Builds run one at a time until your account holds credit, then four. A
-  free trial keeps its first three images free; after that they are billed as
+- Builds run one at a time until your account holds credit, then four. An account without credit keeps its first three images free; after that they are billed as
   stored images ([pricing](./pricing#snapshots-images-and-volumes)).
 
 ## What was verified

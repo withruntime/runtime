@@ -11,10 +11,11 @@ module WithRuntime
       unavailable unsupported fork_unavailable previews_unavailable
       network_unavailable network_rules_unavailable secrets_unavailable identity_unavailable env_unavailable
     ].freeze
-    # Refusals that pass on their own: a host frees room, a trial slot frees.
-    PASSING = %w[no_capacity trial_busy].freeze
+    # Refusals that pass on their own: a host frees room, a sandbox of an
+    # account without credit stops.
+    PASSING = %w[no_capacity no_credit_running_limit no_credit_total_limit].freeze
     # Refusals of a create that clear when a sandbox stops or a host frees room.
-    WAITS_FOR_ROOM = %w[trial_busy trial_domain_limit trial_capacity quota_exceeded no_capacity volume_releasing].freeze
+    WAITS_FOR_ROOM = %w[no_credit_running_limit no_credit_total_limit no_credit_domain_limit no_credit_capacity_full quota_exceeded no_capacity volume_releasing].freeze
 
     attr_reader :code, :status, :hint, :request_id, :details, :idempotency_key, :retry_after
 

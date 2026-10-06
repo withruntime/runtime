@@ -61,7 +61,7 @@ agent = SandboxAgent(name="Coder", instructions="Fix the failing test, then run 
 run_config = RunConfig(
     sandbox=SandboxRunConfig(
         client=RuntimeCloudSandboxClient(),
-        options=RuntimeCloudSandboxClientOptions(funding="trial"),
+        options=RuntimeCloudSandboxClientOptions(),
     )
 )
 result = Runner.run_sync(agent, "The tests are in tests/.", run_config=run_config)
@@ -77,7 +77,7 @@ import { RuntimeCloudSandboxClient } from "withruntime/openai-agents";
 
 export async function fixTests() {
   const agent = new SandboxAgent({ name: "Coder", instructions: "Fix the failing test." });
-  const client = new RuntimeCloudSandboxClient({ create: { funding: "trial" } });
+  const client = new RuntimeCloudSandboxClient();
   const result = await run(agent, "The tests are in tests/.", { sandbox: { client } });
   return result.finalOutput;
 }
@@ -328,7 +328,7 @@ VS Code takes it in `.vscode/mcp.json`:
 - Every sample on this page is typechecked or compiled against the current SDK
   on every build, and the samples that need no model run.
 - On 23 September 2026 each integration ran in its framework's own agent loop
-  against real trial sandboxes, driven by scripted models so no model was paid
+  against real sandboxes without credit, driven by scripted models so no model was paid
   for: OpenAI Agents SDK 0.22.3 (Python) and 0.18.0 (TypeScript), AI SDK
   7.0.87, Claude Agent SDK 0.3.277, LangChain 1.4, LangGraph 1.2, Deep Agents
   0.7.18, Mastra 1.69.0, Pydantic AI 2.48, Google ADK 2.9, LlamaIndex 0.14 and

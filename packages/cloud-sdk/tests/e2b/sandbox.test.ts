@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AuthenticationError,
   CommandExitError,
@@ -19,10 +19,11 @@ import {
   waitForPort,
   type SandboxOpts,
 } from "../../src/e2b/index";
-import { pickKey } from "../../src/e2b/client";
-import { keptLeases, renewLeases } from "../../src/e2b/sandbox";
+import { keySource, pickKey, resetClients } from "../../src/e2b/client";
+import { TEMPLATE_LABEL } from "../../src/e2b/sandbox";
 import { PublicPreviewNotAllowedError } from "../../src/e2b/index";
-import { FakeWorld, type FakeSandbox } from "./fake";
+import { commandAs, listedAs, shellAs } from "../../src/e2b/users";
+import { FakeWorld, guestCommand, notFound, type FakeSandbox } from "./fake";
 
 let world: FakeWorld;
 const runtime = () => ({ runtime: { client: world.client() } });
@@ -36,30 +37,27 @@ beforeEach(() => {
 });
 
 describe("Sandbox.create", () => {
-  test("gives E2B's default machine, no time limit, and leaves funding to Runtime", async () => {
+  test("gives E2B's default machine and E2B's 300 s, which ends in a pause, never a delete", async () => {
     const sbx = await create();
-    // No timeoutMs, no time limit: it runs while it works and pauses when
-    // idle (0300), never killed at E2B's five minutes in the middle of work.
+    // Nobody asked for it to end, so E2B's default five minutes pauses it:
+    // nothing is lost, and the next call wakes it.
     expect(lastCreate()).toEqual({
       vcpu: 2,
       memoryMiB: 512,
-      onLeaseEnd: "stop",
+      timeoutSeconds: 300,
+      onLeaseEnd: "pause",
     });
     expect(sbx.sandboxId).toBe(fake(sbx).id);
     expect(world.called("images.list")).toEqual([]);
-    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
-    // Its endAt is a time ahead, never 1970; setTimeout has no end to move.
-    expect((await sbx.getInfo()).endAt.getTime()).toBeGreaterThan(Date.now());
-    await sbx.setTimeout(600_000);
-    expect(world.called("sandbox.extend")).toEqual([]);
+    expect((await sbx.getInfo()).lifecycle?.onTimeout).toBe("pause");
   });
 
-  test("a timeoutMs is the limit the customer set: sent as it is, and extended only by setTimeout", async () => {
+  test("a timeoutMs is a deadline the server keeps, and it deletes, as E2B's kill does", async () => {
     const sbx = await create({ timeoutMs: 600_000 });
-    expect(lastCreate()).toMatchObject({ timeoutSeconds: 600, onLeaseEnd: "stop" });
-    const end = (await sbx.getInfo()).endAt.getTime();
-    expect(Math.abs(end - (Date.now() + 600_000))).toBeLessThan(2000);
-    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
+    expect(lastCreate()).toMatchObject({ timeoutSeconds: 600, onLeaseEnd: "delete" });
+    const info = await sbx.getInfo();
+    expect(Math.abs(info.endAt.getTime() - (Date.now() + 600_000))).toBeLessThan(2000);
+    expect(info.lifecycle?.onTimeout).toBe("kill");
     await sbx.setTimeout(1_200_000);
     // Ten minutes on, rounded up to a whole second: 601 when a millisecond
     // passed between the create and the call.
@@ -67,6 +65,48 @@ describe("Sandbox.create", () => {
     expect(id).toBe(sbx.sandboxId);
     expect(seconds).toBeGreaterThanOrEqual(600);
     expect(seconds).toBeLessThanOrEqual(601);
+    // An explicit onTimeout "kill" deletes too, with or without a timeoutMs.
+    await create({ lifecycle: { onTimeout: "kill" } });
+    expect(lastCreate()).toMatchObject({ timeoutSeconds: 300, onLeaseEnd: "delete" });
+  });
+
+  test("a timeout up to 24 hours is sent whole: no timer in this process keeps it", async () => {
+    // 5 October 2026: a 24-hour timeoutMs was an hour's lease that this
+    // process moved on every five minutes, so a create from a request handler
+    // or a cron ended within the hour.
+    const sbx = await create({ timeoutMs: 24 * 3_600_000 });
+    expect(lastCreate()).toMatchObject({ timeoutSeconds: 86_400, onLeaseEnd: "delete" });
+    await sbx.setTimeout(24 * 3_600_000);
+    // The same end, to the second: nothing to move.
+    expect(world.called("sandbox.extend")).toEqual([]);
+    const other = await create({ timeoutMs: 600_000 });
+    await Sandbox.connect(other.sandboxId, { ...runtime(), timeoutMs: 3 * 3_600_000 });
+    const [, seconds] = world.called("sandbox.extend").at(-1) as [string, number];
+    expect(seconds).toBeGreaterThan(3 * 3600 - 610);
+  });
+
+  test("a sandbox the server keeps running (a pilot's) has no end to move", async () => {
+    const sbx = await create({ runtime: { create: { persistent: true } } });
+    await sbx.setTimeout(600_000);
+    await Sandbox.connect(sbx.sandboxId, { ...runtime(), timeoutMs: 600_000 });
+    expect(world.called("sandbox.extend")).toEqual([]);
+    // Its end is E2B's furthest, a day ahead, not where it is paid up to:
+    // 5 October 2026, a pilot's read minutes ahead and looked about to end.
+    const day = Date.now() + 86_400_000;
+    const info = await sbx.getInfo();
+    expect(Math.abs(info.endAt.getTime() - day)).toBeLessThan(2000);
+    const [listed] = await Sandbox.list({ ...runtime() }).nextItems();
+    expect(Math.abs(listed!.endAt.getTime() - day)).toBeLessThan(2000);
+    // A paused one keeps the time it stopped.
+    await sbx.pause();
+    expect((await sbx.getInfo()).endAt.getTime()).toBe(Date.parse(fake(sbx).info.expiresAt));
+  });
+
+  test("setTimeout cannot bring the end sooner, and says so", async () => {
+    const sbx = await create({ timeoutMs: 600_000 });
+    const error = await sbx.setTimeout(60_000).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotSupportedError);
+    expect((error as Error).message).toContain("kill()");
   });
 
   test("maps timeoutMs, metadata, internet access and lifecycle", async () => {
@@ -117,51 +157,6 @@ describe("Sandbox.create", () => {
     expect(world.called("sandboxes.create")).toEqual([]);
   });
 
-  test("a timeout over an hour gets an hour's lease, carried on up to the time asked", async () => {
-    // 2 October 2026: an E2B timeout over an hour was refused.
-    const start = Date.now();
-    try {
-      const sbx = await create({ timeoutMs: 90 * 60_000 });
-      expect(lastCreate().timeoutSeconds).toBe(3600);
-      const asked = keptLeases().get(sbx.sandboxId)!;
-      expect(Math.abs(asked - (start + 90 * 60_000))).toBeLessThan(2000);
-      // Five minutes on, with 55 minutes of lease left: moved on to an hour ahead.
-      setSystemTime(new Date(start + 5 * 60_000));
-      fake(sbx).info.expiresAt = new Date(start + 60 * 60_000).toISOString();
-      await renewLeases();
-      const [, first] = world.called("sandbox.extend").at(-1)!;
-      expect(first as number).toBeGreaterThan(5 * 60 - 40);
-      expect(first as number).toBeLessThanOrEqual(5 * 60);
-      expect(keptLeases().has(sbx.sandboxId)).toBe(true);
-      // Forty minutes in: the end asked is within the hour, so the lease is
-      // moved to it exactly, never past it, and the sandbox is let go.
-      setSystemTime(new Date(start + 40 * 60_000));
-      await renewLeases();
-      expect(Math.abs(Date.parse(fake(sbx).info.expiresAt) - asked)).toBeLessThan(2000);
-      expect(keptLeases().has(sbx.sandboxId)).toBe(false);
-    } finally {
-      setSystemTime();
-    }
-  });
-
-  test("kill lets a kept sandbox go; setTimeout and connect keep one past an hour", async () => {
-    const sbx = await create({ timeoutMs: 2 * 3_600_000 });
-    expect(keptLeases().has(sbx.sandboxId)).toBe(true);
-    await sbx.kill();
-    expect(keptLeases().has(sbx.sandboxId)).toBe(false);
-    const other = await create({ timeoutMs: 600_000 });
-    await other.setTimeout(5 * 3_600_000);
-    expect(keptLeases().get(other.sandboxId)! - Date.now()).toBeGreaterThan(4.9 * 3_600_000);
-    // The lease itself goes no further than an hour ahead.
-    expect(Date.parse(fake(other).info.expiresAt) - Date.now()).toBeLessThanOrEqual(3_600_000);
-    const third = await create({ timeoutMs: 600_000 });
-    await Sandbox.connect(third.sandboxId, { ...runtime(), timeoutMs: 3 * 3_600_000 });
-    expect(keptLeases().has(third.sandboxId)).toBe(true);
-    await Sandbox.kill(third.sandboxId, runtime());
-    await other.kill();
-    expect(keptLeases().size).toBe(0);
-  });
-
   test("a timeout over 24 hours is refused, as E2B refuses it", async () => {
     const error = await create({ timeoutMs: 25 * 3_600_000 }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(InvalidArgumentError);
@@ -197,20 +192,54 @@ describe("templates", () => {
     ]);
   });
 
-  test("a name is a ready Runtime image of that name", async () => {
+  test("a name, name:tag or team/name:tag is a Runtime image the create resolves", async () => {
     world.images.push({ id: "img-1", name: "my-agent", state: "ready" });
-    await Sandbox.create("my-agent", runtime());
-    expect(world.called("images.list")[0]).toEqual([
-      { name: "my-agent", state: "ready", limit: 1 },
-    ]);
-    expect(lastCreate()).toMatchObject({ image: "img-1", vcpu: 2, memoryMiB: 512 });
+    const sbx = await Sandbox.create("my-agent", runtime());
+    expect(lastCreate()).toMatchObject({
+      image: "my-agent",
+      vcpu: 2,
+      memoryMiB: 512,
+      labels: { [TEMPLATE_LABEL]: "my-agent" },
+    });
+    // No lookup before the create: the create resolves the name.
+    expect(world.called("images.list")).toEqual([]);
+    await Sandbox.create("my-agent:v2", runtime());
+    expect(lastCreate()).toMatchObject({ image: "my-agent:v2" });
+    await Sandbox.create("acme-team/my-agent:v2", runtime());
+    expect(lastCreate()).toMatchObject({
+      image: "my-agent:v2",
+      labels: { [TEMPLATE_LABEL]: "acme-team/my-agent:v2" },
+    });
+    // getInfo and list name the template it was made from, from any client,
+    // and keep it out of metadata (5 October 2026: it read "base").
+    const info = await Sandbox.getInfo(sbx.sandboxId, runtime());
+    expect(info.templateId).toBe("my-agent");
+    expect(info.metadata).toEqual({});
+    const listed = await Sandbox.list({
+      ...runtime(),
+      query: { template: "my-agent" },
+    }).nextItems();
+    expect(listed.map((one) => one.sandboxId)).toEqual([sbx.sandboxId]);
+  });
+
+  test("the template label never pushes metadata past Runtime's 32 labels", async () => {
+    world.images.push({ id: "img-1", name: "my-agent", state: "ready" });
+    const metadata = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`k${i}`, "v"]));
+    await Sandbox.create("my-agent", { ...runtime(), metadata });
+    expect(lastCreate().labels).toEqual(metadata);
   });
 
   test("an E2B template with no Runtime image says how to build one", async () => {
     const error = await Sandbox.create("abc123xyz", runtime()).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(TemplateError);
     expect((error as Error).message).toContain("--name abc123xyz");
-    expect(world.called("sandboxes.create")).toEqual([]);
+    expect((error as TemplateError).code).toBe("template_not_found");
+    expect(world.sandboxes.size).toBe(0);
+    // It names the account the key belongs to: 5 October 2026, a
+    // RUNTIME_API_KEY of another account looked like a missing image.
+    expect((error as Error).message).toContain(
+      'No Runtime image is named "abc123xyz" in the account "Acme".',
+    );
   });
 
   test("a UUID is an image when one exists, else a snapshot, which keeps its own shape", async () => {
@@ -220,7 +249,12 @@ describe("templates", () => {
     expect(lastCreate()).toMatchObject({ image });
     const snapshot = "99999999-2222-4333-8444-555555555555";
     await Sandbox.create(snapshot, runtime());
-    expect(lastCreate()).toEqual({ snapshot, onLeaseEnd: "stop" });
+    expect(lastCreate()).toEqual({
+      snapshot,
+      timeoutSeconds: 300,
+      onLeaseEnd: "pause",
+      labels: { [TEMPLATE_LABEL]: snapshot },
+    });
   });
 
   test("a snapshot while forks are off fails with Runtime's own words", async () => {
@@ -242,8 +276,12 @@ describe("keys", () => {
   test("an E2B key is never used", () => {
     delete process.env.RUNTIME_API_KEY;
     process.env.E2B_API_KEY = "e2b_abc";
-    expect(pickKey()).toBeUndefined();
+    // Never a quiet fall back to a saved login, which may be another account.
+    expect(() => pickKey()).toThrow(/RUNTIME_API_KEY/);
+    expect(() => pickKey()).toThrow(AuthenticationError);
     expect(() => pickKey("e2b_abc")).toThrow(AuthenticationError);
+    delete process.env.E2B_API_KEY;
+    expect(pickKey()).toBeUndefined();
   });
 
   test("RUNTIME_API_KEY first, then a Runtime key left in E2B_API_KEY", () => {
@@ -254,6 +292,41 @@ describe("keys", () => {
     expect(pickKey("rk_given")).toBe("rk_given");
     delete process.env.RUNTIME_API_KEY;
     expect(pickKey()).toBe("rk_other");
+  });
+
+  test("two different Runtime keys in RUNTIME_API_KEY and E2B_API_KEY are said once, and errors name the key's source", () => {
+    // 5 October 2026: a RUNTIME_API_KEY of another account silently beat
+    // E2B_API_KEY, and the create failed as a missing image.
+    resetClients();
+    const warnings: unknown[][] = [];
+    const warn = spyOn(process, "emitWarning").mockImplementation((...args: unknown[]) => {
+      warnings.push(args);
+    });
+    try {
+      process.env.RUNTIME_API_KEY = "rk_same";
+      process.env.E2B_API_KEY = "rk_same";
+      pickKey();
+      process.env.E2B_API_KEY = "e2b_left";
+      pickKey();
+      expect(warnings).toEqual([]);
+      process.env.E2B_API_KEY = "rk_other";
+      expect(pickKey()).toBe("rk_same");
+      pickKey();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]![0]).toContain(
+        "RUNTIME_API_KEY and E2B_API_KEY hold different Runtime keys",
+      );
+      expect(warnings[0]![1]).toEqual({ code: "RUNTIME_E2B_TWO_KEYS" });
+    } finally {
+      warn.mockRestore();
+      resetClients();
+    }
+    expect(keySource("rk_given")).toBe("apiKey");
+    expect(keySource()).toBe("RUNTIME_API_KEY");
+    delete process.env.RUNTIME_API_KEY;
+    expect(keySource()).toBe("E2B_API_KEY");
+    delete process.env.E2B_API_KEY;
+    expect(keySource()).toBe("the saved login");
   });
 });
 
@@ -350,6 +423,19 @@ describe("commands.run", () => {
     expect(world.called("sandbox.execStream").at(-1)![1]).toMatchObject({ timeoutMs: 86_400_000 });
   });
 
+  test("a command whose sandbox is killed under it fails with E2B's TimeoutError", async () => {
+    // 5 October 2026, E2B's own suite: it was a SandboxNotFoundError.
+    const sbx = await create();
+    world.outputError = notFound("not_found", "No sandbox with that id.");
+    const handle = await sbx.commands.run("sleep 60", { background: true });
+    const error = await handle.wait().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TimeoutError);
+    expect((error as Error).message).toMatch(
+      /ended before the stream completed|sandbox was killed/,
+    );
+    expect((error as Error).cause).toBeInstanceOf(SandboxNotFoundError);
+  });
+
   test("a command killed by a signal exits -1", async () => {
     world.exec = () => ({ exitCode: null, stderr: "" });
     const sbx = await create();
@@ -415,10 +501,10 @@ describe("commands.run", () => {
     const commands = world.calls
       .filter(([method]) => method === "sandbox.exec" || method === "sandbox.execStream")
       .map(([, command]) => command);
-    expect(commands.filter((command) => String(command).includes("ln -s"))).toEqual([
-      "[ -e /home/user ] || sudo ln -s /workspace /home/user",
-    ]);
-    expect(commands.indexOf("[ -e /home/user ] || sudo ln -s /workspace /home/user")).toBe(1);
+    const link =
+      "[ -e /home/user ] || sudo ln -s /workspace /home/user || exit 1; if [ /home/user -ef /workspace ]; then echo same; fi";
+    expect(commands.filter((command) => String(command).includes("ln -s"))).toEqual([link]);
+    expect(commands.indexOf(link)).toBe(1);
   });
 });
 
@@ -495,7 +581,7 @@ describe("background commands", () => {
 
     const listed = await sbx.commands.list();
     expect(listed.map((one) => one.pid)).toContain(open.pid);
-    expect(listed[0]).toMatchObject({ cmd: "/bin/bash", args: ["-c", "cat"] });
+    expect(listed[0]).toMatchObject({ cmd: "/bin/bash", args: ["-l", "-c", "cat"] });
 
     await sbx.commands.sendStdin(open.pid, "more");
     const attached = await sbx.commands.connect(open.pid);
@@ -505,16 +591,67 @@ describe("background commands", () => {
     expect(await sbx.commands.kill(12345)).toBe(false);
     expect(await closed.kill()).toBe(true);
   });
+
+  test("commands.list shows each command as E2B starts it: /bin/bash -l -c and the customer's own script", async () => {
+    // 5 October 2026: args were ["-c", "bash -c npm run dev"], so code that
+    // finds its server by args[2] or by the script found nothing.
+    const sbx = await create();
+    await sbx.commands.run("npm run dev", { background: true });
+    expect(await sbx.commands.list()).toMatchObject([
+      { cmd: "/bin/bash", args: ["-l", "-c", "npm run dev"], envs: {} },
+    ]);
+    const line = (argv: string[]) => guestCommand(argv);
+    expect(listedAs(line(commandAs("root", "npm run dev", false)))).toEqual({
+      cmd: "/bin/bash",
+      args: ["-l", "-c", "npm run dev"],
+    });
+    expect(listedAs(line(commandAs("root", "echo a && echo b", true)))).toEqual({
+      cmd: "/bin/bash",
+      args: ["-l", "-c", "echo a && echo b"],
+    });
+    expect(listedAs(line(shellAs("root", false)))).toEqual({
+      cmd: "/bin/bash",
+      args: ["-i", "-l"],
+    });
+    expect(listedAs(line(["/bin/bash", "-i", "-l"]))).toEqual({
+      cmd: "/bin/bash",
+      args: ["-i", "-l"],
+    });
+    // Started outside this package, with its own words.
+    expect(listedAs("python3 -m http.server 8000")).toEqual({
+      cmd: "python3",
+      args: ["-m", "http.server", "8000"],
+    });
+  });
 });
 
 describe("files", () => {
+  test("an image with its own /home/user gets /workspace paths back, which name the file", async () => {
+    const sbx = await create();
+    world.exec = () => ({ exitCode: 0, stdout: "" });
+    expect((await sbx.files.write("a.txt", "a")).path).toBe("/workspace/a.txt");
+    expect((await sbx.files.getInfo("a.txt")).path).toBe("/workspace/a.txt");
+  });
+
   test("write and read text, bytes and blobs; relative paths land in the home", async () => {
+    // 5 October 2026, E2B's own suite: a relative write came back as
+    // /workspace/... where E2B gives /home/user/...
     const sbx = await create();
     expect(await sbx.files.write("notes/a.txt", "hello")).toEqual({
       name: "a.txt",
       type: FileType.FILE,
-      path: "/workspace/notes/a.txt",
+      path: "/home/user/notes/a.txt",
     });
+    expect(fake(sbx).fileMap.get("/workspace/notes/a.txt")).toBeDefined();
+    expect((await sbx.files.getInfo("./notes/a.txt")).path).toBe("/home/user/notes/a.txt");
+    expect((await sbx.files.list("notes")).map((entry) => entry.path)).toEqual([
+      "/home/user/notes/a.txt",
+    ]);
+    expect((await sbx.files.getInfo("/workspace/notes/a.txt")).path).toBe("/workspace/notes/a.txt");
+    // Asked once, beside the first call: /home/user leads to /workspace.
+    expect(world.called("sandbox.exec").filter(([c]) => String(c).includes("ln -s"))).toHaveLength(
+      1,
+    );
     expect(await sbx.files.read("/workspace/notes/a.txt")).toBe("hello");
     expect(await sbx.files.read("notes/a.txt", { format: "bytes" })).toEqual(
       new TextEncoder().encode("hello"),
@@ -540,7 +677,7 @@ describe("files", () => {
       type: FileType.FILE,
       size: 8,
       mode: 0o644,
-      permissions: "rw-r--r--",
+      permissions: "-rw-r--r--",
     });
     expect(world.called("files.list")[0]![1]).toEqual({ depth: 1, hidden: true });
     expect((await sbx.files.getInfo("/workspace/d")).type).toBe(FileType.DIR);
@@ -549,6 +686,8 @@ describe("files", () => {
     expect(await sbx.files.makeDir("/workspace/e")).toBe(true);
     const moved = await sbx.files.rename("/workspace/d/x.py", "/workspace/d/y.py");
     expect(moved.path).toBe("/workspace/d/y.py");
+    expect((await sbx.files.rename("d/y.py", "d/x.py")).path).toBe("/home/user/d/x.py");
+    await sbx.files.rename("d/x.py", "d/y.py");
     expect(world.called("files.rename")[0]![2]).toEqual({ overwrite: true });
     await sbx.files.remove("/workspace/d");
     expect(world.called("files.remove")[0]).toEqual(["/workspace/d", { recursive: true }]);
@@ -577,8 +716,11 @@ describe("files", () => {
       recursive: true,
       timeoutMs: 0,
     });
+    // A file Runtime puts in place whole is created and, as envd says, written:
+    // E2B's own watch test waits for the write (5 October 2026).
     expect(seen).toEqual([
       { name: "a.txt", type: FilesystemEventType.CREATE },
+      { name: "a.txt", type: FilesystemEventType.WRITE },
       { name: "sub/b.txt", type: FilesystemEventType.WRITE },
     ]);
     expect(world.called("files.watch")[0]).toMatchObject([
@@ -587,6 +729,62 @@ describe("files", () => {
     ]);
     await handle.stop();
     expect(world.called("files.watch.stop")).toEqual([["/workspace/app"]]);
+    // envd watches only a directory.
+    await sbx.files.write("/workspace/one.txt", "1");
+    const refused = await sbx.files.watchDir("one.txt", () => {}).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(InvalidArgumentError);
+    expect(world.called("files.watch")).toHaveLength(1);
+  });
+
+  test("entries read as envd gives them: the kind's letter, E2B's user, an absolute link target, depth at least one", async () => {
+    // 5 October 2026, E2B's own suite: "rw-r--r--" for "-rw-r--r--", owner
+    // "runtime" for "user", a link's "a.txt" for its absolute target.
+    const sbx = await create();
+    fake(sbx).listing = [
+      {
+        name: "d",
+        path: "/workspace/x/d",
+        type: "directory",
+        size: 4096,
+        mode: "0755",
+        owner: "runtime",
+        group: "runtime",
+        modifiedAt: "2026-10-05T00:00:00.000Z",
+      },
+      {
+        name: "l",
+        path: "/workspace/x/l",
+        type: "symlink",
+        size: 5,
+        mode: "0777",
+        owner: "root",
+        group: "root",
+        symlinkTarget: "../a.txt",
+        modifiedAt: "2026-10-05T00:00:00.000Z",
+      },
+      {
+        name: "m",
+        path: "/workspace/x/m",
+        type: "symlink",
+        size: 5,
+        mode: "0777",
+        owner: "runtime",
+        group: "runtime",
+        symlinkTarget: "/etc/hosts",
+        modifiedAt: "2026-10-05T00:00:00.000Z",
+      },
+    ];
+    const [dir, link, absolute] = await sbx.files.list("x");
+    expect(dir).toMatchObject({ permissions: "drwxr-xr-x", owner: "user", group: "user" });
+    expect(link).toMatchObject({
+      permissions: "Lrwxrwxrwx",
+      owner: "root",
+      symlinkTarget: "/home/user/a.txt",
+    });
+    expect(absolute!.symlinkTarget).toBe("/etc/hosts");
+    const error = await sbx.files.list("x", { depth: 0 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidArgumentError);
+    expect((error as Error).message).toBe("depth should be at least one");
   });
 
   test("acts as another user through sudo -u, and refuses metadata", async () => {
@@ -634,7 +832,7 @@ describe("files", () => {
       type: FileType.FILE,
       size: 3,
       mode: 0o600,
-      permissions: "rw-------",
+      permissions: "-rw-------",
       owner: "root",
     });
     expect(world.called("files.stat")).toEqual([]);
@@ -648,13 +846,21 @@ describe("files", () => {
 });
 
 describe("lifecycle", () => {
-  test("kill stops once, without waiting; unknown ids are false", async () => {
+  test("kill deletes the sandbox for good, as E2B's kill destroys it; unknown ids are false", async () => {
+    // 5 October 2026: kill was a stop, which keeps the disk; a pilot's kept
+    // stops filled its 2,000 kept slots and its hosts' disks.
     const sbx = await create();
     expect(await sbx.kill()).toBe(true);
-    expect(world.called("sandbox.stop")[0]![1]).toEqual({ wait: false });
+    expect(world.called("sandbox.delete")).toHaveLength(1);
+    expect(world.called("sandbox.stop")).toEqual([]);
+    expect(world.sandboxes.has(sbx.sandboxId)).toBe(false);
     expect(await sbx.kill()).toBe(false);
     expect(await Sandbox.kill(sbx.sandboxId, runtime())).toBe(false);
     expect(await Sandbox.kill("nope", runtime())).toBe(false);
+    const other = await create();
+    expect(await Sandbox.kill(other.sandboxId, runtime())).toBe(true);
+    expect(world.called("sandbox.delete")).toHaveLength(2);
+    expect(await Sandbox.kill(other.sandboxId, runtime())).toBe(false);
   });
 
   test("setTimeout moves the end later and refuses to move it earlier", async () => {
@@ -677,7 +883,7 @@ describe("lifecycle", () => {
       state: "running",
       cpuCount: 2,
       memoryMB: 512,
-      lifecycle: { onTimeout: "kill", autoResume: false },
+      lifecycle: { onTimeout: "pause", autoResume: true },
     });
     expect(await sbx.isRunning()).toBe(true);
     expect(await sbx.pause()).toBe(true);
@@ -698,6 +904,31 @@ describe("lifecycle", () => {
     expect(await Sandbox.connect("nope", runtime()).catch((e: unknown) => e)).toBeInstanceOf(
       SandboxNotFoundError,
     );
+  });
+
+  test("a sandbox Runtime paused for being idle is running to E2B code: the next call wakes it", async () => {
+    const sbx = await create({ metadata: { suite: "idle" } });
+    fake(sbx).info.state = "paused";
+    fake(sbx).info.stopReason = "idle";
+    expect(await sbx.isRunning()).toBe(true);
+    expect((await sbx.getInfo()).state).toBe("running");
+    const running = await Sandbox.list({
+      ...runtime(),
+      query: { state: ["running"], metadata: { suite: "idle" } },
+    }).nextItems();
+    expect(running.map((one) => one.sandboxId)).toEqual([sbx.sandboxId]);
+    // Paused on request, it is paused, as on E2B.
+    fake(sbx).info.stopReason = "requested";
+    expect(await sbx.isRunning()).toBe(false);
+    const paused = await Sandbox.list({
+      ...runtime(),
+      query: { state: ["paused"], metadata: { suite: "idle" } },
+    }).nextItems();
+    expect(paused.map((one) => one.sandboxId)).toEqual([sbx.sandboxId]);
+    // Without automatic wake, nothing wakes it: paused.
+    fake(sbx).info.stopReason = "idle";
+    fake(sbx).info.autoWake = false;
+    expect(await sbx.isRunning()).toBe(false);
   });
 
   test("pause refuses a files-only pause", async () => {

@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.11.1. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.11.2. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -56,13 +56,13 @@ running. `await using` stops it when the block ends, even after an error. It
 needs Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
 `const sbx = ...` and call `await sbx.stop()` in a `finally` block.
 
-With no arguments you get the free trial while it lasts, the default region, and
+With no arguments you get the included usage while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
 itself when idle, with no time limit. A paid sandbox
-can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; one without credit, 2 vCPU and
 4 GiB.
 
-The trial's hours are spent first, then prepaid credit, with nothing to
+The included usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 Every field is optional:
 
@@ -85,7 +85,7 @@ await sbx.stop();
 ```
 
 A sandbox needs no time limit: it runs while it works and pauses itself when
-idle, until you stop it or credit or the trial hours ([trial](./trial)) run out.
+idle, until you stop it or credit or the [included usage](./included-usage) runs out.
 `timeoutSeconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: at the
 end it pauses (the default) or stops, as `onLeaseEnd` says, busy or not.
 `sbx.info.endsAt` is when it will stop or pause by itself, or `null` when it
@@ -591,18 +591,18 @@ try {
 }
 ```
 
-| Class                     | When                                                                   |
-| ------------------------- | ---------------------------------------------------------------------- |
-| `AuthenticationError`     | 401: the key is missing, wrong or revoked                              |
-| `PermissionDeniedError`   | 403: the key or account may not do this                                |
-| `NotFoundError`           | 404: no such resource in this account                                  |
-| `ConflictError`           | 409: the resource is in the wrong state, or the trial busy             |
-| `InvalidRequestError`     | 400 and 422: `details` names every wrong field                         |
-| `RateLimitError`          | 429: slow down; `retryAfterMs` says how long                           |
-| `ServiceUnavailableError` | 503: capacity or a dependency; safe to retry                           |
-| `AccountBlockedError`     | 402 `account_blocked`: a payment is disputed or in review (from 0.7.0) |
-| `ConnectionError`         | No answer at all                                                       |
-| `CommandError`            | `check: true` and the command did not exit 0                           |
+| Class                     | When                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| `AuthenticationError`     | 401: the key is missing, wrong or revoked                                          |
+| `PermissionDeniedError`   | 403: the key or account may not do this                                            |
+| `NotFoundError`           | 404: no such resource in this account                                              |
+| `ConflictError`           | 409: the resource is in the wrong state, or an account without credit at its limit |
+| `InvalidRequestError`     | 400 and 422: `details` names every wrong field                                     |
+| `RateLimitError`          | 429: slow down; `retryAfterMs` says how long                                       |
+| `ServiceUnavailableError` | 503: capacity or a dependency; safe to retry                                       |
+| `AccountBlockedError`     | 402 `account_blocked`: a payment is disputed or in review (from 0.7.0)             |
+| `ConnectionError`         | No answer at all                                                                   |
+| `CommandError`            | `check: true` and the command did not exit 0                                       |
 
 Every write carries an idempotency key, made for you. Timeouts, dropped
 connections, 429 and 503 are retried with the same key and a growing delay, so a
@@ -624,7 +624,7 @@ same key; streamed output is never replayed after it reaches your code.
 reading the response and automatic retries. `timeoutMs: 0` disables that
 deadline; an `AbortSignal` you pass still cancels the call.
 
-**A create waits for room.** When every trial slot is taken (`trial_busy`), the
+**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
@@ -835,8 +835,7 @@ explicitly before taking another capture; a failed recovery does not erase the
 snapshot id.
 
 Copies run on what the account's new sandboxes run on, as `create` does;
-`funding` is accepted and ignored. On an account with the trial alone, a copy
-must fit the trial, so a sandbox with reserved CPU, or a floor above 250,
+`funding` is accepted and ignored. On an account without credit, a copy must fit the limits without credit, so a sandbox with reserved CPU, or a floor above 250,
 forks only once the account holds credit.
 
 The snapshot a fork takes is deleted when the fork ends, whether every copy
@@ -853,7 +852,7 @@ it and start more copies later; it is then billed as snapshot storage.
   charged for the fork's snapshot, and says how to wake it.
 
 A snapshot is kept as long as you have credit, up to a year from when it was
-taken (7 days on the trial), or for `retentionDays`, 1 to 365; delete it sooner
+taken (7 days without credit), or for `retentionDays`, 1 to 365; delete it sooner
 with `runtime.snapshots.delete`.
 
 ## Code interpreter
@@ -910,7 +909,7 @@ console.log(page.status);
 ```
 
 Pass `{ visibility: "public" }` for an address anyone can open (paid sandboxes;
-a trial sandbox's previews stay private), `previews.rotate(port)`
+a sandbox without credit's previews stay private), `previews.rotate(port)`
 to refuse every token issued so far, and `previews.delete(port)` to stop sharing.
 
 - **When a change applies:** sharing, rotating, deleting and switching between

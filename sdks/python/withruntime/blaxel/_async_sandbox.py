@@ -1426,8 +1426,7 @@ class AsyncSandboxInstance:
                      runtime_create: Optional[Dict[str, Any]] = None) -> "AsyncSandboxInstance":
         """Creates a sandbox with Blaxel's defaults (blaxel/base-image, 4096 MB,
         kept until deleted), ready when this answers. Funding is left to
-        Runtime: the free trial while the account has trial time, then prepaid
-        credit. ``runtime_create`` passes Runtime's own create fields
+        Runtime: the included usage first, then prepaid credit. ``runtime_create`` passes Runtime's own create fields
         (snake_case), for example ``{"funding": "trial"}``."""
         config = core.config_of(sandbox)
         core.check_create(config)
@@ -1590,7 +1589,7 @@ async def _write_envs(runtime: Any, envs: Dict[str, str], append: bool) -> None:
 
 
 async def _retain(runtime: Any, days: int) -> None:
-    """Keeps the sandbox ``days`` once paused. A trial sandbox's seven days
+    """Keeps the sandbox ``days`` once paused. A sandbox's seven days without credit
     cannot change, so it is not asked; a sandbox Runtime refuses the change
     for keeps Runtime's own retention."""
     if runtime.info.get("funding") == "trial":

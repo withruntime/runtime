@@ -6,7 +6,7 @@
      bun scripts/e2b-e2e.ts --dry                     # set up and show the change only
 
    It creates real sandboxes (six cases, four at a time, 2 vCPU / 512 MiB,
-   at most five minutes each, each stopped when its case ends) on whatever
+   at most five minutes each, each deleted when its case ends) on whatever
    funding the key's account defaults to: the free trial while it lasts.
    RUNTIME_API_URL points it elsewhere. Not part of `bun test`. */
 import { spawnSync } from "node:child_process";

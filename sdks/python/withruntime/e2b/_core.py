@@ -11,7 +11,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import IO, Any, Callable, Dict, List, Literal, Optional, TypedDict, Union
 
 from .._errors import RuntimeError as _SDKError
 
@@ -72,6 +72,42 @@ class ServiceBusyException(Exception):
     status_code = 503
 
 
+class GitAuthException(AuthenticationException):
+    pass
+
+
+class GitUpstreamException(SandboxException):
+    pass
+
+
+class BuildException(Exception):
+    pass
+
+
+class FileUploadException(BuildException):
+    pass
+
+
+class VolumeException(Exception):
+    pass
+
+
+class VolumeNotFoundException(NotFoundException):
+    """As E2B's: a NotFoundException, not a VolumeException."""
+
+
+class VolumePathNotFoundException(NotFoundException):
+    pass
+
+
+class SecretException(Exception):
+    pass
+
+
+class SecretNotFoundException(SecretException):
+    pass
+
+
 class NotSupportedException(SandboxException):
     """A call E2B supports and Runtime does not, or not the same way. Raised
     before anything is done. ``feature`` names what was asked; ``alternative``
@@ -85,19 +121,18 @@ class NotSupportedException(SandboxException):
 
 
 class PublicPreviewNotAllowedException(NotSupportedException):
-    """Runtime's addition, for ``get_host`` and ``get_public_host``: a free-trial
-    sandbox shares a port only privately, so a request needs the port's token,
+    """Runtime's addition, for ``get_host`` and ``get_public_host``: a sandbox without credit shares a port only privately, so a request needs the port's token,
     and a host name alone cannot carry one. The message says what works."""
 
     def __init__(self, sandbox_id: str, port: Optional[int], message: Optional[str] = None):
         where = "<port>" if port is None else str(port)
         alternative = (
-            f"For an address that works on the trial, use sandbox.runtime.previews.create({where})['urlWithToken']: "
+            f"For an address that works without credit, use sandbox.runtime.previews.create({where})['urlWithToken']: "
             "it carries the token, in a browser, fetch or curl. For other paths on it, send the token as the "
             "x-runtime-preview-token header or the runtime_preview_token query parameter. A public host needs a "
             "paid sandbox, which is the account owner's decision.")
-        super().__init__("A public address on a free-trial sandbox", alternative, message or (
-            f"Sandbox {sandbox_id} runs on the free trial, where a shared port is private: every request needs the "
+        super().__init__("A public address on a sandbox without credit", alternative, message or (
+            f"Sandbox {sandbox_id} runs without credit, where a shared port is private: every request needs the "
             f"port's token, and a host name alone cannot carry one. {alternative}"))
         self.code = "public_preview_not_allowed"
 
@@ -167,6 +202,13 @@ class FileType(Enum):
     SYMLINK = "symlink"
 
 
+class WriteEntry(TypedDict):
+    """A file for ``files.write_files``: its path and its data, as E2B types it."""
+
+    path: str
+    data: Union[str, bytes, IO]
+
+
 @dataclass
 class WriteInfo:
     name: str
@@ -230,16 +272,17 @@ DEFAULT_VCPU = 2
 """E2B's default machine: 2 vCPU and 512 MiB (docs.e2b.dev/billing, checked 23 September 2026)."""
 DEFAULT_MEMORY_MIB = 512
 DEFAULT_TIMEOUT = 300
-"""E2B's default sandbox timeout, in seconds. Not sent: a sandbox created with
-no timeout has no time limit on Runtime, running while it works and pausing
-when idle (0300). Kept for code that imports it."""
-MIN_LEASE, MAX_LEASE = 60, 3600
+"""E2B's default sandbox timeout, in seconds, sent when none is given. It ends
+in a pause, which keeps memory and files, since nobody asked for the sandbox to
+end; a pilot account's sandbox is kept running by the server instead."""
+MIN_TIMEOUT = 60
+"""Runtime's shortest time limit, in seconds."""
 LONGEST_TIMEOUT = 86_400
-"""E2B's longest sandbox timeout, 24 hours (its Pro plan), in seconds."""
-KEEP_EVERY = 300
-"""How often a timeout over an hour has its lease moved on, in seconds."""
-KEEP_AHEAD = MAX_LEASE - 30
-"""How far ahead a kept lease is moved: under the API's hour, for the clocks and the trip."""
+"""E2B's longest sandbox timeout, 24 hours (its Pro plan), in seconds; Runtime's
+server keeps a time limit up to the same (0381)."""
+TEMPLATE_LABEL = "e2b-template"
+"""The label a sandbox carries its E2B template name in, for get_info's
+template_id and list's template filter; metadata never shows it."""
 PROCESS_LIFETIME_MS = 86_400_000
 """How long a command may run: a day, E2B's longest sandbox. E2B's own
 timeout bounds only the connection."""
@@ -259,10 +302,37 @@ def whole_output(_text: str) -> None:
 STOCK_TEMPLATES = frozenset({"base", "code-interpreter-v1", "code-interpreter"})
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 HOME = "/workspace"
-HOME_LINK = "[ -e /home/user ] || sudo ln -s /workspace /home/user"
+# Makes E2B's home lead to Runtime's unless the image has its own, and prints
+# "same" when /home/user is then /workspace.
+HOME_LINK = ("[ -e /home/user ] || sudo ln -s /workspace /home/user || exit 1; "
+             "if [ /home/user -ef /workspace ]; then echo same; fi")
 RUNNING = ["starting", "running", "resuming"]
 PAUSED = ["pausing", "paused"]
 _warned_short = False
+
+
+E2B_MAX_CONNECTIONS = 4096
+"""Connections the adapter's own client may hold at once: E2B's SDK has no cap
+of its own, so an orchestrator that drives a thousand sandboxes from one
+process runs every command at once. 4,096 is the widest room Runtime's edge
+gives an address that has used a valid key (api.md, "Limits"); the edge and the
+API answer anything past an account's room with a retry, which the client
+waits out. Runtime's own SDK keeps 48."""
+
+_warned_queued = False
+
+
+def warn_queued(max_connections: int) -> None:
+    """Said once per process, the first time a call has to wait for a
+    connection: E2B never holds a call back, so a caller should hear it."""
+    global _warned_queued
+    if _warned_queued:
+        return
+    _warned_queued = True
+    import warnings
+    warnings.warn(
+        f"More than {max_connections} calls and command streams are open at once from this process, so the rest "
+        "wait their turn. Pass client=Runtime(max_connections=...) for more.", RuntimeWarning, stacklevel=3)
 
 
 def pick_key(explicit: Optional[str]) -> Optional[str]:
@@ -272,6 +342,7 @@ def pick_key(explicit: Optional[str]) -> Optional[str]:
     if explicit is not None and not explicit.startswith("e2b_"):
         return explicit
     if runtime_key:
+        _warn_two_keys(runtime_key, os.environ.get("E2B_API_KEY"))
         return runtime_key
     if explicit is not None:
         raise AuthenticationException(
@@ -279,7 +350,50 @@ def pick_key(explicit: Optional[str]) -> Optional[str]:
             "Runtime key (https://withruntime.com/account/keys, or run `npx withruntime login`), or pass the "
             "Runtime key as api_key.")
     e2b = os.environ.get("E2B_API_KEY")
-    return e2b if e2b and not e2b.startswith("e2b_") else None
+    if e2b and e2b.startswith("e2b_"):
+        # Never a quiet fall back to a saved login, which may be another account.
+        raise AuthenticationException(
+            "E2B_API_KEY holds an E2B API key (e2b_...), and it was not sent. Set RUNTIME_API_KEY to a Runtime "
+            "key (https://withruntime.com/account/keys, or run `npx withruntime login`), or put the Runtime key "
+            "in E2B_API_KEY.")
+    return e2b or None
+
+
+_warned_two_keys = False
+
+
+def _warn_two_keys(runtime_key: str, e2b: Optional[str]) -> None:
+    """Said once per process: RUNTIME_API_KEY wins, as in Runtime's own SDK,
+    but code written for E2B means E2B_API_KEY, so two different Runtime keys
+    are likely two accounts, and the wrong one fails later as a missing image
+    (5 October 2026)."""
+    global _warned_two_keys
+    if not e2b or e2b.startswith("e2b_") or e2b == runtime_key or _warned_two_keys:
+        return
+    _warned_two_keys = True
+    warnings.warn(
+        "RUNTIME_API_KEY and E2B_API_KEY hold different Runtime keys, which may be different accounts; this "
+        "package uses RUNTIME_API_KEY. Unset one, or set both to the same key.", RuntimeWarning, stacklevel=5)
+
+
+def key_source(explicit: Optional[str]) -> str:
+    """Where the key in use came from, as an error names it."""
+    if explicit is not None and not explicit.startswith("e2b_"):
+        return "api_key"
+    if os.environ.get("RUNTIME_API_KEY"):
+        return "RUNTIME_API_KEY"
+    if os.environ.get("E2B_API_KEY"):
+        return "E2B_API_KEY"
+    return "the saved login"
+
+
+def account_of(me: Optional[Dict[str, Any]], source: Optional[str]) -> str:
+    """" in the account …" for a missing image: the account's name and where
+    its key came from, which a key of another account explains."""
+    if not me:
+        return ""
+    name = me.get("orgName") or me.get("orgId")
+    return f' in the account "{name}"' + (f" (key: {source})" if source else "")
 
 
 REFUSED_CONNECTION = {
@@ -347,31 +461,52 @@ def check_timeout(timeout: Union[int, float]) -> None:
         raise InvalidArgumentException(f"timeout is at most 24 hours (86400 s), as on E2B, not {timeout}.")
 
 
-def lease_seconds(timeout: Union[int, float]) -> int:
-    """The first lease for ``timeout``: up to an hour; a longer timeout is
-    carried on from there while the process runs."""
+def timeout_seconds(timeout: Union[int, float]) -> int:
+    """Runtime's time limit for ``timeout``, in whole seconds: at least a
+    minute (with a warning once), at most 24 hours. The server keeps it."""
     global _warned_short
     check_timeout(timeout)
-    seconds = min(math.ceil(timeout), MAX_LEASE)
-    if seconds < MIN_LEASE:
+    seconds = math.ceil(timeout)
+    if seconds < MIN_TIMEOUT:
         if not _warned_short:
             _warned_short = True
-            warnings.warn(f"timeout {timeout} is under Runtime's shortest lease; the sandbox gets 60 s. "
+            warnings.warn(f"timeout {timeout} is under Runtime's shortest time limit; the sandbox gets 60 s. "
                           "Call kill() when done.", stacklevel=3)
-        return MIN_LEASE
+        return MIN_TIMEOUT
     return seconds
 
 
-def on_lease_end(lifecycle: Optional[Dict[str, Any]]) -> str:
+def on_timeout(lifecycle: Optional[Dict[str, Any]], timeout_asked: bool) -> str:
+    """What the server does when the time limit runs out. E2B kills: a caller
+    that asked for an end (a timeout, or on_timeout "kill") gets a delete, as
+    E2B's kill destroys the sandbox. One that asked for nothing gets E2B's 300 s
+    default as a pause, which keeps everything, since a sandbox nobody asked to
+    end is never ended."""
     if not lifecycle:
-        return "stop"
-    on_timeout = lifecycle.get("on_timeout", "kill")
-    if isinstance(on_timeout, dict):
-        if on_timeout.get("keep_memory") is False:
+        return "delete" if timeout_asked else "pause"
+    action = lifecycle.get("on_timeout", "kill")
+    if isinstance(action, dict):
+        if action.get("keep_memory") is False:
             raise NotSupportedException("A files-only pause (keep_memory=False)",
                                         "Runtime's pause keeps memory and files; leave keep_memory out.")
-        on_timeout = on_timeout.get("action", "kill")
-    return "pause" if on_timeout == "pause" else "stop"
+        action = action.get("action", "kill")
+    return "pause" if action == "pause" else "delete"
+
+
+def image_name_for(template: str) -> str:
+    """The Runtime image name an E2B template name stands for: E2B's
+    ``team/name:tag`` without the team, since a Runtime account's images are its
+    own. ``name``, ``name:tag`` and ``name@version`` are Runtime image names too."""
+    return template.rsplit("/", 1)[-1]
+
+
+def labels_for(metadata: Optional[Dict[str, str]], template: str) -> Dict[str, str]:
+    """The labels a create sends: E2B's metadata, and the template it was made
+    from, while there is room for it among Runtime's 32 labels."""
+    labels = dict(metadata or {})
+    if template not in STOCK_TEMPLATES and len(labels) < 32 and len(template) <= 256:
+        labels[TEMPLATE_LABEL] = template
+    return labels
 
 
 REFUSED_CREATE = {
@@ -390,13 +525,18 @@ def refuse_create(opts: Dict[str, Any]) -> None:
             raise NotSupportedException(feature, alternative)
 
 
-def template_missing(template: str) -> TemplateException:
+def template_missing(template: str, cause: Optional[BaseException] = None, account: str = "") -> TemplateException:
+    """The create's refusal of a template no Runtime image answers to, as E2B's
+    TemplateException, saying how to build it and in which account."""
+    image = image_name_for(template)
+    name = re.sub(r"[:@].*$", "", image)
     error = TemplateException(
-        f'No Runtime image is named "{template}". E2B templates do not run on Runtime; build the same '
+        f'No Runtime image is named "{image}"{account}. E2B templates do not run on Runtime; build the same '
         f"environment as a Runtime image with that name and this call starts from it: "
-        f"`npx withruntime image build --dockerfile e2b.Dockerfile --name {template}`, or "
-        f'runtime.images.build(name="{template}", dockerfile=...).')
+        f"`npx withruntime image build --dockerfile e2b.Dockerfile --name {name}`, or "
+        f'runtime.images.build(name="{name}", dockerfile=...).')
     error.code = "template_not_found"
+    error.__cause__ = cause
     return error
 
 
@@ -529,14 +669,53 @@ def pid_of(process_id: str) -> int:
 
 
 def describe_process(info: Dict[str, Any]) -> ProcessInfo:
-    return ProcessInfo(pid=pid_of(info["id"]), tag=None, cmd="/bin/bash", args=["-c", info.get("command", "")],
-                       envs={}, cwd=info.get("cwd"))
+    cmd, args = listed_as(info.get("command", ""))
+    return ProcessInfo(pid=pid_of(info["id"]), tag=None, cmd=cmd, args=args, envs={}, cwd=info.get("cwd"))
+
+
+_AS_USER = re.compile(r"^sudo -n -E -H -u [^ ]+ -- /bin/bash -c (?:cd ~ 2>/dev/null\n)?")
+
+
+def listed_as(command: str) -> tuple:
+    """A running command as E2B lists it, from the command line Runtime keeps
+    (its words joined by spaces, at most 256 characters): ``/bin/bash -l -c
+    <script>`` for a command, ``/bin/bash -i -l`` for a PTY, as E2B starts
+    them, whether it runs as the sandbox user or through ``command_as``.
+    Anything else, started outside this package, is its first word and the
+    rest. (5 October 2026: args were ["-c", "bash -c <script>"].)"""
+    wrapped = _AS_USER.match(command)
+    if wrapped:
+        inner = command[wrapped.end():]
+        if inner == "exec /bin/bash -i -l":
+            return "/bin/bash", ["-i", "-l"]
+        return "/bin/bash", ["-l", "-c", inner]
+    if command.startswith("bash -c "):
+        return "/bin/bash", ["-l", "-c", command[len("bash -c "):]]
+    if command == "/bin/bash -i -l":
+        return "/bin/bash", ["-i", "-l"]
+    words = command.split(" ")
+    return words[0], words[1:]
 
 
 def absolute(path: str) -> str:
     if path.startswith("/"):
         return path
     return f"{HOME}/{path[2:] if path.startswith('./') else path}"
+
+
+E2B_HOME = "/home/user"
+
+
+def shown(path: str, asked: str, linked: bool) -> str:
+    """A path as E2B gives it back: one the caller asked for relative to the
+    home is shown under /home/user, as E2B shows it, when /home/user leads to
+    /workspace (``linked``), so it names the same file. A path the caller gave
+    in full comes back as given."""
+    if asked.startswith("/") or not linked:
+        return path
+    if path == HOME:
+        return E2B_HOME
+    return E2B_HOME + path[len(HOME):] if path.startswith(HOME + "/") else path
 
 
 def refuse_file_user(user: Optional[str], metadata: Optional[Dict[str, str]] = None) -> None:
@@ -556,20 +735,76 @@ def _date(value: Any) -> datetime:
     return datetime.fromtimestamp(0, tz=timezone.utc)
 
 
-def entry_info(entry: Dict[str, Any]) -> EntryInfo:
+def command_failure(error: BaseException) -> BaseException:
+    """A command's failure as E2B says it: its sandbox going away under it is
+    a TimeoutException, which code written for E2B catches (5 October 2026:
+    it was a SandboxNotFoundException)."""
+    if isinstance(error, SandboxNotFoundException):
+        ended = TimeoutException("The command ended before the stream completed: the sandbox was killed or "
+                                 "reached its end of life.")
+        ended.__cause__ = error
+        return ended
+    return error
+
+
+_KIND_LETTER = {"directory": "d", "symlink": "L"}
+
+
+def e2b_user(name: Optional[str]) -> str:
+    """The sandbox user as E2B names it: Runtime's is ``runtime``, E2B's ``user``."""
+    return "user" if name == "runtime" else (name or "")
+
+
+def link_target(path: str, target: str) -> str:
+    """A link's target as envd gives it: absolute, a relative one taken from
+    the link's own directory."""
+    if target.startswith("/"):
+        return target
+    parts = path.split("/")[:-1]
+    for part in target.split("/"):
+        if part == "..":
+            if parts:
+                parts.pop()
+        elif part and part != ".":
+            parts.append(part)
+    return "/" + "/".join(p for p in parts if p)
+
+
+def written_whole(event: Dict[str, Any]) -> bool:
+    """Runtime writes a file whole, by a rename into place, which the watch
+    sees as a create; envd writes in place, which is a write. Code written for
+    E2B waits for the write (5 October 2026), so a file's create brings one."""
+    return event.get("type") == "create" and not event.get("isDir")
+
+
+def only_directory(target: str, stat: Dict[str, Any]) -> None:
+    """envd watches only a directory; Runtime's watch also takes a file."""
+    if stat.get("exists") and stat.get("type") != "directory":
+        raise InvalidArgumentException(f"{target} is not a directory; watch_dir watches a directory.")
+
+
+def check_depth(depth: Optional[int]) -> None:
+    if depth is not None and depth < 1:
+        raise InvalidArgumentException("depth should be at least one")
+
+
+def entry_info(entry: Dict[str, Any], asked: str, linked: bool = False) -> EntryInfo:
     try:
         raw_mode = entry.get("mode", 0)
         mode = int(raw_mode, 8) if isinstance(raw_mode, str) else int(raw_mode)
     except (ValueError, TypeError):
         mode = 0
     bits = mode & 0o777
-    return EntryInfo(name=entry.get("name", ""), type=_TYPES.get(entry.get("type", "")), path=entry["path"],
+    return EntryInfo(name=entry.get("name", ""), type=_TYPES.get(entry.get("type", "")),
+                     path=shown(entry["path"], asked, linked),
                      size=int(entry.get("size", 0)), mode=mode,
-                     permissions=_PERMS[(bits >> 6) & 7] + _PERMS[(bits >> 3) & 7] + _PERMS[bits & 7],
-                     owner=entry.get("owner", ""), group=entry.get("group", ""),
+                     permissions=(_KIND_LETTER.get(entry.get("type", ""), "-") + _PERMS[(bits >> 6) & 7]
+                                  + _PERMS[(bits >> 3) & 7] + _PERMS[bits & 7]),
+                     owner=e2b_user(entry.get("owner")), group=e2b_user(entry.get("group")),
                      modified_time=(datetime.fromtimestamp(entry["mtimeMs"] / 1000, tz=timezone.utc)
                                     if "mtimeMs" in entry else _date(entry.get("modifiedAt"))),
-                     symlink_target=entry.get("symlinkTarget"))
+                     symlink_target=(shown(link_target(entry["path"], entry["symlinkTarget"]), asked, linked)
+                                     if entry.get("symlinkTarget") else None))
 
 
 def to_bytes(data: Any) -> bytes:
@@ -591,16 +826,43 @@ def simple_state(state: str) -> str:
     return "running"
 
 
+def idle_asleep(info: Dict[str, Any]) -> bool:
+    """Whether a paused sandbox is, to code written for E2B, still running:
+    Runtime paused it itself for being idle (E2B never does) and the next call
+    wakes it, so every E2B call on it works as on a running one."""
+    return (simple_state(info.get("state", "")) == "paused" and info.get("stopReason") == "idle"
+            and info.get("autoWake") is not False)
+
+
+def e2b_state(info: Dict[str, Any]) -> str:
+    """The sandbox's state as E2B would say it."""
+    return "running" if simple_state(info.get("state", "")) == "running" or idle_asleep(info) else "paused"
+
+
+def end_of(info: Dict[str, Any]) -> datetime:
+    """E2B's end_at: when the sandbox ends by itself. One that never will (no
+    time limit, as a persistent or a pilot's sandbox) reads 24 hours ahead,
+    the furthest an E2B sandbox's end may be, so code that waits until the
+    end, or extends near it, behaves as for the longest E2B sandbox.
+    (5 October 2026: it read where the sandbox was paid up to, minutes ahead,
+    so a pilot's looked about to end.)"""
+    if info.get("endsAt"):
+        return _date(info["endsAt"])
+    if "endsAt" in info and info["endsAt"] is None and e2b_state(info) == "running":
+        return datetime.fromtimestamp(time.time() + LONGEST_TIMEOUT, tz=timezone.utc)
+    return _date(info.get("expiresAt"))
+
+
 def sandbox_info(info: Dict[str, Any]) -> SandboxInfo:
-    template = info.get("image") or info.get("snapshot") or "base"
-    state = simple_state(info.get("state", ""))
+    metadata = dict(info.get("labels") or {})
+    template = metadata.pop(TEMPLATE_LABEL, None) or info.get("image") or info.get("snapshot") or "base"
+    action = info.get("onTimeout") or info.get("onLeaseEnd")
     return SandboxInfo(
         sandbox_id=info["id"], sandbox_domain=None, template_id=template, name=info.get("name"),
-        metadata=dict(info.get("labels") or {}), started_at=_date(info.get("createdAt")),
-        # With no time limit, where it is paid up to: always ahead, moving on.
-        end_at=_date(info.get("endsAt") or info.get("expiresAt")), state="paused" if state == "stopped" else state,
+        metadata=metadata, started_at=_date(info.get("createdAt")),
+        end_at=end_of(info), state=e2b_state(info),
         cpu_count=int(info.get("vcpu", 0)), memory_mb=int(info.get("memoryMiB", 0)), envd_version="runtime",
-        lifecycle=SandboxInfoLifecycle(on_timeout="kill" if info.get("onLeaseEnd") == "stop" else "pause",
+        lifecycle=SandboxInfoLifecycle(on_timeout="pause" if action == "pause" else "kill",
                                        auto_resume=info.get("autoWake") is True))
 
 
@@ -622,15 +884,18 @@ def list_filter(query: Optional[SandboxQuery], limit: Optional[int], next_token:
     query = query or SandboxQuery()
     if limit is not None and (not isinstance(limit, int) or limit < 1):
         raise InvalidArgumentException(f"limit must be a positive whole number, not {limit}.")
-    states = query.state or ["running", "paused"]
-    server: Dict[str, Any] = {"state": [s for one in states for s in (RUNNING if one == "running" else PAUSED)]}
+    # Runtime's states are read together and sorted here, since a sandbox
+    # Runtime paused for being idle is running to E2B.
+    asked = set(query.state or ["running", "paused"])
+    server: Dict[str, Any] = {"state": RUNNING + PAUSED}
     if query.metadata:
         server["labels"] = dict(query.metadata)
     local = (query.template is not None or query.started_after is not None or order == "desc"
              or next_token is not None)
     server["limit"] = 100 if local else min(limit or 100, 100)
     return {"server": server, "local": local, "page_size": limit or 100, "offset": token_offset(next_token),
-            "template": query.template, "started_after": query.started_after, "order": order}
+            "template": query.template, "started_after": query.started_after, "order": order,
+            "only": next(iter(asked)) if len(asked) == 1 else None}
 
 
 def token_offset(token: Optional[str]) -> int:
@@ -643,11 +908,22 @@ def token_offset(token: Optional[str]) -> int:
     return int(match.group(1))
 
 
-def matching(infos: List[SandboxInfo], templates: Optional[set], filters: Dict[str, Any]) -> List[SandboxInfo]:
+def wanted(info: SandboxInfo, filters: Dict[str, Any]) -> bool:
+    """Whether a sandbox is in the one E2B state asked for, if one was."""
+    return filters["only"] is None or info.state == filters["only"]
+
+
+def matching(infos: List[SandboxInfo], filters: Dict[str, Any]) -> List[SandboxInfo]:
+    """The sandboxes a local list serves: E2B's state, template and start time,
+    in the order asked for."""
+    template = filters["template"]
+    templates = None if template is None else (
+        {"base", *STOCK_TEMPLATES} if template in STOCK_TEMPLATES else {template})
     after = filters["started_after"]
     if after is not None and after.tzinfo is None:
         after = after.replace(tzinfo=timezone.utc)
-    kept = [info for info in infos if (templates is None or info.template_id in templates)
+    kept = [info for info in infos if wanted(info, filters)
+            and (templates is None or info.template_id in templates)
             and (after is None or info.started_at >= after)]
     return sorted(kept, key=lambda info: info.started_at, reverse=filters["order"] == "desc")
 

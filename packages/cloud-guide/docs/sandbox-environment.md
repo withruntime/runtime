@@ -82,11 +82,12 @@ a project's `packageManager` names the first time they run.
   server.
 - **CPU:** shared by default, with a guaranteed floor (`cpuFloorMillis`, 50
   thousandths of a vCPU unless you ask for more) and bursts up to `vcpu` cores.
-  You pay for the CPU the sandbox uses. Up to 16 vCPUs on a paid sandbox, 2 on
-  the trial.
+  `cpu: "reserved"` is that same floor set to every vCPU (`vcpu` x 1000).
+  You pay for the CPU the sandbox uses. Up to 16 vCPUs on a paid sandbox, 2 without
+  credit.
 - **Processor:** AMD EPYC 7371, 16 cores (x86-64, Zen).
-- **Memory:** what you ask for, up to 64 GiB on a paid sandbox and 4 GiB on the
-  trial.
+- **Memory:** what you ask for, up to 64 GiB on a paid sandbox and 4 GiB
+  without credit.
 
 See [pricing](./pricing) for what each costs.
 
@@ -108,11 +109,11 @@ directly.
 `sudo` keeps these. Programs that ignore proxy settings work too: names resolve
 inside the sandbox, and their TCP connections go to the same proxy on their
 own. In a paid sandbox, `git clone git@github.com:...`, `psql`, database
-drivers, gRPC and `ssh` need no setup. A trial sandbox reaches ports 443 and 80
+drivers, gRPC and `ssh` need no setup. A sandbox without credit reaches ports 443 and 80
 only, so there clone over HTTPS (`git clone https://github.com/...`).
 
 A paid sandbox reaches any public host on any port, once your account has made
-a purchase. A trial sandbox reaches ports 443 and 80. For both, private and
+a purchase. A sandbox without credit reaches ports 443 and 80. For both, private and
 internal addresses are refused, mail ports (25, 465 and 587) are closed unless
 support enables them for your account, and a few ports are never reachable:
 telnet, Windows RPC, NetBIOS and SMB, and IRC. TCP leaves the sandbox, and a
@@ -120,20 +121,22 @@ paid sandbox also sends UDP to any public address and port
 ([outbound UDP](./networking#outbound-udp)); DNS is answered inside it.
 
 **Bandwidth.** Downloads are fast for everyone; uploads are limited, more
-strictly on the trial, because uploads are what spam and floods use. Downloads
+strictly without credit, because uploads are what spam and floods use. Downloads
 have no speed limit: each server's link is shared between the sandboxes using
-it, and while it is full a paid sandbox gets {{paid-share}} a trial sandbox's share.
+it, and while it is full a paid sandbox gets {{paid-share}} a sandbox without credit's share.
 A sandbox paid for with credit uploads at up to {{paid-upload}}; after its first {{paid-upload-burst}}
 at that speed it uploads at {{paid-upload-sustained}}, and earns the burst back at that rate
-while it sends less. A trial sandbox uploads at up to {{trial-upload}}. A paid sandbox of
-an account that has made a purchase can move {{paid-daily-transfer}} a day, in and out together,
-in a 24-hour window that starts with its first byte; a trial account {{trial-daily-transfer}} a
-day shared by all its sandboxes. Past the daily amount, open connections close
+while it sends less. A sandbox without credit uploads at up to {{trial-upload}}. A paid sandbox
+(any account with credit, bought or given) can move {{paid-daily-transfer}} a day, in and out together,
+in a 24-hour window that starts with its first byte; an account without credit {{trial-daily-transfer}} a
+day shared by all its sandboxes, each sandbox's bytes counting until its own
+window ends, even once it is deleted. Past the daily amount, open connections close
 and new requests get `429 Too Many Requests` with `X-Runtime-Egress:
-quota-exhausted` (`quota-exhausted:account` for a trial account's shared
-amount), until the window ends.
+quota-exhausted` (`quota-exhausted:account` for the shared amount of an
+account without credit), until the window ends. Credit added to an account without credit moves its
+running sandboxes to the paid amount, with what they have used kept.
 Inbound traffic is free; each account's first {{outbound-allowance}} out a month is free, then
-{{outbound-rate}} per GB ([pricing](./pricing#network-products)).
+{{outbound-rate}} per GB (10⁹ bytes) ([pricing](./pricing#network-products)).
 
 Each sandbox has its own rules, set at create (`network`) or at any time after,
 applied at once, to open connections too:
@@ -212,11 +215,13 @@ all yours to open:
 - A preview: an HTTPS address for one port that you share on purpose, private
   with a token by default. See [JavaScript](./javascript#share-a-port) or
   `npx withruntime sandbox preview`.
-- A tunnel for your own machine: `runtime sandbox ssh` and `runtime sandbox port-forward` reach
-  any port on the sandbox's loopback through Runtime's API, with your key. See
+- A connection from your own computer: `runtime sandbox ssh` and
+  `runtime sandbox port-forward` reach any port on the sandbox's loopback
+  through Runtime's API, with your key, and need nothing set up. See
   [SSH and editors](./editors).
 - For an account with a kept top-up, a custom domain, a public TCP port,
-  or a WireGuard tunnel from your own network. See [networking](./networking).
+  or a WireGuard tunnel from your own network into your sandboxes (`runtime tunnel`, the private
+  network). See [networking](./networking).
 
 A sandbox with none of these accepts no connections from anyone but you.
 What a sandbox created from 5 October 2026 sends back through a preview, a custom
@@ -261,11 +266,10 @@ docker compose up -d
 
 - The clock is kept on the host's clock, and set again after every wake.
 - A sandbox runs while it works and pauses itself when idle
-  (`idlePauseSeconds`), until you stop it or credit or the trial hours
-  ([trial](./trial)) run out; then it pauses or stops as `onTimeout` says. It
+  (`idlePauseSeconds`), until you stop it or credit or the
+  [included usage](./included-usage) runs out; then it pauses or stops as `onTimeout` says. It
   has no time limit unless `timeoutSeconds` sets one (60 to 86,400), which
   `extend` moves. A pause keeps its memory and processes.
-- A host-side lease bounds execution even if management is unavailable.
 - A stop keeps the disk, billed as [paused storage](./pricing#paused-storage),
   until you delete the sandbox; `restart` starts it again with its memory
   gone. It is still not a backup; copy out what you need to keep.

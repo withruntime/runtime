@@ -28,7 +28,7 @@ agent = SandboxAgent(
 run_config = RunConfig(
     sandbox=SandboxRunConfig(
         client=RuntimeCloudSandboxClient(),
-        options=RuntimeCloudSandboxClientOptions(funding="trial"),
+        options=RuntimeCloudSandboxClientOptions(),
     )
 )
 print(Runner.run_sync(agent, "How much did sales grow?", run_config=run_config).final_output)
@@ -57,7 +57,7 @@ export async function analyse() {
       entries: { "sales.csv": { type: "file", content: "month,total\nJuly,120\nAugust,180\n" } },
     },
   });
-  const client = new RuntimeCloudSandboxClient({ create: { funding: "trial" } });
+  const client = new RuntimeCloudSandboxClient();
   const result = await run(agent, "How much did sales grow?", { sandbox: { client } });
   return result.finalOutput;
 }
@@ -135,7 +135,7 @@ returns the same four.
 ## What was verified
 
 On 23 September 2026 both clients ran `SandboxAgent` in the SDK's own runner
-against real trial sandboxes, driven by the SDK's scripted test model:
+against real sandboxes without credit, driven by the SDK's scripted test model:
 OpenAI Agents SDK 0.22.3 in Python and 0.18.0 in TypeScript. Between them the
 runs covered commands, a long command polled through `write_stdin`, a terminal
 session, `apply_patch`, manifests with files, users, git repositories and local

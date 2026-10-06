@@ -242,9 +242,9 @@ class Create(Base):
         with self.assertRaises(SandboxAPIError) as caught:
             self.create({"memory": 8192})
         self.assertEqual(str(caught.exception).splitlines()[0],
-                         "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.")
+                         "Without credit, a sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.")
         self.assertNotIn("memoryMiB", str(caught.exception))
-        self.assertEqual((caught.exception.status_code, caught.exception.code), (400, "invalid_trial"))
+        self.assertEqual((caught.exception.status_code, caught.exception.code), (400, "no_credit_size_limit"))
 
     def test_every_runtime_hint_is_said_in_blaxels_calls(self):
         expected = {
@@ -254,10 +254,10 @@ class Create(Base):
             "sandbox_paused": "Call sandbox.unarchive(), then try again.",
             "not_running": "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one "
                            "with SandboxInstance.create if it was deleted.",
-            "trial_busy": "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or "
+            "no_credit_running_limit": "The sandboxes an account without credit runs at once are all in use: delete one you no longer need (sandbox.delete()) or "
                           "archive it (sandbox.archive()), then try again. Moving to paid credit is the account "
                           "owner's decision.",
-            "public_preview_not_allowed": 'On the trial, share the port privately: sandbox.previews.create({"metadata": '
+            "public_preview_not_allowed": 'Without credit, share the port privately: sandbox.previews.create({"metadata": '
                                           '{"name": ...}, "spec": {"port": ..., "public": False}}) and a Runtime '
                                           "duration-based token from sandbox.withruntime.previews.get(port, ttl_seconds=seconds). "
                                           "A public preview needs a paid sandbox, which is the account owner's decision.",

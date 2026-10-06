@@ -63,6 +63,15 @@ export {
   CommandExitError,
   NotSupportedError,
   PublicPreviewNotAllowedError,
+  GitAuthError,
+  GitUpstreamError,
+  BuildError,
+  FileUploadError,
+  VolumeError,
+  VolumeNotFoundError,
+  VolumePathNotFoundError,
+  SecretError,
+  SecretNotFoundError,
   type CommandResult,
 } from "./errors.js";
 export type { ConnectionOpts, HttpVersion, RuntimeOpts } from "./client.js";
@@ -77,6 +86,18 @@ export {
   waitForProcess,
   waitForFile,
   waitForTimeout,
+  SecretPaginator,
+  Git,
+  ReadyCmd,
+  LogEntry,
+  LogEntryStart,
+  LogEntryEnd,
+  defaultBuildLogger,
+  ConnectionConfig,
+  ApiClient,
+  getSignature,
+  ALL_TRAFFIC,
+  VolumeFileType,
 } from "./unsupported.js";
 export default Sandbox;
 

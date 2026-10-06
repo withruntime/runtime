@@ -183,7 +183,7 @@ test("capacity waits do not spend the transport retry allowance", async () => {
         return Response.json(
           {
             error: {
-              code: "trial_busy",
+              code: "no_credit_running_limit",
               message: "full",
               retryAfterMs: 1,
             },
@@ -216,7 +216,10 @@ test("errors from caller callbacks propagate without resending a call", async ()
         calls++;
         return callback === "onResponse"
           ? Response.json({ ok: true })
-          : Response.json({ error: { code: "trial_busy", message: "full" } }, { status: 409 });
+          : Response.json(
+              { error: { code: "no_credit_running_limit", message: "full" } },
+              { status: 409 },
+            );
       }) as unknown as typeof fetch,
       { maxRetries: 1 },
     );

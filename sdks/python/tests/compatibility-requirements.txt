@@ -197,8 +197,8 @@ distro==1.9.0 \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
 dockerfile-parse==2.0.1 \
     --hash=sha256:bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6
-e2b==2.52.0 \
-    --hash=sha256:6f4b5084b09986db43e99c7405bae6b14dc56984a69bbb1dc0687f1c71515cfb
+e2b==2.52.1 \
+    --hash=sha256:708583a37c9b797b0044bd92fa407c21aec65f101f2fd4c4a0ccd842dbe33de1
 e2b-code-interpreter==2.10.1 \
     --hash=sha256:f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d
 exceptiongroup==1.3.1 \

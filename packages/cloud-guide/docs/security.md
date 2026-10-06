@@ -96,12 +96,12 @@ balance: you are notified, and after seven days unpaid it is deleted.
 use `HTTP_PROXY` and programs that open raw sockets are held to the same rules;
 nothing in the guest, root included, can go around it.
 
-- A paid sandbox of an account with a kept top-up reaches any public host on any port. A trial sandbox reaches ports 443 and 80.
+- A paid sandbox of an account with a kept top-up reaches any public host on any port. A sandbox without credit reaches ports 443 and 80.
 - A few ports are never reachable (telnet, Windows RPC, NetBIOS and SMB, IRC),
   and mail ports open only when support enables mail for your account.
 - Private and internal addresses are refused. Code that retries one, such as a
   cloud SDK looking for credentials at the metadata address, is only refused.
-- The proxy watches every sandbox, trial or paid, for traffic that only abuse
+- The proxy watches every sandbox, with credit or without, for traffic that only abuse
   makes: trying one internal address after another, a port scan or a sweep of
   addresses that do not answer, a cryptocurrency mining pool, and mail sent
   straight to many mail servers. The thresholds sit far above what test
@@ -109,7 +109,7 @@ nothing in the guest, root included, can go around it.
   tests against your own servers do. A sandbox that crosses one loses its
   network and is paused, or stopped if it cannot pause; your inbox
   (`GET /v1/notices`) says what was seen and what was done. An account that
-  has paid is never suspended for it; a trial account that probes internal
+  has paid is never suspended for it; an account without credit that probes internal
   addresses is. Traffic that looks like a flood, repeated attempts on the
   closed mail ports, or full CPU beside a mining pool's website is only
   recorded for a person to look at.
@@ -126,8 +126,8 @@ nothing in the guest, root included, can go around it.
 - Each sandbox has limits on concurrent connections, upload speed and bytes
   per day, and shares its server's link fairly with the others, so one sandbox
   cannot crowd out others. A paid sandbox uploads at up to {{paid-upload}}, {{paid-upload-sustained}}
-  sustained after its first {{paid-upload-burst}}, and moves {{paid-daily-transfer}} a day; a trial sandbox
-  uploads at up to {{trial-upload}}, with {{trial-daily-transfer}} a day for the whole trial account.
+  sustained after its first {{paid-upload-burst}}, and moves {{paid-daily-transfer}} a day; a sandbox without credit
+  uploads at up to {{trial-upload}}, with {{trial-daily-transfer}} a day for the whole account.
   Uploads are limited because they are what spam and floods use; downloads
   are not ([the sandbox environment](./sandbox-environment#the-network)).
 
@@ -135,7 +135,7 @@ Inbound connections require a preview, a proved custom domain, an allocated
 TCP port or an authorized private tunnel. Each reaches only the sandbox port
 and account it was granted. A preview is private with an expiring token unless
 you make it public, which a paid sandbox of an account with a kept top-up
-can do; a trial sandbox's previews are always private. While an account is
+can do; a sandbox without credit's previews are always private. While an account is
 blocked, or every purchase it made is refunded in full, its public previews
 need the token like private ones, and they are public again once it pays.
 Preview addresses are under `runtimehost.com`, never under
@@ -382,7 +382,7 @@ Google Cloud account, or presents it to your own API. See
 
 ## Before production traffic
 
-- Run your real workload on the [free trial](./trial), including its package
+- Run your real workload on the [included usage](./included-usage), including its package
   registries, cleanup and recovery.
 - Give each agent or application its own key, with a daily limit where it helps.
 - Keep outputs you need outside the sandbox.

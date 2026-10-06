@@ -102,24 +102,23 @@ Node from nodejs.org reads no such file, so it starts either way.
 
 ## Creation is refused
 
-| Code                  | What it means                                                                               | What to do                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `trial_busy`          | Eight trial sandboxes are already running; `details` names them                             | Stop or pause one, or retry once one ends                                        |
-| `trial_domain_limit`  | Your email domain's eight shared trial slots are all running                                | Stop or pause one, or use paid credit                                            |
-| `trial_exhausted`     | The {{trial-hours}} hours are used                                                          | Use paid credit                                                                  |
-| `invalid_trial`       | A trial sandbox is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk                       | Omit the size fields for the default                                             |
-| `invalid_request`     | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                 |
-| `invalid_region`      | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                 |
-| `no_capacity`, `busy` | No host has room right now                                                                  | Wait `Retry-After`, then retry with the same idempotency key and a growing delay |
-| `image_not_found`     | `image` names nothing in your account; the message lists the name's tags                    | Name one it lists, or build a public image first                                 |
-| `volume_not_ready`    | A volume it names, or one you back up, is still `creating` (a restore is too until checked) | Wait until the volume reads `ready`, then try again                              |
+| Code                      | What it means                                                                               | What to do                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `no_credit_running_limit` | Eight sandboxes without credit are already running; `details` names them                    | Stop or pause one, or retry once one ends                                        |
+| `no_credit_domain_limit`  | Your email domain's eight shared slots without credit are all running                       | Stop or pause one, or use paid credit                                            |
+| `included_usage_used_up`  | This month's included usage, or a product's share of it, is used                            | Add credit, or wait for the 1st (UTC)                                            |
+| `no_credit_size_limit`    | A sandbox without credit is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk              | Omit the size fields for the default                                             |
+| `invalid_request`         | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                 |
+| `invalid_region`          | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                 |
+| `no_capacity`, `busy`     | No host has room right now                                                                  | Wait `Retry-After`, then retry with the same idempotency key and a growing delay |
+| `image_not_found`         | `image` names nothing in your account; the message lists the name's tags                    | Name one it lists, or build a public image first                                 |
+| `volume_not_ready`        | A volume it names, or one you back up, is still `creating` (a restore is too until checked) | Wait until the volume reads `ready`, then try again                              |
 
-**`trial_busy` is temporary:** a slot frees when any trial sandbox stops or
-pauses.
+**`no_credit_running_limit` is temporary:** a slot frees when any sandbox without credit stops or pauses.
 
 - Retry with the same idempotency key, a growing delay and a bounded deadline,
   or stop or pause one of the sandboxes `details` names.
-- A fork asking for more copies than the trial runs at once never fits; ask for
+- A fork asking for more copies than an account without credit runs at once never fits; ask for
   fewer.
 - An SDK create waits for a slot by itself, for up to two minutes by default
   (`waitForCapacityMs` in JavaScript, `wait_for_capacity` in Python), and then
@@ -128,12 +127,10 @@ pauses.
 - Once the account holds prepaid credit, it runs more at once, with nothing
   to change.
 
-Once the trial's hours are used, an account with prepaid credit runs on it with
-nothing to change; one with neither is refused with `trial_exhausted`. See how
-much trial time is left with
+Once the included usage is used, an account with prepaid credit runs on it with nothing to change; one with neither is refused with `included_usage_used_up` until the 1st (UTC). See how much is left with
 `npx withruntime usage`, or with `GET /v1/usage` or `GET /v1/limits`, whose
-`trial.availableMs` is what a new trial sandbox can still use, in milliseconds.
-See [the trial](./trial).
+`trial.availableMs` is what a new sandbox without credit can still use, in milliseconds, and `allowances` what each pool has left this month.
+See [included usage](./included-usage).
 
 ## A sandbox's `env`, delete or image switch is refused
 
@@ -173,8 +170,10 @@ that reads `pause_failed` lost its memory and kept its files.
 | `idle`               | Read on a paused sandbox, not a stopped one: nothing happened in it for `idlePauseSeconds`, so it paused itself. Nothing is lost                                                                                                                           | A request wakes it while `autoWake` is on; `idlePauseSeconds: 0` keeps it running                                                                |
 | `requested`          | A key, an agent or a person stopped it                                                                                                                                                                                                                     | Nothing                                                                                                                                          |
 | `time_limit`         | The time limit it was created with (`timeoutSeconds`) ran out, and it was made to stop then rather than pause: `onTimeout: "stop"`. Its disk is kept for `:restart`. Before 4 October 2026 this read `lease_expired`                                       | Leave out `timeoutSeconds` so the next one runs while it works, or extend a running one before its end (`keepAlive` in the SDKs does it for you) |
-| `paused_expired`     | It stayed paused past its `pausedExpiresAt` (a trial's seven days, days you set, or seven days after credit ran out), so its memory and disk were deleted                                                                                                  | Wake it before then, top up, set `:retention` to `null`, or take a snapshot                                                                      |
+| `paused_expired`     | It stayed paused past its `pausedExpiresAt` (seven days without credit, days you set, or seven days after credit ran out), so its memory and disk were deleted                                                                                             | Wake it before then, top up, set `:retention` to `null`, or take a snapshot                                                                      |
 | `insufficient_funds` | The credit ran out, or the account is blocked by a payment that is disputed or [under review](./pricing#when-a-payment-is-under-review)                                                                                                                    | Add credit at Usage & billing. When a dispute or review is the cause, a create answers `account_blocked` and says what clears it                 |
+| `pilot_hours_used`   | The pilot it ran on has used its sandbox hours, so it paused or stopped with its files kept. Credit does not run a pilot's sandbox                                                                                                                         | To extend the pilot or ask for more hours, the account's owner writes to support (support@withruntime.com, or a reply to the pilot's email)      |
+| `pilot_ended`        | The pilot it ran on, and the pilot's grace, are over. A pilot's sandbox runs only on its pilot, and is kept seven days, then deleted, with an email first                                                                                                  | To extend the pilot, the account's owner writes to support before then. New sandboxes run on included usage or credit                            |
 | `lifetime_cap`       | The sandbox reached its own `maxTotalCostMicros`                                                                                                                                                                                                           | Start a new sandbox if the work needs more                                                                                                       |
 | `spending_limit`     | An owner-set spending limit, usually this agent's daily one                                                                                                                                                                                                | See what is left with `GET /v1/limits` or `runtime limits`                                                                                       |
 | `authority_revoked`  | The key or agent that made it was revoked or removed                                                                                                                                                                                                       | Connect the agent again or make a new key, then create a new sandbox                                                                             |
@@ -198,14 +197,14 @@ still unknown, inspect its files and `processes` before repeating a side effect.
 
 ## The service returns 401, 403, 409, 429 or 5xx
 
-| Response           | What to check                                                       | Safe next step                                                             |
-| ------------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 401                | Missing, expired or revoked key; wrong API origin                   | Check `npx withruntime whoami` or the secret-manager configuration         |
-| 403                | Owner approval, key scope, account suspension or resource ownership | Confirm the account and permitted action; do not work around a refusal     |
-| 409                | The resource's state: paused, stopped, not ready, or the trial busy | Resolve that state, then retry                                             |
-| 422                | The idempotency key was used before with a different body           | Same key, same body; or a new key for genuinely new work                   |
-| 429                | Request rate or concurrent work exceeded the server's bound         | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
-| 5xx or no response | The write may already have reached the server                       | Retry identical input with the same idempotency key and inspect state      |
+| Response           | What to check                                                                               | Safe next step                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 401                | Missing, expired or revoked key; wrong API origin                                           | Check `npx withruntime whoami` or the secret-manager configuration         |
+| 403                | Owner approval, key scope, account suspension or resource ownership                         | Confirm the account and permitted action; do not work around a refusal     |
+| 409                | The resource's state: paused, stopped, not ready, or an account without credit at its limit | Resolve that state, then retry                                             |
+| 422                | The idempotency key was used before with a different body                                   | Same key, same body; or a new key for genuinely new work                   |
+| 429                | Request rate or concurrent work exceeded the server's bound                                 | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
+| 5xx or no response | The write may already have reached the server                                               | Retry identical input with the same idempotency key and inspect state      |
 
 A 5xx whose message says the fault is ours was reported to us when it happened,
 with its `requestId`. [API errors and retries](./api) describes the full
@@ -214,7 +213,7 @@ contract.
 **`time_limit_too_short` (409) means the command could outlast the sandbox's
 time.** A command is refused, and nothing runs, when the timeout you set is
 longer than the time left before the sandbox's time limit, or before the end of
-its funding once credit, trial hours or a spending limit ran out; a paused
+its funding once credit, included usage or a spending limit ran out; a paused
 sandbox is refused before it is woken, so the wake costs nothing. For a time
 limit, raise it first (`runtime sandbox extend <id> 600`, `sbx.extend(600)`);
 for funding, add credit or raise the limit (`runtime limits`); or give the
@@ -246,7 +245,7 @@ Outside your own files, use `sudo` in a command.
 **Check the sandbox's network rules and the destination port.**
 
 - `npx withruntime sandbox network <id>` shows the rules.
-- A trial sandbox reaches ports 80 and 443 only; a paid sandbox of an account
+- A sandbox without credit reaches ports 80 and 443 only; a paid sandbox of an account
   with a kept top-up reaches every port. `openPorts` in the rules says
   which. See [the sandbox environment](./sandbox-environment#the-network).
 - Name lookups or `pip install` time out in a sandbox from your own image on

@@ -56,6 +56,35 @@ export class ServiceBusyError extends Error {
   }
 }
 
+/** E2B's other error classes, by the same names and parents, so a module
+ * that imports or catches them loads and works: nothing in this package
+ * throws them, since the features behind them (template builds, git,
+ * volumes, secrets) answer NotSupportedError here. */
+export class GitAuthError extends AuthenticationError {}
+export class GitUpstreamError extends SandboxError {}
+export class BuildError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+export class FileUploadError extends BuildError {}
+export class VolumeError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+export class VolumeNotFoundError extends VolumeError {}
+export class VolumePathNotFoundError extends VolumeError {}
+export class SecretError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = new.target.name;
+  }
+}
+export class SecretNotFoundError extends SecretError {}
+
 /** A call that E2B supports and Runtime does not, or not in the same way.
  * Thrown before anything is done, never after doing something different.
  * `feature` names what was asked for; `alternative` says what to use on
@@ -71,23 +100,22 @@ export class NotSupportedError extends SandboxError {
   }
 }
 
-/** Runtime's addition, for `getHost` and `getPublicHost`: a free-trial
- * sandbox shares a port only privately, so a request needs the port's token,
+/** Runtime's addition, for `getHost` and `getPublicHost`: a sandbox without credit shares a port only privately, so a request needs the port's token,
  * and a host name alone cannot carry one. The message says what works. A
  * NotSupportedError, so code that catches those catches this too. */
 export class PublicPreviewNotAllowedError extends NotSupportedError {
   constructor(sandboxId: string, port: number | undefined, message?: string) {
     const where = port === undefined ? "<port>" : String(port);
     const alternative =
-      `For an address that works on the trial, use (await sandbox.runtime.previews.create(${where})).urlWithToken: ` +
+      `For an address that works without credit, use (await sandbox.runtime.previews.create(${where})).urlWithToken: ` +
       "it carries the token, in a browser, fetch or curl. For other paths on it, send the token as the " +
       "x-runtime-preview-token header or the runtime_preview_token query parameter. A public host needs a paid " +
       "sandbox, which is the account owner's decision.";
     super(
-      "A public address on a free-trial sandbox",
+      "A public address on a sandbox without credit",
       alternative,
       message ??
-        `Sandbox ${sandboxId} runs on the free trial, where a shared port is private: every request needs the ` +
+        `Sandbox ${sandboxId} runs without credit, where a shared port is private: every request needs the ` +
           `port's token, and a host name alone cannot carry one. ${alternative}`,
     );
     this.code = "public_preview_not_allowed";

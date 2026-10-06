@@ -137,3 +137,79 @@ class ConnectionCap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdapterClientIsWide(unittest.TestCase):
+    """E2B's SDK holds no call back, so code written for it runs a hundred
+    one-second commands from one process in about a second. The adapter's own
+    client must not read them 40 at a time (Agentin rehearsal, 5 October 2026:
+    three waves, 10.1, 20.4 and 30.7 s)."""
+
+    def setUp(self):
+        import os
+        from withruntime.e2b import _async_sandbox, _sync_sandbox, _core
+        self._env = os.environ.get("RUNTIME_API_KEY")
+        os.environ["RUNTIME_API_KEY"] = "rtcloud_test"
+        _async_sandbox._clients.clear()
+        _sync_sandbox._clients.clear()
+        _core._warned_queued = False
+
+    def tearDown(self):
+        import os
+        from withruntime.e2b import _async_sandbox, _sync_sandbox
+        if self._env is None:
+            os.environ.pop("RUNTIME_API_KEY", None)
+        else:
+            os.environ["RUNTIME_API_KEY"] = self._env
+        _async_sandbox._clients.clear()
+        _sync_sandbox._clients.clear()
+
+    def test_a_hundred_commands_at_once_async(self):
+        from withruntime.e2b import _async_sandbox
+        wire = Wire(True, hold=1.0)
+        client = _async_sandbox._client(None, None)
+        client._t._http = wire
+
+        async def main():
+            sbx = await AsyncSandbox.create()
+            started = time.monotonic()
+            results = await asyncio.gather(*(sbx.commands.run("sleep 1") for _ in range(100)))
+            return results, time.monotonic() - started
+        results, seconds = asyncio.run(main())
+        self.assertTrue(all(r.exit_code == 0 for r in results))
+        self.assertEqual(wire.peak, 100)
+        self.assertLess(seconds, 1.8)
+
+    def test_a_hundred_commands_at_once_sync(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from withruntime.e2b import _sync_sandbox, Sandbox
+        wire = Wire(False, hold=1.0)
+        client = _sync_sandbox._client(None, None)
+        client._t._http = wire
+        sbx = Sandbox.create()
+        started = time.monotonic()
+        with ThreadPoolExecutor(100) as pool:
+            results = list(pool.map(lambda _: sbx.commands.run("sleep 1"), range(100)))
+        seconds = time.monotonic() - started
+        self.assertTrue(all(r.exit_code == 0 for r in results))
+        self.assertEqual(wire.peak, 100)
+        self.assertLess(seconds, 1.8)
+
+    def test_a_queued_call_warns_once(self):
+        import warnings
+        from withruntime.e2b import _core
+        wire = Wire(True, hold=0.05)
+        client = AsyncRuntime(api_key="rk", base_url="https://api.example.test", max_connections=9,
+                              on_queued=_core.warn_queued)
+        client._t._http = wire
+
+        async def main():
+            async def stream():
+                return [e async for e in client._t.events("GET", "/v1/stream")]
+            return await asyncio.gather(*(stream() for _ in range(5)))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            asyncio.run(main())
+        said = [str(w.message) for w in caught if "wait their turn" in str(w.message)]
+        self.assertEqual(len(said), 1)
+        self.assertIn("More than 9 calls", said[0])

@@ -129,8 +129,8 @@ wakes it, and carries on.
 CPU is billed as used, {{cpu-rate}} per vCPU-hour with a floor of {{cpu-floor}}, and
 reserved memory at {{memory-rate}} per GiB-hour. A 2 vCPU, 4 GiB sandbox costs {{busy-hour}} an
 hour with both CPUs busy and {{idle-hour}} an hour while it waits. A paused sandbox
-pays only storage ([pricing](./pricing)). New accounts get {{trial-hours}} free sandbox
-hours, no card.
+pays only storage ([pricing](./pricing)). Every account gets {{included-machine}} included
+every month, no card.
 
 ## What was verified
 

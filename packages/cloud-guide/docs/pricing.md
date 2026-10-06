@@ -33,8 +33,7 @@ connection, no network traffic and no CPU use. From then it pays
 sandbox's disk holds are included. Past them, the blocks its disk alone holds
 are billed at the [paused-storage](#paused-storage) rate,
 {{paused-storage-rate}} per decimal GB per 30-day month, measured every 30
-seconds while it runs. A disk of {{running-disk-included}} or less, the default
-and every trial sandbox's, never pays it. It shows on the bill as "Sandbox
+seconds while it runs. A disk of {{running-disk-included}} or less, the default and every sandbox's without credit, never pays it. It shows on the bill as "Sandbox
 disk". Sandboxes made before 5 October 2026 keep the terms they were quoted.
 
 **Busy time is never cut off on a clock.** A sandbox has no time limit unless
@@ -45,9 +44,7 @@ says whether it then pauses or stops. `persistent: true` keeps a sandbox
 running until you stop it, with no idle pause; its disk is billed as any
 sandbox's.
 
-**Start free.** Every new account gets the [{{trial-hours}}-hour free trial](./trial), no
-card. At these rates, {{trial-hours}} fully busy hours of a 2 vCPU, 4 GiB sandbox would cost
-{{=$2 trial-hours * busy-hour}}.
+**Start free, every month.** Every account gets [included usage](./included-usage) each calendar month, with no card: {{free-memory}} of memory, {{free-cpu}} of active CPU, {{free-saved-copies}} of saved copies (snapshots, images, backups) and {{free-disks}} of volumes, {{included-machine}}. It is used before credit, renews on the 1st (UTC) and is never charged. An account given free hours before 5 October 2026 keeps what is left of them as well.
 
 **Then prepay.** Add credit by card at
 [Usage & billing](https://withruntime.com/account/billing), any amount from {{topup-min}}
@@ -63,7 +60,7 @@ agents can apply to [Runtime for Startups](https://withruntime.com/startups) for
 ## How many at once
 
 One paid sandbox can have up to **{{max-vcpu}} vCPUs and {{max-memory}} of memory**, at the same
-per-unit rates, and a disk of up to {{max-disk}}; a trial sandbox up to 2 vCPU, 4 GiB and a 10 GiB
+per-unit rates, and a disk of up to {{max-disk}}; a sandbox without credit up to 2 vCPU, 4 GiB and a 10 GiB
 disk. Fully busy, the largest
 costs {{=$2 cost:runtime:16x64x3600x57600x1}} an hour.
 
@@ -98,8 +95,7 @@ level is missing: "needs credit" or "needs a kept top-up".
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
 Past a limit, a create returns `quota_exceeded`, saying which limit and, for
-a new account, when it lifts, and costs nothing. The [free trial](./trial)
-runs {{trial-sandboxes}} at once.
+a new account, when it lifts, and costs nothing. An account without credit runs {{trial-sandboxes}} at once, at most {{no-credit-total}} in all ([included usage](./included-usage)).
 
 ## Paused storage
 
@@ -125,9 +121,8 @@ is kept free for three days, with one notice a day before, and then deleted.
 A paused sandbox on a paid account is kept as long as the account has credit,
 until you delete it, or for 1–365 days if you set them with `:retention`. When
 credit runs out it is kept seven more days, with a notice first, and a top-up
-before then keeps it again. Each pause replaces the previous saved state. On an
-account with only the trial, a paused sandbox is kept seven days for free. Once
-the account holds credit, a sandbox paused on the trial is kept as a paid one is,
+before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free. Once
+the account holds credit, a sandbox paused without credit is kept as a paid one is,
 and its storage is billed from the end of its seven free days. The resource's `pausedExpiresAt` (null while it is kept as long as you
 have credit) and paused-storage receipt give its actual terms.
 
@@ -173,16 +168,15 @@ The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole
 size on its server from the moment you create it.
 
-Building an image is free (on the free trial it counts toward the {{trial-hours}} hours, unless it fails through a fault of ours),
-and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, up to a year from when it was taken (7 days on the trial), unless you choose 1 to 365 days. A snapshot's copy
+Building an image is free (without credit it counts toward the included usage, unless it fails through a fault of ours),
+and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, up to a year from when it was taken (7 days without credit), unless you choose 1 to 365 days. A snapshot's copy
 off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**, charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
 Every volume is backed up off its server daily unless you turn that off.
 
-The [free trial](./trial) stores your first three images and your first 10 GiB of
+The [included usage](./included-usage) stores your first three images and your first 10 GiB of
 volumes free, for as long as you keep them. They are never charged, even after
-you add credit. Deleting one frees its place. Snapshots are not part of the
-trial's free storage.
+you add credit. Deleting one frees its place. Snapshots are not part of that free storage.
 
 An item's rate is fixed when you make it and never changes. It is under `rates`
 in `GET /v1/usage`: `storage.stored` for a snapshot, `storage.reserved` for an
@@ -202,7 +196,7 @@ serve through previews, custom domains and TCP ports, a desktop's live view
 included. Everything a sandbox receives, traffic to your own network over a
 WireGuard tunnel or to your other sandboxes by name, and your code's calls to
 Runtime's own API at `http://runtime.internal` are not counted. What a sandbox
-created before 5 October 2026 serves stays free for its life. A trial sandbox's traffic is free and uses
+created before 5 October 2026 serves stays free for its life. A sandbox without credit's traffic is free and uses
 none of the allowance.
 
 The allowance is shared by all of an account's sandboxes and starts again on
@@ -215,8 +209,7 @@ sends and `egress.served` for what it serves, and
 the allowance covered, and what the rest cost. At {{outbound-rate}}, 1 TB past the
 allowance costs {{=$0 1000 * outbound-rate}}.
 
-A paid sandbox moves up to {{paid-daily-transfer}} a day, in and out together, and a trial
-account {{trial-daily-transfer}} a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
+A paid sandbox moves up to {{paid-daily-transfer}} a day, in and out together, and an account without credit {{trial-daily-transfer}} a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
 
 A dedicated IPv4 address costs **{{address-month}} per 30-day month**. A WireGuard tunnel
 costs **{{tunnel-month}} per 30-day month**, including up to 16 peers. These are prorated to
@@ -398,8 +391,7 @@ runtime compare --from e2b
 
 It takes your settled sandboxes from the last 30 days (`--days` up to 90). It
 prices them at the rates you were quoted, and the same vCPUs, memory and
-running time at the rival's published rates from the table above. Sandboxes
-the free trial ran are priced at the standard rates, what the same work costs
+running time at the rival's published rates from the table above. Sandboxes the included usage paid for are priced at the standard rates, what the same work costs
 on paid credit, and the output says how many there were. Then it says
 what you save, and about how much that is a month. With no sandboxes yet it
 prices an example and says so. It compares compute only: storage, network,

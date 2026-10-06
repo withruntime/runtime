@@ -4,7 +4,7 @@ import { RuntimeError, ServiceUnavailableError } from "../errors.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
 /** A run's sandbox. Every field has a default; a run is a sandbox of this
- * size, on the trial's hours first and then on credit at the sandbox rates. */
+ * size, on the included usage first and then on credit at the sandbox rates. */
 export type JobCompute = {
   region: string;
   vcpu: number;
@@ -266,8 +266,7 @@ export function switchedOff(product: string) {
 }
 
 /** Scheduled jobs: a command run in a fresh sandbox, once or on a cron
- * schedule. Each run is a sandbox, paid for as one: from the free trial's
- * hours first while the run fits the trial's size and count, then from credit
+ * schedule. Each run is a sandbox, paid for as one: from the included usage first while the run fits the limits without credit, then from credit
  * at the sandbox rates, through the same holds and spending limits.
  *
  *   const job = await runtime.jobs.create({

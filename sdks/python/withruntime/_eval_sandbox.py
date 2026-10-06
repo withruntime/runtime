@@ -319,7 +319,7 @@ def _sizes(cpus: Optional[int], memory_mb: Optional[int], storage_mb: Optional[i
         for key, most, unit in (("vcpu", _TRIAL_VCPU, "vCPU"), ("memory_mib", _TRIAL_MEMORY_MIB, "MiB of memory"),
                                 ("disk_mib", _TRIAL_DISK_MIB, "MiB of disk")):
             if fields.get(key, 0) > most:
-                notes.append(f"{fields[key]} {unit} cut to the trial's {most}")
+                notes.append(f"{fields[key]} {unit} cut to {most}, the most without credit")
                 fields[key] = most
     return fields, notes
 

@@ -32,11 +32,11 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
   processes, and try several things from exactly that point.
 - **No plan fee.** Runloop's Pro plan is {{term:runloop:pro}} a month plus usage. Runtime is
-  prepaid credit from {{topup-min}}, with {{trial-hours}} free sandbox hours to start.
+  prepaid credit from {{topup-min}}, with {{included-machine}} included every month.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -60,7 +60,7 @@ Runloop's figures come from its public pricing and documentation, checked
 | Memory billing  | {{memory-rate}} per reserved GiB-hour                          | {{rate:runloop:memory}} per GB-hour                     |
 | Disk            | Included while running                                         | {{rate:runloop:disk}} per GB-hour                       |
 | Plan fee        | None; prepaid credit from {{topup-min}}                        | Basic free; Pro {{term:runloop:pro}} a month plus usage |
-| Free start      | {{trial-hours}} sandbox hours, no card                         | {{term:runloop:credit}} of credit, no card              |
+| Free start      | {{included-machine}} every month, no card                      | {{term:runloop:credit}} of credit, no card              |
 | Suspend, resume | Pause keeps files, memory and processes                        | Suspend keeps the disk; processes restart               |
 
 ## Cost for the same job
@@ -94,7 +94,7 @@ terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Runloop calls on a branch, tests them on the free trial, and tells
+replaces the Runloop calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -102,7 +102,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

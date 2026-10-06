@@ -34,7 +34,7 @@ import com.withruntime.*;
 public class Hello {
   public static void main(String[] args) {
     RuntimeClient runtime = RuntimeClient.create();
-    try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox().funding("trial"))) {
+    try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox())) {
       sbx.files().write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
       CommandResult result = sbx.exec("python3 /workspace/invoice.py", new ExecOptions().check(true));
       System.out.print(result.stdout());
@@ -44,10 +44,10 @@ public class Hello {
 ```
 
 `create` returns once the sandbox is running, and closing it stops it. With no
-options you get the free trial while it lasts, the default region, and 2 vCPU,
+options you get the included usage while it lasts, the default region, and 2 vCPU,
 4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
 when idle, with no time limit (`timeoutSeconds(seconds)` sets one, 60 to
-86,400). The trial's hours are spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
+86,400). The included usage is spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
 
 ```java
 import com.withruntime.*;
@@ -188,17 +188,17 @@ import java.util.List;
 public class Lifecycle {
   public static void main(String[] args) {
     RuntimeClient runtime = RuntimeClient.create();
-    try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox().funding("trial"))) {
+    try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox())) {
       sbx.pause(); // memory and files are kept; compute billing stops
       Sandbox again = runtime.sandboxes().get(sbx.id());
       again.wake(Duration.ofMinutes(20));
       again.extend(Duration.ofMinutes(10));
 
-      List<Sandbox> copies = again.fork(new ForkOptions().count(2).funding("trial"));
+      List<Sandbox> copies = again.fork(new ForkOptions().count(2));
       for (Sandbox copy : copies) copy.stop();
 
       Snapshot snapshot = again.snapshot(new SnapshotOptions().name("ready").retentionDays(7));
-      try (Sandbox fromSnapshot = runtime.sandboxes().create(new CreateSandbox().snapshot(snapshot.id()).funding("trial"))) {
+      try (Sandbox fromSnapshot = runtime.sandboxes().create(new CreateSandbox().snapshot(snapshot.id()))) {
         System.out.println(fromSnapshot.id());
       }
       runtime.snapshots().delete(snapshot.id());
@@ -336,7 +336,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `retryable()` says whether trying the same call again may work.
 
-**A create waits for room.** When every trial slot is taken (`trial_busy`), the
+**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes().create` waits and sends the same request again,
 for up to two minutes. Set `waitForCapacity` on the client builder, or on one

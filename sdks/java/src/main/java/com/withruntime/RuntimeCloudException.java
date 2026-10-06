@@ -27,15 +27,17 @@ public class RuntimeCloudException extends RuntimeException {
           "identity_unavailable",
           "env_unavailable");
 
-  /** Refusals that pass on their own: a host frees room, a trial slot frees. */
-  static final Set<String> PASSING = Set.of("no_capacity", "trial_busy");
+  /** Refusals that pass on their own: a host frees room, a sandbox of an account without credit stops. */
+  static final Set<String> PASSING =
+      Set.of("no_capacity", "no_credit_running_limit", "no_credit_total_limit");
 
   /** Refusals of a create that clear when a sandbox stops or a host frees room. */
   static final Set<String> WAITS_FOR_ROOM =
       Set.of(
-          "trial_busy",
-          "trial_domain_limit",
-          "trial_capacity",
+          "no_credit_running_limit",
+          "no_credit_total_limit",
+          "no_credit_domain_limit",
+          "no_credit_capacity_full",
           "quota_exceeded",
           "no_capacity",
           "volume_releasing");
@@ -72,7 +74,7 @@ public class RuntimeCloudException extends RuntimeException {
     this(message, code, 0, hint, null, null, null, null, null);
   }
 
-  /** The API's error code, such as "not_found", "trial_busy" or "missing_api_key". */
+  /** The API's error code, such as "not_found", "no_credit_running_limit" or "missing_api_key". */
   public String code() {
     return code;
   }

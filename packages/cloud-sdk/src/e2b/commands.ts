@@ -7,11 +7,12 @@ import {
   guard,
   InvalidArgumentError,
   SandboxError,
+  SandboxNotFoundError,
   TimeoutError,
   translate,
   type CommandResult,
 } from "./errors.js";
-import { commandAs, runAs } from "./users.js";
+import { commandAs, listedAs, runAs } from "./users.js";
 
 export type { CommandResult };
 export type Username = "user" | "root" | (string & {});
@@ -57,6 +58,9 @@ export interface SandboxContext {
   /** Makes /home/user (E2B's home) lead to /workspace (Runtime's), once, when
    * something names it. */
   ensureHome(text: string | undefined, options?: RequestOptions): Promise<void>;
+  /** Whether /home/user leads to /workspace, linking it first if nothing is
+   * there; false when that cannot be told. Never fails. */
+  homeIsWorkspace(): Promise<boolean>;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -371,11 +375,21 @@ export class Commands {
 function describe(info: RuntimeProcessInfo): ProcessInfo {
   return {
     pid: pidOf(info.id),
-    cmd: "/bin/bash",
-    args: ["-c", info.command],
+    ...listedAs(info.command),
     envs: {},
     cwd: info.cwd,
   };
+}
+
+/** A command whose sandbox went away under it, as E2B says it: a
+ * TimeoutError, which code written for E2B catches (5 October 2026: it was a
+ * SandboxNotFoundError). */
+function sandboxEnded(cause: SandboxNotFoundError): TimeoutError {
+  const error = new TimeoutError(
+    "The command ended before the stream completed: the sandbox was killed or reached its end of life.",
+  );
+  error.cause = cause;
+  return error;
 }
 
 /** Reader cancellation also releases a callback whose promise never settles. */
@@ -517,7 +531,11 @@ export class CommandHandle {
       if (!this.#disconnected && !this.#failure) {
         const translated = translate(error, "sandbox");
         this.#failure =
-          translated instanceof Error ? translated : new SandboxError(String(translated));
+          translated instanceof SandboxNotFoundError
+            ? sandboxEnded(translated)
+            : translated instanceof Error
+              ? translated
+              : new SandboxError(String(translated));
       }
     } finally {
       if (this.#deadline !== undefined) clearTimeout(this.#deadline);

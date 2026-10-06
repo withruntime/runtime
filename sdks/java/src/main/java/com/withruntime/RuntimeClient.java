@@ -141,7 +141,7 @@ public final class RuntimeClient {
     }
 
     /**
-     * How long a sandbox create keeps retrying, with the same key and input, when every trial slot,
+     * How long a sandbox create keeps retrying, with the same key and input, when every slot without credit,
      * the account's quota or the region is full. Default two minutes; zero fails at once.
      */
     public Builder waitForCapacity(Duration wait) {
@@ -265,7 +265,7 @@ public final class RuntimeClient {
     return new Me(transport.object(new Transport.Call("GET", "/v1/me")));
   }
 
-  /** The account's credit, holds, trial time and per-resource charges. */
+  /** The account's credit, holds, free time and per-resource charges. */
   public Usage usage() {
     return new Usage(transport.object(new Transport.Call("GET", "/v1/usage")));
   }

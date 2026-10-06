@@ -368,7 +368,7 @@ class BlaxelSandboxes(DropInSandboxes):
         if self._w.trial and fields.get("memory_mib", 0) > 4096:
             raise withruntime.InvalidRequestError(
                 "A trial sandbox is at most 2 vCPU and 4 GiB: vcpu must be at most 2; memoryMiB must be at most 4096.",
-                code="invalid_trial", status=400, hint="Omit vcpu, memoryMiB, diskMiB and cpu for the default.")
+                code="no_credit_size_limit", status=400, hint="Omit vcpu, memoryMiB, diskMiB and cpu for the default.")
         if fields.get("get_or_create"):
             for one in self._w.sandboxes.values():
                 if one.info.get("name") == fields.get("name") and one.state != "stopped":

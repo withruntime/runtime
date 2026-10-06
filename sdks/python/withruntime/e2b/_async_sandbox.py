@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses as _dataclasses
 import datetime as _dt
+import math
 import time as _time
 from functools import partial
 
@@ -14,7 +15,7 @@ from .._request_scope import limits as request_limits, request_scope
 
 from . import _core as core
 from ._async_io import begin, call, finish, start, stop, stream, wrap, watch_directory, request, request_limited, close_stream, open_file, disconnect, opening_timeout
-from ._async_io import background, each_event, next_event, past_deadline, sleep
+from ._async_io import each_event, next_event, past_deadline
 from .._request_scope import Limits
 from ._core import (CommandResult, EntryInfo, FileNotFoundException, FileType, InvalidArgumentException,
                     NotSupportedException, ProcessInfo, PublicPreviewNotAllowedException, SandboxException,
@@ -37,7 +38,8 @@ def _client(api_key: Optional[str], client: Optional[AsyncRuntime], **connection
     key = core.pick_key(api_key)
     found = _clients.get(key or "")
     if found is None:
-        found = AsyncRuntime(api_key=key) if key else AsyncRuntime()
+        found = AsyncRuntime(api_key=key or None, max_connections=core.E2B_MAX_CONNECTIONS,
+                             on_queued=core.warn_queued)
         _clients[key or ""] = found
     return found
 
@@ -111,7 +113,7 @@ class AsyncCommandHandle:
             finally:
                 await close_stream(events)
         except Exception as error:  # noqa: BLE001
-            self._failure = translate(error, "sandbox")
+            self._failure = core.command_failure(translate(error, "sandbox"))
 
     @property
     def pid(self) -> int:
@@ -361,7 +363,8 @@ class AsyncPty(AsyncCommands):
 
 class AsyncFilesystem:
     """``sandbox.files``: E2B's filesystem module over Runtime's files API.
-    Relative paths resolve against the home directory (Runtime's is /workspace)."""
+    Relative paths resolve against the home directory (Runtime's is /workspace)
+    and come back under /home/user, as E2B gives them."""
 
     def __init__(self, sandbox: "AsyncSandbox") -> None:
         self._sandbox = sandbox
@@ -436,10 +439,11 @@ class AsyncFilesystem:
                     break
         else:
             await _guard("file_http", lambda: self._files.write(target, core.to_bytes(data)))
-        return WriteInfo(name=target.rstrip("/").rsplit("/", 1)[-1], type=FileType.FILE, path=target)
+        return WriteInfo(name=target.rstrip("/").rsplit("/", 1)[-1], type=FileType.FILE,
+                         path=core.shown(target, path, await self._sandbox._home_is_workspace(path)))
 
     @request_limited
-    async def write_files(self, files: List[Dict[str, Any]], user: Optional[str] = None,
+    async def write_files(self, files: List[core.WriteEntry], user: Optional[str] = None,
                           request_timeout: Optional[float] = None, gzip: bool = False,
                           use_octet_stream: Optional[bool] = None,
                           metadata: Optional[Dict[str, str]] = None) -> List[WriteInfo]:
@@ -452,6 +456,7 @@ class AsyncFilesystem:
     async def list(self, path: str, depth: Optional[int] = 1, user: Optional[str] = None,
                    request_timeout: Optional[float] = None) -> List[EntryInfo]:
         """A directory's entries, hidden ones included; ``depth`` goes deeper."""
+        core.check_depth(depth)
         target = await self._path(path, user)
         name = await _run_as(self._sandbox, user)
         if name:
@@ -459,7 +464,8 @@ class AsyncFilesystem:
             entries = core.found_entries(result.stdout)
         else:
             entries = await _guard("file", lambda: self._files.list(target, depth=depth or 1, hidden=True))
-        return [core.entry_info(entry) for entry in entries]
+        linked = await self._sandbox._home_is_workspace(path)
+        return [core.entry_info(entry, path, linked) for entry in entries]
 
     @request_limited
     async def exists(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> bool:
@@ -478,11 +484,11 @@ class AsyncFilesystem:
             entries = core.found_entries((await self._as_checked(name, target, "stat")).stdout)
             if not entries:
                 raise FileNotFoundException(f"{target} does not exist.")
-            return core.entry_info(entries[0])
+            return core.entry_info(entries[0], path, await self._sandbox._home_is_workspace(path))
         found = await _guard("file", lambda: self._files.stat(target))
         if not found.get("exists"):
             raise FileNotFoundException(f"{target} does not exist.")
-        return core.entry_info(found)
+        return core.entry_info(found, path, await self._sandbox._home_is_workspace(path))
 
     @request_limited
     async def remove(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> None:
@@ -505,7 +511,7 @@ class AsyncFilesystem:
             await self._as_checked(name, source, "rename", target)
         else:
             await _guard("file", lambda: self._files.rename(source, target, overwrite=True))
-        return await self.get_info(target, user=user)
+        return await self.get_info(new_path, user=user)
 
     @request_limited
     async def make_dir(self, path: str, user: Optional[str] = None, request_timeout: Optional[float] = None) -> bool:
@@ -571,27 +577,18 @@ class AsyncSandboxPaginator:
             page = await _guard("other", lambda: self._page.next_page())
         self._page = page
         self._has_next = bool(page is not None and page.has_more)
-        items = [] if page is None else [core.sandbox_info(sbx.info) for sbx in page.data]
+        items = [] if page is None else [info for info in (core.sandbox_info(sbx.info) for sbx in page.data)
+                                         if core.wanted(info, self._filters)]
         self._offset += len(items)
         return items
 
     async def _every_match(self) -> List[SandboxInfo]:
-        template = self._filters["template"]
-        templates = None
-        if template is not None:
-            if template in core.STOCK_TEMPLATES:
-                templates = {"base"}
-            elif core.UUID.match(template):
-                templates = {template}
-            else:
-                images = await self._client.images.list(name=template, limit=100)
-                templates = {image["id"] for image in images.data}
         infos: List[SandboxInfo] = []
         page = await self._client.sandboxes.list(**self._filters["server"])
         while page is not None:
             infos.extend(core.sandbox_info(sbx.info) for sbx in page.data)
             page = await page.next_page() if page.has_more else None
-        return core.matching(infos, templates, self._filters)
+        return core.matching(infos, self._filters)
 
 
 class AsyncSandbox:
@@ -604,7 +601,8 @@ class AsyncSandbox:
         """Use ``await AsyncSandbox.create()`` or ``await AsyncSandbox.connect(id)``."""
         self.runtime = runtime
         self._client = client
-        self._home_linked = False
+        self._home: Optional[bool] = None  # whether /home/user leads to /workspace, once asked
+        self._killed = False
         self._request_timeout = 60
         self._shares: Dict[int, Any] = {}  # port -> the one public share asked for it
         self._users: Dict[str, bool] = {}  # users this sandbox was found to have
@@ -619,13 +617,34 @@ class AsyncSandbox:
         """E2B's home is /home/user and Runtime's is /workspace. The first time
         something names /home/user it is made a link to /workspace (unless
         something is already there), so paths written for E2B work."""
-        if self._home_linked or not text or "/home/user" not in text:
+        if self._home is not None or not text or "/home/user" not in text:
             return
-        self._home_linked = True
+        await self._link_home()
+
+    async def _link_home(self) -> bool:
+        """Links /home/user to /workspace unless something is already there,
+        and says whether /home/user then leads to /workspace: an image may
+        have its own /home/user, and E2B's paths are shown only where true."""
+        self._home = False
         result = await _guard("sandbox", lambda: self.runtime.exec(core.HOME_LINK))
         if result.exit_code != 0:
             import warnings
-            warnings.warn(f"Could not link /home/user to /workspace: {result.stderr.strip()}", stacklevel=3)
+            warnings.warn(f"Could not link /home/user to /workspace: {result.stderr.strip()}", stacklevel=4)
+            return False
+        self._home = result.stdout.strip() == "same"
+        return self._home
+
+    async def _home_is_workspace(self, path: str) -> bool:
+        """Whether a path asked relative to the home may be shown under
+        /home/user; asked once a sandbox, and never fails."""
+        if path.startswith("/"):
+            return False
+        if self._home is None:
+            try:
+                await self._link_home()
+            except Exception:
+                return False
+        return bool(self._home)
 
     async def _run_as(self, user: Optional[str]) -> Optional[str]:
         """The Linux user a call runs as, or None for the sandbox's own. A user
@@ -651,44 +670,58 @@ class AsyncSandbox:
                      **connection: Any) -> Any:
         """Creates a sandbox from ``template`` (default "base", Runtime's stock
         image) with E2B's default machine, 2 vCPU and 512 MiB, and waits until
-        it runs. ``timeout`` is in seconds, when it ends; leave it out for no
-        time limit: it runs while it works and pauses when idle. Funding is left to
-        Runtime: the free trial while the account has trial time, then prepaid
-        credit, exactly as withruntime's own create. ``runtime_create`` passes
+        it runs. ``timeout`` is in seconds, up to 24 hours, kept by Runtime's
+        server: when it runs out the sandbox is deleted, as E2B's kill does.
+        Left out, E2B's 300 s ends in a pause instead, which keeps memory and
+        files (a pilot account's sandbox is kept running). Funding is left to
+        Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. ``runtime_create`` passes
         Runtime fields (snake_case) over the adapter's."""
         core.refuse_create({"mcp": mcp, "network": network, "iam": iam, "volume_mounts": volume_mounts})
         runtime_client = _client(api_key, client, **connection)
-        # No timeout, no time limit: it runs while it works (0300).
-        asked = None if timeout is None else _time.time() + timeout
+        template = template or cls.default_template
         with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
-            fields: Dict[str, Any] = {"on_lease_end": core.on_lease_end(lifecycle)}
-            if timeout is not None:
-                fields["timeout_seconds"] = core.lease_seconds(timeout)
+            # The server keeps the deadline, up to 24 hours (0381). Without one
+            # asked for, E2B's 300 s ends in a pause, never a delete.
+            fields: Dict[str, Any] = {
+                "timeout_seconds": core.timeout_seconds(core.DEFAULT_TIMEOUT if timeout is None else timeout),
+                "on_lease_end": core.on_timeout(lifecycle, timeout is not None)}
             if lifecycle:
                 # E2B resumes on traffic only when asked; Runtime's automatic wake is the same (0093).
                 fields["auto_wake"] = bool(lifecycle.get("auto_resume"))
-            if metadata:
-                fields["labels"] = dict(metadata)
+            labels = core.labels_for(metadata, template)
+            if labels:
+                fields["labels"] = labels
             if envs:
                 # Runtime keeps them with the sandbox: every command, terminal and
                 # interpreter in it gets them, from this client or any other.
                 fields["env"] = dict(envs)
             if allow_internet_access is False:
                 fields["network"] = {"internet": False}
-            source = await _guard("sandbox", lambda: cls._resolve(runtime_client, template or cls.default_template))
+            source = await _guard("sandbox", lambda: cls._resolve(runtime_client, template))
             if "snapshot" not in source:
                 fields = {"vcpu": core.DEFAULT_VCPU, "memory_mib": core.DEFAULT_MEMORY_MIB, **fields}
             fields.update(source)
             fields.update(runtime_create or {})
-            created = await _guard("sandbox", lambda: runtime_client.sandboxes.create(**fields))
-        if asked is not None:
-            _keep_until(created, asked)
+            try:
+                created = await _guard("sandbox", lambda: runtime_client.sandboxes.create(**fields))
+            except SandboxException as error:
+                if error.code == "image_not_found":
+                    try:
+                        me = await runtime_client.me()
+                    except Exception:  # noqa: BLE001 - the error says what it can without it
+                        me = None
+                    source = None if client is not None else core.key_source(api_key)
+                    raise core.template_missing(template, error, core.account_of(me, source)) from error
+                raise
         result = cls(created, runtime_client)
         result._request_timeout = connection.get("request_timeout") if connection.get("request_timeout") is not None else 60
         return result
 
     @staticmethod
     async def _resolve(client: AsyncRuntime, template: str) -> Dict[str, Any]:
+        """Where a template sends the create: the stock image, a Runtime image
+        by name (with its tag or version) or id, or a Runtime snapshot by id. A
+        name is resolved by the create itself, in the same request."""
         if template in core.STOCK_TEMPLATES:
             return {}
         if core.UUID.match(template):
@@ -699,10 +732,7 @@ class AsyncSandbox:
                 if getattr(error, "status", None) != 404:
                     raise translate(error) from error
             return {"snapshot": template}
-        page = await _guard("other", lambda: client.images.list(name=template, state="ready", limit=1))
-        if page.data:
-            return {"image": page.data[0]["id"]}
-        raise core.template_missing(template)
+        return {"image": core.image_name_for(template)}
 
     @classmethod
     async def _cls_connect_sandbox(cls, sandbox_id: str, timeout: Optional[int] = None, *,
@@ -738,21 +768,28 @@ class AsyncSandbox:
     async def _cls_kill(cls, sandbox_id: str, api_key: Optional[str] = None, client: Optional[AsyncRuntime] = None,
                         **connection: Any) -> bool:
         runtime_client = _client(api_key, client, **connection)
-        _stop_keeping(sandbox_id)
         try:
+            # Read first: a delete answers the same however often it is sent,
+            # and E2B says False for one already gone.
             runtime = await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id))
+            await _guard("sandbox", lambda: runtime.delete())
         except SandboxNotFoundException:
             return False
-        return await _stop(runtime)
+        return True
 
     @class_method_variant("_cls_kill")
     async def kill(self, **_: Any) -> bool:
-        """Stops the sandbox. False when it was not found or had already ended."""
-        _stop_keeping(self.sandbox_id)
+        """Deletes the sandbox for good, as E2B's kill destroys it: its disk,
+        memory and shared ports go. False when it was not found or was already
+        deleted."""
+        if self._killed:
+            return False
         try:
-            return await _stop(self.runtime)
+            await _guard("sandbox", lambda: self.runtime.delete())
         except SandboxNotFoundException:
             return False
+        self._killed = True
+        return True
 
     @classmethod
     async def _cls_set_timeout(cls, sandbox_id: str, timeout: int, api_key: Optional[str] = None,
@@ -762,10 +799,11 @@ class AsyncSandbox:
 
     @class_method_variant("_cls_set_timeout")
     async def set_timeout(self, timeout: int, **_: Any) -> None:
-        """Sets the sandbox to end ``timeout`` seconds from now, up to 24 hours;
-        past an hour the lease is moved on while this process runs. Runtime
-        cannot end a lease early, so an end sooner than the lease's is refused.
-        A sandbox created with no timeout has no end to move, and nothing changes."""
+        """Sets the sandbox to end ``timeout`` seconds from now, up to 24 hours,
+        as E2B does; the server keeps the deadline. Runtime cannot bring an end
+        sooner, so that is refused. A sandbox with no time limit (one on a pilot
+        account, kept running by the server) has no end to move, and nothing
+        changes."""
         await _guard("sandbox", lambda: self.runtime.refresh())
         await _extend_to(self.runtime, timeout)
 
@@ -782,11 +820,14 @@ class AsyncSandbox:
 
     @request_limited
     async def is_running(self, request_timeout: Optional[float] = None) -> bool:
+        """Whether the sandbox answers calls, as E2B's health check says: True
+        while it runs, and while Runtime has paused it for being idle, since the
+        next call wakes it. False once paused on request, ended or deleted."""
         try:
             await _guard("sandbox", lambda: self.runtime.refresh())
         except SandboxNotFoundException:
             return False
-        return self.runtime.state == "running"
+        return self.runtime.state == "running" or core.idle_asleep(self.runtime.info)
 
     @classmethod
     async def _cls_pause(cls, sandbox_id: str, keep_memory: Optional[bool] = None, api_key: Optional[str] = None,
@@ -865,7 +906,7 @@ class AsyncSandbox:
         returns once it has landed); the sync one before returning."""
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise InvalidArgumentException(f"port must be a whole number from 1 to 65535, not {port!r}.")
-        # A trial sandbox's ports are private: a host alone would answer 404 or
+        # A sandbox without credit shares ports privately: a host alone would answer 404 or
         # 401 to everyone. Say so now, with the address that works.
         if self.runtime.info.get("funding") == "trial":
             raise PublicPreviewNotAllowedException(self.sandbox_id, port)
@@ -939,120 +980,35 @@ async def _resume(runtime: Any, timeout: Optional[int], on_resume: str) -> None:
     state = core.simple_state(runtime.state)
     if state == "stopped":
         raise SandboxNotFoundException(f"Sandbox {runtime.id} has ended.")
-    asked = None if timeout is None else _time.time() + timeout
     if state == "paused":
-        await _guard("sandbox", lambda: runtime.wake(timeout_seconds=None if timeout is None else core.lease_seconds(timeout)))
+        await _guard("sandbox", lambda: runtime.wake(
+            timeout_seconds=None if timeout is None else core.timeout_seconds(timeout)))
     elif timeout is not None:
         core.check_timeout(timeout)
+        # A running one's end moves later, never sooner, as E2B's connect.
         if core.no_limit(runtime.info):
             return
-        later = core.seconds_later(runtime.info, min(timeout, core.KEEP_AHEAD))
+        later = core.seconds_later(runtime.info, timeout)
         if later > 1:
-            await _guard("sandbox", lambda: runtime.extend(int(later) + 1))
-    kept = _keepers.get(runtime.id)
-    if asked is not None and asked > (kept["until"] if kept else 0):
-        _keep_until(runtime, asked)
-
-
-async def _stop(runtime: Any) -> bool:
-    if core.simple_state(runtime.state) == "stopped":
-        return False
-    await _guard("sandbox", lambda: runtime.stop(wait=False))
-    return True
+            await _guard("sandbox", lambda: runtime.extend(math.ceil(later)))
 
 
 async def _extend_to(runtime: Any, timeout: float) -> None:
     core.check_timeout(timeout)
     if core.no_limit(runtime.info):
         return
-    asked = _time.time() + timeout
-    if core.seconds_later(runtime.info, timeout) < -1:
-        raise NotSupportedException("Ending a sandbox sooner than its lease (a shorter set_timeout)",
-                                    "Runtime cannot end a lease early. Call kill() when the work is done.")
-    later = core.seconds_later(runtime.info, min(timeout, core.KEEP_AHEAD))
+    later = core.seconds_later(runtime.info, timeout)
+    if later < -1:
+        raise NotSupportedException("Ending a sandbox sooner than its time limit (a shorter set_timeout)",
+                                    "Runtime cannot bring a time limit forward. Call kill() when the work is done.")
+    # A second's difference is the clocks and the trip, not a new end.
     if later > 1:
-        await _guard("sandbox", lambda: runtime.extend(int(later)))
-    _keep_until(runtime, asked)
+        await _guard("sandbox", lambda: runtime.extend(math.ceil(later)))
 
 
 async def _run_as(sandbox: Any, user: Optional[str]) -> Optional[str]:
     """The sandbox's own user asks nothing of the sandbox."""
     return None if core.other_user(user) is None else await sandbox._run_as(user)
-
-
-# Timeouts over an hour. Runtime's lease reaches at most an hour ahead of now,
-# and E2B's timeout up to a day. While this process runs, the adapter moves
-# the lease on every five minutes, as far as an hour ahead and never past the
-# end asked for; one keeper per sandbox, whichever object asked. If the
-# process ends first, the sandbox ends when its lease does, at most an hour
-# later. The async keeper is a task on the running loop; the sync one a
-# daemon thread.
-_keepers: Dict[str, Dict[str, Any]] = {}
-_warned_keeper = False
-
-
-def _keep_until(runtime: Any, until: float) -> None:
-    if until - _time.time() <= core.MAX_LEASE:
-        _stop_keeping(runtime.id)
-        return
-    keeper = _keepers.get(runtime.id)
-    if keeper is not None:
-        keeper["until"], keeper["runtime"] = until, runtime
-        return
-    keeper = {"until": until, "runtime": runtime}
-    _keepers[runtime.id] = keeper
-    keeper["cancel"] = background(lambda: _keep_loop(keeper))
-
-
-def _stop_keeping(sandbox_id: str) -> None:
-    keeper = _keepers.pop(sandbox_id, None)
-    if keeper is not None and keeper.get("cancel"):
-        keeper["cancel"]()
-
-
-async def _keep_loop(keeper: Dict[str, Any]) -> None:
-    while _keepers.get(keeper["runtime"].id) is keeper:
-        await sleep(core.KEEP_EVERY)
-        if _keepers.get(keeper["runtime"].id) is not keeper:
-            return
-        await _renew(keeper)
-
-
-async def _renew(keeper: Dict[str, Any]) -> None:
-    global _warned_keeper
-    runtime = keeper["runtime"]
-    if _keepers.get(runtime.id) is not keeper:
-        return
-    try:
-        await runtime.refresh()
-        state = core.simple_state(runtime.state)
-        if state == "stopped" or core.no_limit(runtime.info):
-            _stop_keeping(runtime.id)
-            return
-        if state == "running":
-            now = _time.time()
-            later = int(core.seconds_later(runtime.info, min(keeper["until"], now + core.KEEP_AHEAD) - now))
-            if later >= 1:
-                await runtime.extend(later)
-            if core.seconds_later(runtime.info, keeper["until"] - _time.time()) <= 1:
-                _stop_keeping(runtime.id)
-    except Exception as error:  # noqa: BLE001 - tried again at the next turn
-        if not _warned_keeper:
-            _warned_keeper = True
-            import warnings
-            warnings.warn(f"Could not extend sandbox {runtime.id}'s lease toward its timeout: {error}. "
-                          "Trying again in five minutes.", RuntimeWarning, stacklevel=1)
-
-
-async def renew_leases() -> None:
-    """Test hook: renew every kept lease now, as the five-minute timer would."""
-    for keeper in list(_keepers.values()):
-        await _renew(keeper)
-
-
-def kept_leases() -> Dict[str, float]:
-    """Test hook: the end (epoch seconds) each kept sandbox is kept until."""
-    return {sandbox_id: keeper["until"] for sandbox_id, keeper in _keepers.items()}
 
 
 async def _pause(runtime: Any, keep_memory: Optional[bool]) -> bool:

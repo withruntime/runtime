@@ -1,9 +1,18 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from withruntime.e2b import FilesystemEventType, SandboxException
+from withruntime.e2b import FilesystemEventType, InvalidArgumentException, SandboxException
 from withruntime.e2b._sync_io import watch_directory as watch_sync
 from withruntime.e2b._async_io import watch_directory as watch_async
+
+
+def directory_stat(*_):
+    """The watched path, as the API's stat answers a directory."""
+    return {"exists": True, "type": "directory"}
+
+
+async def directory_stat_async(*_):
+    return directory_stat()
 
 class Native:
     def __init__(self):
@@ -19,18 +28,28 @@ class SyncWatch(unittest.TestCase):
         def start(path, **opts):
             self.assertEqual((path, opts['recursive']), ('/workspace', True))
             return native
-        fs = SimpleNamespace(_path=lambda p, u: p, _files=SimpleNamespace(watch=start))
+        fs = SimpleNamespace(_path=lambda p, u: p, _files=SimpleNamespace(stat=directory_stat, watch=start))
         handle = watch_sync(fs, '/workspace', recursive=True)
         events = handle.get_new_events()
-        self.assertEqual((events[0].name, events[0].type), ('.env', FilesystemEventType.CREATE))
+        # A file Runtime puts in place whole is created and, as envd says,
+        # written: E2B's own watch test waits for the write (5 October 2026).
+        self.assertEqual([(e.name, e.type) for e in events],
+                         [('.env', FilesystemEventType.CREATE), ('.env', FilesystemEventType.WRITE)])
         handle.stop()
         handle.stop()
         self.assertEqual(native.stopped, 1)
         with self.assertRaisesRegex(SandboxException, 'already stopped'): handle.get_new_events()
+    def test_a_file_is_not_watched_as_envd_refuses_it(self):
+        started = []
+        fs = SimpleNamespace(_path=lambda p, u: p, _files=SimpleNamespace(
+            stat=lambda p: {"exists": True, "type": "file"}, watch=lambda *a, **k: started.append(a)))
+        with self.assertRaisesRegex(InvalidArgumentException, 'not a directory'):
+            watch_sync(fs, '/workspace/a.txt')
+        self.assertEqual(started, [])
     def test_loss_is_not_silently_a_complete_event_list(self):
         native = Native()
         native.notices = [{'k': 'overflow'}]
-        fs = SimpleNamespace(_path=lambda p, u: p, _files=SimpleNamespace(watch=lambda *a, **k: native))
+        fs = SimpleNamespace(_path=lambda p, u: p, _files=SimpleNamespace(stat=directory_stat, watch=lambda *a, **k: native))
         with self.assertRaisesRegex(SandboxException, 'lost'): watch_sync(fs, '/workspace').get_new_events()
 
 class AsyncWatch(unittest.TestCase):
@@ -45,7 +64,7 @@ class AsyncWatch(unittest.TestCase):
                 native = AsyncNative()
                 async def path(p, u): return p
                 async def start(*args, **kwargs): return native
-                fs = SimpleNamespace(_path=path, _files=SimpleNamespace(watch=start))
+                fs = SimpleNamespace(_path=path, _files=SimpleNamespace(stat=directory_stat_async, watch=start))
                 seen, exits = [], []
                 handle = await watch_async(fs, '/workspace', seen.append, exits.append)
                 if not immediately: await asyncio.sleep(0)
@@ -65,7 +84,7 @@ class AsyncWatch(unittest.TestCase):
             native = AsyncNative()
             async def path(p, u): return p
             async def start(*args, **kwargs): return native
-            fs = SimpleNamespace(_path=path, _files=SimpleNamespace(watch=start))
+            fs = SimpleNamespace(_path=path, _files=SimpleNamespace(stat=directory_stat_async, watch=start))
             errors = []
             exited = asyncio.Event()
             def on_exit(error):
@@ -90,7 +109,7 @@ class ReentrantWatch(unittest.TestCase):
             native = AsyncNative()
             async def path(p, u): return p
             async def start(*args, **kwargs): return native
-            fs = SimpleNamespace(_path=path, _files=SimpleNamespace(watch=start))
+            fs = SimpleNamespace(_path=path, _files=SimpleNamespace(stat=directory_stat_async, watch=start))
             exits, seen = [], []
             async def event(e):
                 seen.append(e.name)

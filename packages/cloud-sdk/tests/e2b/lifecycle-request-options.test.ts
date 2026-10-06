@@ -22,7 +22,7 @@ test("pre-aborted template create makes no lookup or sandbox request", async () 
   expect(world.calls).toEqual([]);
 });
 
-test("named and UUID templates forward signal and zero timeout to lookup and create", async () => {
+test("a UUID template's lookup and every create forward signal and zero timeout", async () => {
   const world = new FakeWorld();
   const id = "11111111-2222-4333-8444-555555555555";
   world.images.push({ id, name: "custom", state: "ready" });
@@ -41,10 +41,8 @@ test("named and UUID templates forward signal and zero timeout to lookup and cre
   const signal = new AbortController().signal;
   for (const template of ["custom", id])
     await Sandbox.create(template, { requestTimeoutMs: 0, signal, runtime: { client } });
-  expect(lookups).toEqual([
-    { timeoutMs: 0, signal },
-    { timeoutMs: 0, signal },
-  ]);
+  // A name is resolved by the create itself; only a UUID is looked up.
+  expect(lookups).toEqual([{ timeoutMs: 0, signal }]);
   for (const call of world.called("sandboxes.create"))
     expect(call[1]).toEqual({ timeoutMs: 0, signal });
 });
@@ -53,14 +51,17 @@ test("cancellation during image lookup prevents the later sandbox create", async
   const world = new FakeWorld();
   const client = world.client();
   const controller = new AbortController();
-  client.images.list = async () => {
+  client.images.get = async () => {
     controller.abort(new Error("cancelled during lookup"));
-    return { data: [{ id: "image", state: "ready" }] } as Awaited<
-      ReturnType<typeof client.images.list>
+    return { id: "image", state: "ready" } as unknown as Awaited<
+      ReturnType<typeof client.images.get>
     >;
   };
   await expect(
-    Sandbox.create("custom", { signal: controller.signal, runtime: { client } }),
+    Sandbox.create("11111111-2222-4333-8444-555555555555", {
+      signal: controller.signal,
+      runtime: { client },
+    }),
   ).rejects.toThrow("cancelled during lookup");
   expect(world.called("sandboxes.create")).toEqual([]);
 });
@@ -89,14 +90,15 @@ test("a template lookup deadline cancels native HTTP before sandbox creation", a
     fetch: (async (input, init) => {
       const req = new Request(input, init);
       calls.push(req);
-      return stalledResponse(req, { data: [], nextCursor: null });
+      return stalledResponse(req, { id: "image", state: "ready" });
     }) as typeof fetch,
   });
+  const id = "11111111-2222-4333-8444-555555555555";
   await expect(
-    Sandbox.create("custom", { requestTimeoutMs: 10, runtime: { client } }),
+    Sandbox.create(id, { requestTimeoutMs: 10, runtime: { client } }),
   ).rejects.toBeInstanceOf(Error);
   expect(calls).toHaveLength(1);
-  expect(new URL(calls[0]!.url).pathname).toBe("/v1/images");
+  expect(new URL(calls[0]!.url).pathname).toBe(`/v1/images/${id}`);
   expect(calls[0]!.signal.aborted).toBe(true);
 });
 

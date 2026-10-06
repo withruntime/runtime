@@ -1,10 +1,11 @@
 package com.withruntime;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 
 /**
- * The account's money and trial time. Money is integer microdollars, exact past 2^53: available =
+ * The account's money and free time. Money is integer microdollars, exact past 2^53: available =
  * credited - spent - expired - held.
  */
 public final class Usage extends JsonObject {
@@ -42,8 +43,19 @@ public final class Usage extends JsonObject {
     return micros("available");
   }
 
-  /** The trial's milliseconds: totalMs, usedMs, reservedMs and availableMs; empty when none. */
+  /**
+   * Machine time without credit, in milliseconds: totalMs, usedMs, reservedMs, availableMs, offer
+   * and renewsAt; empty when none.
+   */
   public JsonObject trial() {
     return getObject("trial");
+  }
+
+  /**
+   * This month's included usage, one object per product: pool, unit, quantity, used, reserved,
+   * left, month and renewsAt. Empty from an API older than 5 October 2026.
+   */
+  public List<JsonObject> allowances() {
+    return getObjects("allowances");
   }
 }

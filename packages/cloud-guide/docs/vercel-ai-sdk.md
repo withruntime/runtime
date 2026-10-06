@@ -21,7 +21,7 @@ import { createRuntimeSandbox } from "withruntime/ai-harness";
 export async function fixTests(harness: HarnessAgentAdapter) {
   const agent = new HarnessAgent({
     harness,
-    sandbox: createRuntimeSandbox({ ports: [4000], create: { funding: "trial" } }),
+    sandbox: createRuntimeSandbox({ ports: [4000] }),
     instructions: "You are a careful coding assistant.",
   });
   const session = await agent.createSession();
@@ -123,7 +123,7 @@ It needs the `ai` package, version 5 or later. Mastra agents take the same tools
   a private preview as a bridge harness opens one, is written and has not run
   yet. No bridge harness (Claude Code, Codex) has run on Runtime yet.
 - On 23 September 2026 `runtimeTools` ran in the AI SDK's own agent loop (AI SDK
-  7.0.87) against real trial sandboxes, driven by a scripted model.
+  7.0.87) against real sandboxes without credit, driven by a scripted model.
 
 Official reference checked 25 September 2026:
 [AI SDK HarnessAgent](https://ai-sdk.dev/docs/ai-sdk-harnesses/harness-agent).

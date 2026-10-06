@@ -243,6 +243,8 @@ class AsyncWatchHandle:
                     except core.FileNotFoundException:
                         pass
                 await call(self._on_event, core.FilesystemEvent(name, core.FilesystemEventType(event["type"]), entry))
+                if core.written_whole(event) and not self._closed:
+                    await call(self._on_event, core.FilesystemEvent(name, core.FilesystemEventType.WRITE, entry))
                 if self._closed:
                     break
             if self._native.notices:
@@ -307,6 +309,7 @@ async def watch_directory(filesystem: Any, path: str, on_event: Any, on_exit: An
                                         "Watch it as the sandbox's own user (leave user out); Runtime's watch "
                                         "reports changes made by anyone.")
         target = await filesystem._path(path, user)
+        core.only_directory(target, await filesystem._files.stat(target))
         native = await filesystem._files.watch(target, recursive=recursive, timeout_ms=0)
         return target, native
     try:

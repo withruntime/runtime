@@ -101,14 +101,13 @@ type VolumeMount struct {
 	Mode     string `json:"mode,omitempty"`
 }
 
-// CreateOptions are a create's fields, every one optional. With none you get
-// the free trial while it lasts, the default region and a 2 vCPU / 4 GiB
+// CreateOptions are a create's fields, every one optional. With none you get the included usage while it lasts, the default region and a 2 vCPU / 4 GiB
 // machine for up to 30 minutes.
 type CreateOptions struct {
 	Name   string            `json:"name,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
-	// Funding is "trial" or "paid". Omitted: the trial while it lasts, then
-	// prepaid credit. Explicit trial funding never falls back to paid credit.
+	// Funding is accepted and ignored: the included usage is used first, then
+	// prepaid credit.
 	Funding        string `json:"funding,omitempty"`
 	Region         string `json:"region,omitempty"`
 	VCPU           int    `json:"vcpu,omitempty"`
@@ -157,7 +156,7 @@ type CreateOptions struct {
 	// until the sandbox runs.
 	NoWait bool `json:"-"`
 	// WaitForCapacity replaces the client's for this create; a pointer to 0
-	// fails at once when the trial, quota or region is full.
+	// fails at once when the slots without credit, quota or region are full.
 	WaitForCapacity *time.Duration `json:"-"`
 	// Extra carries fields newer than this SDK. They are merged into the body.
 	Extra map[string]any `json:"-"`
@@ -264,29 +263,51 @@ type SandboxSettings struct {
 	RemoveMaxTotalCost bool   `json:"-"`
 }
 
-// Usage is the account's money and trial time. Money is integer microdollars
+// Usage is the account's money and free time. Money is integer microdollars
 // in strings, exact past 2^53: Available = Credited - Spent - Expired - Held.
 type Usage struct {
-	OrgID     string           `json:"orgId"`
-	Unit      string           `json:"unit"`
-	Credited  string           `json:"credited"`
-	Spent     string           `json:"spent"`
-	Held      string           `json:"held"`
-	Expired   string           `json:"expired"`
-	Available string           `json:"available"`
-	TakenBack string           `json:"takenBack"`
-	Trial     *TrialTime       `json:"trial"`
-	Resources []map[string]any `json:"resources"`
+	OrgID     string     `json:"orgId"`
+	Unit      string     `json:"unit"`
+	Credited  string     `json:"credited"`
+	Spent     string     `json:"spent"`
+	Held      string     `json:"held"`
+	Expired   string     `json:"expired"`
+	Available string     `json:"available"`
+	TakenBack string     `json:"takenBack"`
+	Trial     *TrialTime `json:"trial"`
+	// Allowances is what the account uses free this calendar month (UTC),
+	// one row per product, drawn before credit and never charged.
+	Allowances []Allowance      `json:"allowances"`
+	Resources  []map[string]any `json:"resources"`
 }
 
-// TrialTime is the account's free trial in milliseconds. A trial sandbox
-// that has not ended holds its whole lease in ReservedMs;
-// AvailableMs = TotalMs - UsedMs - ReservedMs.
+// Allowance is one product's included usage this month: Quantity in Unit
+// (GiB-hour, vCPU-hour or GB-month), what is Used, Reserved for what runs now,
+// and Left. It renews at RenewsAt, the 1st of next month, 00:00 UTC.
+type Allowance struct {
+	Pool     string  `json:"pool"`
+	Unit     string  `json:"unit"`
+	Quantity float64 `json:"quantity"`
+	Used     float64 `json:"used"`
+	Reserved float64 `json:"reserved"`
+	Left     float64 `json:"left"`
+	Month    string  `json:"month"`
+	RenewsAt string  `json:"renewsAt"`
+}
+
+// TrialTime is the machine time an account can still run without credit, in
+// milliseconds. TotalMs and UsedMs count free hours given before 5 October
+// 2026 (0 for an account given none); AvailableMs is the larger of those
+// hours left and this month's included usage, as time at 2 vCPU and 4 GiB.
+// Offer is "monthly" (the included usage only) or "hours" (free hours given
+// before 5 October 2026, kept); RenewsAt is when the included usage renews.
 type TrialTime struct {
-	TotalMs     int64 `json:"totalMs"`
-	UsedMs      int64 `json:"usedMs"`
-	ReservedMs  int64 `json:"reservedMs"`
-	AvailableMs int64 `json:"availableMs"`
+	TotalMs     int64  `json:"totalMs"`
+	UsedMs      int64  `json:"usedMs"`
+	ReservedMs  int64  `json:"reservedMs"`
+	AvailableMs int64  `json:"availableMs"`
+	Offer       string `json:"offer,omitempty"`
+	RenewsAt    string `json:"renewsAt,omitempty"`
 }
 
 // KeyLimits is whether a key is read-only and its agent's daily limit. Money
@@ -300,6 +321,7 @@ type KeyLimits struct {
 		RemainingMicros *string `json:"remainingMicros"`
 		Window          string  `json:"window"`
 	} `json:"daily"`
-	// Trial is the account's free trial time, nil when it has none.
+	// Trial is the machine time the account can still run without credit, nil
+	// when it has none.
 	Trial *TrialTime `json:"trial"`
 }

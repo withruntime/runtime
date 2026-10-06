@@ -2,6 +2,7 @@ import type { Runtime } from "../client.js";
 import type { RequestOptions } from "../transport.js";
 import {
   clientFor,
+  keySource,
   request,
   type ConnectionOpts,
   type RuntimeCreate,
@@ -28,15 +29,23 @@ import { Pty } from "./pty.js";
 /** E2B's default machine: 2 vCPU and 512 MiB (docs.e2b.dev/billing, checked
  * 23 September 2026). Pass `runtime: { create: { memoryMiB } }` for another. */
 export const DEFAULT_SHAPE = { vcpu: 2, memoryMiB: 512 } as const;
-/** E2B's default sandbox timeout, 300 s. Not sent: a sandbox created with no
- * timeoutMs has no time limit on Runtime, running while it works and pausing
- * when idle (0300). Kept for code that imports it. */
+/** E2B's default sandbox timeout, 300 s. A sandbox created without timeoutMs
+ * gets it, and is paused when it runs out rather than killed, since nobody
+ * asked for it to end: nothing in it is lost, and the next call wakes it. On
+ * a pilot account the server keeps every sandbox running instead (0254). */
 export const DEFAULT_TIMEOUT_MS = 300_000;
-/** Runtime's lease bounds (MAX_TIMEOUT_SECONDS in the API). */
-const MIN_LEASE_SECONDS = 60;
-const MAX_LEASE_SECONDS = 3600;
-/** E2B's longest sandbox timeout, 24 hours (its Pro plan). */
+/** Runtime's time limit bounds (MIN_TIMEOUT_SECONDS and MAX_TIMEOUT_SECONDS
+ * in the API): a minute to 24 hours, E2B's longest (its Pro plan). The server
+ * keeps the deadline: nothing in this process has to stay running for it. */
+const MIN_TIMEOUT_SECONDS = 60;
 const LONGEST_TIMEOUT_MS = 86_400_000;
+/** Makes E2B's home lead to Runtime's unless the image has its own, and
+ * prints "same" when /home/user is then /workspace. */
+const HOME_LINK =
+  "[ -e /home/user ] || sudo ln -s /workspace /home/user || exit 1; if [ /home/user -ef /workspace ]; then echo same; fi";
+/** The label that keeps the template a sandbox was made from, so getInfo
+ * and list name it whichever client asks; it is not shown in `metadata`. */
+export const TEMPLATE_LABEL = "e2b-template";
 /** E2B template names that mean "the stock environment": Runtime's default image. */
 const STOCK_TEMPLATES = new Set(["base", "code-interpreter-v1", "code-interpreter"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -125,20 +134,20 @@ function checkForkCount(count: number | undefined) {
     throw new InvalidArgumentError(`count must be an integer between 1 and ${MAX_FORK_COUNT}`);
 }
 
-/** The first lease for `timeoutMs`: up to an hour; `keepUntil` carries a
- * longer timeout on from there. */
-function leaseSeconds(timeoutMs: number): number {
+/** Runtime's time limit for `timeoutMs`, in whole seconds: at least a
+ * minute (with a warning once), at most 24 hours. */
+function timeoutSeconds(timeoutMs: number): number {
   checkTimeout(timeoutMs);
-  const seconds = Math.min(Math.ceil(timeoutMs / 1000), MAX_LEASE_SECONDS);
-  if (seconds < MIN_LEASE_SECONDS) {
+  const seconds = Math.ceil(timeoutMs / 1000);
+  if (seconds < MIN_TIMEOUT_SECONDS) {
     if (!warnedShortLease && typeof process !== "undefined") {
       warnedShortLease = true;
       process.emitWarning(
-        `timeoutMs ${timeoutMs} is under Runtime's shortest lease; the sandbox gets 60 s. Call kill() when done.`,
+        `timeoutMs ${timeoutMs} is under Runtime's shortest time limit; the sandbox gets 60 s. Call kill() when done.`,
         { code: "RUNTIME_E2B_SHORT_TIMEOUT" },
       );
     }
-    return MIN_LEASE_SECONDS;
+    return MIN_TIMEOUT_SECONDS;
   }
   return seconds;
 }
@@ -152,84 +161,16 @@ function checkTimeout(timeoutMs: number) {
     );
 }
 
-/* Timeouts over an hour. Runtime's lease reaches at most an hour ahead of
-   now, and E2B's timeout up to a day. While this process runs, the adapter
-   moves the lease on every five minutes, as far as an hour ahead and never
-   past the end asked for. One keeper per sandbox, whichever object asked.
-   If the process ends first, the sandbox ends when its lease does, at most
-   an hour later; it is never kept past the time asked for. */
-const KEEP_EVERY_MS = 5 * 60_000;
-/** Kept under the API's hour, for the clocks and the trip. */
-const KEEP_AHEAD_MS = (MAX_LEASE_SECONDS - 30) * 1000;
-type Keeper = { until: number; runtime: RuntimeSandbox; timer?: ReturnType<typeof setTimeout> };
-const keepers = new Map<string, Keeper>();
-let warnedKeeper = false;
-
-/** Keeps `runtime` until `until` (epoch ms), or stops keeping it when that
- * is within the hour its lease can already reach. */
-function keepUntil(runtime: RuntimeSandbox, until: number) {
-  const keeper = keepers.get(runtime.id);
-  if (until - Date.now() <= MAX_LEASE_SECONDS * 1000) return stopKeeping(runtime.id);
-  if (keeper) {
-    keeper.until = until;
-    keeper.runtime = runtime;
-    return;
-  }
-  const made: Keeper = { until, runtime };
-  keepers.set(runtime.id, made);
-  schedule(made);
-}
-
-function stopKeeping(sandboxId: string) {
-  const keeper = keepers.get(sandboxId);
-  if (keeper?.timer !== undefined) clearTimeout(keeper.timer);
-  keepers.delete(sandboxId);
-}
-
-function schedule(keeper: Keeper) {
-  keeper.timer = setTimeout(() => void renew(keeper), KEEP_EVERY_MS);
-  // Never what keeps a Node or Bun process running.
-  (keeper.timer as { unref?: () => void }).unref?.();
-}
-
-async function renew(keeper: Keeper) {
-  const id = keeper.runtime.id;
-  if (keepers.get(id) !== keeper) return;
-  try {
-    await keeper.runtime.refresh();
-    const current = state(keeper.runtime);
-    if (current === "stopped") return stopKeeping(id);
-    if (current === "running") {
-      if (keeper.runtime.info.endsAt === null) return stopKeeping(id);
-      const end = Date.parse(keeper.runtime.info.expiresAt);
-      const want = Math.min(keeper.until, Date.now() + KEEP_AHEAD_MS);
-      const later = Math.floor((want - end) / 1000);
-      if (later >= 1) await keeper.runtime.extend(later);
-      if (Date.parse(keeper.runtime.info.expiresAt) >= keeper.until - 1000) return stopKeeping(id);
-    }
-  } catch (error) {
-    if (!warnedKeeper && typeof process !== "undefined" && process.emitWarning) {
-      warnedKeeper = true;
-      process.emitWarning(
-        `Could not extend sandbox ${id}'s lease toward its timeout: ${error instanceof Error ? error.message : String(error)}. Trying again in five minutes.`,
-        { code: "RUNTIME_E2B_LEASE" },
-      );
-    }
-  }
-  if (keepers.get(id) === keeper) schedule(keeper);
-}
-
-/** Test hook: renew every kept lease now, as the five-minute timer would. */
-export async function renewLeases(): Promise<void> {
-  await Promise.all([...keepers.values()].map((keeper) => renew(keeper)));
-}
-/** Test hook: the end each kept sandbox is kept until. */
-export function keptLeases(): Map<string, number> {
-  return new Map([...keepers].map(([id, keeper]) => [id, keeper.until]));
-}
-
-function onLeaseEnd(lifecycle: SandboxLifecycle | undefined): "pause" | "stop" {
-  if (!lifecycle) return "stop";
+/** What the server does when the time limit runs out. E2B kills: a caller
+ * that asked for an end (a timeoutMs, or onTimeout "kill") gets a delete, as
+ * E2B's kill destroys the sandbox. One that asked for nothing gets E2B's
+ * 300 s default as a pause, which keeps everything, since a sandbox nobody
+ * asked to end is never ended. */
+function onTimeout(
+  lifecycle: SandboxLifecycle | undefined,
+  timeoutAsked: boolean,
+): "pause" | "delete" {
+  if (!lifecycle) return timeoutAsked ? "delete" : "pause";
   const action =
     typeof lifecycle.onTimeout === "string" ? lifecycle.onTimeout : lifecycle.onTimeout.action;
   if (typeof lifecycle.onTimeout === "object" && lifecycle.onTimeout.keepMemory === false)
@@ -237,7 +178,7 @@ function onLeaseEnd(lifecycle: SandboxLifecycle | undefined): "pause" | "stop" {
       "A files-only pause (keepMemory: false)",
       "Runtime's pause keeps memory and files; leave keepMemory out.",
     );
-  return action === "pause" ? "pause" : "stop";
+  return action === "pause" ? "pause" : "delete";
 }
 
 function refuseCreate(opts: SandboxOpts) {
@@ -263,8 +204,17 @@ function refuseCreate(opts: SandboxOpts) {
     if (opts[field] !== undefined) throw new NotSupportedError(feature, alternative);
 }
 
+/** The Runtime image name an E2B template name stands for: E2B's
+ * `team/name:tag` without the team, since a Runtime account's images are its
+ * own. `name`, `name:tag` and `name@version` are Runtime image names too. */
+export function imageNameFor(template: string): string {
+  const slash = template.lastIndexOf("/");
+  return slash < 0 ? template : template.slice(slash + 1);
+}
+
 /** Where a template sends the create: the stock image, a Runtime image by
- * name or id, or a Runtime snapshot by id. */
+ * name (with its tag or version) or id, or a Runtime snapshot by id. A name
+ * is resolved by the create itself, in the same request. */
 async function resolveTemplate(
   client: Runtime,
   template: string,
@@ -281,17 +231,46 @@ async function resolveTemplate(
     }
     return { snapshot: template };
   }
-  const page = await client.images.list({ name: template, state: "ready", limit: 1 }, options);
-  const image = page.data[0];
-  if (image) return { image: image.id };
+  return { image: imageNameFor(template) };
+}
+
+/** The labels a create sends: E2B's metadata, and the template it was made
+ * from, while there is room for it among Runtime's 32 labels. */
+function labelsFor(
+  metadata: Record<string, string> | undefined,
+  template: string,
+): { labels?: Record<string, string> } {
+  const labels = { ...metadata };
+  if (!STOCK_TEMPLATES.has(template) && Object.keys(labels).length < 32 && template.length <= 256)
+    labels[TEMPLATE_LABEL] = template;
+  return Object.keys(labels).length ? { labels } : {};
+}
+
+/** " in the account …", for an error a key of another account explains: the
+ * account's name and where its key came from. Nothing when the lookup fails. */
+async function accountOf(
+  client: Runtime,
+  opts: { apiKey?: string; runtime?: { client?: Runtime } },
+): Promise<string | undefined> {
+  const me = await client.me({ timeoutMs: 5_000 }).catch(() => undefined);
+  if (!me) return undefined;
+  const source = opts.runtime?.client ? "" : ` (key: ${keySource(opts.apiKey)})`;
+  return ` in the account "${me.orgName || me.orgId}"${source}`;
+}
+
+/** The create's refusal of a template no Runtime image answers to, as E2B's
+ * TemplateError, saying how to build it. */
+function templateMissing(template: string, cause: unknown, account?: string): TemplateError {
+  const name = imageNameFor(template).replace(/[:@].*$/, "");
   const error = new TemplateError(
-    `No Runtime image is named "${template}". E2B templates do not run on Runtime; build the same ` +
+    `No Runtime image is named "${imageNameFor(template)}"${account ?? ""}. E2B templates do not run on Runtime; build the same ` +
       `environment as a Runtime image with that name and this call starts from it: ` +
-      `\`npx withruntime image build --dockerfile e2b.Dockerfile --name ${template}\`, or ` +
-      `runtime.images.build({ name: "${template}", dockerfile }).`,
+      `\`npx withruntime image build --dockerfile e2b.Dockerfile --name ${name}\`, or ` +
+      `runtime.images.build({ name: "${name}", dockerfile }).`,
   );
   error.code = "template_not_found";
-  throw error;
+  error.cause = cause;
+  return error;
 }
 
 function state(runtime: RuntimeSandbox): SandboxState | "stopped" {
@@ -301,29 +280,59 @@ function state(runtime: RuntimeSandbox): SandboxState | "stopped" {
   return "running";
 }
 
+/** Whether a paused sandbox is, to code written for E2B, still running:
+ * Runtime paused it itself for being idle (E2B never does) and the next
+ * call wakes it, so every E2B call on it works as on a running one. */
+function idleAsleep(runtime: RuntimeSandbox): boolean {
+  const info = runtime.info;
+  return state(runtime) === "paused" && info.stopReason === "idle" && info.autoWake !== false;
+}
+
+/** The sandbox's state as E2B would say it. */
+function e2bState(runtime: RuntimeSandbox): SandboxState {
+  const current = state(runtime);
+  if (current === "running" || idleAsleep(runtime)) return "running";
+  return "paused";
+}
+
+/** E2B's endAt: when the sandbox ends by itself. One that never will (no
+ * time limit, as a persistent or a pilot's sandbox) reads 24 hours ahead, the
+ * furthest an E2B sandbox's end may be, so code that waits until the end, or
+ * extends near it, behaves as for the longest E2B sandbox: a JavaScript timer
+ * set past 24.8 days would fire at once. (5 October 2026: it read where the
+ * sandbox was paid up to, minutes ahead, so a pilot's looked about to end.) */
+function endOf(runtime: RuntimeSandbox): Date {
+  const { endsAt, expiresAt } = runtime.info;
+  if (endsAt) return new Date(endsAt);
+  if (endsAt === null && e2bState(runtime) === "running")
+    return new Date(Date.now() + LONGEST_TIMEOUT_MS);
+  return new Date(expiresAt);
+}
+
 function infoOf(runtime: RuntimeSandbox): SandboxInfo {
   const info = runtime.info;
+  const { [TEMPLATE_LABEL]: template, ...metadata } = info.labels ?? {};
   const templateId =
-    typeof info.image === "string"
+    template ??
+    (typeof info.image === "string"
       ? info.image
       : typeof info.snapshot === "string"
         ? info.snapshot
-        : "base";
-  const current = state(runtime);
+        : "base");
+  const action = info.onTimeout ?? info.onLeaseEnd;
   return {
     sandboxId: info.id,
     templateId,
     ...(info.name ? { name: info.name } : {}),
-    metadata: info.labels ?? {},
+    metadata,
     startedAt: new Date(info.createdAt),
-    // With no time limit, where it is paid up to: always ahead, moving on.
-    endAt: new Date(info.endsAt ?? info.expiresAt),
-    state: current === "stopped" ? "paused" : current,
+    endAt: endOf(runtime),
+    state: e2bState(runtime),
     cpuCount: info.vcpu,
     memoryMB: info.memoryMiB,
     envdVersion: "runtime",
     lifecycle: {
-      onTimeout: info.onLeaseEnd === "stop" ? "kill" : "pause",
+      onTimeout: action === "pause" ? "pause" : "kill",
       autoResume: info.autoWake === true,
     },
   };
@@ -346,7 +355,9 @@ export class Sandbox {
   readonly pty: Pty;
   readonly #client: Runtime;
   #runtime: RuntimeSandbox;
-  #home: Promise<void> | undefined;
+  #killed = false;
+  /** The /home/user link, once asked for: whether /home/user leads to /workspace. */
+  #home: Promise<boolean> | undefined;
   /** Ports shared as public previews, by port: the one share each asked for. */
   readonly #shares = new Map<number, Promise<string>>();
 
@@ -361,6 +372,7 @@ export class Sandbox {
     const ctx = {
       ensureHome: (text: string | undefined, options?: RequestOptions) =>
         this.#ensureHome(text, options),
+      homeIsWorkspace: () => (this.#home ?? this.#linkHome()).catch(() => false),
       requestTimeoutMs: this.requestTimeoutMs,
     } as unknown as SandboxContext;
     // A getter, so the modules see the sandbox as it is after each refresh.
@@ -407,29 +419,39 @@ export class Sandbox {
         );
       });
     };
-    if (this.#home || !text?.includes("/home/user")) return wait(this.#home ?? Promise.resolve());
+    const done = (home: Promise<boolean>) => wait(home.then(() => undefined));
+    if (this.#home || !text?.includes("/home/user"))
+      return done(this.#home ?? Promise.resolve(false));
+    return done(this.#linkHome(signal));
+  }
+
+  /** Links /home/user to /workspace unless something is already there, and
+   * says whether /home/user then leads to /workspace: an image may have its
+   * own /home/user, and E2B's paths are shown only where they are true. */
+  #linkHome(signal?: AbortSignal): Promise<boolean> {
     const pending = (async () => {
-      const result = await guard("sandbox", () =>
-        this.#runtime.exec("[ -e /home/user ] || sudo ln -s /workspace /home/user", { signal }),
-      );
-      if (result.exitCode !== 0 && typeof process !== "undefined")
-        process.emitWarning(`Could not link /home/user to /workspace: ${result.stderr.trim()}`, {
-          code: "RUNTIME_E2B_HOME",
-        });
+      const result = await guard("sandbox", () => this.#runtime.exec(HOME_LINK, { signal }));
+      if (result.exitCode !== 0) {
+        if (typeof process !== "undefined")
+          process.emitWarning(`Could not link /home/user to /workspace: ${result.stderr.trim()}`, {
+            code: "RUNTIME_E2B_HOME",
+          });
+        return false;
+      }
+      return result.stdout.trim() === "same";
     })();
     this.#home = pending;
     pending.catch(() => {
       if (this.#home === pending) this.#home = undefined;
     });
-    return wait(pending);
+    return pending;
   }
 
   // ---- create, connect, list -------------------------------------------
 
   /** Creates a sandbox from `template` (default "base", Runtime's stock image)
    * with E2B's default machine, 2 vCPU and 512 MiB, and waits until it runs.
-   * Funding is left to Runtime: the free trial while the account has trial
-   * time, then prepaid credit, exactly as withruntime's own create. */
+   * Funding is left to Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
   static create<S extends typeof Sandbox>(this: S, opts?: SandboxOpts): Promise<InstanceType<S>>;
   static create<S extends typeof Sandbox>(
     this: S,
@@ -448,15 +470,15 @@ export class Sandbox {
     options.signal?.throwIfAborted();
     refuseCreate(opts);
     const client = clientFor(opts);
-    // No timeoutMs, no time limit: it runs while it works (0300).
-    const asked = opts.timeoutMs === undefined ? undefined : Date.now() + opts.timeoutMs;
+    // The server keeps the deadline, up to 24 hours (0381). Without one asked
+    // for, E2B's 300 s ends in a pause, never a delete.
     const input: RuntimeCreate = {
-      ...(opts.timeoutMs === undefined ? {} : { timeoutSeconds: leaseSeconds(opts.timeoutMs) }),
-      onLeaseEnd: onLeaseEnd(opts.lifecycle),
+      timeoutSeconds: timeoutSeconds(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      onLeaseEnd: onTimeout(opts.lifecycle, opts.timeoutMs !== undefined),
       // With a lifecycle, E2B resumes a paused sandbox on traffic only when
       // asked (autoResume); Runtime's automatic wake is the same thing (0093).
       ...(opts.lifecycle ? { autoWake: opts.lifecycle.autoResume === true } : {}),
-      ...(opts.metadata && Object.keys(opts.metadata).length ? { labels: opts.metadata } : {}),
+      ...labelsFor(opts.metadata, template),
       // Runtime keeps them with the sandbox: every command, terminal and
       // interpreter in it gets them, from this client or any other.
       ...(opts.envs && Object.keys(opts.envs).length ? { env: opts.envs } : {}),
@@ -471,8 +493,13 @@ export class Sandbox {
       ...source,
       ...opts.runtime?.create,
     };
-    const runtime = await guard("sandbox", () => client.sandboxes.create(create, options));
-    if (asked !== undefined) keepUntil(runtime, asked);
+    const runtime = await guard("sandbox", () => client.sandboxes.create(create, options)).catch(
+      async (error: unknown) => {
+        if ((error as { code?: string }).code === "image_not_found")
+          throw templateMissing(template, error, await accountOf(client, opts));
+        throw error;
+      },
+    );
     return new this(runtime, client, opts.requestTimeoutMs) as InstanceType<S>;
   }
 
@@ -503,32 +530,39 @@ export class Sandbox {
 
   // ---- lifecycle --------------------------------------------------------
 
-  /** Stops the sandbox. False when it was not found or had already ended. */
+  /** Deletes the sandbox for good, as E2B's kill destroys it: its disk,
+   * memory and shared ports go. False when it was not found or was already
+   * deleted. */
   static async kill(sandboxId: string, opts: SandboxApiOpts = {}): Promise<boolean> {
     const client = clientFor(opts);
-    stopKeeping(sandboxId);
     try {
+      // Read first: a delete answers the same however often it is sent, and
+      // E2B says false for one already gone.
       const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
-      return await stop(runtime, opts);
+      await guard("sandbox", () => runtime.delete(request(opts)));
+      return true;
     } catch (error) {
       if (error instanceof SandboxNotFoundError) return false;
       throw error;
     }
   }
   async kill(opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal"> = {}): Promise<boolean> {
-    stopKeeping(this.sandboxId);
+    if (this.#killed) return false;
     try {
-      return await stop(this.#runtime, opts);
+      await guard("sandbox", () => this.#runtime.delete(request(opts)));
+      this.#killed = true;
+      return true;
     } catch (error) {
       if (error instanceof SandboxNotFoundError) return false;
       throw error;
     }
   }
 
-  /** Sets the sandbox to end `timeoutMs` from now, up to 24 hours; past an
-   * hour the lease is moved on while this process runs. Runtime cannot end a
-   * lease early, so an end sooner than the lease's is refused. A sandbox
-   * created with no timeout has no end to move, and nothing changes. */
+  /** Sets the sandbox to end `timeoutMs` from now, up to 24 hours, as E2B
+   * does; the server keeps the deadline. Runtime cannot bring an end
+   * sooner, so that is refused. A sandbox with no time limit (one on a pilot
+   * account, kept running by the server) has no end to move, and nothing
+   * changes. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: SandboxApiOpts = {}) {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
@@ -551,6 +585,9 @@ export class Sandbox {
     return infoOf(this.#runtime);
   }
 
+  /** Whether the sandbox answers calls, as E2B's health check says: true
+   * while it runs, and while Runtime has paused it for being idle, since the
+   * next call wakes it. False once paused on request, ended or deleted. */
   async isRunning(opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal"> = {}) {
     try {
       await guard("sandbox", () => this.#runtime.refresh(request(opts)));
@@ -558,7 +595,7 @@ export class Sandbox {
       if (error instanceof SandboxNotFoundError) return false;
       throw error;
     }
-    return this.#runtime.state === "running";
+    return this.#runtime.state === "running" || idleAsleep(this.#runtime);
   }
 
   /** Pauses the sandbox, keeping memory and files. False when it was paused. */
@@ -655,7 +692,7 @@ export class Sandbox {
   getHost(port: number): string {
     if (!Number.isInteger(port) || port < 1 || port > 65_535)
       throw new InvalidArgumentError(`port must be a whole number from 1 to 65535, not ${port}.`);
-    // A trial sandbox's ports are private: a host alone would answer 404 or
+    // A sandbox without credit shares ports privately: a host alone would answer 404 or
     // 401 to everyone. Say so now, with the address that works.
     if (this.#runtime.info.funding === "trial")
       throw new PublicPreviewNotAllowedError(this.sandboxId, port);
@@ -744,33 +781,28 @@ async function resume(runtime: RuntimeSandbox, opts: SandboxConnectOpts) {
     );
   const current = state(runtime);
   if (current === "stopped") throw new SandboxNotFoundError(`Sandbox ${runtime.id} has ended.`);
-  const asked = opts.timeoutMs === undefined ? undefined : Date.now() + opts.timeoutMs;
   if (current === "paused") {
     await guard("sandbox", () =>
       runtime.wake({
-        ...(opts.timeoutMs === undefined ? {} : { timeoutSeconds: leaseSeconds(opts.timeoutMs) }),
+        ...(opts.timeoutMs === undefined ? {} : { timeoutSeconds: timeoutSeconds(opts.timeoutMs) }),
         ...request(opts),
       }),
     );
   } else if (opts.timeoutMs !== undefined) {
     checkTimeout(opts.timeoutMs);
-    // No time limit: no end to move (0300).
-    if (runtime.info.endsAt === null) return;
-    const later = Math.min(asked!, Date.now() + KEEP_AHEAD_MS) - Date.parse(runtime.info.expiresAt);
-    if (later > 1000)
-      await guard("sandbox", () => runtime.extend(Math.ceil(later / 1000), request(opts)));
+    // A running one's end moves later, never sooner, as E2B's connect.
+    const later = secondsLater(runtime, opts.timeoutMs);
+    if (later > 1) await guard("sandbox", () => runtime.extend(Math.ceil(later), request(opts)));
   }
-  if (asked !== undefined && asked > (keepers.get(runtime.id)?.until ?? 0))
-    keepUntil(runtime, asked);
 }
 
-async function stop(
-  runtime: RuntimeSandbox,
-  opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal">,
-) {
-  if (state(runtime) === "stopped") return false;
-  await guard("sandbox", () => runtime.stop({ wait: false, ...request(opts) }));
-  return true;
+/** How many seconds past its current end `now + timeoutMs` is; 0 for a
+ * sandbox with no time limit, which has no end to move. A second either way
+ * is the clocks and the trip, not a new end. */
+function secondsLater(runtime: RuntimeSandbox, timeoutMs: number): number {
+  if (runtime.info.endsAt === null) return 0;
+  const end = Date.parse(runtime.info.endsAt ?? runtime.info.expiresAt);
+  return (Date.now() + timeoutMs - end) / 1000;
 }
 
 async function extendTo(
@@ -779,19 +811,14 @@ async function extendTo(
   opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal">,
 ) {
   checkTimeout(timeoutMs);
-  // No time limit: no end to move (0300).
   if (runtime.info.endsAt === null) return;
-  const asked = Date.now() + timeoutMs;
-  const end = Date.parse(runtime.info.endsAt ?? runtime.info.expiresAt);
-  if (asked - end < -1000)
+  const later = secondsLater(runtime, timeoutMs);
+  if (later < -1)
     throw new NotSupportedError(
-      "Ending a sandbox sooner than its lease (a shorter setTimeout)",
-      "Runtime cannot end a lease early. Call kill() when the work is done.",
+      "Ending a sandbox sooner than its time limit (a shorter setTimeout)",
+      "Runtime cannot bring a time limit forward. Call kill() when the work is done.",
     );
-  const later = Math.min(asked, Date.now() + KEEP_AHEAD_MS) - end;
-  if (later > 1000)
-    await guard("sandbox", () => runtime.extend(Math.ceil(later / 1000), request(opts)));
-  keepUntil(runtime, asked);
+  if (later > 1) await guard("sandbox", () => runtime.extend(Math.ceil(later), request(opts)));
 }
 
 async function pause(runtime: RuntimeSandbox, opts: SandboxApiOpts & { keepMemory?: boolean }) {
@@ -821,6 +848,10 @@ export class SandboxPaginator {
   readonly #opts: SandboxListOpts;
   readonly #pageSize: number;
   readonly #local: boolean;
+  /** One E2B state asked for alone: Runtime's states are read together and
+   * sorted here, since a sandbox Runtime paused for being idle is running
+   * to E2B. */
+  readonly #only: SandboxState | undefined;
   #page: Awaited<ReturnType<Runtime["sandboxes"]["list"]>> | undefined;
   #all: SandboxInfo[] | undefined;
   #offset: number;
@@ -840,9 +871,10 @@ export class SandboxPaginator {
       query.startedAfter !== undefined ||
       opts.order === "desc" ||
       opts.nextToken !== undefined;
-    const states = query.state?.length ? query.state : (["running", "paused"] as const);
+    const asked = new Set(query.state?.length ? query.state : ["running", "paused"]);
+    this.#only = asked.size === 1 ? ([...asked][0] as SandboxState) : undefined;
     this.#filter = {
-      state: states.flatMap((one) => (one === "running" ? [...RUNNING] : [...PAUSED])),
+      state: [...RUNNING, ...PAUSED],
       ...(query.metadata && Object.keys(query.metadata).length ? { labels: query.metadata } : {}),
       limit: this.#local ? 100 : Math.min(this.#pageSize, 100),
     };
@@ -872,9 +904,13 @@ export class SandboxPaginator {
     );
     this.#page = page ?? undefined;
     this.#hasNext = Boolean(page?.hasMore);
-    const items = (page?.data ?? []).map(infoOf);
+    const items = (page?.data ?? []).map(infoOf).filter((info) => this.#wanted(info));
     this.#offset += items.length;
     return items;
+  }
+
+  #wanted(info: SandboxInfo): boolean {
+    return this.#only === undefined || info.state === this.#only;
   }
 
   async #everyMatch(): Promise<SandboxInfo[]> {
@@ -882,7 +918,9 @@ export class SandboxPaginator {
     const templates =
       query.template === undefined
         ? undefined
-        : await templateIds(this.#client, query.template, this.#request);
+        : STOCK_TEMPLATES.has(query.template)
+          ? new Set(["base", ...STOCK_TEMPLATES])
+          : new Set([query.template]);
     const after = query.startedAfter?.getTime();
     const all: SandboxInfo[] = [];
     let page: Awaited<ReturnType<Runtime["sandboxes"]["list"]>> | null =
@@ -890,6 +928,7 @@ export class SandboxPaginator {
     while (page) {
       for (const one of page.data) {
         const info = infoOf(one);
+        if (!this.#wanted(info)) continue;
         if (templates && !templates.has(info.templateId)) continue;
         if (after !== undefined && info.startedAt.getTime() < after) continue;
         all.push(info);
@@ -908,19 +947,6 @@ function tokenOffset(token: string): number {
       `"${token}" is not a nextToken this package gave; pass the paginator's own nextToken.`,
     );
   return Number(match[1]);
-}
-
-/** The template ids a template name stands for: "base" for the stock names,
- * the id itself for a UUID, and every Runtime image of that name. */
-async function templateIds(
-  client: Runtime,
-  template: string,
-  options: RequestOptions,
-): Promise<Set<string>> {
-  if (STOCK_TEMPLATES.has(template)) return new Set(["base"]);
-  if (UUID.test(template)) return new Set([template]);
-  const page = await client.images.list({ name: template, limit: 100 }, options);
-  return new Set(page.data.map((image) => image.id));
 }
 
 type MetricsOpts = { start?: Date | number; end?: Date | number };

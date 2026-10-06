@@ -10,5 +10,9 @@ from ._async_ci import AsyncSandbox
 from ._models import Context, Execution, ExecutionError, Logs, MIMEType, OutputMessage, Result
 from ._sync_ci import Sandbox
 
+from typing import Literal as _Literal, Union as _Union
+
+RunCodeLanguage = _Union[_Literal["python", "javascript", "typescript", "r", "java", "bash"], str]
+
 __all__ = [*[name for name in _base_all if name not in ("Sandbox", "AsyncSandbox")], "Sandbox", "AsyncSandbox",
-           "Context", "Execution", "ExecutionError", "Logs", "MIMEType", "OutputMessage", "Result"]
+           "Context", "Execution", "ExecutionError", "Logs", "MIMEType", "OutputMessage", "Result", "RunCodeLanguage"]

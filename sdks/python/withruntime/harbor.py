@@ -23,8 +23,7 @@ How it maps Harbor onto Runtime:
 - Every command streams, so no output is cut, and a sandbox is kept alive past
   the hour-long lease while the trial runs.
 - ``cpus``, ``memory_mb`` and ``storage_mb`` become ``vcpu``, ``memory_mib`` and
-  ``disk_mib``. A trial sandbox is at most 2 vCPU, 4 GiB and 10 GiB of disk; a
-  larger request on the trial is cut to that, with a warning.
+  ``disk_mib``. Without credit, a sandbox is at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request is cut to that, with a warning.
 - Network policies: no network, allow-lists of hostnames, ``*.domain``
   wildcards, IPv4 addresses and IPv4 CIDR ranges, changed while the sandbox runs.
 - Docker Compose tasks with more than the main container are not supported.
@@ -174,7 +173,7 @@ class RuntimeEnvironment(BaseEnvironment):
                                   "labels": {"created_by": "harbor", "harbor_task": self.environment_name[:256],
                                              "harbor_session": self.session_id[:256], **self._labels}}
         if self._cpu_resource_mode in (ResourceMode.REQUEST, ResourceMode.GUARANTEE) and self._funding != "trial":
-            fields["cpu"] = "reserved"  # A trial sandbox's CPU is always shared.
+            fields["cpu"] = "reserved"  # CPU without credit is always shared.
         if self.network_policy.network_mode != NetworkMode.PUBLIC:
             fields["network"] = self._network(self.network_policy)
         if self._funding:
@@ -188,7 +187,7 @@ class RuntimeEnvironment(BaseEnvironment):
         try:
             return await self._client().sandboxes.create(**fields)
         except RuntimeCloudError as error:
-            if error.code != "invalid_trial" or self._funding is not None:
+            if error.code != "no_credit_size_limit" or self._funding is not None:
                 raise
             # No funding named, and the account is on its trial: run at the trial's largest size.
             sizes, notes = _sizes(self._effective_cpus, self._effective_memory_mb, self._effective_storage_mb, True)

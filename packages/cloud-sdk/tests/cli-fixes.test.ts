@@ -168,7 +168,9 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
       expect(text).toMatch(
         /^set aside for running sandboxes and this hour's storage\s+\$0\.0011$/m,
       );
-      expect(text).toMatch(/^free trial\s+99 of 100 hours left$/m);
+      expect(text).toMatch(
+        /^free time\s+99 hours left \(100 free hours given before 5 October 2026, and the included usage\)$/m,
+      );
       expect(text).toMatch(
         /^outbound traffic this month\s+104\.7 GiB sent, 0 GiB of 100 GiB free left, \$0\.1000 charged$/m,
       );
@@ -404,7 +406,9 @@ test("`whoami` names the organization, the role and what it can spend", async ()
       const text = lines.join("\n");
       expect(text).toMatch(/^organization\s+Acme \(org-1\)$/m);
       expect(text).toMatch(/^role\s+owner$/m);
-      expect(text).toMatch(/^funding\s+free trial, 95\.5 hours left; \$24\.99 of credit$/m);
+      expect(text).toMatch(
+        /^funding\s+included usage, 95\.5 hours left without credit; \$24\.99 of credit$/m,
+      );
     },
   );
 });

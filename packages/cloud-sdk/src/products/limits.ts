@@ -1,3 +1,4 @@
+import type { Usage } from "../types.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
 /** What this key may do, and the daily spending limit on its agent. Money is
@@ -15,11 +16,9 @@ export type KeyLimits = {
     remainingMicros: string | null;
     window: "24h";
   };
-  /** The account's free trial time in milliseconds, the same figures as
-   * `usage.get()`, or null when the account has no trial. A trial sandbox
-   * that has not ended holds its whole lease in `reservedMs`;
-   * `availableMs = totalMs - usedMs - reservedMs`. */
-  trial: { totalMs: number; usedMs: number; reservedMs: number; availableMs: number } | null;
+  /** Machine time the account can still run without credit, the same
+   * figures as `usage.get()`'s `trial`, or null when it has none. */
+  trial: Usage["trial"];
 };
 
 /** `runtime.limits.get()`: whether this key is read-only, and what its agent

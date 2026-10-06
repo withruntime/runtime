@@ -33,7 +33,7 @@ Weighing more than two? [Prime Sandboxes alternatives](/compare/prime-sandboxes-
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -63,7 +63,7 @@ Prime's figures come from its sandbox documentation and launch post, checked
 | Pause and fork     | Files, memory and processes; forks of a running sandbox        | Snapshots and forks listed as coming soon          |
 | At once            | {{paid-sandboxes}} on a paid account                           | 1,024 per account to start                         |
 | Plan fee           | None; prepaid credit from {{topup-min}}                        | None; rates published through 22 December 2026     |
-| Free start         | {{trial-hours}} sandbox hours, no card                         | None published                                     |
+| Free start         | {{included-machine}} every month, no card                      | None published                                     |
 
 ## Cost for the same job
 
@@ -95,7 +95,7 @@ traffic is free, and each account's first {{outbound-allowance}} out a month is 
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Prime calls on a branch, tests them on the free trial, and tells
+replaces the Prime calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -106,7 +106,7 @@ running machine.
 ```ts check
 import { Sandbox } from "withruntime";
 
-await using base = await Sandbox.create({ funding: "trial" });
+await using base = await Sandbox.create();
 await base.exec("pip install --quiet numpy");
 const episodes = await base.fork({ count: 4 }); // four running copies, memory included
 await Promise.all(episodes.map((episode) => episode.stop()));

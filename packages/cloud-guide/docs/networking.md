@@ -203,7 +203,7 @@ runtime network private off                    # open connections are cut within
 - **A paused sandbox wakes** when a connection reaches it. A stopped one does
   not: start it first.
 - **A kept top-up, from paid sandboxes.** An account without one is told so when it
-  turns it on; a connection from a trial sandbox is refused with
+  turns it on; a connection from a sandbox without credit is refused with
   `private-network-paid-only`. A sandbox with its internet off reaches no other
   sandbox either.
 - **Not billed:** these connections are not outbound traffic.
@@ -344,14 +344,14 @@ soon as it runs; a join that fails stops the new sandbox and answers why.
   memory snapshot of it is refused with `tailscale_joined`: the copy would be
   the same Tailscale machine and would hold the key. Take it off, copy it, and
   join each. A disk snapshot is taken as ever.
-- **Trial sandboxes** cannot join (`payment_required`). The first join
+- **Sandboxes without credit** cannot join (`payment_required`). The first join
   downloads Tailscale into the sandbox, a few seconds more; later joins reuse it.
 
 ## Outbound UDP
 
 Paid sandboxes send UDP to any public address and port: HTTP/3 and QUIC, DNS
 to a resolver of your choice, time sync, game and media servers, WireGuard or
-other VPN clients. Trial sandboxes send TCP only. In a measurement on 25
+other VPN clients. Sandboxes without credit send TCP only. In a measurement on 25
 September 2026 a paid sandbox got an NTP answer in 18 ms and a QUIC answer from
 Google in 16 ms.
 
@@ -371,13 +371,13 @@ Google in 16 ms.
 
 ## Errors
 
-| Code                  | Status | Meaning                                                        |
-| --------------------- | -----: | -------------------------------------------------------------- |
-| `payment_required`    |    402 | The account has no kept top-up, or the sandbox is a trial one  |
-| `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it |
-| `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet            |
-| `network_not_allowed` |    403 | Runtime turned network features off for the account            |
-| `quota_exceeded`      |    409 | A limit above was reached                                      |
-| `rate_limited`        |    429 | Too many added today                                           |
-| `no_capacity`         |    503 | No public port or dedicated address is free just now           |
-| `network_unavailable` |    503 | The feature is not switched on in this region yet              |
+| Code                  | Status | Meaning                                                            |
+| --------------------- | -----: | ------------------------------------------------------------------ |
+| `payment_required`    |    402 | The account has no kept top-up, or the sandbox runs without credit |
+| `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it     |
+| `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet                |
+| `network_not_allowed` |    403 | Runtime turned network features off for the account                |
+| `quota_exceeded`      |    409 | A limit above was reached                                          |
+| `rate_limited`        |    429 | Too many added today                                               |
+| `no_capacity`         |    503 | No public port or dedicated address is free just now               |
+| `network_unavailable` |    503 | The feature is not switched on in this region yet                  |

@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.11.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.11.1. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -52,13 +52,13 @@ with Sandbox.create() as sbx:
 `Sandbox.create()` takes no required arguments and returns once the sandbox is
 running. Leaving the `with` block stops it, even after an exception.
 
-With no arguments you get the free trial while it lasts, the default region, and
+With no arguments you get the included usage while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
 itself when idle, with no time limit. A paid sandbox
-can have up to {{max-vcpu}} vCPUs and {{max-memory}}; a trial one, 2 vCPU and
+can have up to {{max-vcpu}} vCPUs and {{max-memory}}; one without credit, 2 vCPU and
 4 GiB.
 
-The trial's hours are spent first, then prepaid credit, with nothing to
+The included usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 Every field is optional and takes snake_case names:
 
@@ -81,7 +81,7 @@ sbx.stop()
 ```
 
 A sandbox needs no time limit: it runs while it works and pauses itself when
-idle, until you stop it or credit or the trial hours ([trial](./trial)) run out.
+idle, until you stop it or credit or the [included usage](./included-usage) runs out.
 `timeout_seconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: then it
 pauses or stops, as `on_lease_end` says, busy or not. `sbx.info["endsAt"]` is
 when it will stop or pause by itself, or `None` when it never will.
@@ -521,7 +521,7 @@ with Runtime() as runtime:
         sbx.exec(["python3", "-c", "print(42)"], idempotency_key=f"job-{job}-step-1")
 ```
 
-**A create waits for room.** When every trial slot is taken (`trial_busy`), the
+**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
@@ -631,7 +631,7 @@ with runtime.sandboxes.create(image=image["id"],
 
 # A sandbox with volumes cannot be snapshotted, so these use one without.
 with runtime.sandboxes.create(image=image["id"]) as base:
-    forks = base.fork(count=2, funding="trial")  # copies as it is now, running
+    forks = base.fork(count=2)  # copies as it is now, running
     for fork in forks:
         fork.stop()
     snapshot = base.snapshot(name="with-pandas", retention_days=7)
@@ -667,7 +667,7 @@ Forks and snapshots:
 - Copies run on what the account's new sandboxes run on, as a create does;
   `funding` is accepted and ignored.
 - Copies keep the source's size and CPU (reserved CPU, or a raised floor) and
-  are billed as a create with those would be. A trial copy must fit the trial.
+  are billed as a create with those would be. A copy without credit must fit the limits without credit.
 - The snapshot a fork takes is deleted when the fork ends, whether every copy
   started or not, and is not billed, unless `keep_snapshot=True`.
 - If a copy fails, the error's `details["startedSandboxIds"]` names the copies
@@ -758,7 +758,7 @@ with Sandbox.create() as sbx:
 
 A preview is private by default: open `urlWithToken`, or send `token` as the
 `x-runtime-preview-token` header. `visibility="public"` gives an address anyone
-can open, on a paid sandbox only; a trial sandbox's previews stay private.
+can open, on a paid sandbox only; a sandbox without credit's previews stay private.
 
 `embed_origins=["https://app.example.com"]` on `create` names the sites that
 may show the preview in an iframe (up to {{embed-origins}}); any other site's

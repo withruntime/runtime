@@ -10,7 +10,7 @@ module WithRuntime
   # product: the same rules as the JavaScript, Python, Go and Java SDKs. Writes
   # carry an idempotency key, made per call and kept across the client's own
   # retries; transport failures, 429, 502, 503 and 504 are retried with backoff
-  # and jitter; a create waits out a full trial, quota or region.
+  # and jitter; a create waits out full slots without credit, a full quota or a full region.
   class Transport
     class OpeningCancelled < IOError; end
     class Cancellation

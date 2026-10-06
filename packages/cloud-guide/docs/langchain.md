@@ -172,5 +172,5 @@ any output past 100,000 characters, which broke `read_file` on files larger
 than about 75 KB. `langchain-withruntime` requires 0.6.1 or later.
 
 On 23 September 2026, `RuntimeSandbox` ran in Deep Agents 0.7.18's own
-agent loop against real trial sandboxes, driven by a scripted model, as the
+agent loop against real sandboxes without credit, driven by a scripted model, as the
 [frameworks guide](./frameworks#what-was-verified) records.

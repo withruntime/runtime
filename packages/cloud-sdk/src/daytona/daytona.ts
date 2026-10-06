@@ -382,8 +382,7 @@ export class Daytona implements AsyncDisposable {
 
   /** Creates a sandbox and waits until it runs, with Daytona's defaults: 1
    * vCPU, 1 GiB, 3 GiB disk, pausing after 15 minutes without calls. Funding
-   * is left to Runtime: the free trial while the account has trial time, then
-   * prepaid credit, exactly as withruntime's own create. */
+   * is left to Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
   async create(
     params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams = {},
     options: { timeout?: number; onSnapshotCreateLogs?: (chunk: string) => void } = {},

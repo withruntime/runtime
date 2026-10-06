@@ -38,7 +38,7 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No access key
   goes into a prompt or a config file, and the [MCP server](./mcp) reuses the
   same connection.
@@ -66,7 +66,7 @@ checked {{checked:lambda-microvms}}. Rates are for Arm (Graviton) in US East (N.
 | Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart | Baseline up to 4 vCPUs and 8 GB, 2 GB per vCPU                                       |
 | Session length | No time limit: runs while it works, or `persistent`            | State kept up to 8 hours                                                             |
 | Suspend        | Files, memory and processes, kept while you have credit        | Memory and disk in a snapshot, at {{paused-storage-rate}} per GB (10⁹ bytes) a month |
-| Free start     | {{trial-hours}} sandbox hours, no card                         | No free tier for MicroVMs                                                            |
+| Free start     | {{included-machine}} every month, no card                      | No free tier for MicroVMs                                                            |
 | Plan fee       | None; prepaid credit from {{topup-min}}                        | None; an AWS account                                                                 |
 | Agent sign-in  | Browser approval; no key in the agent's config                 | AWS credentials and IAM                                                              |
 
@@ -101,7 +101,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the MicroVM calls on a branch, tests them on the free trial, and tells
+replaces the MicroVM calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -112,7 +112,7 @@ endpoint maps to a [preview](./javascript#share-a-port):
 ```ts check
 import { Sandbox } from "withruntime";
 
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.spawn("python3 -m http.server 8080");
   const preview = await box.previews.create(8080);

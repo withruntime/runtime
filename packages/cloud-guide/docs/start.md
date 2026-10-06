@@ -4,9 +4,9 @@ Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use, and
 
 Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
 One API, one CLI, one MCP server and SDKs for JavaScript, Python, Go, Ruby and Java cover
-every Runtime product. New accounts get [{{trial-hours}} free hours](./trial), no card.
+every Runtime product. New accounts get [{{included-machine}} included every month](./included-usage), no card.
 
-- **{{trial-hours}} free hours, no card:** enough to run your real workload before you pay.
+- **{{included-machine}} included every month, no card:** enough to run your real workload before you pay.
 - **Pay for the CPU you use:** {{cpu-rate}} per active vCPU-hour, measured, and
   {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
 - **Idle time costs almost nothing:** a sandbox pauses itself after
@@ -164,8 +164,7 @@ own credential automatically, and you do not copy an API key.
 - To use a key you already have, `npx withruntime login --with-key` reads it
   from standard input, never from the command line.
 
-There is nothing to choose between the trial and credit: the trial's hours
-are spent first, then prepaid credit, and `funding` in a request is ignored.
+There is nothing to choose between included usage and credit: the included usage is spent first, then prepaid credit, and `funding` in a request is ignored.
 Once the account holds credit, its sandboxes have paid limits.
 
 ## Switch from another provider
@@ -185,11 +184,11 @@ matched, up to {{switching-max}}.
 Keep the error code, request ID and sandbox ID. A lost response is not proof
 that nothing ran: inspect the original resource before trying another create.
 
-| Error                             | What to do                                                                |
-| --------------------------------- | ------------------------------------------------------------------------- |
-| `connection_pending`              | Approve the printed request, then rerun the same command                  |
-| `trial_busy` or `trial_exhausted` | Check your trial usage; once the account holds credit, it runs on that    |
-| `start_failed`                    | Read the sandbox's state and `stopReason`; a stopped sandbox is not ready |
+| Error                                                 | What to do                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| `connection_pending`                                  | Approve the printed request, then rerun the same command                  |
+| `no_credit_running_limit` or `included_usage_used_up` | Check your included usage; once the account holds credit, it runs on that |
+| `start_failed`                                        | Read the sandbox's state and `stopReason`; a stopped sandbox is not ready |
 
 See [troubleshooting](./troubleshooting) for safe retries and cleanup.
 

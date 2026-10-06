@@ -22,7 +22,7 @@ machine's `npx withruntime login`, as for the rest of the SDK.
 Pass the environment's import path to `-e`, and its options with `--ek`:
 
 ```bash no-run
-harbor run -t hello-world/hello-world -a oracle -e withruntime.harbor:RuntimeEnvironment --ek funding=trial
+harbor run -t hello-world/hello-world -a oracle -e withruntime.harbor:RuntimeEnvironment
 harbor run -d terminal-bench@2.0 -a oracle -e withruntime.harbor:RuntimeEnvironment --n-concurrent 8
 ```
 
@@ -63,7 +63,7 @@ Every option is optional.
 
 | `--ek`     | What it does                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `funding`  | Accepted and ignored: the trial's hours are spent first, then prepaid credit                                              |
+| `funding`  | Accepted and ignored: the included usage is spent first, then prepaid credit                                              |
 | `region`   | The region to run in; left out, the default                                                                               |
 | `image`    | A Runtime image (id, name or `name:tag`) to start every trial from, instead of building the task's                        |
 | `build`    | Build limits, such as `build='{"disk_mib": 16384}'`: `vcpu`, `memory_mib`, `disk_mib`, `max_image_mib`, `timeout_seconds` |
@@ -75,7 +75,7 @@ Every option is optional.
 | Harbor                                   | Runtime                                                                                                                                                                         |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `environment/Dockerfile`, `docker_image` | A [custom image](./images), built once and kept as `harbor-<task>` with a tag from a hash of the environment. Reruns start from it; `--force-build` builds it again             |
-| `cpus`, `memory_mb`, `storage_mb`        | `vcpu`, `memory_mib`, `disk_mib`. A trial sandbox is at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request on the trial runs at that size, with a warning                  |
+| `cpus`, `memory_mb`, `storage_mb`        | `vcpu`, `memory_mib`, `disk_mib`. A sandbox without credit is at most 2 vCPU, 4 GiB and 10 GiB of disk; a larger request without credit runs at that size, with a warning       |
 | Commands                                 | `bash -c` (`sh -c` in an image without bash), in the task's `workdir` or the Dockerfile's `WORKDIR`, with the task's and the agent's environment. Output streams, however large |
 | Users                                    | Root by default, as in Docker, and any named user, through `sudo`                                                                                                               |
 | Files                                    | Uploads and downloads of any size, anywhere in the machine, as root                                                                                                             |
@@ -101,9 +101,9 @@ only to its built-in environments.
 ## Limits to plan for
 
 - The trial runs {{trial-sandboxes}} sandboxes at once, so keep `--n-concurrent` at {{trial-concurrency}} or
-  below on the trial. A paid account runs more; see [pricing](./pricing#how-many-at-once).
+  below without credit. A paid account runs more; see [pricing](./pricing#how-many-at-once).
 - Each task is its own image. Builds run one at a time until your account holds
-  credit, then four. A free trial keeps its first three images free;
+  credit, then four. An account without credit keeps its first three images free;
   after that they are billed as stored images
   ([pricing](./pricing#snapshots-images-and-volumes)). `runtime image ls` lists
   them and `runtime image rm` removes them.

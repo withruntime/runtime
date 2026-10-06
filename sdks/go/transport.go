@@ -35,7 +35,7 @@ type call struct {
 	key string
 	// noRetry: the server cannot deduplicate this write.
 	noRetry bool
-	// room is how long to wait out a full trial, quota or region.
+	// room is how long to wait out full slots without credit, a full quota or a full region.
 	room time.Duration
 	// timeout replaces the client's for this call.
 	timeout time.Duration

@@ -49,7 +49,7 @@ Weighing more than two? [Modal Sandbox alternatives](/compare/modal-alternatives
 - **Switching credit.** Run `runtime switch --from modal` before your first
   top-up and that top-up is matched, up to {{switching-max}}
   ([switching credit](./pricing#switching-credit)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -71,7 +71,7 @@ Modal's figures come from its public pricing and documentation, checked
 | CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{=$4 rate:modal:cpu * 2}} per physical core-hour (2 vCPUs), request or use                                            |
 | Memory billing | {{memory-rate}} per reserved GiB-hour                                       | {{=$4 rate:modal:memory}} per GiB-hour, request or use                                                                 |
 | Plan fee       | None; prepaid credit from {{topup-min}}                                     | Starter {{term:modal:starter}} with {{term:modal:starter-credit}} a month of compute; Team {{term:modal:team}} a month |
-| Free start     | {{trial-hours}} sandbox hours, no card                                      | {{term:modal:starter-credit}} of compute a month on Starter                                                            |
+| Free start     | {{included-machine}} every month, no card                                   | {{term:modal:starter-credit}} of compute a month on Starter                                                            |
 | Session length | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | Up to 24 hours; snapshots carry state beyond that                                                                      |
 | Setup          | One call; no app or project                                                 | A Modal App is needed outside Modal                                                                                    |
 
@@ -106,7 +106,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Modal calls on a branch, tests them on the free trial, and tells
+replaces the Modal calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -125,7 +125,7 @@ Runtime:
 
 ```python
 from withruntime import Sandbox
-with Sandbox.create(funding="trial") as box:
+with Sandbox.create() as box:
     box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
     print(box.exec("python3 /workspace/invoice.py", check=True).stdout)
 ```

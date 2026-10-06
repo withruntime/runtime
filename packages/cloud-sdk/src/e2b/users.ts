@@ -78,6 +78,28 @@ export function shellAs(user: string, cwdGiven: boolean): string[] {
   return commandAs(user, "exec /bin/bash -i -l", cwdGiven);
 }
 
+/** A running command as E2B lists it, from the command line Runtime keeps
+ * (its words joined by spaces, at most 256 characters): `/bin/bash -l -c
+ * <script>` for a command, `/bin/bash -i -l` for a PTY, as E2B starts them,
+ * whether it runs as the sandbox user or through `commandAs`. Anything else,
+ * started outside this package, is its first word and the rest. */
+export function listedAs(command: string): { cmd: string; args: string[] } {
+  const wrapped = AS_USER.exec(command);
+  if (wrapped) {
+    const inner = command.slice(wrapped[0].length);
+    if (inner === "exec /bin/bash -i -l") return { cmd: "/bin/bash", args: ["-i", "-l"] };
+    return { cmd: "/bin/bash", args: ["-l", "-c", inner] };
+  }
+  if (command.startsWith("bash -c "))
+    return { cmd: "/bin/bash", args: ["-l", "-c", command.slice(8)] };
+  if (command === "/bin/bash -i -l") return { cmd: "/bin/bash", args: ["-i", "-l"] };
+  const [cmd = "", ...args] = command.split(" ");
+  return { cmd, args };
+}
+
+/** What `commandAs` puts before the script, as the joined command line shows it. */
+const AS_USER = /^sudo -n -E -H -u [^ ]+ -- \/bin\/bash -c (?:cd ~ 2>\/dev\/null\n)?/;
+
 /** One `sh -c` script as `user`, with its arguments passed apart, never
  * pasted into the script. */
 function script(user: string, text: string, ...args: string[]): string[] {

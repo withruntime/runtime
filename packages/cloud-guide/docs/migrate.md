@@ -1,6 +1,6 @@
 # Switch to Runtime from another sandbox provider
 
-Move your sandbox code to Runtime in one pass, test it on the free trial, and see what you save each month.
+Move your sandbox code to Runtime in one pass, test it on the included usage, and see what you save each month.
 
 Your model, prompts and application stay as they are; only the sandbox calls
 change. For a project with no sandbox yet, start with [Get started](./start).
@@ -13,8 +13,7 @@ change. For a project with no sandbox yet, start with [Get started](./start).
 The agent follows the steps below and keeps going until your real job runs on
 Runtime. It ends with your monthly saving in dollars and what is left for you
 to go live.
-It tests on the free trial, asks before going on once the trial's hours are
-used, and never touches your old provider's account.
+It tests without credit, asks before going on once the included usage is used, and never touches your old provider's account.
 
 **Why teams switch:**
 
@@ -30,8 +29,8 @@ used, and never touches your old provider's account.
 - **More is built in.** A desktop, a code interpreter, custom images, volumes,
   and preview URLs that are private by default.
 - **No API key to copy.** One browser approval connects the CLI, SDKs and MCP.
-- **Test it free.** {{trial-hours}} sandbox hours, no card, up to eight running at once.
-  A trial sandbox reaches ports 80 and 443 and shares previews privately, with
+- **Test it free.** {{included-machine}} every month, no card, up to eight running at once.
+  A sandbox without credit reaches ports 80 and 443 and shares previews privately, with
   a token; other outbound ports and public previews need paid credit.
 
 The [comparison pages](./e2b-alternative) work through the cost of the same job
@@ -84,7 +83,7 @@ npx withruntime feedback --kind migration_blocker --competitor E2B \
 
 ```bash no-run
 npx withruntime login --no-browser
-npx withruntime sandbox run --trial -- echo hello
+npx withruntime sandbox run -- echo hello
 ```
 
 The first command prints a link and a code: show them to the owner and wait for
@@ -100,7 +99,7 @@ old code. Then:
   below).
 - Remove the old provider's SDK, its client setup and its settings from the
   code.
-- Test on the trial's hours. Once they are used, sandboxes run on the
+- Test without credit's hours. Once they are used, sandboxes run on the
   account's credit by themselves, so check what is left with
   `npx withruntime usage` and ask the owner before going on.
 - Use one sandbox per isolated task or tenant, not a shared global sandbox.
@@ -130,7 +129,7 @@ Runtime handles differently, such as drives or schedules, throws
   (the API keys page, or `runtime keys create --account-wide`). Give services
   that share sandboxes account-wide keys
   ([keys in a team](./teams#keys-in-a-team)).
-- The trial caps a sandbox at 2 vCPU and 4096 MB; `memory: 8192` needs paid
+- Without credit, a sandbox is at most 2 vCPU and 4096 MB; `memory: 8192` needs paid
   credit.
 - An image other than Blaxel's own templates must be a ready Runtime image of
   the same name: `npx withruntime image build --dockerfile Dockerfile --name <name>`.
@@ -142,12 +141,26 @@ Runtime handles differently, such as drives or schedules, throws
 `commands.run` throws `CommandExitError` (Python `CommandExitException`) on a
 non-zero exit and `TimeoutError` (Python `TimeoutException`) past its timeout,
 so keep your `try`/`catch`. A call Runtime handles differently throws
-`NotSupportedError` naming what to use instead. On the trial a shared port is
-private, so `getHost(port)` throws `PublicPreviewNotAllowedError` (Python
+`NotSupportedError` naming what to use instead. Without credit a shared port is private, so `getHost(port)` throws `PublicPreviewNotAllowedError` (Python
 `PublicPreviewNotAllowedException`) rather than hand back a host nobody can
 reach: while you test, open
 `(await sandbox.runtime.previews.create(port)).urlWithToken` instead, or send
 its token in the `x-runtime-preview-token` header.
+
+An E2B template becomes a Runtime image of the same name, built once from the
+same Dockerfile:
+
+1. Build it: `npx withruntime image build --dockerfile e2b.Dockerfile --name <template>`.
+   Its `WORKDIR` is where commands start, as on E2B. A start or ready command
+   from `e2b.toml` is not carried over; start it with
+   `commands.run(cmd, { background: true })` after the create.
+2. Keep the create as it is: `Sandbox.create("<template>")`, with or without
+   E2B's `team/` prefix and a `:tag`, starts from that image, and `getInfo()`
+   reports the template by the name you gave.
+
+A `timeoutMs` (Python `timeout`) is kept by Runtime's server, up to 24 hours,
+and `kill()` deletes the sandbox, as on E2B. With no timeout, E2B's 300 seconds
+ends in a pause rather than a delete, so call `kill()` when the work is done.
 
 ### Map the calls
 
@@ -157,7 +170,7 @@ docs.
 
 | You call                                                                                                                                                                                                                                           | Runtime (JavaScript; Python is the same in snake_case)                                                                             |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| E2B `Sandbox.create()`, Daytona `daytona.create()`, Vercel `Sandbox.create()`, Blaxel `SandboxInstance.create()`, Modal `Sandbox.create(app=...)`, Cloudflare 0.x `getSandbox(env.Sandbox, id)`, Sprites `client.createSprite(name)`               | `Sandbox.create({ funding: "trial" })` while you test                                                                              |
+| E2B `Sandbox.create()`, Daytona `daytona.create()`, Vercel `Sandbox.create()`, Blaxel `SandboxInstance.create()`, Modal `Sandbox.create(app=...)`, Cloudflare 0.x `getSandbox(env.Sandbox, id)`, Sprites `client.createSprite(name)`               | `Sandbox.create()` while you test                                                                                                  |
 | E2B `sbx.commands.run(cmd)`, Daytona `sandbox.process.exec(cmd)`, Vercel `sandbox.runCommand(cmd, args)`, Blaxel `sandbox.process.exec({ command })`, Modal `sb.exec(*args)`, Cloudflare `sandbox.exec(cmd)`, Sprites `sprite.execFile(cmd, args)` | `sbx.exec(cmd)` or `sbx.exec([cmd, ...args])`                                                                                      |
 | E2B `CommandExitError` on a non-zero exit, once you port to `withruntime` (the `withruntime/e2b` import keeps throwing it)                                                                                                                         | `exec` returns `exitCode` (and `timedOut: true` on a timeout) without throwing; `exec(cmd, { check: true })` throws `CommandError` |
 | Streaming callbacks (`onStdout`, `on_stdout`)                                                                                                                                                                                                      | `exec(cmd, { onStdout, onStderr })` or `execStream(cmd)`                                                                           |
@@ -192,7 +205,7 @@ docs.
 - The 0.1.0 HTTP routes were removed; each answers 410 and names its
   replacement.
 
-## 5. Make it work on the trial
+## 5. Make it work without credit
 
 **Run the project's own tests, then its real job, not a stand-in.** Use the
 same inputs, dependency versions, output checks and deadline as before. Fix what
@@ -205,7 +218,7 @@ finish the switch.
 - Record completion time over several runs, startup included.
 - List sandboxes at the end (`npx withruntime sandbox ls --json`) and stop any
   the test left running.
-- If the job hits a trial limit, stop and tell the owner which limit the error
+- If the job hits a limit without credit, stop and tell the owner which limit the error
   named and that a top-up lifts it. Do not shrink the job to fit.
 
 ## 6. Work out the saving
@@ -215,14 +228,14 @@ finish the switch.
 The quickest way: `npx withruntime compare --from <provider>` prices the
 sandboxes you actually ran at that provider's published rates and prints the
 monthly saving, with the date the rates were checked (`runtime_account` with
-action `compare` over MCP). It prices trial sandboxes at the standard rates and says how many
-ran on the trial, so the saving is the one paid credit gives. Before the owner's first top-up, `npx withruntime switch --from
+action `compare` over MCP). It prices sandboxes without credit at the standard rates and says how many
+ran without credit, so the saving is the one paid credit gives. Before the owner's first top-up, `npx withruntime switch --from
 <provider>` records the move, and that top-up is matched, up to {{switching-max}}
 ([switching credit](./pricing#switching-credit)). To work it out by hand:
 
 1. **Runtime's cost.** After the test runs, `npx withruntime usage --json` lists
    each sandbox with its measured `activeCpuSeconds`, `billedCpuSeconds` and
-   `memoryGiBSeconds`. A trial sandbox is charged nothing, so price the usage at
+   `memoryGiBSeconds`. A sandbox without credit is charged nothing, so price the usage at
    the standard rates in [pricing](./pricing):
 
    ```text
@@ -241,7 +254,7 @@ ran on the trial, so the saving is the one paid credit gives. Before the owner's
    saving divided by the old cost; leave it out when the old cost is unknown.
 
 Say which figures are measured and which are published rates, with their dates.
-Never present an estimate as an invoice, or count free trial time as a saving.
+Never present an estimate as an invoice, or count included usage as a saving.
 If Runtime is more expensive or lacks a needed feature, say so.
 
 A report in this shape, with made-up volumes:
@@ -267,8 +280,7 @@ only they can take:
   this machine only.
 - The owner merges. Then check that `npx withruntime sandbox ls` shows the
   app's sandboxes.
-- Never spend paid credit on your own: going on past the trial's hours is the
-  owner's word.
+- Never spend paid credit on your own: going on past the included usage is the owner's word.
 - The old provider's account, keys and data are the owner's to close. Leave
   them as they are.
 - Send feedback on anything that slowed the switch:

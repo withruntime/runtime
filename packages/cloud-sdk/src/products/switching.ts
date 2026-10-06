@@ -62,14 +62,13 @@ export type UsageComparison = {
     runSeconds: number;
     activeCpuSeconds: number;
     unpricedSandboxes: number;
-    /** Of `sandboxes`, how many the free trial paid for, and their running
-     * time. The trial charged nothing for them; `runtimeMicros` prices them at
+    /** Of `sandboxes`, how many free usage paid for, and their running time. It charged nothing for them; `runtimeMicros` prices them at
      * Runtime's standard rates, what the same work costs on paid credit. */
     trialSandboxes: number;
     trialRunSeconds: number;
   };
   /** What the usage costs on Runtime on paid credit: each paid sandbox at the
-   * rates it was quoted, a trial sandbox at the standard rates. */
+   * rates it was quoted, a sandbox free usage paid for at the standard rates. */
   runtimeMicros: string;
   rivalMicros: string;
   /** Rival less Runtime: negative when the rival would cost less. */

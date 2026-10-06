@@ -33,7 +33,7 @@ each.
   sees, volumes, bucket mounts, a desktop, metrics, webhooks and OpenTelemetry
   export on every account; custom domains, TCP ports, dedicated outbound
   addresses and WireGuard private networks on paid ones ([products](./products)).
-- **Free to try.** {{trial-hours}} sandbox hours, no card, then prepaid credit from {{topup-min}} with
+- **Free to try.** {{included-machine}} every month, no card, then prepaid credit from {{topup-min}} with
   no plan fee.
 
 ## Start with the workload
@@ -49,7 +49,7 @@ to keep, expected duration and acceptable failure rate.
 | Isolated code execution | Boundary between guest, host and other tenants                | A Firecracker microVM with its own kernel for every sandbox                                                                                                     |
 | Agent integration       | Actual remote execution, structured results, file round trip  | API, CLI, Python, JavaScript and MCP; an OpenAI Agents SDK sandbox client and ready tools for ten agent frameworks; MCP servers from a catalog run in a sandbox |
 | Easy authentication     | Connection without secrets in prompts or project files        | Browser-approved CLI connection; local MCP reuses it                                                                                                            |
-| Outbound network        | Your package registries and service destinations work         | Every port with a kept top-up, 80 and 443 on the trial; per-sandbox rules; secrets the sandbox never sees                                                       |
+| Outbound network        | Your package registries and service destinations work         | Every port with a kept top-up, 80 and 443 without credit; per-sandbox rules; secrets the sandbox never sees                                                     |
 | Public app hosting      | Reachability, ingress auth and abuse controls                 | Previews: an HTTPS address per port, private by default; custom domains and TCP ports with a kept top-up                                                        |
 | Pause and restoration   | Files and memory survive; expiry and failed wake are explicit | Files, memory and processes kept while you have credit; a failed wake says so                                                                                   |
 | Custom environments     | Dependencies installed once, reused on every start            | Custom images from a recipe, any public or private image, or a Dockerfile                                                                                       |
@@ -62,7 +62,7 @@ to keep, expected duration and acceptable failure rate.
 | Reliability             | A published uptime figure, and what you get when it is missed | {{uptime-promise}} a month for paid accounts, {{uptime-credit}} back automatically; a status page checked from outside                                          |
 
 For exact terms, read [security](./security), [pricing](./pricing),
-[trial access](./trial), and the [API reference](./api).
+[included usage](./included-usage), and the [API reference](./api).
 
 ## Measure completed jobs
 
@@ -135,7 +135,7 @@ time, Northflank's allocated rate is lower than Runtime's.
 ## Switch with one prompt
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the old provider's calls on a branch, tests them on the free trial, and
+replaces the old provider's calls on a branch, tests them on the included usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge. Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after
 changing one import. Moving from E2B, Daytona, Vercel Sandbox, Modal,

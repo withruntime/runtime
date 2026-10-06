@@ -141,8 +141,7 @@ Closing cannot be undone. At once:
 
 What is unspent of a purchase made in the last 15 days is refunded on request:
 write to support@withruntime.com. Other credit, including granted and referral
-credit, is forfeited. Signing in again later starts a new, empty account; the
-free trial is not given twice.
+credit, is forfeited. Signing in again later starts a new, empty account.
 
 ## Audit log
 

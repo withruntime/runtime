@@ -42,7 +42,7 @@ Weighing more than two? [Blaxel alternatives](/compare/blaxel-alternatives) rank
   own network to its sandboxes over WireGuard, for {{address-month}} a month
   ([private networks](./networking#private-networks)). Blaxel lists private
   network connectivity on its Custom plan.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -69,7 +69,7 @@ Blaxel's figures come from its public pricing and documentation, checked
 | Memory billing | {{memory-rate}} per reserved GiB-hour                                                | {{=$7 rate:blaxel:memory / 3600}} per GB-second of active time      |
 | Paused storage | {{paused-storage-rate}} per GB (10⁹ bytes) a month; files, memory and processes      | {{term:blaxel:snapshot}} per GB-month snapshot; files and processes |
 | Plan fee       | None; prepaid credit from {{topup-min}}                                              | None; tiers grow with credit added                                  |
-| Free start     | {{trial-hours}} sandbox hours, no card                                               | Up to {{term:blaxel:credit}} of credit                              |
+| Free start     | {{included-machine}} every month, no card                                            | Up to {{term:blaxel:credit}} of credit                              |
 | Internet out   | First {{outbound-allowance}} a month free, then {{outbound-rate}} per GB (10⁹ bytes) | Included                                                            |
 
 ## Cost for the same job
@@ -99,7 +99,7 @@ is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) f
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Blaxel calls on a branch, tests them on the free trial, and tells
+replaces the Blaxel calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -120,8 +120,7 @@ Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB. A
 sandbox pauses after {{idle-pause}} with nothing happening in it, keeping its
 memory, files and processes, and wakes by itself on the next command, file call or preview visit.
 Envs, processes by name, files, previews, snapshots, forks, volumes and the code
-interpreter carry over. Sandboxes use the free trial while the account has
-trial time, then prepaid credit, with nothing to choose.
+interpreter carry over. Sandboxes use the included usage first, then prepaid credit, with nothing to choose.
 
 Four things to know before the first run:
 
@@ -131,7 +130,7 @@ Four things to know before the first run:
   page or with `runtime keys create --account-wide`. Give a web service and a
   worker that share sandboxes account-wide keys, or one key
   ([keys in a team](./teams#keys-in-a-team)).
-- **The trial caps a sandbox at 2 vCPU and 4096 MB.** Blaxel's default fits.
+- **Without credit, a sandbox is at most 2 vCPU and 4096 MB.** Blaxel's default fits.
   `memory: 8192` or more needs paid credit.
 - **Custom images are Runtime images.** Blaxel's own templates, such as
   `blaxel/base-image`, start Runtime's stock image. Any other image must be a
@@ -177,7 +176,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

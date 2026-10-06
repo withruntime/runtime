@@ -37,7 +37,7 @@ Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alte
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -62,7 +62,7 @@ covers the CodeSandbox SDK, checked {{checked:codesandbox}}.
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the VM size                                                       |
 | Billing unit     | By the second                                                  | By the minute, rounded up                                                |
 | Plan fee         | None; prepaid credit from {{topup-min}}                        | Build free with 10 VMs at once; Scale {{term:codesandbox:scale}} a month |
-| Free start       | {{trial-hours}} sandbox hours, no card                         | The free Build plan                                                      |
+| Free start       | {{included-machine}} every month, no card                      | The free Build plan                                                      |
 | Snapshots, forks | Files, memory and running processes                            | Memory snapshot and restore                                              |
 
 ## Cost for the same job
@@ -95,7 +95,7 @@ each account's first {{outbound-allowance}} out a month is free, then {{outbound
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the CodeSandbox calls on a branch, tests them on the free trial, and
+replaces the CodeSandbox calls on a branch, tests them on the included usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge.
 
@@ -103,7 +103,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

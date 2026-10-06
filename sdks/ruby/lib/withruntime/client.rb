@@ -26,7 +26,7 @@ module WithRuntime
     # +max_retries+: of transport failures, 429, 502, 503 and 504 (4).
     # +max_connections+: calls in flight at once; streams do not count (32).
     # +wait_for_capacity+: seconds a sandbox create keeps retrying, with the
-    # same key and input, when the trial, quota or region is full (120; 0 fails at once).
+    # same key and input, when the slots without credit, quota or region are full (120; 0 fails at once).
     def initialize(api_key: nil, base_url: nil, timeout: 300, max_retries: 4, max_connections: 32,
                    wait_for_capacity: 120, env: ENV, in_sandbox: -> { Credentials.in_runtime_sandbox? })
       origin = Credentials.origin(base_url || env["RUNTIME_API_URL"].then { |url| url.nil? || url.empty? ? DEFAULT_BASE_URL : url })
@@ -69,7 +69,7 @@ module WithRuntime
     # Who this key is: organization, agent and credential.
     def me = Record.new(@transport.json("GET", "/v1/me"))
 
-    # The account's credit, holds, trial time and per-resource charges.
+    # The account's credit, holds, free time and per-resource charges.
     def usage = Record.new(@transport.json("GET", "/v1/usage"))
 
     # Calls any API path with this client's key, retries, idempotency keys and

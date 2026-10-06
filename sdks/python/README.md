@@ -25,11 +25,12 @@ with Sandbox.create() as sbx:
 ```
 
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
-leaving the `with` block stops it. With no arguments you get the free trial
-while it lasts: 100 free hours, no card, up to eight sandboxes running at once.
+leaving the `with` block stops it. With no arguments you get the included usage,
+a 1 GB machine running all month every month with no card, up to eight
+sandboxes running at once without credit.
 The current default image includes NumPy, pandas and matplotlib; see the
 [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-The trial's hours are spent first, then prepaid credit, with nothing to
+The included usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 `AsyncRuntime` is the same client for asyncio, method for method:
 
@@ -158,7 +159,7 @@ How it maps:
   with the build command, for example `npx withruntime image build
 --dockerfile Dockerfile --name my-company-agent-image -t
 my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
-  name. On the free trial a sandbox has at most 4096 MB of memory (2 vCPUs).
+  name. Without credit a sandbox has at most 4096 MB of memory (2 vCPUs).
 - **Standby.** A sandbox pauses after a minute with no call (Blaxel: about 15
   seconds). It keeps its memory and processes, and wakes on the next command,
   file call or preview visit. `archive` pauses it and keeps its memory too.
@@ -169,7 +170,7 @@ my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
 - **How long it is kept.** A paused sandbox with no `ttl` or `lifecycle` is
   kept 365 days. Blaxel keeps it until you delete it. A limit is rounded up to
   whole days of pause. A limit of an hour or less that counts from creation
-  also ends the sandbox at that time. On the free trial a paused sandbox is kept
+  also ends the sandbox at that time. Without credit a paused sandbox is kept
   seven days, the most Blaxel's first tier keeps one.
 - **Envs** reach every process, from any client: they are kept on the
   sandbox, and a process's own `env` wins.

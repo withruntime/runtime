@@ -395,8 +395,7 @@ export class Sandbox {
   /** Creates a sandbox and waits until it runs. Vercel's defaults: 2 vCPUs,
    * 2048 MiB per vCPU, persistent. With no `timeout` it has no time limit: it
    * runs while it works and pauses when idle. A `timeout` is kept as given. Funding is left to
-   * Runtime: the free trial while the account has trial time, then prepaid
-   * credit, exactly as withruntime's own create. */
+   * Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
   static async create(params: CreateSandboxParams = {}): Promise<Sandbox & AsyncDisposable> {
     refuseCreate(params);
     const client = clientFor(params);

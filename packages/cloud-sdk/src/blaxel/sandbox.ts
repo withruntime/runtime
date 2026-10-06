@@ -659,8 +659,7 @@ export class SandboxInstance {
 
   /** Creates a sandbox and answers once it runs. Blaxel's defaults: the base
    * image (Runtime's stock image) and 4096 MB, with vCPUs at one per 2048 MB.
-   * Funding is left to Runtime: the free trial while the account has trial
-   * time, then prepaid credit. A name another live sandbox holds is refused
+   * Funding is left to Runtime: the included usage first, then prepaid credit. A name another live sandbox holds is refused
    * with a 409, as in Blaxel. */
   static async create<T extends typeof SandboxInstance>(
     this: T,

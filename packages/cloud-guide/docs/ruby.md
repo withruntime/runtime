@@ -25,7 +25,7 @@ and whose `hint` says how to get one.
 require "withruntime"
 
 runtime = WithRuntime::Client.new
-sbx = runtime.sandboxes.create(funding: "trial")
+sbx = runtime.sandboxes.create
 begin
   sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
@@ -34,11 +34,9 @@ ensure
 end
 ```
 
-`create` returns once the sandbox is running. With no arguments you get the
-free trial while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
+`create` returns once the sandbox is running. With no arguments you get the included usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
 a 4 GiB disk, running while it works and pausing itself when idle, with no
-time limit (`timeout_seconds:` sets one, 60 to 86,400). The trial's hours are
-spent first, then prepaid credit; `funding:` is accepted and ignored. Every
+time limit (`timeout_seconds:` sets one, 60 to 86,400). The included usage is spent first, then prepaid credit; `funding:` is accepted and ignored. Every
 field is optional, in snake_case:
 
 ```ruby
@@ -147,16 +145,16 @@ older guest, setting a mode also needs the exec grant for its chmod fallback.
 require "withruntime"
 
 runtime = WithRuntime::Client.new
-sbx = runtime.sandboxes.create(funding: "trial")
+sbx = runtime.sandboxes.create
 sbx.pause # memory and files are kept; compute billing stops
 again = runtime.sandboxes.get(sbx.id)
 again.wake(timeout_seconds: 1200)
 again.extend_lease(600)
 
-copies = again.fork(count: 2, funding: "trial")
+copies = again.fork(count: 2)
 copies.each(&:stop)
 snapshot = again.snapshot(name: "ready", retention_days: 7)
-runtime.sandboxes.create(snapshot: snapshot.id, funding: "trial").stop
+runtime.sandboxes.create(snapshot: snapshot.id).stop
 runtime.snapshots.delete(snapshot.id)
 again.stop
 ```
@@ -185,7 +183,7 @@ sbx.stop
 ```
 
 A preview is private by default; `visibility: "public"` shares it with anyone
-who has the address, on a paid sandbox only (a trial sandbox's previews stay
+who has the address, on a paid sandbox only (a sandbox without credit's previews stay
 private). Addresses are under `runtimehost.com`.
 
 ## Images, volumes, network rules and secrets
@@ -375,7 +373,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `retryable?` says whether trying the same call again may work.
 
-**A create waits for room.** When every trial slot is taken (`trial_busy`), the
+**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. Pass `wait_for_capacity:` (seconds) to the client or to one

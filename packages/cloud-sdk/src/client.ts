@@ -1,12 +1,12 @@
-import { WAIT_FOR_TIMEOUT_SECONDS } from "./api-defaults.js";
-import { RuntimeError } from "./errors.js";
-import type { Page } from "./page.js";
 import { clientFactories, clientProductAliases, type ClientExtensions } from "./products/index.js";
 import { usageExport as makeUsageExport } from "./products/observability.js";
-import { Sandbox, deleteSandbox, sandboxPage } from "./sandbox.js";
+import { Machines } from "./machine.js";
+import { SANDBOXES, Sandbox } from "./sandbox.js";
 import { Snapshots } from "./snapshots.js";
 import { DEFAULT_BASE_URL, Transport, missingKey, type RequestOptions } from "./transport.js";
 import type { CreateSandbox, DeletedSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
+
+export type { CreateOptions } from "./machine.js";
 
 export type RuntimeOptions = {
   /** Default: the RUNTIME_API_KEY environment variable. */
@@ -24,9 +24,12 @@ export type RuntimeOptions = {
    * before it has used a valid key. 8 are kept for calls whatever the
    * streams hold. */
   maxConnections?: number;
+  /** Called each time a call has to wait for one of those connections: an
+   * adapter warns with it, once, that its caller is being held back. */
+  onQueued?: (maxConnections: number) => void;
   /** How long `sandboxes.create` keeps retrying, with the same key and input,
-   * when the trial's slots, the account's quota or the region is full
-   * (trial_busy, quota_exceeded, no_capacity and the like). Default 120 000
+   * when the slots without credit, the account's quota or the region is full
+   * (no_credit_running_limit, quota_exceeded, no_capacity and the like). Default 120 000
    * (two minutes); 0 fails at once. The refusal is thrown as it came when the
    * wait runs out. */
   waitForCapacityMs?: number;
@@ -76,6 +79,7 @@ export class Runtime {
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
       ...(options.maxConnections !== undefined ? { maxConnections: options.maxConnections } : {}),
+      ...(options.onQueued ? { onQueued: options.onQueued } : {}),
       ...(options.waitForCapacityMs !== undefined
         ? { waitForCapacityMs: options.waitForCapacityMs }
         : {}),
@@ -110,8 +114,8 @@ export class Runtime {
       ...options,
     });
   }
-  /** Balance, holds, trial time and per-resource charges, in integer microdollars. */
-  /** Credit, holds, trial time and per-resource charges. */
+  /** Balance, holds, free time and per-resource charges, in integer microdollars. */
+  /** Credit, holds, free time and per-resource charges. */
   usage(options: RequestOptions = {}) {
     return this.transport.json<Usage>({
       method: "GET",
@@ -147,155 +151,10 @@ export class Runtime {
   }
 }
 
-/** How `sandboxes.create` waits when every trial slot, the account's quota or
- * the region is full. */
-export type CreateOptions = RequestOptions & {
-  /** How long to keep retrying a refusal that clears by itself. Default: the
-   * client's, two minutes; 0 fails at once. */
-  waitForCapacityMs?: number;
-  /** Called before each wait, with the refusal and the milliseconds until the
-   * next try: to tell a person why nothing has happened yet. */
-  onCapacityWait?: (refusal: RuntimeError, waitMs: number) => void;
-};
-
-export class Sandboxes {
-  constructor(private readonly t: Transport) {}
-  /** Creates a sandbox and waits until it is running. Every field is optional:
-   * with none you get the free trial while it lasts, the default region and a
-   * 2 vCPU / 4 GiB machine from a warm template. `wait: false` returns at once.
-   * When every trial slot or the account's quota is taken, it waits for one to
-   * free, up to `waitForCapacityMs` (the client's, two minutes by default). */
-  async create(
-    input: CreateSandbox & { wait?: boolean } = {},
-    options: CreateOptions = {},
-  ): Promise<Sandbox> {
-    const { wait, ...body } = input;
-    const began = performance.now();
-    // Time spent waiting for capacity is the room's, not the deadline's.
-    let waited = 0;
-    const info = await this.t.json<SandboxInfo>({
-      method: "POST",
-      path: "/v1/sandboxes",
-      body,
-      wait: wait === false ? 0 : 60,
-      ...options,
-      waitForCapacityMs: options.waitForCapacityMs ?? this.t.waitForCapacityMs,
-      onCapacityWait: (refusal, waitMs) => {
-        waited += waitMs;
-        options.onCapacityWait?.(refusal, waitMs);
-      },
-    });
-    const sandbox = new Sandbox(this.t, info);
-    if (wait !== false && info.state !== "running") {
-      // One deadline for the whole create: the wait for running gets what the
-      // create left of it (1 ms when nothing is left, so it ends as a timeout).
-      const { timeoutMs } = options;
-      await sandbox.waitFor("running", {
-        timeoutSeconds: WAIT_FOR_TIMEOUT_SECONDS,
-        signal: options.signal,
-        timeoutMs: timeoutMs
-          ? Math.max(1, Math.ceil(timeoutMs - (performance.now() - began - waited)))
-          : timeoutMs,
-        idempotencyKey: options.idempotencyKey,
-      });
-      if (sandbox.state !== "running")
-        throw new RuntimeError({
-          message: `Sandbox ${info.id} is ${sandbox.state}, not running.`,
-          code: "start_failed",
-          status: 0,
-          hint: "Read it with runtime.sandboxes.get(id); stopReason says why.",
-        });
-    }
-    return sandbox;
-  }
-  /** The sandbox named `name` in this account, ready to use: running as it
-   * is, woken if it is paused, restarted if it is stopped and persistent, or
-   * created with `input` when no sandbox has the name. `sandbox.info.reused`
-   * says which. The other fields apply only when it is created. */
-  async getOrCreate(
-    name: string,
-    input: Omit<CreateSandbox, "name" | "getOrCreate"> & { wait?: boolean } = {},
-    options: CreateOptions = {},
-  ): Promise<Sandbox> {
-    return this.create({ ...input, name, getOrCreate: true }, options);
-  }
-  async get(id: string, options: RequestOptions = {}): Promise<Sandbox> {
-    return new Sandbox(
-      this.t,
-      await this.t.json<SandboxInfo>({
-        method: "GET",
-        path: `/v1/sandboxes/${encodeURIComponent(id)}`,
-        ...options,
-      }),
-    );
-  }
-  /** Deletes a sandbox for good, by id, without reading it first: see
-   * `sandbox.delete()`. Deleting it again answers the same. */
-  delete(id: string, options: RequestOptions = {}): Promise<DeletedSandbox> {
-    return deleteSandbox(this.t, id, options);
-  }
-  /** Live sandboxes, oldest first. Await for a page, or `for await` over all.
-   * Request options apply to the initial request and every subsequent page. */
-  async list(
-    filter: {
-      state?: SandboxInfo["state"][];
-      includeStopped?: boolean;
-      /** Every label must match. */
-      labels?: Record<string, string>;
-      name?: string;
-      limit?: number;
-    } = {},
-    options: RequestOptions = {},
-  ): Promise<Page<Sandbox>> {
-    const query = {
-      ...(filter.state ? { state: filter.state } : {}),
-      ...(filter.includeStopped ? { includeStopped: true } : {}),
-      ...(filter.labels
-        ? { label: Object.entries(filter.labels).map(([k, v]) => `${k}:${v}`) }
-        : {}),
-      ...(filter.name ? { name: filter.name } : {}),
-      ...(filter.limit ? { limit: filter.limit } : {}),
-    };
-    return sandboxPage(
-      this.t,
-      await this.t.json({ method: "GET", path: "/v1/sandboxes", query, ...options }),
-      query,
-      options,
-    );
-  }
-  /** Stops every live sandbox whose labels all match, eight at a time, and
-   * says which stopped and which failed; one failure does not stop the rest.
-   * Needs at least one label, so stopping everything is never one call. */
-  async stopAll(
-    filter: { labels: Record<string, string> },
-    options: RequestOptions = {},
-  ): Promise<{ stopped: string[]; failed: { id: string; error: unknown }[] }> {
-    if (!filter?.labels || Object.keys(filter.labels).length === 0)
-      throw new RuntimeError({
-        message: "stopAll needs at least one label to match.",
-        code: "invalid_request",
-        status: 0,
-        hint: "Stop one sandbox with sandbox.stop(), or label the ones to stop together.",
-      });
-    const live = await (
-      await this.list({ labels: filter.labels, limit: 100 }, options)
-    ).toArray(Infinity);
-    // One key cannot name several stops: each stop makes its own.
-    const { idempotencyKey: _one, ...each } = options;
-    // In list order, oldest first, whichever finishes first.
-    const errors: unknown[] = new Array(live.length);
-    let next = 0;
-    const worker = async () => {
-      for (let at = next++; at < live.length; at = next++)
-        await live[at]!.stop(each).catch((error: unknown) => (errors[at] = error ?? "failed"));
-    };
-    await Promise.all(Array.from({ length: Math.min(8, live.length) }, worker));
-    return {
-      stopped: live.filter((_, at) => errors[at] === undefined).map((sbx) => sbx.id),
-      failed: live.flatMap((sbx, at) =>
-        errors[at] === undefined ? [] : [{ id: sbx.id, error: errors[at] }],
-      ),
-    };
+/** `runtime.sandboxes`: the sandbox product of the machine engine. */
+export class Sandboxes extends Machines<Sandbox, SandboxInfo, CreateSandbox, DeletedSandbox> {
+  constructor(t: Transport) {
+    super(SANDBOXES, t, (transport, info) => new Sandbox(transport, info));
   }
 }
 

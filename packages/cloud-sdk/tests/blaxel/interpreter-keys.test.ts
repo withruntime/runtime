@@ -241,18 +241,18 @@ describe("Runtime's words in Blaxel's", () => {
       new RuntimeError({
         message:
           "A trial sandbox is at most 2 vCPU and 4 GiB: vcpu must be at most 2; memoryMiB must be at most 4096.",
-        code: "invalid_trial",
+        code: "no_credit_size_limit",
         status: 400,
         hint: "Omit vcpu, memoryMiB, diskMiB and cpu for the default.",
         requestId: "req_t",
       }),
     ) as ResponseError;
     expect(error.message).toBe(
-      "Sandbox request failed with status 400: A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.\nRequest: req_t",
+      "Sandbox request failed with status 400: Without credit, a sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.\nRequest: req_t",
     );
     expect([error.status, error.runtimeCode, error.hint, error.requestId]).toEqual([
       400,
-      "invalid_trial",
+      "no_credit_size_limit",
       undefined,
       "req_t",
     ]);
@@ -301,14 +301,14 @@ describe("Runtime's words in Blaxel's", () => {
         "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with SandboxInstance.create if it was deleted.",
       ],
       [
-        "trial_busy",
+        "no_credit_running_limit",
         429,
-        "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
+        "The sandboxes an account without credit runs at once are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
       ],
       [
         "public_preview_not_allowed",
         403,
-        "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
+        "Without credit, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
       ],
       ["busy", 409, "Try again in a moment."],
       ["guest_busy", 429, "Try again in a moment."],

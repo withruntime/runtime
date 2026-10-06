@@ -114,7 +114,7 @@ sandbox is running (`--no-wait` returns at once). Its options:
   `--cpu reserved` for the highest floor, every vCPU; `--max-total-cost <usd>`
   caps its whole life
 - `--name`, `--label k=v` (repeatable); `--trial` and `--paid` are accepted
-  and ignored, since the trial's hours are spent first, then credit
+  and ignored, since the included usage is spent first, then credit
 - `--env K=V` (repeatable) sets a variable for every command, terminal and SSH
   session in it, for its whole life; values are never shown again
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
@@ -130,7 +130,7 @@ sandbox is running (`--no-wait` returns at once). Its options:
 From withruntime 0.7.0, every command refuses an option it does not take,
 before it sends anything, and names the one you likely meant: `--memory-mib`
 gets "Did you mean --memory?". A value option followed by another flag fails
-locally, for example `--name --trial` answers `--name needs a value.`
+locally, for example `--name --json` answers `--name needs a value.`
 Boolean options accept `=true` or `=false`; `--persistent=maybe` answers
 `--persistent takes true or false.` Explicit numeric values, including zero,
 reach the API for validation rather than silently using a default. `--help`
@@ -456,8 +456,7 @@ Forks and snapshots:
   final compressed form is ready.
 - Copies run on what the account's new sandboxes run on (`--trial` and `--paid`
   are accepted and ignored). Copies keep the source's size and CPU, reserved or
-  a raised floor, and are billed as a create with those would be. On an
-  account with the trial alone, a copy must fit the trial.
+  a raised floor, and are billed as a create with those would be. On an account without credit, a copy must fit the limits without credit.
 - The snapshot a fork takes is deleted when the fork ends, whether every copy
   started or not, and is not billed, unless you pass `--keep-snapshot`.
 - If a copy fails, the error names the copies that did start; they keep running
@@ -465,7 +464,7 @@ Forks and snapshots:
 - If a fork stops partway and left its source paused, the source stays paused
   and an account notice says so; wake it with `runtime sandbox wake`.
 - A snapshot is kept as long as you have credit, up to a year from when it was
-  taken (7 days on the trial), unless `--retention` gives 1 to 365 days.
+  taken (7 days without credit), unless `--retention` gives 1 to 365 days.
 
 ## Scripts and agents: `--json`
 
@@ -474,7 +473,7 @@ Every command takes `--json` and prints one JSON value. Errors become
 non-zero exit.
 
 ```bash
-id=$(runtime sandbox create --trial)
+id=$(runtime sandbox create)
 runtime sandbox get "${id}" --json
 runtime sandbox exec "${id}" --json -- uname -a
 runtime sandbox stop "${id}" --json
@@ -510,7 +509,7 @@ runtime usage
 runtime ls
 ```
 
-- `runtime usage` prints the balance, the free-trial hours left and what each
+- `runtime usage` prints the balance, the included usage left and what each
   kind of resource was charged, in dollars; `--json` gives every figure in
   integer microdollars, with each resource's rates and CPU time. From 0.7.0,
   `--csv` exports one row per resource for a spreadsheet: its name, kind, state,
@@ -526,17 +525,20 @@ runtime ls
   [export settled usage](./api#export-settled-usage).
 - `runtime limits` says whether this machine's key is read-only and what its
   daily spending limit is, with what was used in the last 24 hours and what is
-  left (0.3.1 and later), and, in versions after 0.8.4, the free-trial hours
-  left, as `runtime usage` does. The member who made the key, or an owner or admin,
+  left (0.3.1 and later), and, in versions after 0.8.4, the included usage left, as `runtime usage` does. The member who made the key, or an owner or admin,
   sets or changes the limit at [API keys](https://withruntime.com/account/keys);
   see [security](./security).
+- On an account with a pilot, `runtime usage` shows its sandbox hours left,
+  and in versions after 0.11.1 `runtime whoami` and `runtime limits` also say
+  how many sandboxes it runs free and until when. Credit does not run a pilot's
+  sandboxes; to extend a pilot or ask for more hours, write to support.
 - `runtime ls` lists everything the account runs, every product.
 - `runtime compare --from <provider>` says what the sandboxes you ran in the
   last 30 days would have cost at another provider, from the same vCPUs, memory
   and running time at its published rates, and what you save a month
   (`--days` up to 90). When your first sandbox in the window is more recent
   than the window, the month is projected from the days since, and the output
-  says so. Sandboxes the free trial ran are priced at the standard
+  says so. Sandboxes the included usage paid for are priced at the standard
   rates, and the output says how many there were. The providers are `e2b`, `daytona`, `vercel`, `modal`,
   `cloudflare`, `fly` (Sprites), `fly-machines` and the others in the
   [rate comparison](./pricing#published-rate-comparison). With no sandboxes

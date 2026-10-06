@@ -114,10 +114,10 @@ const BLAXEL_HINTS: Record<string, string> = {
   sandbox_paused: "Call sandbox.unarchive(), then try again.",
   not_running:
     "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with SandboxInstance.create if it was deleted.",
-  trial_busy:
-    "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
+  no_credit_running_limit:
+    "The sandboxes an account without credit runs at once are all in use: delete one you no longer need (sandbox.delete()) or archive it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
   public_preview_not_allowed:
-    "On the trial, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
+    "Without credit, share the port privately: sandbox.previews.create({ metadata: { name }, spec: { port, public: false } }) and a token from preview.tokens.create(expiresAt) on a server supporting absolute preview deadlines. A public preview needs a paid sandbox, which is the account owner's decision.",
   busy: AGAIN,
   guest_busy: AGAIN,
   rate_limited: AGAIN,
@@ -126,7 +126,7 @@ const BLAXEL_HINTS: Record<string, string> = {
 };
 /** A trial create over the trial's size, in Blaxel's field. */
 const TRIAL_CAP =
-  "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.";
+  "Without credit, a sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit.";
 
 /** A Runtime SDK error as Blaxel's: ResponseError (SandboxGatewayError for a
  * 502, 503 or 504), NotSupportedError for a product Runtime has switched off,
@@ -150,7 +150,7 @@ export function translate(error: unknown): unknown {
       error.message,
     );
   if (error.status < 200 || error.status > 599) return error;
-  const trialCap = error.code === "invalid_trial";
+  const trialCap = error.code === "no_credit_size_limit";
   const hint = trialCap ? undefined : (BLAXEL_HINTS[error.code] ?? error.hint);
   const message = [
     trialCap ? TRIAL_CAP : error.message,

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-09-29",
+  "checkedAt": "2026-10-05",
   "providers": [
     {
       "id": "e2b",
@@ -9,9 +9,9 @@
         {
           "registry": "npm",
           "name": "e2b",
-          "version": "2.52.0",
+          "version": "2.52.1",
           "artifacts": {
-            "2.52.0": "sha512-TmUZlAvQq8BbguodpA+BBdawR/x5uILMQtHcLkdaLUqevsDjDdh46IYYU8ZRYKsQ4OhWr4xhsFIPSg1kgf+O0w=="
+            "2.52.1": "sha512-qbX0s6qV2gfN4/+NBTIli1hkztfH/1kL4AEAYTaP4wjx7dp2m2wnXcN35iz+8Gug0q4TPN9w4xbdw/TGJr/Bpw=="
           }
         },
         {
@@ -25,10 +25,10 @@
         {
           "registry": "pypi",
           "name": "e2b",
-          "version": "2.52.0",
+          "version": "2.52.1",
           "artifacts": {
-            "e2b-2.52.0-py3-none-any.whl": "sha256-6f4b5084b09986db43e99c7405bae6b14dc56984a69bbb1dc0687f1c71515cfb",
-            "e2b-2.52.0.tar.gz": "sha256-58c0042609513799341d4c1837e2581a4a5e73d3d62c9f1c57495c5e23eedee2"
+            "e2b-2.52.1-py3-none-any.whl": "sha256-708583a37c9b797b0044bd92fa407c21aec65f101f2fd4c4a0ccd842dbe33de1",
+            "e2b-2.52.1.tar.gz": "sha256-3af5c037b971ebc89a1ef0e5ced0e1c9ecbf3d65f2c23df5db7ad9faef8f68fa"
           }
         },
         {
@@ -49,9 +49,9 @@
         {
           "registry": "npm",
           "name": "@daytona/sdk",
-          "version": "0.220.0",
+          "version": "0.222.0",
           "artifacts": {
-            "0.220.0": "sha512-PJio3vbDwRApzlsK6AGO7r4CHJcF9PI5DWuUW2yUnA2MVJSh/jotS0onKBv6boC5F+oboljTibUMxrwVPIrOlQ=="
+            "0.222.0": "sha512-N0hjbprttUcAQE3eBegzRNIhQTzbPOGAuS2LJvl4a6bLp3rjCY1R7G9HbE9STepiBQDAs5B08Vv1rpRTXw9PaA=="
           }
         },
         {
@@ -66,25 +66,25 @@
         {
           "registry": "npm",
           "name": "@daytona/api-client",
-          "version": "0.220.0",
+          "version": "0.222.0",
           "artifacts": {
-            "0.220.0": "sha512-XaMEtiQCaIHc3T7y3HUqx1A5eWSnd+FJvhpSHDwP3Snu9Nnhy4t+K2LHBWgJQn9dGtWXsdOsbB9K0BqpmFJtyA=="
+            "0.222.0": "sha512-KvD+k6LMaqauQBedbMPTZG3UK3oITwmI5onfqbQJOdEG3xD6Occ3dJRphPlXqfF7tdtmDiXv3yrbyyOusqjvdA=="
           }
         },
         {
           "registry": "npm",
           "name": "@daytona/toolbox-api-client",
-          "version": "0.220.0",
+          "version": "0.222.0",
           "artifacts": {
-            "0.220.0": "sha512-Kn94AOxhGQil0XygOOR26SaCkndE4dOtxYS0hLbqrTxcP3H1uq1HGFGSRkHFQNkaR8eL9QwFUPSMqd0Vr3A64A=="
+            "0.222.0": "sha512-crdx4Zoxjtd7sGoURS3Dwd0xEQ+6lW6e+tu45TgUx85BpDAoTEr0z7i13HgXcEfAYMIcj8o70FOlI5JlkEJ5dw=="
           }
         },
         {
           "registry": "npm",
           "name": "@daytona/analytics-api-client",
-          "version": "0.220.0",
+          "version": "0.222.0",
           "artifacts": {
-            "0.220.0": "sha512-3BGYILzjo2aFTJhLd6XBXlNEQBSo9Zr2Nj31OdX9o50fMRVUwVydF6ekIGkPGSLwskz6b6xxg5BSS+f9dbrxCQ=="
+            "0.222.0": "sha512-KNIk2b21pLzKMdKPnz+7cOXE9Qjvlfe9hwfiIdAatxa9jYbwJQTmbxs7BpdDB7I9GtdUionpdskxJWL+rVcWvA=="
           }
         }
       ]

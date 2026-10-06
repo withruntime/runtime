@@ -33,7 +33,10 @@ export type SandboxInfo = {
   persistent?: boolean;
   /** The last exec, file, terminal, desktop or preview request, to within a minute. */
   lastActiveAt?: string | null;
-  onLeaseEnd: "pause" | "stop";
+  /** What happens when its time limit, credit or a spending limit ends it. */
+  onLeaseEnd: "pause" | "stop" | "delete";
+  /** onLeaseEnd's newer name (0381): the same value. */
+  onTimeout?: "pause" | "stop" | "delete";
   createdAt: string;
   readyAt: string | null;
   /** Paid up to: a time ahead of now that moves on by itself while it runs.
@@ -86,7 +89,7 @@ export type CreateSandbox = {
    * `env`. At most 32 variables and 32 KiB. Values are never shown again;
    * answers list only `envNames`. Copies made by fork() keep them. */
   env?: Record<string, string>;
-  /** Omit to use the free trial while it lasts, then prepaid credit. */
+  /** Omit to use the included usage while it lasts, then prepaid credit. */
   funding?: "trial" | "paid";
   region?: string;
   vcpu?: number;
@@ -94,14 +97,16 @@ export type CreateSandbox = {
   diskMiB?: number;
   cpu?: "shared" | "reserved";
   cpuFloorMillis?: number;
-  /** A time limit, 60 to 3600 seconds. Leave it out (or 0) for none: the
-   * sandbox runs while it works and pauses when idle, until you stop it or
-   * credit runs out. */
+  /** A time limit, 60 to 86400 seconds (24 hours). Leave it out (or 0) for
+   * none: the sandbox runs while it works and pauses when idle, until you
+   * stop it or credit runs out. */
   timeoutSeconds?: number;
   /** @deprecated Ignored since 5 October 2026: every sandbox can pause. */
   pausable?: boolean;
-  /** What happens when its time limit or credit runs out: "pause" (default) or "stop". */
-  onLeaseEnd?: "pause" | "stop";
+  /** What happens when its time limit, credit or a spending limit ends it:
+   * "pause" (default), "stop", or "delete" (when the time limit runs out,
+   * delete it and its files; credit or a spending limit only stops it). */
+  onLeaseEnd?: "pause" | "stop" | "delete";
   /** Pause after this many seconds in which nothing happens in it: no
    * request, no command or terminal running, no open connection, no network
    * traffic and no CPU use. Default 60 unless persistent; 0 never;
@@ -229,13 +234,41 @@ export type Usage = {
   available: string;
   /** The part of spent that refunds and disputes took. */
   takenBack: string;
+  /** Machine time the account can still run without credit, in
+   * milliseconds, or null when it has none. `totalMs` and `usedMs` count free
+   * hours given before 5 October 2026 (0 for an account given none);
+   * `availableMs` is the larger of those hours left and this month's included
+   * usage, as time at 2 vCPU and 4 GiB. The field keeps its older name. */
   trial: {
     totalMs: number;
     usedMs: number;
     /** @deprecated Read `availableMs`. Still sent for older clients. */
     reservedMs: number;
     availableMs: number;
+    /** `monthly`: the included usage every month only. `hours`: free hours
+     * given before 5 October 2026, kept, beside the included usage. Absent
+     * from an API older than 5 October 2026. */
+    offer?: "monthly" | "hours";
+    /** When the included usage renews: the 1st of next month, 00:00 UTC. */
+    renewsAt?: string;
   } | null;
+  /** What the account uses free this calendar month (UTC), one row per
+   * product, drawn before credit and never charged
+   * (https://withruntime.com/docs/included-usage). */
+  allowances?: Array<{
+    /** machine-memory, machine-cpu, saved-copies or disks. */
+    pool: string;
+    /** GiB-hour, vCPU-hour or GB-month. */
+    unit: string;
+    quantity: number;
+    used: number;
+    /** Held for what is running now; given back unless used. */
+    reserved: number;
+    left: number;
+    /** The month's first day, YYYY-MM-DD. */
+    month: string;
+    renewsAt: string;
+  }>;
   /** Outbound traffic this calendar month, UTC: the first `allowanceBytes` an
    * account sends are free, and the rest is charged at the rate in the pricing
    * guide (https://withruntime.com/docs/pricing#network-products). */
@@ -251,7 +284,9 @@ export type Usage = {
   } | null;
   /** The account's pilot while it serves its sandboxes, a free run agreed
    * with Runtime: `hours` sandbox-hours of running time, `usedMs` and
-   * `leftMs` of it used and left. Null on every other account. */
+   * `leftMs` of it used and left, and `running`, its sandboxes running now:
+   * `leftMs / running` is how long the hours last at this rate. Null on every
+   * other account. */
   pilot?: {
     id: string;
     sandboxes: number;
@@ -265,7 +300,12 @@ export type Usage = {
     hours: number;
     usedMs: number;
     leftMs: number;
+    running?: number;
   } | null;
+  /** Everything this key acts for, a row a kind, past the hundred newest
+   * `resources` lists: how many, and what was charged and is held, in
+   * integer microdollars as strings. Absent from an API before 6 October 2026. */
+  kinds?: Array<{ kind: string; resources: number; chargedMicros: string; heldMicros: string }>;
   resources: Array<Record<string, unknown>>;
   [key: string]: unknown;
 };

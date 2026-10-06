@@ -5,7 +5,7 @@ import changed from e2b to withruntime.e2b.
     python3 sdks/python/scripts/e2b_e2e.py --dry                       # show the change only
 
 Six sandboxes (four at a time, 2 vCPU / 512 MiB, five minutes at most, each
-stopped when its case ends) on the account's default funding: the free trial
+deleted when its case ends) on the account's default funding: the free trial
 while it lasts. RUNTIME_API_URL points it elsewhere. Not part of the tests."""
 import os
 import shutil

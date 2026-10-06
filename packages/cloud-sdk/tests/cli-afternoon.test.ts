@@ -120,7 +120,7 @@ test("a refused create names the option, in dollars where the option takes dolla
   // A refusal naming one field says the option too.
   const trial = describeError(
     new RuntimeError({
-      code: "invalid_trial",
+      code: "no_credit_size_limit",
       status: 400,
       message: "A trial sandbox has at most 10240 MiB of disk: diskMiB must be at most 10240.",
       details: { field: "diskMiB" },

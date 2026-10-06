@@ -9,6 +9,7 @@ function fixture(done: Promise<void> = new Promise(() => {})) {
     ensureHome: async () => {},
     runtime: {
       files: {
+        stat: async () => ({ exists: true, type: "directory" }),
         watch: async () => {
           starts++;
           return {
@@ -88,15 +89,17 @@ test("watch metadata is best effort for removed files and includes existing dotf
         stat: async (path: string) =>
           path.endsWith("missing")
             ? { exists: false }
-            : {
-                exists: true,
-                name: ".env",
-                path,
-                type: "file",
-                size: 3,
-                mode: "0600",
-                modifiedAt: 1000,
-              },
+            : path.endsWith("/app")
+              ? { exists: true, type: "directory" }
+              : {
+                  exists: true,
+                  name: ".env",
+                  path,
+                  type: "file",
+                  size: 3,
+                  mode: "0600",
+                  modifiedAt: 1000,
+                },
       },
     },
   } as unknown as SandboxContext);
@@ -127,6 +130,7 @@ test("lost events stop delivery and report one failure, including notices during
     ensureHome: async () => {},
     runtime: {
       files: {
+        stat: async () => ({ exists: true, type: "directory" }),
         watch: async (
           _: string,
           callback: (event: unknown) => Promise<void>,
@@ -178,6 +182,7 @@ test("subsecond watch deadline uses an unbounded native watcher and stops it exa
     ensureHome: async () => {},
     runtime: {
       files: {
+        stat: async () => ({ exists: true, type: "directory" }),
         watch: async (
           _path: string,
           _callback: unknown,
@@ -218,6 +223,7 @@ test("zero and over-one-day watch lifetimes never receive a clamped native deadl
       ensureHome: async () => {},
       runtime: {
         files: {
+          stat: async () => ({ exists: true, type: "directory" }),
           watch: async (_path: string, _callback: unknown, opts: { timeoutMs: number }) => {
             nativeTimeout = opts.timeoutMs;
             return { done: new Promise(() => {}), stop: async () => {} };
@@ -247,6 +253,7 @@ test("watch callback may stop itself without deadlock or another event", async (
     ensureHome: async () => {},
     runtime: {
       files: {
+        stat: async () => ({ exists: true, type: "directory" }),
         watch: async (
           _path: string,
           callback: typeof deliver,
@@ -289,6 +296,7 @@ test("watch timeout during remote creation cleans a late returned watcher", asyn
     ensureHome: async () => {},
     runtime: {
       files: {
+        stat: async () => ({ exists: true, type: "directory" }),
         watch: async () => {
           await new Promise((resolve) => setTimeout(resolve, 30));
           return {

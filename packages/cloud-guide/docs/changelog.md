@@ -10,6 +10,33 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 5 October 2026
 
+- **Usage included every month, for every account, and jobs run on it.**
+  Every account now gets {{free-memory}} of machine memory, {{free-cpu}} of
+  active CPU, {{free-saved-copies}} of saved copies (snapshots, images,
+  backups) and {{free-disks}} of volumes each calendar month,
+  {{included-machine}}, with no card. It renews on the 1st (UTC), is used
+  before credit and is never charged. New accounts get it in place of free
+  hours; an account given free hours before today keeps what is left of them,
+  and has the included usage as well. `GET /v1/usage` lists each product's
+  share under `allowances`, and `trial` gains `offer` and `renewsAt`. A
+  scheduled job's runs spend it first, then credit, as a sandbox does; a run
+  it cannot take, on an account without credit, waits with `blockedReason`
+  `credits`. An account holds up to {{paid-jobs}} jobs and {{paid-secrets}}
+  secrets for jobs, where it held 50 and 200. Credit, bought or given, now
+  opens every paid feature but three: a kept top-up is needed only for ports
+  beyond 80 and 443, public previews, and private networks and Tailscale.
+  Without credit, an account runs at most {{no-credit-total}} at once across
+  its sandboxes and image builds, beside 2 vCPU and 4 GiB each and eight at
+  once; past it, a create, wake or build is refused with 409
+  `no_credit_total_limit`, whose message says what runs now. Seven codes are
+  renamed, in the API, MCP, CLI and every SDK: `trial_busy` is now
+  `no_credit_running_limit`, `trial_capacity` `no_credit_capacity_full`,
+  `invalid_trial` `no_credit_size_limit`, `trial_domain_limit`
+  `no_credit_domain_limit`, `trial_build_limit` `no_credit_build_limit`,
+  `trial_exhausted` `included_usage_used_up` and `trial_unavailable`
+  `included_usage_unavailable`; code that compares with an old name should
+  compare with both until it updates. See [included usage](./included-usage)
+  and [what a job costs](./jobs#what-it-costs).
 - **A hundred sandboxes at once from the first top-up, and time limits up to
   24 hours.** A paid account runs {{paid-sandboxes}} sandboxes at once as
   soon as its first top-up clears, where a new one ran 50 for its first week;
@@ -22,19 +49,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   with both. A sandbox's disk is at most {{max-disk}}, and a larger `diskMiB`
   is refused at once, naming the limit. See
   [how many at once](./pricing#how-many-at-once).
-- **Scheduled jobs run on the free trial, and an account holds
-  {{paid-jobs}} of them.** A job's runs spend the trial's hours first, then
-  credit, as a sandbox does; a run the trial cannot take, on an account
-  without credit, waits with `blockedReason` `credits`. An account holds up
-  to {{paid-jobs}} jobs and {{paid-secrets}} secrets for jobs, where it held
-  50 and 200. Credit, bought or given, now opens every paid feature but three:
-  a kept top-up is needed only for ports beyond 80 and 443, public previews,
-  and private networks and Tailscale. See [what a job costs](./jobs#what-it-costs).
 - **Downloads as fast as the server's link, and TCP ports five times
   faster.** A sandbox's downloads are no longer capped: each sandbox shares
   its server's link, and when several are busy a paid account gets four times
-  a trial's share. Uploads stay limited, more strictly on the trial
-  ({{trial-upload}}); paid uploads are {{paid-upload}},
+  the share of one without credit. Uploads stay limited, more strictly without
+  credit ({{trial-upload}}); paid uploads are {{paid-upload}},
   {{paid-upload-sustained}} after {{paid-upload-burst}},
   {{paid-daily-transfer}} a day. A public TCP port now moves traffic at those
   paid figures, where it was 100 Mbit/s, 20 Mbit/s after 2 GiB and 50 GiB a
@@ -79,7 +98,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   keeps working. Once an account holds credit, its sandboxes have paid limits
   and still spend the trial's hours first, and a trial sandbox that turns paid
   while it runs gets a paid sandbox's disk share at once and, if the trial
-  had slowed it, its full cores back. See [the trial](./trial#after-the-trial).
+  had slowed it, its full cores back. See [included usage](./included-usage#after-you-add-credit).
 - **Public previews follow a kept purchase.** A preview can be public once
   the account has bought credit; credit given alone does not open one. While
   an account is blocked, or every purchase it made is refunded in full, its
@@ -189,7 +208,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   an auth key stored as a secret. See [networking](./networking#your-tailscale-network).
 - **Trial sandboxes keep going while they work.** A trial sandbox that is still
   busy when its lease ends gets its `timeoutSeconds` again, until the trial
-  hours run out. See [the trial](./trial).
+  hours run out. See [included usage](./included-usage).
 
 ## 29 September 2026
 
@@ -399,7 +418,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   [your account](./products#the-console).
 - **A 100-hour free trial.** The free trial is now 100 hours of sandbox time,
   from 50, still with no card. Accounts already on the trial get the extra
-  hours too; hours already used still count. See [the free trial](./trial).
+  hours too; hours already used still count. See [included usage](./included-usage).
 - **Sandboxes up to 16 vCPUs and 64 GiB.** A paid sandbox can now be as large
   as 16 vCPUs and 64 GiB of memory, at the same per-unit rates; a trial
   sandbox stays at 2 vCPU and 4 GiB. See [pricing](./pricing#how-many-at-once).

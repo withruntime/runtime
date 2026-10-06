@@ -13,9 +13,9 @@ module WithRuntime
     end
 
     # Creates a sandbox and, unless +wait: false+, waits until it is running.
-    # Every field is optional: with none you get the free trial while it lasts,
+    # Every field is optional: with none you get the included usage while it lasts,
     # the default region and a 2 vCPU / 4 GiB machine for up to 30 minutes.
-    # When every trial slot or the account's quota is taken, it waits for one to
+    # When every slot without credit or the account's quota is taken, it waits for one to
     # free, up to +wait_for_capacity+ seconds (the client's, two minutes by default).
     #
     #   runtime.sandboxes.create(funding: "trial", labels: { team: "search" }, timeout_seconds: 900)

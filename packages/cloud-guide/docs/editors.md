@@ -94,6 +94,6 @@ joins your own network to your sandboxes
   A sandbox created with `timeoutSeconds` still ends the connection at its
   limit; extend it for a long session.
 - An organization has at most 16 SSH logins and port forwards open at once,
-  and one port forward carries at most 64 connections at once. Each lasts at
+  and two more for each sandbox it holds that is not stopped, up to 292; one port forward carries at most 64 connections at once. Each lasts at
   most 24 hours; open it again to go on.
 - Port 10800 is the sandbox's own outbound proxy and is not forwarded.

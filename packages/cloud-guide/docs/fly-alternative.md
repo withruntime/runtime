@@ -36,7 +36,7 @@ Weighing more than two? [Fly.io alternatives for agent sandboxes](/compare/fly-i
 - **Switching credit.** Run `runtime switch --from fly` before your first
   top-up and that top-up is matched, up to {{switching-max}}
   ([switching credit](./pricing#switching-credit)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -65,7 +65,7 @@ Machines at the rates of its Ashburn (`iad`) region.
 | Memory billing | {{memory-rate}} per reserved GiB-hour                            | {{rate:fly-sprites:memory}} per GB-hour of memory in use  | Included in the size; more at {{term:fly-machines:extra-memory}} per GB a month        |
 | Size           | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart   | Memory managed by Fly, 100 GB disk                        | Up to 16 performance vCPUs and 128 GB                                                  |
 | Plan fee       | None; prepaid credit from {{topup-min}}                          | None required; optional monthly plans                     | None; pay as you go                                                                    |
-| Free start     | {{trial-hours}} sandbox hours, no card                           | {{term:fly-sprites:credit}} of trial credit               | Not stated on the pricing page                                                         |
+| Free start     | {{included-machine}} every month, no card                        | {{term:fly-sprites:credit}} of trial credit               | Not stated on the pricing page                                                         |
 | When idle      | Pause keeps files and memory; kept while you have credit         | Pauses itself; memory kept at first, the disk kept always | Root disk is temporary; volumes keep files; suspend, 2 GB or less                      |
 | Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs | API, CLI, MCP server; JavaScript, Python, Go, Elixir SDKs | Machines API and flyctl                                                                |
 
@@ -110,7 +110,7 @@ is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) f
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Fly.io calls on a branch, tests them on the free trial, and tells
+replaces the Fly.io calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -129,7 +129,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec(["python3", "/workspace/invoice.py"], { check: true })).stdout);

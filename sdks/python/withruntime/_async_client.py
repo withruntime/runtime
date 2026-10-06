@@ -9,7 +9,7 @@ import os
 import random
 import time
 import uuid
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Generic, Optional, TypeVar, Union
 from urllib.parse import quote, urlencode
 
 from ._api_defaults import KEEP_ALIVE_MARGIN_SECONDS, STREAMED_EXEC_TIMEOUT_MS, WAIT_FOR_TIMEOUT_SECONDS
@@ -185,7 +185,8 @@ class _Transport:
     WebSocket is not counted."""
 
     def __init__(self, api_key: str, base_url: str, timeout: float, max_retries: int,
-                 max_connections: int = DEFAULT_MAX_CONNECTIONS, wait_for_capacity: float = 120) -> None:
+                 max_connections: int = DEFAULT_MAX_CONNECTIONS, wait_for_capacity: float = 120,
+                 on_queued: Optional[Callable[[int], None]] = None) -> None:
         if api_key and any(c.isspace() for c in api_key):
             raise _missing_key()
         # Empty: the key `runtime login` saved for this machine, found on first use.
@@ -200,8 +201,9 @@ class _Transport:
         self._timeout = timeout
         self._max_retries = max_retries
         most = max(1, max_connections)
-        self._slots = slots(most)
-        self._streams = slots(max(1, most - _KEPT_FOR_CALLS))
+        queued = None if on_queued is None else (lambda: on_queued(most))
+        self._slots = slots(most, queued)
+        self._streams = slots(max(1, most - _KEPT_FOR_CALLS), queued)
         # What sandboxes.create waits for room by default, in seconds.
         self.wait_for_capacity = max(0.0, float(wait_for_capacity))
 
@@ -1140,20 +1142,23 @@ class AsyncSandboxSessions:
         return await self._t.json("POST", self._path(f"/{_enc(session_id)}:revoke"), body={})
 
 
-class AsyncSandbox:
-    """A sandbox. ``async with await runtime.sandboxes.create() as sbx:`` stops it at the end."""
+_M = TypeVar("_M", bound="AsyncMachine")
+
+
+class AsyncMachine:
+    """One machine of the machine engine (CLOUD.md section 2,
+    engines/machine/ENGINE.md): its record and the verbs every machine product
+    shares, written once. A product is a subclass that names its path and adds
+    what only it does; ``AsyncSandbox`` is the one today."""
+
+    #: The API serves the product at /v1/<_plural>; its errors call one a <_noun>.
+    _plural = ""
+    _noun = ""
 
     def __init__(self, t: _Transport, info: dict[str, Any]) -> None:
         self._t = t
         self.info = info
         self._keep_alive: Optional[Callable[[], None]] = None
-        self.files = AsyncFiles(t, info["id"])
-        self.sessions = AsyncSandboxSessions(t, info["id"])
-        # Imported here, not at the top, so a product module may itself import
-        # this one without a cycle.
-        from ._async_products import SANDBOX as SANDBOX_PRODUCTS
-        for name, product in SANDBOX_PRODUCTS.items():
-            setattr(self, name, product(t, self))
 
     @property
     def info(self) -> dict[str, Any]:
@@ -1175,6 +1180,281 @@ class AsyncSandbox:
     def state(self) -> str:
         return self.info.get("state", "")
 
+    def _path(self, suffix: str = "") -> str:
+        return f"/v1/{self._plural}/{_enc(self.id)}{suffix}"
+
+    async def refresh(self: _M) -> _M:
+        self.info = await self._t.json("GET", self._path())
+        return self
+
+    async def wait_for(self: _M, state: str, timeout_seconds: int = WAIT_FOR_TIMEOUT_SECONDS) -> _M:
+        """Waits (server-side, no polling) until the sandbox reaches ``state``."""
+        self.info = await self._t.json("GET", self._path(), query={"waitFor": state, "timeoutSeconds": timeout_seconds})
+        return self
+
+    async def _lifecycle(self: _M, verb: str, wait: bool, body: Optional[dict[str, Any]] = None,
+                         idempotency_key: Optional[str] = None) -> _M:
+        self.info = await self._t.json("POST", self._path(f":{verb}"), body=body or {}, wait=60 if wait else None,
+                                       idempotency_key=idempotency_key)
+        return self
+
+    async def stop(self: _M, wait: bool = True, idempotency_key: Optional[str] = None) -> _M:
+        self.stop_keep_alive()
+        return await self._lifecycle("stop", wait, idempotency_key=idempotency_key)
+
+    async def pause(self: _M, wait: bool = True, idempotency_key: Optional[str] = None) -> _M:
+        return await self._lifecycle("pause", wait, idempotency_key=idempotency_key)
+
+    async def switch_image(self: _M, image: str, *, keep: str = "workspace",
+                           idempotency_key: Optional[str] = None) -> _M:
+        """Moves it to another image (id, name, name:tag or name@version),
+        keeping its id, /workspace (its home: dotfiles, pip --user and npm -g
+        installs), volumes, environment, name and previews. Its processes
+        restart, and everything else on its old disk (sudo installs, apt
+        packages, /etc) is lost; snapshot it first to keep everything. A
+        running sandbox is paused first. A switch that fails is undone
+        (``switch_undone``), the sandbox on its old image with nothing lost.
+        Charged as a wake. ``keep`` is optional: "workspace" is the only
+        value, and it is sent either way, so an API from before it was
+        optional accepts the call too."""
+        self.info = await self._t.json("POST", self._path(":switch-image"), body={"image": image, "keep": keep},
+                                       wait=120, idempotency_key=idempotency_key)
+        return self
+
+    async def resize(self: _M, *, restart: bool = True, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
+                     idempotency_key: Optional[str] = None) -> _M:
+        """Gives it more or fewer vCPUs or more or less memory by a restart:
+        its id, whole disk, volumes, environment, name and previews stay, and
+        its programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped
+        if it is persistent, and comes back running at the new size on the
+        same server; a paused or stopped one is started. Memory bills on the
+        new size from then. Refused, with nothing changed, when the server has
+        no room (``no_capacity``), above your quota or the 2 vCPU and 4 GiB without credit, or while a snapshot or fork of it is being taken. ``restart``
+        is optional and True is the only value the API takes."""
+        body: dict[str, Any] = {"restart": restart}
+        if vcpu is not None:
+            body["vcpu"] = vcpu
+        if memory_mib is not None:
+            body["memoryMiB"] = memory_mib
+        self.info = await self._t.json("POST", self._path(":resize"), body=body, wait=120,
+                                       idempotency_key=idempotency_key)
+        return self
+
+    async def delete(self, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Deletes it for good: stops it if it runs or is paused, deletes its
+        disk and paused memory, revokes its previews and ports, and removes it
+        from lists. Its snapshots, usage and audit entries stay. Deleting it
+        again answers the same. Answers ``{"id", "status": "deleted",
+        "deletedAt", ...}``."""
+        self.stop_keep_alive()
+        return await self._t.json("DELETE", self._path(), idempotency_key=idempotency_key)
+
+    async def wake(self: _M, wait: bool = True, timeout_seconds: Optional[int] = None,
+                   idempotency_key: Optional[str] = None) -> _M:
+        """Carries on a paused sandbox; for one with a time limit,
+        ``timeout_seconds`` is its new one. Waking one that is already awake
+        is done, not an error (unless a new limit was asked for, which was not
+        given)."""
+        try:
+            return await self._lifecycle("wake", wait, {} if timeout_seconds is None else {"timeoutSeconds": timeout_seconds},
+                                         idempotency_key)
+        except RuntimeError as error:
+            if error.code != "not_paused" or timeout_seconds is not None:
+                raise
+            await self.refresh()
+            if self.state not in ("running", "starting"):
+                raise
+            return self
+
+    async def extend(self: _M, seconds: int, idempotency_key: Optional[str] = None) -> _M:
+        """More time before its time limit ends (at most an hour ahead of
+        now). A sandbox with no time limit needs none: the call answers at
+        once and changes nothing."""
+        return await self._lifecycle("extend", False, {"seconds": seconds}, idempotency_key)
+
+    async def update(self: _M, idempotency_key: Optional[str] = None, **settings: Any) -> _M:
+        """Changes its settings; what you leave out stays as it is: ``name``,
+        ``labels``, ``env`` (a value sets a variable, None removes it; commands
+        started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
+        ``idle_pause_seconds`` (pause after this long with no activity, counted
+        from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
+        ``persistent`` (keep it running until stopped, while credit lasts,
+        never idle-paused; its disk is billed and kept as any sandbox's; paid
+        only) and
+        ``max_total_cost_micros`` (None removes the cap)."""
+        return await self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
+
+    def keep_alive(self, every_seconds: float = 60, margin_seconds: int = KEEP_ALIVE_MARGIN_SECONDS) -> Callable[[], None]:
+        """Keeps a sandbox with a time limit running past it, in the
+        background, until ``stop()`` or the function it returns ends it:
+        every ``every_seconds`` it extends the limit so that
+        ``margin_seconds`` (60 to 3600) remain, never more than the hour ahead
+        the API allows. A sandbox with no time limit (``endsAt`` None) needs
+        none, and is only watched. Running time is billed as it is used. A
+        paused sandbox is left paused (a request wakes it unless auto_wake is
+        off); a stopped one ends it."""
+        self.stop_keep_alive()
+        state: dict[str, Any] = {"on": True}
+        margin = min(3600, max(60, int(margin_seconds)))
+        every = max(10.0, float(every_seconds))
+
+        async def loop() -> None:
+            while state["on"]:
+                try:
+                    await self.refresh()
+                    if self.state in ("stopped", "stopping"):
+                        break
+                    # No time limit: nothing to extend (an older server sends no endsAt).
+                    if self.state == "running" and not ("endsAt" in self.info and self.info["endsAt"] is None):
+                        need = math.ceil(margin - _seconds_until(self.info.get("endsAt") or self.info.get("expiresAt")))
+                        if need >= 1:
+                            await self.extend(min(3600, need))
+                except RuntimeError:
+                    pass  # The next check tries again.
+                if state["on"]:
+                    await sleep(every)
+            state["on"] = False
+            if self._keep_alive is state.get("end"):
+                self._keep_alive = None
+
+        cancel = background(loop)
+
+        def end() -> None:
+            state["on"] = False
+            cancel()
+            if self._keep_alive is end:
+                self._keep_alive = None
+        state["end"] = end
+        self._keep_alive = end
+        return end
+
+    def stop_keep_alive(self) -> None:
+        """Ends ``keep_alive()``, if it runs."""
+        if self._keep_alive is not None:
+            self._keep_alive()
+
+    async def set_retention(self: _M, days: int, idempotency_key: Optional[str] = None) -> _M:
+        """Days a paused sandbox is kept before deletion (1 to 365)."""
+        return await self._lifecycle("retention", False, {"days": days}, idempotency_key)
+
+    async def snapshot(self, *, name: Optional[str] = None, labels: Optional[dict[str, str]] = None,
+                       retention_days: Optional[int] = None, mode: Optional[str] = None,
+                       idempotency_key: Optional[str] = None,
+                       timeout_seconds: Optional[float] = None) -> dict[str, Any]:
+        """Keep a whole-machine snapshot, or a disk-only snapshot with mode='disk'.
+        A running source stays paused until capture finishes, then wakes; an
+        already paused source stays paused. Capture waits ``timeout_seconds``
+        (ten minutes unless given); a capture still running then keeps its
+        source paused, and the snapshot_timeout error names the snapshot."""
+        if mode is not None and mode not in ("memory", "disk"):
+            raise ValueError("Snapshot mode must be memory or disk")
+        from ._request_scope import Limits, request_scope
+        body = {"name": name, "labels": labels, "retentionDays": retention_days, "mode": mode}
+        await self.refresh()
+        if self.state in ("resuming", "starting"):
+            await self.wait_for("running")
+        elif self.state == "pausing":
+            await self.wait_for("paused")
+        running = self.state == "running"
+        snapshot = None
+        primary_error = None
+        # A capture still running at the deadline needs its source paused: the
+        # worker fails one whose source woke (4 October 2026).
+        late = False
+        try:
+            if running:
+                await self.pause()
+            try:
+                with request_scope(timeout_seconds if timeout_seconds and timeout_seconds > 0
+                                   else SNAPSHOT_DEADLINE_SECONDS):
+                    snapshot = await self._t.json("POST", self._path(":snapshot"),
+                                                  body={k: v for k, v in body.items() if v is not None},
+                                                  wait=10, idempotency_key=idempotency_key)
+                    while snapshot["state"] == "capturing":
+                        await _request_sleep(.2)
+                        snapshot = await self._t.json("GET", f"/v1/snapshots/{_enc(snapshot['id'])}")
+            except (RuntimeError, *timeouts()) as error:
+                if isinstance(error, RuntimeError) and error.code != "request_timeout":
+                    raise
+                if snapshot is None:
+                    raise RuntimeError("Snapshot capture ran past its deadline.", code="snapshot_timeout") from error
+                late = running
+                raise RuntimeError(
+                    f"Snapshot {snapshot['id']} was still capturing at the deadline."
+                    + (f" The {self._noun.lower()} stays paused until it ends: waking it now would fail the capture."
+                       if running else ""),
+                    code="snapshot_timeout",
+                    hint=f"Wait until snapshots.get('{snapshot['id']}') is ready"
+                         + (f", then wake the {self._noun.lower()}" if running else "")
+                         + ", or pass a longer timeout_seconds.",
+                    details={"snapshotId": snapshot["id"], "sourceSandboxId": self.id}) from error
+            if snapshot["state"] != "ready":
+                raise RuntimeError(snapshot.get("error") or f"Snapshot capture ended in state {snapshot['state']}.",
+                                   code="snapshot_failed", status=409, details={"snapshotId": snapshot["id"]})
+            if mode == "disk" and snapshot.get("mode") != "disk":
+                raise RuntimeError("The server did not confirm a disk-only snapshot.", code="snapshot_mode_mismatch",
+                                   status=409, details={"snapshotId": snapshot["id"]})
+            return snapshot
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            if running and not late:
+                # Capture's deadline must never prevent restoring the source.
+                try:
+                    with request_scope(captured=Limits()):
+                        await self.wake()
+                except BaseException as error:
+                    failure = primary_error if primary_error is not None else error
+                    recovery = {"message": str(error)}
+                    if isinstance(error, RuntimeError):
+                        recovery["code"] = error.code
+                    details = {"sourceSandboxId": self.id, "sourceWakeError": recovery}
+                    if snapshot is not None:
+                        details["snapshotId"] = snapshot["id"]
+                    if isinstance(failure, RuntimeError):
+                        failure.details = {**(failure.details or {}), **details}
+                    else:
+                        for key, value in details.items():
+                            setattr(failure, key, value)
+                    if primary_error is None:
+                        raise
+
+    async def restart(self: _M, wait: bool = True, idempotency_key: Optional[str] = None) -> _M:
+        """Starts a stopped sandbox again from its disk (memory is not kept)."""
+        return await self._lifecycle("restart", wait, idempotency_key=idempotency_key)
+
+    async def __aenter__(self: _M) -> _M:
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        self.stop_keep_alive()
+        if self.state != "stopped":
+            try:
+                await self.stop(wait=False)
+            except RuntimeError:
+                pass
+
+    def __repr__(self) -> str:
+        return f"{self._noun}(id={self.id!r}, state={self.state!r})"
+
+
+class AsyncSandbox(AsyncMachine):
+    """A sandbox. ``async with await runtime.sandboxes.create() as sbx:`` stops it at the end."""
+
+    _plural = "sandboxes"
+    _noun = "Sandbox"
+
+    def __init__(self, t: _Transport, info: dict[str, Any]) -> None:
+        super().__init__(t, info)
+        self.files = AsyncFiles(t, info["id"])
+        self.sessions = AsyncSandboxSessions(t, info["id"])
+        # Imported here, not at the top, so a product module may itself import
+        # this one without a cycle.
+        from ._async_products import SANDBOX as SANDBOX_PRODUCTS
+        for name, product in SANDBOX_PRODUCTS.items():
+            setattr(self, name, product(t, self))
+
     @staticmethod
     def from_session(token: str, sandbox_id: str, api_url: Optional[str] = None, *,
                      timeout: float = 300) -> "AsyncSandbox":
@@ -1187,18 +1467,6 @@ class AsyncSandbox:
                                hint="Make one on your backend with sbx.sessions.create() and pass its token.")
         t = _Transport(token, api_url or default_base_url(), timeout, 4)
         return AsyncSandbox(t, {"id": sandbox_id})
-
-    def _path(self, suffix: str = "") -> str:
-        return f"/v1/sandboxes/{_enc(self.id)}{suffix}"
-
-    async def refresh(self) -> "AsyncSandbox":
-        self.info = await self._t.json("GET", self._path())
-        return self
-
-    async def wait_for(self, state: str, timeout_seconds: int = WAIT_FOR_TIMEOUT_SECONDS) -> "AsyncSandbox":
-        """Waits (server-side, no polling) until the sandbox reaches ``state``."""
-        self.info = await self._t.json("GET", self._path(), query={"waitFor": state, "timeoutSeconds": timeout_seconds})
-        return self
 
     async def exec(self, command: Union[str, list[str], tuple[str, ...]], *, cwd: Optional[str] = None,
                    env: Optional[dict[str, str]] = None, stdin: Optional[Union[str, bytes]] = None,
@@ -1358,233 +1626,6 @@ class AsyncSandbox:
         sandbox is opened to the internet."""
         return await open_forward(self._t.websocket, self._path("/tunnel"), port, local_port, host)
 
-    async def _lifecycle(self, verb: str, wait: bool, body: Optional[dict[str, Any]] = None,
-                         idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        self.info = await self._t.json("POST", self._path(f":{verb}"), body=body or {}, wait=60 if wait else None,
-                                       idempotency_key=idempotency_key)
-        return self
-
-    async def stop(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        self.stop_keep_alive()
-        return await self._lifecycle("stop", wait, idempotency_key=idempotency_key)
-
-    async def pause(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        return await self._lifecycle("pause", wait, idempotency_key=idempotency_key)
-
-    async def switch_image(self, image: str, *, keep: str = "workspace",
-                           idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """Moves it to another image (id, name, name:tag or name@version),
-        keeping its id, /workspace (its home: dotfiles, pip --user and npm -g
-        installs), volumes, environment, name and previews. Its processes
-        restart, and everything else on its old disk (sudo installs, apt
-        packages, /etc) is lost; snapshot it first to keep everything. A
-        running sandbox is paused first. A switch that fails is undone
-        (``switch_undone``), the sandbox on its old image with nothing lost.
-        Charged as a wake. ``keep`` is optional: "workspace" is the only
-        value, and it is sent either way, so an API from before it was
-        optional accepts the call too."""
-        self.info = await self._t.json("POST", self._path(":switch-image"), body={"image": image, "keep": keep},
-                                       wait=120, idempotency_key=idempotency_key)
-        return self
-
-    async def resize(self, *, restart: bool = True, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
-                     idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """Gives it more or fewer vCPUs or more or less memory by a restart:
-        its id, whole disk, volumes, environment, name and previews stay, and
-        its programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped
-        if it is persistent, and comes back running at the new size on the
-        same server; a paused or stopped one is started. Memory bills on the
-        new size from then. Refused, with nothing changed, when the server has
-        no room (``no_capacity``), above your quota or the trial's 2 vCPU and
-        4 GiB, or while a snapshot or fork of it is being taken. ``restart``
-        is optional and True is the only value the API takes."""
-        body: dict[str, Any] = {"restart": restart}
-        if vcpu is not None:
-            body["vcpu"] = vcpu
-        if memory_mib is not None:
-            body["memoryMiB"] = memory_mib
-        self.info = await self._t.json("POST", self._path(":resize"), body=body, wait=120,
-                                       idempotency_key=idempotency_key)
-        return self
-
-    async def delete(self, idempotency_key: Optional[str] = None) -> dict[str, Any]:
-        """Deletes it for good: stops it if it runs or is paused, deletes its
-        disk and paused memory, revokes its previews and ports, and removes it
-        from lists. Its snapshots, usage and audit entries stay. Deleting it
-        again answers the same. Answers ``{"id", "status": "deleted",
-        "deletedAt", ...}``."""
-        self.stop_keep_alive()
-        return await self._t.json("DELETE", self._path(), idempotency_key=idempotency_key)
-
-    async def wake(self, wait: bool = True, timeout_seconds: Optional[int] = None,
-                   idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """Carries on a paused sandbox; for one with a time limit,
-        ``timeout_seconds`` is its new one. Waking one that is already awake
-        is done, not an error (unless a new limit was asked for, which was not
-        given)."""
-        try:
-            return await self._lifecycle("wake", wait, {} if timeout_seconds is None else {"timeoutSeconds": timeout_seconds},
-                                         idempotency_key)
-        except RuntimeError as error:
-            if error.code != "not_paused" or timeout_seconds is not None:
-                raise
-            await self.refresh()
-            if self.state not in ("running", "starting"):
-                raise
-            return self
-
-    async def extend(self, seconds: int, idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """More time before its time limit ends (at most an hour ahead of
-        now). A sandbox with no time limit needs none: the call answers at
-        once and changes nothing."""
-        return await self._lifecycle("extend", False, {"seconds": seconds}, idempotency_key)
-
-    async def update(self, idempotency_key: Optional[str] = None, **settings: Any) -> "AsyncSandbox":
-        """Changes its settings; what you leave out stays as it is: ``name``,
-        ``labels``, ``env`` (a value sets a variable, None removes it; commands
-        started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
-        ``idle_pause_seconds`` (pause after this long with no activity, counted
-        from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
-        ``persistent`` (keep it running until stopped, while credit lasts,
-        never idle-paused; its disk is billed and kept as any sandbox's; paid
-        only) and
-        ``max_total_cost_micros`` (None removes the cap)."""
-        return await self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
-
-    def keep_alive(self, every_seconds: float = 60, margin_seconds: int = KEEP_ALIVE_MARGIN_SECONDS) -> Callable[[], None]:
-        """Keeps a sandbox with a time limit running past it, in the
-        background, until ``stop()`` or the function it returns ends it:
-        every ``every_seconds`` it extends the limit so that
-        ``margin_seconds`` (60 to 3600) remain, never more than the hour ahead
-        the API allows. A sandbox with no time limit (``endsAt`` None) needs
-        none, and is only watched. Running time is billed as it is used. A
-        paused sandbox is left paused (a request wakes it unless auto_wake is
-        off); a stopped one ends it."""
-        self.stop_keep_alive()
-        state: dict[str, Any] = {"on": True}
-        margin = min(3600, max(60, int(margin_seconds)))
-        every = max(10.0, float(every_seconds))
-
-        async def loop() -> None:
-            while state["on"]:
-                try:
-                    await self.refresh()
-                    if self.state in ("stopped", "stopping"):
-                        break
-                    # No time limit: nothing to extend (an older server sends no endsAt).
-                    if self.state == "running" and not ("endsAt" in self.info and self.info["endsAt"] is None):
-                        need = math.ceil(margin - _seconds_until(self.info.get("endsAt") or self.info.get("expiresAt")))
-                        if need >= 1:
-                            await self.extend(min(3600, need))
-                except RuntimeError:
-                    pass  # The next check tries again.
-                if state["on"]:
-                    await sleep(every)
-            state["on"] = False
-            if self._keep_alive is state.get("end"):
-                self._keep_alive = None
-
-        cancel = background(loop)
-
-        def end() -> None:
-            state["on"] = False
-            cancel()
-            if self._keep_alive is end:
-                self._keep_alive = None
-        state["end"] = end
-        self._keep_alive = end
-        return end
-
-    def stop_keep_alive(self) -> None:
-        """Ends ``keep_alive()``, if it runs."""
-        if self._keep_alive is not None:
-            self._keep_alive()
-
-    async def set_retention(self, days: int, idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """Days a paused sandbox is kept before deletion (1 to 365)."""
-        return await self._lifecycle("retention", False, {"days": days}, idempotency_key)
-
-    async def snapshot(self, *, name: Optional[str] = None, labels: Optional[dict[str, str]] = None,
-                       retention_days: Optional[int] = None, mode: Optional[str] = None,
-                       idempotency_key: Optional[str] = None,
-                       timeout_seconds: Optional[float] = None) -> dict[str, Any]:
-        """Keep a whole-machine snapshot, or a disk-only snapshot with mode='disk'.
-        A running source stays paused until capture finishes, then wakes; an
-        already paused source stays paused. Capture waits ``timeout_seconds``
-        (ten minutes unless given); a capture still running then keeps its
-        source paused, and the snapshot_timeout error names the snapshot."""
-        if mode is not None and mode not in ("memory", "disk"):
-            raise ValueError("Snapshot mode must be memory or disk")
-        from ._request_scope import Limits, request_scope
-        body = {"name": name, "labels": labels, "retentionDays": retention_days, "mode": mode}
-        await self.refresh()
-        if self.state in ("resuming", "starting"):
-            await self.wait_for("running")
-        elif self.state == "pausing":
-            await self.wait_for("paused")
-        running = self.state == "running"
-        snapshot = None
-        primary_error = None
-        # A capture still running at the deadline needs its source paused: the
-        # worker fails one whose source woke (4 October 2026).
-        late = False
-        try:
-            if running:
-                await self.pause()
-            try:
-                with request_scope(timeout_seconds if timeout_seconds and timeout_seconds > 0
-                                   else SNAPSHOT_DEADLINE_SECONDS):
-                    snapshot = await self._t.json("POST", self._path(":snapshot"),
-                                                  body={k: v for k, v in body.items() if v is not None},
-                                                  wait=10, idempotency_key=idempotency_key)
-                    while snapshot["state"] == "capturing":
-                        await _request_sleep(.2)
-                        snapshot = await self._t.json("GET", f"/v1/snapshots/{_enc(snapshot['id'])}")
-            except (RuntimeError, *timeouts()) as error:
-                if isinstance(error, RuntimeError) and error.code != "request_timeout":
-                    raise
-                if snapshot is None:
-                    raise RuntimeError("Snapshot capture ran past its deadline.", code="snapshot_timeout") from error
-                late = running
-                raise RuntimeError(
-                    f"Snapshot {snapshot['id']} was still capturing at the deadline."
-                    + (" The sandbox stays paused until it ends: waking it now would fail the capture." if running else ""),
-                    code="snapshot_timeout",
-                    hint=f"Wait until snapshots.get('{snapshot['id']}') is ready"
-                         + (", then wake the sandbox" if running else "") + ", or pass a longer timeout_seconds.",
-                    details={"snapshotId": snapshot["id"], "sourceSandboxId": self.id}) from error
-            if snapshot["state"] != "ready":
-                raise RuntimeError(snapshot.get("error") or f"Snapshot capture ended in state {snapshot['state']}.",
-                                   code="snapshot_failed", status=409, details={"snapshotId": snapshot["id"]})
-            if mode == "disk" and snapshot.get("mode") != "disk":
-                raise RuntimeError("The server did not confirm a disk-only snapshot.", code="snapshot_mode_mismatch",
-                                   status=409, details={"snapshotId": snapshot["id"]})
-            return snapshot
-        except BaseException as error:
-            primary_error = error
-            raise
-        finally:
-            if running and not late:
-                # Capture's deadline must never prevent restoring the source.
-                try:
-                    with request_scope(captured=Limits()):
-                        await self.wake()
-                except BaseException as error:
-                    failure = primary_error if primary_error is not None else error
-                    recovery = {"message": str(error)}
-                    if isinstance(error, RuntimeError):
-                        recovery["code"] = error.code
-                    details = {"sourceSandboxId": self.id, "sourceWakeError": recovery}
-                    if snapshot is not None:
-                        details["snapshotId"] = snapshot["id"]
-                    if isinstance(failure, RuntimeError):
-                        failure.details = {**(failure.details or {}), **details}
-                    else:
-                        for key, value in details.items():
-                            setattr(failure, key, value)
-                    if primary_error is None:
-                        raise
-
     async def fork(self, count: Optional[int] = None, *, name: Optional[str] = None,
                    labels: Optional[dict[str, str]] = None, keep_snapshot: Optional[bool] = None,
                    funding: Optional[str] = None, idempotency_key: Optional[str] = None) -> Any:
@@ -1599,33 +1640,24 @@ class AsyncSandbox:
         sandboxes = [AsyncSandbox(self._t, info) for info in reply["sandboxes"]]
         return sandboxes if count is not None else sandboxes[0]
 
-    async def restart(self, wait: bool = True, idempotency_key: Optional[str] = None) -> "AsyncSandbox":
-        """Starts a stopped sandbox again from its disk (memory is not kept)."""
-        return await self._lifecycle("restart", wait, idempotency_key=idempotency_key)
 
-    async def __aenter__(self) -> "AsyncSandbox":
-        return self
+class AsyncMachines(Generic[_M]):
+    """A machine product's collection, ``runtime.<product>``: its create,
+    reads, deletes and lists, written once. A product subclasses it with the
+    machine class it answers and the check of its create's fields."""
 
-    async def __aexit__(self, *_: Any) -> None:
-        self.stop_keep_alive()
-        if self.state != "stopped":
-            try:
-                await self.stop(wait=False)
-            except RuntimeError:
-                pass
+    _machine: Any = AsyncMachine
 
-    def __repr__(self) -> str:
-        return f"Sandbox(id={self.id!r}, state={self.state!r})"
-
-
-class AsyncSandboxes:
     def __init__(self, t: _Transport) -> None:
         self._t = t
+
+    def _check_create(self, fields: dict[str, Any]) -> None:
+        """Refuses a create field the product does not take."""
 
     async def create(self, *, wait: bool = True, idempotency_key: Optional[str] = None,
                      wait_for_capacity: Optional[float] = None,
                      on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
-                     **fields: Any) -> AsyncSandbox:
+                     **fields: Any) -> _M:
         """Creates a sandbox and waits until it is running. Every field is
         optional (name, labels, env (variables for every command, terminal
         and SSH session in it; values are never shown again), funding, region, vcpu, memory_mib, disk_mib,
@@ -1634,30 +1666,31 @@ class AsyncSandboxes:
         max_cost_micros, network={"internet": True, "deny": [...]}, and
         image, snapshot, volumes and the rest of _CREATE_FIELDS; a misspelled one
         raises TypeError, naming the one meant).
-        When every trial slot or the account's quota is taken, it waits for one
+        When every slot without credit or the account's quota is taken, it waits for one
         to free, up to ``wait_for_capacity`` seconds (the client's, 120 by
         default; 0 fails at once), then raises the refusal as it came;
         ``on_capacity_wait(refusal, seconds)`` is called before each wait, to
         tell a person why nothing has happened yet."""
-        _check_create_fields(fields)
+        self._check_create(fields)
         body = {_camel(k): v for k, v in fields.items() if v is not None}
         if isinstance(body.get("volumes"), list):
             body["volumes"] = [{_camel(k): v for k, v in item.items()} for item in body["volumes"]]
-        info = await self._t.json("POST", "/v1/sandboxes", body=body, wait=60 if wait else None,
+        info = await self._t.json("POST", f"/v1/{self._machine._plural}", body=body, wait=60 if wait else None,
                                   idempotency_key=idempotency_key,
                                   wait_for_capacity=self._t.wait_for_capacity if wait_for_capacity is None
                                   else max(0.0, float(wait_for_capacity)),
                                   on_capacity_wait=on_capacity_wait)
-        sandbox = AsyncSandbox(self._t, info)
-        if wait and sandbox.state != "running":
-            await sandbox.wait_for("running", WAIT_FOR_TIMEOUT_SECONDS)
-            if sandbox.state != "running":
-                raise RuntimeError(f"Sandbox {sandbox.id} is {sandbox.state}, not running.", code="start_failed",
-                                   hint="Read it with runtime.sandboxes.get(id); stopReason says why.")
-        return sandbox
+        machine = self._machine(self._t, info)
+        if wait and machine.state != "running":
+            await machine.wait_for("running", WAIT_FOR_TIMEOUT_SECONDS)
+            if machine.state != "running":
+                raise RuntimeError(f"{self._machine._noun} {machine.id} is {machine.state}, not running.",
+                                   code="start_failed",
+                                   hint=f"Read it with runtime.{self._machine._plural}.get(id); stopReason says why.")
+        return machine
 
     async def get_or_create(self, name: str, *, wait: bool = True, idempotency_key: Optional[str] = None,
-                            **fields: Any) -> AsyncSandbox:
+                            **fields: Any) -> _M:
         """The sandbox named ``name`` in this account, ready to use: running as
         it is, woken if paused, restarted if stopped and persistent, or created
         with ``fields`` when no sandbox has the name. ``sandbox.info.get("reused")``
@@ -1665,13 +1698,14 @@ class AsyncSandboxes:
         return await self.create(wait=wait, idempotency_key=idempotency_key, name=name, get_or_create=True,
                                  **fields)
 
-    async def get(self, sandbox_id: str) -> AsyncSandbox:
-        return AsyncSandbox(self._t, await self._t.json("GET", f"/v1/sandboxes/{_enc(sandbox_id)}"))
+    async def get(self, sandbox_id: str) -> _M:
+        return self._machine(self._t, await self._t.json("GET", f"/v1/{self._machine._plural}/{_enc(sandbox_id)}"))
 
     async def delete(self, sandbox_id: str, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Deletes a sandbox for good, by id, without reading it first: see
         ``AsyncSandbox.delete``."""
-        return await self._t.json("DELETE", f"/v1/sandboxes/{_enc(sandbox_id)}", idempotency_key=idempotency_key)
+        return await self._t.json("DELETE", f"/v1/{self._machine._plural}/{_enc(sandbox_id)}",
+                                  idempotency_key=idempotency_key)
 
     async def list(self, *, state: Optional[list[str]] = None, include_stopped: bool = False,
                    labels: Optional[dict[str, str]] = None, name: Optional[str] = None,
@@ -1682,8 +1716,8 @@ class AsyncSandboxes:
                                  "name": name, "limit": limit}
 
         async def fetch(cursor: Optional[str]) -> AsyncPage:
-            body = await self._t.json("GET", "/v1/sandboxes", query={**query, "cursor": cursor})
-            return AsyncPage([AsyncSandbox(self._t, info) for info in body["data"]], body.get("nextCursor"), fetch)
+            body = await self._t.json("GET", f"/v1/{self._machine._plural}", query={**query, "cursor": cursor})
+            return AsyncPage([self._machine(self._t, info) for info in body["data"]], body.get("nextCursor"), fetch)
         return await fetch(None)
 
     async def stop_all(self, *, labels: dict[str, str]) -> dict[str, Any]:
@@ -1692,8 +1726,9 @@ class AsyncSandboxes:
         failure does not stop the rest. Needs at least one label, so stopping
         everything is never one call."""
         if not labels:
+            one = self._machine._noun.lower()
             raise RuntimeError("stop_all needs at least one label to match.", code="invalid_request",
-                               hint="Stop one sandbox with sandbox.stop(), or label the ones to stop together.")
+                               hint=f"Stop one {one} with {one}.stop(), or label the ones to stop together.")
         live = [sandbox async for sandbox in await self.list(labels=labels, limit=100)]
         errors: dict[int, BaseException] = {}
 
@@ -1705,6 +1740,15 @@ class AsyncSandboxes:
         await parallel(stop, range(len(live)), 8)
         return {"stopped": [s.id for at, s in enumerate(live) if at not in errors],
                 "failed": [{"id": s.id, "error": errors[at]} for at, s in enumerate(live) if at in errors]}
+
+
+class AsyncSandboxes(AsyncMachines[AsyncSandbox]):
+    """``runtime.sandboxes``: create, read, list, stop and delete sandboxes."""
+
+    _machine = AsyncSandbox
+
+    def _check_create(self, fields: dict[str, Any]) -> None:
+        _check_create_fields(fields)
 
 
 class AsyncSnapshots:
@@ -1810,18 +1854,18 @@ class AsyncRuntime:
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, *, timeout: float = 300,
                  max_retries: int = 4, max_connections: int = DEFAULT_MAX_CONNECTIONS,
-                 wait_for_capacity: float = 120) -> None:
+                 wait_for_capacity: float = 120, on_queued: Optional[Callable[[int], None]] = None) -> None:
         """``wait_for_capacity``: seconds ``sandboxes.create`` keeps retrying,
-        with the same key and input, when the trial's slots, the account's
-        quota or the region is full (trial_busy, quota_exceeded, no_capacity
+        with the same key and input, when the slots without credit, the account's quota or the region is full (no_credit_running_limit, quota_exceeded, no_capacity
         and the like). 0 fails at once. ``max_connections``: connections held
         at once, calls and streams (a command's output, a download) together;
         more wait their turn and reuse them. Default 48: one address may hold
         64 connections to the API before it has used a valid key. 8 are kept
-        for calls whatever the streams hold."""
+        for calls whatever the streams hold. ``on_queued(max_connections)`` is
+        called each time a call has to wait for one of them."""
         self._t = _Transport(api_key or os.environ.get("RUNTIME_API_KEY", ""),
                              base_url or default_base_url(), timeout, max_retries,
-                             max_connections, wait_for_capacity)
+                             max_connections, wait_for_capacity, on_queued)
         self.base_url = self._t.base_url
         self.sandboxes = AsyncSandboxes(self._t)
         self.sandbox = self.sandboxes
@@ -1844,7 +1888,7 @@ class AsyncRuntime:
         return await self._t.json("GET", "/v1/me")
 
     async def usage(self) -> dict[str, Any]:
-        """Credit, holds, trial time and per-resource charges. Money is integer
+        """Credit, holds, free time and per-resource charges. Money is integer
         microdollars in strings (1,000,000 = $1): ``credited``, ``spent``,
         ``held``, ``expired``, ``available`` (credited - spent - expired - held)
         and ``takenBack`` (the part of spent that refunds and disputes took);

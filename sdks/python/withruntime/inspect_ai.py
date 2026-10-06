@@ -311,7 +311,7 @@ class RuntimeSandboxEnvironment(SandboxEnvironment):
             try:
                 sandbox = await runtime.sandboxes.create(**fields)
             except RuntimeCloudError as error:
-                if error.code != "invalid_trial" or settings.funding is not None:
+                if error.code != "no_credit_size_limit" or settings.funding is not None:
                     raise
                 sizes, notes = _sizes(settings.vcpu, settings.memory_mib, settings.disk_mib, True)
                 logger.warning("Runtime: this account runs on its trial, so %s. Set funding='paid' for the size "

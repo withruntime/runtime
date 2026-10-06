@@ -18,14 +18,15 @@ DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previ
 # SDK does, with backoff, until the call's deadline (five minutes when it has
 # none), however many retries it allows otherwise.
 NOTHING_RAN = frozenset({"guest_busy", "busy", "rate_limited"})
-# Refusals that pass on their own: a host frees room, a trial slot frees.
-_PASSING = frozenset({"no_capacity", "trial_busy"})
+# Refusals that pass on their own: a host frees room, a sandbox of an account
+# without credit stops.
+_PASSING = frozenset({"no_capacity", "no_credit_running_limit", "no_credit_total_limit"})
 # Refusals of a create that clear when a sandbox stops or pauses, or a host
-# frees room: the trial's slots, an email domain's trial slots, the account's
-# quota and the region's capacity. sandboxes.create waits them out, retrying
+# frees room: an account without credit's eight at once and its total, an
+# email domain's, the account's quota and the region's capacity. sandboxes.create waits them out, retrying
 # with the same key and input, for up to wait_for_capacity seconds.
-WAITS_FOR_ROOM = frozenset({"trial_busy", "trial_domain_limit", "trial_capacity", "quota_exceeded", "no_capacity",
-                            "volume_releasing"})
+WAITS_FOR_ROOM = frozenset({"no_credit_running_limit", "no_credit_total_limit", "no_credit_domain_limit",
+                            "no_credit_capacity_full", "quota_exceeded", "no_capacity", "volume_releasing"})
 
 
 class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0.1.0
@@ -46,14 +47,14 @@ class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0
     @property
     def retryable(self) -> bool:
         """Retrying this exact call is safe and may work. True for no_capacity
-        and trial_busy as well, which clear by themselves when a host frees room
-        or a trial sandbox stops. sandboxes.create already waits for those (see
+        and no_credit_running_limit as well, which clear by themselves when a host frees room
+        or a sandbox without credit stops. sandboxes.create already waits for those (see
         wait_for_capacity), so seeing one from a create means the wait ran out
         or was switched off."""
         if self.code in DELIBERATE:
             return False
         if self.code in _PASSING:
-            # A fork asking for more copies than the trial runs at once never fits.
+            # A fork asking for more copies than an account without credit runs at once never fits.
             return (self.details or {}).get("field") != "count"
         return self.status in (0, 429, 502, 503, 504)
 

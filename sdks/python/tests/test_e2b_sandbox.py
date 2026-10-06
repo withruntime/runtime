@@ -16,7 +16,7 @@ import withruntime.e2b as e2b  # noqa: E402
 from withruntime.e2b import (AsyncSandbox, AuthenticationException, CommandExitException, FileNotFoundException,  # noqa: E402
                              FileType, InvalidArgumentException, NotSupportedException, Sandbox, SandboxQuery,
                              SandboxException, SandboxNotFoundException, TemplateException, TimeoutException)
-from withruntime.e2b._core import pick_key, pid_of  # noqa: E402
+from withruntime.e2b._core import HOME_LINK, pick_key, pid_of  # noqa: E402
 from withruntime.e2b import _sync_sandbox as sync_sandbox  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -90,22 +90,64 @@ class Create(Base):
     def test_e2b_defaults_and_funding_left_to_runtime(self):
         import time
         sbx = self.create()
-        # No timeout, no time limit: it runs while it works and pauses when
-        # idle (0300), never killed at E2B's five minutes in the middle of work.
-        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 512, "on_lease_end": "stop"})
+        # Nobody asked for it to end, so E2B's default five minutes pauses it:
+        # nothing is lost, and the next call wakes it.
+        self.assertEqual(self.last_create(), {"vcpu": 2, "memory_mib": 512, "timeout_seconds": 300,
+                                              "on_lease_end": "pause"})
         self.assertEqual(sbx.sandbox_id, self.fake(sbx).id)
-        self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())
-        # Its end_at is a time ahead, and set_timeout has no end to move.
-        self.assertGreater(sbx.get_info().end_at.timestamp(), time.time())
-        sbx.set_timeout(600)
-        self.assertEqual(self.world.called("sandbox.extend"), [])
+        self.assertEqual(self.world.called("images.list"), [])
+        info = sbx.get_info()
+        self.assertGreater(info.end_at.timestamp(), time.time())
+        self.assertEqual(info.lifecycle.on_timeout, "pause")
 
-    def test_a_timeout_is_the_limit_the_customer_set(self):
+    def test_a_timeout_is_a_deadline_the_server_keeps_and_it_deletes(self):
         import time
         sbx = self.create(timeout=600)
-        self.assertEqual(self.last_create()["timeout_seconds"], 600)
-        self.assertAlmostEqual(sbx.get_info().end_at.timestamp(), time.time() + 600, delta=5)
-        self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())
+        self.assertEqual((self.last_create()["timeout_seconds"], self.last_create()["on_lease_end"]), (600, "delete"))
+        info = sbx.get_info()
+        self.assertAlmostEqual(info.end_at.timestamp(), time.time() + 600, delta=5)
+        self.assertEqual(info.lifecycle.on_timeout, "kill")
+        sbx.set_timeout(1200)
+        seconds = self.world.called("sandbox.extend")[-1][1]
+        self.assertTrue(599 <= seconds <= 602, seconds)
+        # An explicit on_timeout "kill" deletes too, with or without a timeout.
+        self.create(lifecycle={"on_timeout": "kill"})
+        self.assertEqual((self.last_create()["timeout_seconds"], self.last_create()["on_lease_end"]), (300, "delete"))
+
+    def test_a_timeout_up_to_24_hours_is_sent_whole(self):
+        # 5 October 2026: a 24-hour timeout was an hour's lease that this
+        # process moved on every five minutes, so a create from a request
+        # handler or a cron ended within the hour.
+        sbx = self.create(timeout=86_400)
+        self.assertEqual((self.last_create()["timeout_seconds"], self.last_create()["on_lease_end"]),
+                         (86_400, "delete"))
+        sbx.set_timeout(86_400)
+        self.assertEqual(self.world.called("sandbox.extend"), [])  # the same end: nothing to move
+        other = self.create(timeout=600)
+        Sandbox.connect(other.sandbox_id, timeout=3 * 3600, client=self.world.client())
+        self.assertGreater(self.world.called("sandbox.extend")[-1][1], 3 * 3600 - 610)
+
+    def test_a_sandbox_the_server_keeps_running_has_no_end_to_move(self):
+        sbx = self.create(runtime_create={"persistent": True})
+        sbx.set_timeout(600)
+        Sandbox.connect(sbx.sandbox_id, timeout=600, client=self.world.client())
+        self.assertEqual(self.world.called("sandbox.extend"), [])
+        # Its end is E2B's furthest, a day ahead, not where it is paid up to:
+        # 5 October 2026, a pilot's read minutes ahead and looked about to end.
+        import time
+        self.assertAlmostEqual(sbx.get_info().end_at.timestamp(), time.time() + 86_400, delta=5)
+        listed = Sandbox.list(client=self.world.client()).next_items()
+        self.assertAlmostEqual(listed[0].end_at.timestamp(), time.time() + 86_400, delta=5)
+        # A paused one keeps the time it stopped.
+        sbx.pause()
+        self.assertEqual(sbx.get_info().end_at.isoformat().replace("+00:00", "Z")[:19],
+                         self.fake(sbx).info["expiresAt"][:19])
+
+    def test_set_timeout_cannot_bring_the_end_sooner(self):
+        sbx = self.create(timeout=600)
+        with self.assertRaises(NotSupportedException) as caught:
+            sbx.set_timeout(60)
+        self.assertIn("kill()", str(caught.exception))
 
     def test_maps_timeout_metadata_internet_and_lifecycle(self):
         self.create(timeout=120, metadata={"job": "x"}, allow_internet_access=False,
@@ -153,46 +195,42 @@ class Create(Base):
             self.create(timeout=86_401)
         self.assertEqual(self.world.called("sandboxes.create"), [])
 
-    def test_a_timeout_over_an_hour_is_carried_on(self):
-        # Refused before 2 October 2026; Runtime's lease reaches an hour ahead,
-        # so the adapter moves it on toward the end asked for.
-        import time
-        sbx = self.create(timeout=7200)
-        self.assertEqual(self.last_create()["timeout_seconds"], 3600)
-        until = sync_sandbox.kept_leases()[sbx.sandbox_id]
-        self.assertAlmostEqual(until, time.time() + 7200, delta=5)
-        sync_sandbox.renew_leases()
-        self.assertEqual(self.world.called("sandbox.extend"), [])  # still an hour ahead: nothing to do
-        from unittest import mock
-        from e2b_fake import _iso
-        fake, start = self.fake(sbx), time.time()
-        fake.info["expiresAt"] = _iso(start + 600)  # ten minutes left
-        sync_sandbox.renew_leases()
-        seconds = self.world.called("sandbox.extend")[-1][1]
-        self.assertTrue(2900 <= seconds <= 2990, seconds)  # back to about an hour ahead
-        with mock.patch("time.time", return_value=start + 4000):  # an hour and six minutes on
-            fake.info["expiresAt"] = _iso(start + 4300)
-            sync_sandbox.renew_leases()
-            seconds = self.world.called("sandbox.extend")[-1][1]
-            self.assertTrue(2890 <= seconds <= 2910, seconds)  # to the end asked for, never past it
-            self.assertNotIn(sbx.sandbox_id, sync_sandbox.kept_leases())  # reached: no more keeping
-        other = self.create(timeout=7200)
-        self.assertIn(other.sandbox_id, sync_sandbox.kept_leases())
-        other.kill()
-        self.assertNotIn(other.sandbox_id, sync_sandbox.kept_leases())
-
     def test_templates(self):
+        from withruntime.e2b._core import TEMPLATE_LABEL
         self.create("base")
         self.assertNotIn("image", self.last_create())
+        self.assertNotIn("labels", self.last_create())
         self.world.images.append({"id": "img-1", "name": "my-agent", "state": "ready"})
-        self.create("my-agent")
-        self.assertEqual(self.last_create()["image"], "img-1")
+        # A name, with E2B's team and tag, goes to the create, which resolves it.
+        for template, image in (("my-agent", "my-agent"), ("my-agent:v2", "my-agent:v2"),
+                                ("acme/my-agent:v2", "my-agent:v2")):
+            sbx = self.create(template, metadata={"job": "x"})
+            self.assertEqual(self.last_create()["image"], image)
+            self.assertEqual(self.last_create()["labels"], {"job": "x", TEMPLATE_LABEL: template})
+            info = sbx.get_info()
+            self.assertEqual((info.template_id, info.metadata), (template, {"job": "x"}))
+        self.assertEqual(self.world.called("images.list"), [])
+        paginator = Sandbox.list(query=SandboxQuery(template="acme/my-agent:v2"), client=self.world.client())
+        self.assertEqual(len(paginator.next_items()), 1)
+        # No room among 32 labels: the template goes unlabelled, metadata whole.
+        full = {f"k{i}": "v" for i in range(32)}
+        self.create("my-agent", metadata=full)
+        self.assertEqual(self.last_create()["labels"], full)
         with self.assertRaises(TemplateException) as caught:
-            self.create("abc123xyz")
+            self.create("abc123xyz:v1")
         self.assertIn("--name abc123xyz", str(caught.exception))
+        self.assertEqual(caught.exception.code, "template_not_found")
+        # It names the account the key belongs to: 5 October 2026, a
+        # RUNTIME_API_KEY of another account looked like a missing image.
+        self.assertIn('No Runtime image is named "abc123xyz:v1" in the account "Acme".', str(caught.exception))
+        image = "11111111-2222-4333-8444-555555555555"
+        self.world.images.append({"id": image, "name": None, "state": "ready"})
+        self.create(image)
+        self.assertEqual(self.last_create()["image"], image)
         uuid = "99999999-2222-4333-8444-555555555555"
         self.create(uuid)
-        self.assertEqual(self.last_create(), {"snapshot": uuid, "on_lease_end": "stop"})
+        self.assertEqual(self.last_create(), {"snapshot": uuid, "timeout_seconds": 300, "on_lease_end": "pause",
+                                              "labels": {TEMPLATE_LABEL: uuid}})
         self.world.forks_enabled = False
         with self.assertRaises(NotSupportedException) as caught:
             self.create(uuid)
@@ -210,9 +248,14 @@ class Keys(unittest.TestCase):
     def test_e2b_keys_are_never_used(self):
         os.environ.pop("RUNTIME_API_KEY", None)
         os.environ["E2B_API_KEY"] = "e2b_abc"
-        self.assertIsNone(pick_key(None))
+        # Never a quiet fall back to a saved login, which may be another account.
+        with self.assertRaises(AuthenticationException) as caught:
+            pick_key(None)
+        self.assertIn("RUNTIME_API_KEY", str(caught.exception))
         with self.assertRaises(AuthenticationException):
             pick_key("e2b_abc")
+        del os.environ["E2B_API_KEY"]
+        self.assertIsNone(pick_key(None))
 
     def test_order(self):
         os.environ["RUNTIME_API_KEY"] = "rk_runtime"
@@ -222,6 +265,35 @@ class Keys(unittest.TestCase):
         self.assertEqual(pick_key("rk_given"), "rk_given")
         del os.environ["RUNTIME_API_KEY"]
         self.assertEqual(pick_key(None), "rk_other")
+
+    def test_two_different_runtime_keys_are_said_once_and_errors_name_the_source(self):
+        # 5 October 2026: a RUNTIME_API_KEY of another account silently beat
+        # E2B_API_KEY, and the create failed as a missing image.
+        import warnings
+        from withruntime.e2b import _core
+        _core._warned_two_keys = False
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            os.environ["RUNTIME_API_KEY"] = os.environ["E2B_API_KEY"] = "rk_same"
+            pick_key(None)
+            os.environ["E2B_API_KEY"] = "e2b_left"
+            pick_key(None)
+            self.assertEqual(seen, [])
+            os.environ["E2B_API_KEY"] = "rk_other"
+            self.assertEqual(pick_key(None), "rk_same")
+            pick_key(None)
+        self.assertEqual(len(seen), 1)
+        self.assertIn("RUNTIME_API_KEY and E2B_API_KEY hold different Runtime keys", str(seen[0].message))
+        _core._warned_two_keys = False
+        self.assertEqual(_core.key_source("rk_given"), "api_key")
+        self.assertEqual(_core.key_source(None), "RUNTIME_API_KEY")
+        del os.environ["RUNTIME_API_KEY"]
+        self.assertEqual(_core.key_source(None), "E2B_API_KEY")
+        del os.environ["E2B_API_KEY"]
+        self.assertEqual(_core.key_source(None), "the saved login")
+        self.assertEqual(_core.account_of({"orgId": "o", "orgName": "Acme"}, "RUNTIME_API_KEY"),
+                         ' in the account "Acme" (key: RUNTIME_API_KEY)')
+        self.assertEqual(_core.account_of(None, "RUNTIME_API_KEY"), "")
 
 
 class Commands(Base):
@@ -316,7 +388,7 @@ class Commands(Base):
         sbx.commands.run("cat /home/user/a")
         sbx.files.write("/home/user/b", "b")
         commands = [call[0] for call in self.world.called("sandbox.exec")]
-        self.assertEqual(commands.count("[ -e /home/user ] || sudo ln -s /workspace /home/user"), 1)
+        self.assertEqual(commands.count(HOME_LINK), 1)
 
     def test_background(self):
         sbx = self.create()
@@ -348,7 +420,18 @@ class Commands(Base):
         self.assertEqual(self.world.called("process.write"), [(process.id, "hello\n", False), (process.id, b"", True)])
         listed = sbx.commands.list()
         self.assertIn(opened.pid, [one.pid for one in listed])
-        self.assertEqual((listed[0].cmd, listed[0].args), ("/bin/bash", ["-c", "cat"]))
+        self.assertEqual((listed[0].cmd, listed[0].args), ("/bin/bash", ["-l", "-c", "cat"]))
+        # As E2B starts each: /bin/bash -l -c and the customer's own script,
+        # also through sudo for another user, and /bin/bash -i -l for a PTY
+        # (5 October 2026: args were ["-c", "bash -c cat"]).
+        from withruntime.e2b._core import command_as, listed_as, shell_as
+        from e2b_fake import guest_command
+        self.assertEqual(listed_as(guest_command(command_as("root", "npm run dev", False))),
+                         ("/bin/bash", ["-l", "-c", "npm run dev"]))
+        self.assertEqual(listed_as(guest_command(command_as("root", "a && b", True))), ("/bin/bash", ["-l", "-c", "a && b"]))
+        self.assertEqual(listed_as(guest_command(shell_as("root", False))), ("/bin/bash", ["-i", "-l"]))
+        self.assertEqual(listed_as(guest_command(["/bin/bash", "-i", "-l"])), ("/bin/bash", ["-i", "-l"]))
+        self.assertEqual(listed_as("python3 -m http.server 8000"), ("python3", ["-m", "http.server", "8000"]))
         sbx.commands.send_stdin(opened.pid, "more")
         self.assertEqual(sbx.commands.connect(opened.pid).pid, opened.pid)
         self.assertTrue(sbx.commands.kill(opened.pid))
@@ -356,24 +439,52 @@ class Commands(Base):
         self.assertFalse(sbx.commands.kill(12345))
 
 
+class SandboxGone(Base):
+    def test_a_command_whose_sandbox_is_killed_under_it_fails_with_e2bs_timeout(self):
+        # 5 October 2026, E2B's own suite: it was a SandboxNotFoundException.
+        from e2b_fake import not_found
+        sbx = self.create()
+        self.world.output_error = not_found("not_found", "No sandbox with that id.")
+        handle = sbx.commands.run("sleep 60", background=True)
+        with self.assertRaisesRegex(TimeoutException, "ended before the stream completed"):
+            handle.wait()
+
+
 class Files(Base):
     def test_read_write(self):
         sbx = self.create()
+        # 5 October 2026, E2B's own suite: a relative write came back as
+        # /workspace/... where E2B gives /home/user/...
         info = sbx.files.write("notes/a.txt", "hello")
-        self.assertEqual((info.name, info.type, info.path), ("a.txt", FileType.FILE, "/workspace/notes/a.txt"))
+        self.assertEqual((info.name, info.type, info.path), ("a.txt", FileType.FILE, "/home/user/notes/a.txt"))
+        self.assertEqual(sbx.files.get_info("./notes/a.txt").path, "/home/user/notes/a.txt")
+        self.assertEqual([one.path for one in sbx.files.list("notes")], ["/home/user/notes/a.txt"])
+        self.assertEqual(sbx.files.get_info("/workspace/notes/a.txt").path, "/workspace/notes/a.txt")
+        self.assertEqual(sbx.files.rename("notes/a.txt", "notes/b.txt").path, "/home/user/notes/b.txt")
+        sbx.files.rename("notes/b.txt", "notes/a.txt")
+        # Asked once, after the first call: /home/user leads to /workspace.
+        self.assertEqual([c[0] for c in self.world.called("sandbox.exec")].count(HOME_LINK), 1)
         self.assertEqual(sbx.files.read("/workspace/notes/a.txt"), "hello")
         self.assertEqual(sbx.files.read("notes/a.txt", format="bytes"), bytearray(b"hello"))
         self.assertEqual(b"".join(sbx.files.read("notes/a.txt", format="stream")), b"hello")
         written = sbx.files.write_files([{"path": "/workspace/b", "data": b"\x01"}, {"path": "c", "data": "c"}])
-        self.assertEqual([one.path for one in written], ["/workspace/b", "/workspace/c"])
+        self.assertEqual([one.path for one in written], ["/workspace/b", "/home/user/c"])
+
+    def test_an_image_with_its_own_home_gets_workspace_paths_that_name_the_file(self):
+        sbx = self.create()
+        self.world.exec = lambda command, _: Result(0, "")
+        self.assertEqual(sbx.files.write("a.txt", "a").path, "/workspace/a.txt")
+        self.assertEqual(sbx.files.get_info("a.txt").path, "/workspace/a.txt")
 
     def test_list_info_dirs_rename_remove(self):
         sbx = self.create()
         sbx.files.write("/workspace/d/x.py", "print(1)")
         entry = sbx.files.list("/workspace/d")[0]
         self.assertEqual((entry.name, entry.type, entry.size, entry.mode, entry.permissions),
-                         ("x.py", FileType.FILE, 8, 0o644, "rw-r--r--"))
+                         ("x.py", FileType.FILE, 8, 0o644, "-rw-r--r--"))
         self.assertEqual(self.world.called("files.list")[0][1], {"depth": 1, "hidden": True})
+        with self.assertRaisesRegex(InvalidArgumentException, "^depth should be at least one$"):
+            sbx.files.list("/workspace/d", depth=0)
         self.assertEqual(sbx.files.get_info("/workspace/d").type, FileType.DIR)
         self.assertFalse(sbx.files.make_dir("/workspace/d"))
         self.assertTrue(sbx.files.make_dir("/workspace/e"))
@@ -415,11 +526,18 @@ class Files(Base):
 
 
 class Lifecycle(Base):
-    def test_kill(self):
+    def test_kill_deletes(self):
+        # E2B's kill destroys the sandbox. Until 5 October 2026 it was a stop,
+        # which on Runtime keeps the disk: about 3 GiB booked per kill.
         sbx = self.create()
         self.assertTrue(sbx.kill())
-        self.assertEqual(self.world.called("sandbox.stop")[0], (sbx.sandbox_id, False))
+        self.assertEqual(self.world.called("sandbox.delete"), [(sbx.sandbox_id,)])
+        self.assertEqual(self.world.called("sandbox.stop"), [])
+        self.assertNotIn(sbx.sandbox_id, self.world.sandboxes)
         self.assertFalse(sbx.kill())
+        other = self.create()
+        self.assertTrue(Sandbox.kill(other.sandbox_id, client=self.world.client()))
+        self.assertFalse(other.is_running())
         self.assertFalse(Sandbox.kill(sbx.sandbox_id, client=self.world.client()))
         self.assertFalse(Sandbox.kill("nope", client=self.world.client()))
 
@@ -427,7 +545,7 @@ class Lifecycle(Base):
         sbx = self.create(timeout=120)
         sbx.set_timeout(600)
         seconds = self.world.called("sandbox.extend")[0][1]
-        self.assertTrue(478 <= seconds <= 482, seconds)
+        self.assertTrue(479 <= seconds <= 482, seconds)
         with self.assertRaises(NotSupportedException):
             sbx.set_timeout(60)
         Sandbox.set_timeout(sbx.sandbox_id, 900, client=self.world.client())
@@ -456,7 +574,21 @@ class Lifecycle(Base):
     def test_context_manager_kills(self):
         with self.create() as sbx:
             pass
-        self.assertEqual(self.world.called("sandbox.stop")[0][0], sbx.sandbox_id)
+        self.assertEqual(self.world.called("sandbox.delete")[0][0], sbx.sandbox_id)
+
+    def test_a_sandbox_runtime_paused_for_being_idle_is_running_to_e2b(self):
+        # E2B never pauses an idle sandbox; Runtime does, and the next call
+        # wakes it, so code written for E2B sees it running.
+        sbx = self.create(metadata={"s": "idle"})
+        self.fake(sbx).info.update(state="paused", stopReason="idle")
+        self.assertTrue(sbx.is_running())
+        self.assertEqual(sbx.get_info().state, "running")
+        running = Sandbox.list(query=SandboxQuery(state=["running"]), client=self.world.client())
+        self.assertEqual([one.sandbox_id for one in running.next_items()], [sbx.sandbox_id])
+        paused = Sandbox.list(query=SandboxQuery(state=["paused"]), client=self.world.client())
+        self.assertEqual(paused.next_items(), [])
+        sbx.runtime.info["stopReason"] = "requested"
+        self.assertFalse(sbx.is_running())
 
 
 class Listing(Base):
@@ -628,7 +760,7 @@ class Async(unittest.TestCase):
                 self.assertTrue(await AsyncSandbox.pause(sbx.sandbox_id, client=world.async_client()))
                 await AsyncSandbox.connect(sbx.sandbox_id, client=world.async_client())
             self.assertEqual(seen, ["ran echo hi\n", "ran serve\n"])
-            self.assertEqual(world.called("sandbox.stop")[0][0], sbx.sandbox_id)
+            self.assertEqual(world.called("sandbox.delete")[0][0], sbx.sandbox_id)
             # The sandbox's envs went with its create, not with each command.
             self.assertEqual(world.called("sandboxes.create")[0][0]["env"], {"A": "1"})
             self.assertIsNone(world.called("sandbox.spawn")[0][1]["env"])
@@ -645,8 +777,8 @@ class Async(unittest.TestCase):
 
         async def scenario():
             sbx = await AsyncSandbox.create(timeout=7200, client=world.async_client())
-            self.assertEqual(world.called("sandboxes.create")[0][0]["timeout_seconds"], 3600)
-            self.assertIn(sbx.sandbox_id, async_sandbox.kept_leases())
+            # The whole two hours, kept by the server: no timer in this process.
+            self.assertEqual(world.called("sandboxes.create")[0][0]["timeout_seconds"], 7200)
             self.assertEqual((await sbx.commands.run("id", user="root")).stdout, "ran\n")
             self.assertEqual(world.called("sandbox.exec_stream")[-1][0][:6], ["sudo", "-n", "-E", "-H", "-u", "root"])
             self.assertEqual(await sbx.files.read("/etc/secret", user="root"), "s3cret")
@@ -657,8 +789,8 @@ class Async(unittest.TestCase):
                              ["sudo", "-n", "-E", "-H", "-u", "app", "--", "/bin/bash", "-c", "exec /bin/bash -i -l"])
             with self.assertRaises(e2b.PublicPreviewNotAllowedException):
                 sbx.get_host(3000)
-            await sbx.kill()
-            self.assertNotIn(sbx.sandbox_id, async_sandbox.kept_leases())
+            self.assertTrue(await sbx.kill())
+            self.assertEqual(world.called("sandbox.delete"), [(sbx.sandbox_id,)])
         asyncio.run(scenario())
 
     def test_disconnect(self):

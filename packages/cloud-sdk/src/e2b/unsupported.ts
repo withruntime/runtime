@@ -51,3 +51,36 @@ export const Secret = unsupportedExport(
   "Secret",
   "Use a Runtime secret: `npx withruntime secrets set NAME --host api.example.com`. The sandbox sees a placeholder, and the egress proxy adds the value on HTTPS to that host.",
 );
+export const SecretPaginator = unsupportedExport(
+  "SecretPaginator",
+  "List Runtime secrets with `npx withruntime secrets ls` or runtime.secrets.list().",
+);
+export const Git = unsupportedExport(
+  "git module (deprecated by E2B too)",
+  "Run git with sandbox.commands.run('git ...'); git is installed.",
+);
+export const ReadyCmd = unsupportedExport("ReadyCmd (a template ready check)", TEMPLATES);
+export const LogEntry = unsupportedExport("LogEntry (template build logs)", TEMPLATES);
+export const LogEntryStart = unsupportedExport("LogEntryStart (template build logs)", TEMPLATES);
+export const LogEntryEnd = unsupportedExport("LogEntryEnd (template build logs)", TEMPLATES);
+export const defaultBuildLogger = unsupportedExport(
+  "defaultBuildLogger (template build logs)",
+  TEMPLATES,
+);
+const ENDPOINTS =
+  "This package talks only to Runtime's API through the sandbox's own methods; sandbox.runtime is the Runtime sandbox underneath.";
+export const ConnectionConfig = unsupportedExport("ConnectionConfig", ENDPOINTS);
+export const ApiClient = unsupportedExport("ApiClient (E2B's REST client)", ENDPOINTS);
+export const getSignature = unsupportedExport(
+  "getSignature (signed file URLs)",
+  "Use sandbox.files.read and sandbox.files.write.",
+);
+/** E2B's "every address" network selector, as E2B defines it. */
+export const ALL_TRAFFIC = "0.0.0.0/0";
+/** E2B's volume entry types, as E2B defines them. */
+export enum VolumeFileType {
+  UNKNOWN = "unknown",
+  FILE = "file",
+  DIRECTORY = "directory",
+  SYMLINK = "symlink",
+}

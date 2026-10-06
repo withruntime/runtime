@@ -27,11 +27,11 @@ Weighing more than two? [Morph Cloud alternatives](/compare/morph-alternatives) 
   16 GB of disk, and a machine pays for whichever it needs most of. On Runtime
   you choose vCPUs and memory separately and pay for each.
 - **No plan fee.** Morph's plans with included credit cost {{term:morph:developer}} or {{term:morph:team}} a month.
-  Runtime is prepaid credit from {{topup-min}}, with {{trial-hours}} free sandbox hours to start.
+  Runtime is prepaid credit from {{topup-min}}, with {{included-machine}} included every month.
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -58,7 +58,7 @@ Morph's figures come from its public pricing and product pages, checked
 | CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:morph:unit}} per MCU-hour for the machine's size                                      |
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the MCU: 4 GB per MCU                                                                 |
 | Plan fee         | None; prepaid credit from {{topup-min}}                        | Free with no credit; Developer {{term:morph:developer}} and Team {{term:morph:team}} a month |
-| Free start       | {{trial-hours}} sandbox hours, no card                         | 1,000 MCUs with the {{term:morph:developer}} Developer plan                                  |
+| Free start       | {{included-machine}} every month, no card                      | 1,000 MCUs with the {{term:morph:developer}} Developer plan                                  |
 | Snapshots, forks | Files, memory and running processes                            | Memory and disk; branches to many replicas                                                   |
 
 ## Cost for the same job
@@ -87,7 +87,7 @@ is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) f
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Morph calls on a branch, tests them on the free trial, and tells
+replaces the Morph calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -95,7 +95,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

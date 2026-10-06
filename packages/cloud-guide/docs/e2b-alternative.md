@@ -47,7 +47,7 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -74,7 +74,7 @@ E2B's figures come from its public pricing and documentation, checked
 | CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:e2b:cpu}} per allocated vCPU-hour               |
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:e2b:memory}} per GiB-hour                       |
 | Plan fee         | None; prepaid credit from {{topup-min}}                                     | Hobby {{term:e2b:hobby}}; Pro {{term:e2b:pro}} a month |
-| Free start       | {{trial-hours}} sandbox hours, no card                                      | {{term:e2b:credit}} of usage credit on Hobby           |
+| Free start       | {{included-machine}} every month, no card                                   | {{term:e2b:credit}} of usage credit on Hobby           |
 | Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
 | Pause and resume | Files, memory and running processes                                         | Files, memory and running processes                    |
 | Interfaces       | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs            | API, CLI, MCP server, JavaScript and Python SDKs       |
@@ -104,7 +104,7 @@ E2B      CPU    1,000 × 60 s / 3,600 × 2 × {{rate:e2b:cpu}} = {{part:e2b:cpu}
 
 Plan fees, storage, network, taxes and free credits are left out of both.
 `runtime compare --from e2b` prices your own usage the same way, with
-sandboxes the free trial paid for at the standard rates, so trial time never
+sandboxes the included usage paid for at the standard rates, so included usage never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
 first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
@@ -112,7 +112,7 @@ for Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the E2B calls on a branch, tests them on the free trial, and tells
+replaces the E2B calls on a branch, tests them on the included usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -130,11 +130,15 @@ from withruntime.e2b import Sandbox  # was: from e2b import Sandbox
 ```
 
 `withruntime/e2b/code-interpreter` and `withruntime.e2b.code_interpreter`
-replace E2B's code interpreter packages. Sandboxes get E2B's defaults: 2 vCPU,
-512 MiB and a 300-second timeout, after which they stop. Unlike E2B's, they
-pause after {{idle-pause}} with nothing happening and wake on the next call;
-`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the free
-trial while the account has trial time, then prepaid credit, with nothing to
+replace E2B's code interpreter packages. Sandboxes get E2B's defaults: 2 vCPU
+and 512 MiB. A `timeoutMs` you give, up to 24 hours, is kept by Runtime's
+server, and the sandbox is deleted when it runs out, as E2B kills it; `kill()`
+deletes it too. With no timeout, E2B's 300 seconds ends in a pause instead,
+which keeps memory and files at {{paused-storage-rate}} per GB (10⁹ bytes) a
+month while the account has credit, so call `kill()` when the work is done.
+Unlike E2B's, sandboxes pause after {{idle-pause}} with nothing happening and
+wake on the next call, and E2B code still sees them running;
+`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the included usage first, then prepaid credit, with nothing to
 choose.
 
 `commands.run` returns the command's whole output and, as E2B's does, throws
@@ -165,7 +169,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

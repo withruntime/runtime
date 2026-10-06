@@ -282,7 +282,7 @@ test("`runtime compare` says which sandboxes the free trial paid for, and that t
       const { lines, out } = capture();
       await run(["compare", "--from", "e2b"], env, out);
       expect(lines.join("\n")).toContain(
-        "Priced: 70 sandboxes, 16.67 hours running. All of them ran on the free trial, which charged nothing; Runtime's side prices them at the standard rates, what the same work costs on paid credit.",
+        "Priced: 70 sandboxes, 16.67 hours running. All of them ran on free usage, which charged nothing; Runtime's side prices them at the standard rates, what the same work costs on paid credit.",
       );
     },
   );
@@ -291,9 +291,7 @@ test("`runtime compare` says which sandboxes the free trial paid for, and that t
     async () => {
       const { lines, out } = capture();
       await run(["compare", "--from", "e2b"], env, out);
-      expect(lines.join("\n")).toContain(
-        "3 of them, 16.67 hours of that time, ran on the free trial",
-      );
+      expect(lines.join("\n")).toContain("3 of them, 16.67 hours of that time, ran on free usage");
     },
   );
 });
@@ -328,7 +326,7 @@ test("`runtime compare` never shows a short trial test as $0 or 0 hours", async 
       expect(text).toContain(
         "Your last 30 days: $0.000025 on Runtime; the same sandboxes on Daytona: $0.0003; you save $0.0003 (91.7%).",
       );
-      expect(text).toContain("Priced: 1 sandbox, 10 seconds running. It ran on the free trial");
+      expect(text).toContain("Priced: 1 sandbox, 10 seconds running. It ran on free usage");
       expect(text).not.toMatch(/\$0\.0+(?!\d)/);
     },
   );

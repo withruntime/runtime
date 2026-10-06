@@ -4,8 +4,7 @@
 #     job = runtime.jobs.create("nightly-report", cron="0 3 * * *", timezone="Europe/Berlin",
 #                                     command=["python3", "/workspace/report.py"])
 #
-# Each run is a sandbox, paid for as one: from the free trial's hours first while
-# the run fits the trial's size and count, then from credit at the sandbox rates,
+# Each run is a sandbox, paid for as one: from the included usage first while the run fits the limits without credit, then from credit at the sandbox rates,
 # through the same holds and spending limits. When jobs are switched
 # off where you call, every method raises ServiceUnavailableError (code
 # ``unavailable``) at once, and retrying does not change it.

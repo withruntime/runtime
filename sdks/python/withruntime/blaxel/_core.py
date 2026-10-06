@@ -100,9 +100,9 @@ BLAXEL_HINTS = {
     "sandbox_paused": "Call sandbox.unarchive(), then try again.",
     "not_running": "The sandbox is not running: call sandbox.unarchive() if it was archived, or make a new one with "
                    "SandboxInstance.create if it was deleted.",
-    "trial_busy": "The trial's sandboxes are all in use: delete one you no longer need (sandbox.delete()) or archive "
+    "no_credit_running_limit": "The sandboxes an account without credit runs at once are all in use: delete one you no longer need (sandbox.delete()) or archive "
                   "it (sandbox.archive()), then try again. Moving to paid credit is the account owner's decision.",
-    "public_preview_not_allowed": "On the trial, share the port privately: sandbox.previews.create({\"metadata\": "
+    "public_preview_not_allowed": "Without credit, share the port privately: sandbox.previews.create({\"metadata\": "
                                   "{\"name\": ...}, \"spec\": {\"port\": ..., \"public\": False}}) and a Runtime "
                                   "duration-based token from sandbox.withruntime.previews.get(port, ttl_seconds=seconds). "
                                   "A public preview needs a paid sandbox, which is the account owner's decision.",
@@ -115,7 +115,7 @@ BLAXEL_HINTS = {
 """Runtime's hints that name Runtime's calls, in the Blaxel calls a Blaxel
 program makes: the TypeScript adapter's (errors.ts ``BLAXEL_HINTS``), word for
 word, with Python's spelling of each call."""
-TRIAL_CAP = "A trial sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit."
+TRIAL_CAP = "Without credit, a sandbox has at most 4096 MB of memory (2 vCPUs); pass memory 4096 or add credit."
 
 
 def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
@@ -125,7 +125,7 @@ def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
     if not isinstance(error, _SDKError):
         return error
     hint = BLAXEL_HINTS.get(error.code or "", error.hint)
-    if error.code == "invalid_trial":
+    if error.code == "no_credit_size_limit":
         parts = [TRIAL_CAP]
         hint = None
     else:

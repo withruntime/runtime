@@ -39,6 +39,7 @@ function fixture(handler?: (request: Request) => Promise<Response>) {
   const ctx: SandboxContext = {
     runtime: new Sandbox(transport, { id: "sandbox" } as SandboxInfo),
     ensureHome: async () => {},
+    homeIsWorkspace: async () => false,
   };
   return { calls, commands: new Commands(ctx), transport };
 }

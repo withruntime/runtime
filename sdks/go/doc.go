@@ -5,7 +5,7 @@
 //	if err != nil {
 //		return err
 //	}
-//	sbx, err := client.Sandboxes.Create(ctx, nil) // free trial, 2 vCPU / 4 GiB, waits until running
+//	sbx, err := client.Sandboxes.Create(ctx, nil) // included usage, 2 vCPU / 4 GiB, waits until running
 //	if err != nil {
 //		return err
 //	}

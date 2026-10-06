@@ -27,7 +27,7 @@ public final class ForkOptions extends Params<ForkOptions> {
     return set("keepSnapshot", keep);
   }
 
-  /** What the copies run on: "trial" or "paid". Unset, they keep the source's. */
+  /** Accepted and ignored: copies run on what the account's new sandboxes run on. */
   public ForkOptions funding(String funding) {
     return set("funding", funding);
   }

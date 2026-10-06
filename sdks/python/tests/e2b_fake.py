@@ -4,6 +4,7 @@ answers the tests choose. ``world.client()`` stands in for Runtime and
 from __future__ import annotations
 
 import inspect
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 import withruntime
@@ -49,9 +50,13 @@ class World:
         self.images: List[Dict[str, Any]] = []
         self.snapshots: set = set()
         self.forks_enabled = True
+        # When set, a process's output fails with it, as when its sandbox is gone.
+        self.output_error: Optional[BaseException] = None
         self.funding = "paid"  # "trial" refuses public previews, as Runtime does
         self.refuse_public = False  # Runtime refuses though the sandbox read as paid
-        self.exec: Callable[[str, Dict[str, Any]], Result] = lambda command, _: Result(0, f"ran {command}\n")
+        # The /home/user link answers as on an image with no /home/user of its own.
+        self.exec: Callable[[str, Dict[str, Any]], Result] = lambda command, _: Result(
+            0, "same\n" if "ln -s /workspace /home/user" in str(command) else f"ran {command}\n")
         self.output: Callable[[str], List[Dict[str, Any]]] = lambda command: [
             {"type": "stdout", "data": f"ran {command}\n", "offset": 0},
             {"type": "exit", "exitCode": 0, "state": "exited", "timedOut": False}]
@@ -82,6 +87,12 @@ class FakeClient:
         self.sandboxes = FakeSandboxes(world)
         self.images = FakeImages(world)
         self.snapshots = FakeSnapshots(world)
+        self._w = world
+
+    def me(self) -> Dict[str, Any]:
+        """GET /v1/me: who the key is."""
+        self._w.record("me")
+        return {"orgId": "org-1", "orgName": "Acme", "principalId": "p-1", "credentialId": "c-1", "apiVersion": "1"}
 
 
 class FakeSandboxes:
@@ -92,6 +103,11 @@ class FakeSandboxes:
         self._w.record("sandboxes.create", fields)
         if fields.get("snapshot") and not self._w.forks_enabled:
             raise unavailable()
+        if fields.get("image"):
+            # As the API resolves an image: by id, or by name with its tag or version.
+            name = re.sub(r"[:@].*$", "", fields["image"])
+            if not any(fields["image"] == one["id"] or name == one.get("name") for one in self._w.images):
+                raise not_found("image_not_found", f'No image is named "{fields["image"]}".')
         sandbox = FakeSandbox(self._w, self._w.new_id(), fields)
         self._w.sandboxes[sandbox.id] = sandbox
         return sandbox
@@ -139,16 +155,24 @@ class FakeSnapshots:
         self._w.snapshots.discard(snapshot_id)
 
 
+def guest_command(command: Any) -> str:
+    """A process's ``command`` as the guest agent records it: a shell string
+    runs as ``bash -c``, and the words are joined by spaces and cut at 256."""
+    return " ".join(["bash", "-c", command] if isinstance(command, str) else command)[:256]
+
+
 class FakeProcess:
-    def __init__(self, world: World, process_id: str, command: str, stdin_open: bool,
+    def __init__(self, world: World, process_id: str, command: Any, stdin_open: bool,
                  events: List[Dict[str, Any]]) -> None:
         self._w, self.id, self._events = world, process_id, events
         self.killed: Optional[str] = None
-        self.info = {"id": process_id, "state": "running", "command": command, "cwd": "/workspace",
+        self.info = {"id": process_id, "state": "running", "command": guest_command(command), "cwd": "/workspace",
                      "stdinOpen": stdin_open, "outputBytes": 0}
 
     def output(self, cursor: int = 0, timeout_seconds: Optional[float] = None) -> Any:
         self._w.record("process.output", self.id, cursor)
+        if self._w.output_error is not None:
+            raise self._w.output_error
         for event in self._events:
             yield event
             if event["type"] == "exit":
@@ -310,13 +334,14 @@ class FakeSandbox:
         self.info: Dict[str, Any] = _Info({
             "id": sandbox_id, "state": "running", "labels": dict(fields.get("labels") or {}),
             "vcpu": fields.get("vcpu", 2), "memoryMiB": fields.get("memory_mib", 4096),
-            "onLeaseEnd": fields.get("on_lease_end", "pause"), "createdAt": "2026-09-23T00:00:00.000Z",
+            # As the API answers since 0381: onTimeout, and onLeaseEnd, its older name.
+            "onTimeout": fields.get("on_lease_end", "pause"), "onLeaseEnd": fields.get("on_lease_end", "pause"),
+            "autoWake": fields.get("auto_wake", True),
+            "stopReason": None, "createdAt": "2026-09-23T00:00:00.000Z",
             "timeoutSeconds": timeout, "expiresAt": _iso(time.time() + (timeout or 1800)),
             "funding": world.funding})
-        self.info.limited = bool(timeout)
-        for key in ("image", "snapshot"):
-            if key in fields:
-                self.info[key] = fields[key]
+        # A persistent sandbox (a pilot's) has no time limit, whatever it asked.
+        self.info.limited = bool(timeout) and not fields.get("persistent")
         self.files = FakeFiles(world, self)
         self.interpreter = FakeInterpreter(world, self)
         self.previews = FakePreviews(world, self)
@@ -327,6 +352,8 @@ class FakeSandbox:
 
     def refresh(self) -> "FakeSandbox":
         self._w.record("sandbox.refresh", self.id)
+        if self.id not in self._w.sandboxes:
+            raise not_found("not_found", f"Sandbox {self.id} was not found.")
         return self
 
     def exec(self, command: str, **options: Any) -> Result:
@@ -351,7 +378,7 @@ class FakeSandbox:
         """As the SDK's exec_stream: a start event, then the command's output
         read from its first byte, so nothing is dropped before a read."""
         self._w.record("sandbox.exec_stream", command, options)
-        process = FakeProcess(self._w, f"proc-{len(self.process_list) + 1}", str(command), False,
+        process = FakeProcess(self._w, f"proc-{len(self.process_list) + 1}", command, False,
                               self._w.output(command if isinstance(command, str) else command[-1]))
         self.process_list.append(process)
         yield {"type": "start", "processId": process.id}
@@ -384,7 +411,14 @@ class FakeSandbox:
     def pause(self) -> "FakeSandbox":
         self._w.record("sandbox.pause", self.id)
         self.info["state"] = "paused"
+        self.info["stopReason"] = "requested"
         return self
+
+    def delete(self) -> Dict[str, Any]:
+        """As the API's delete: gone for good, and a get after it answers 404."""
+        self._w.record("sandbox.delete", self.id)
+        self._w.sandboxes.pop(self.id, None)
+        return {"id": self.id, "status": "deleted"}
 
     def wake(self, timeout_seconds: Optional[int] = None) -> "FakeSandbox":
         self._w.record("sandbox.wake", self.id, timeout_seconds)

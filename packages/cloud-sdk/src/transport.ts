@@ -8,7 +8,7 @@ import {
 } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 
-export const VERSION = "0.11.1";
+export const VERSION = "0.11.2";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -86,7 +86,7 @@ export type Call = RequestOptions & {
   retry?: boolean;
   /** How long to keep retrying, with the same key and input, a refusal that
    * clears when a sandbox stops or a host frees room (WAITS_FOR_ROOM): a
-   * full trial, a full quota, a full region. Then the refusal is thrown as
+   * full slots without credit, a full quota, a full region. Then the refusal is thrown as
    * it came. Only a create sets it; 0 or absent fails at once. */
   waitForCapacityMs?: number;
   /** Called each time a call waits for room, with the refusal it is waiting
@@ -188,7 +188,7 @@ function abortReason(signal?: AbortSignal): Error {
 
 /** At most `maximum` holders at once; the rest wait their turn, first come
  * first served. */
-function slots(maximum: number) {
+function slots(maximum: number, onWait?: () => void) {
   let active = 0;
   const waiting: Array<() => void> = [];
   return {
@@ -198,6 +198,7 @@ function slots(maximum: number) {
         active++;
         return;
       }
+      onWait?.();
       await new Promise<void>((resolve, reject) => {
         const ready = () => {
           signal?.removeEventListener("abort", abort);
@@ -270,6 +271,8 @@ export class Transport {
     /** Connections held at once, answers and streams together; the rest
      * wait their turn. Default 48: one address may hold 64 to the API. */
     maxConnections?: number;
+    /** Called each time a call has to wait for one of those connections. */
+    onQueued?: (maxConnections: number) => void;
     /** How long a create waits for room. Default 120 000; 0 fails at once. */
     waitForCapacityMs?: number;
   }) {
@@ -286,8 +289,9 @@ export class Transport {
     this.#maxRetries = options.maxRetries ?? 4;
     this.#client = options.client ?? `sdk-js/${VERSION}`;
     const most = Math.max(1, options.maxConnections ?? DEFAULT_MAX_CONNECTIONS);
-    this.#slots = slots(most);
-    this.#streams = slots(Math.max(1, most - KEPT_FOR_CALLS));
+    const queued = options.onQueued && (() => options.onQueued!(most));
+    this.#slots = slots(most, queued);
+    this.#streams = slots(Math.max(1, most - KEPT_FOR_CALLS), queued);
     this.waitForCapacityMs = Math.max(0, options.waitForCapacityMs ?? 120_000);
   }
 

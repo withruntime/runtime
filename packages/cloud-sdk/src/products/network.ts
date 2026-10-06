@@ -25,7 +25,7 @@ export type NetworkPolicy = Required<NetworkRules> & {
   /** Ports reachable without a connect entry. */
   ports: number[];
   connectAllowed: boolean;
-  /** paid, granted, not_paid, revoked, suspended, or trial (a trial sandbox reaches ports 80 and 443 only). */
+  /** paid, granted, not_paid, revoked, suspended, or trial (a sandbox without credit reaches ports 80 and 443 only). */
   connectReason: string;
   forbiddenPorts: number[];
   updatedAt: string | null;

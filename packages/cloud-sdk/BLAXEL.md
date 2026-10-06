@@ -34,7 +34,7 @@ name, or through `getByExternalId`, use the same Runtime key.
 - **Machine:** Blaxel's default of 4096 MB. vCPUs follow Blaxel's rule of one
   per 2048 MB (at least one, at most 16): 2 for the default, 4 for 8192 MB. A
   trial sandbox has at most 4096 MB (2 vCPUs); `memory: 8192` or more needs
-  prepaid credit, and on the trial is refused with a 400 (`invalid_trial`)
+  prepaid credit, and on the trial is refused with a 400 (`no_credit_size_limit`)
   saying so.
 - **Image:** Blaxel's `base-image`, `py-app`, `ts-app`, `node`,
   `docker-in-sandbox` and `jupyter-server` are Runtime's stock image (Ubuntu

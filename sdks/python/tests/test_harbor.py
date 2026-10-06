@@ -238,7 +238,7 @@ class FakeSandboxes:
         if self.world.trial and fields.get("funding") is None and (
                 fields.get("vcpu", 2) > 2 or fields.get("memory_mib", 4096) > 4096 or
                 fields.get("disk_mib", 4096) > 10240):
-            raise InvalidRequestError("A trial sandbox is at most 2 vCPU and 4 GiB.", code="invalid_trial",
+            raise InvalidRequestError("A trial sandbox is at most 2 vCPU and 4 GiB.", code="no_credit_size_limit",
                                       status=400)
         sandbox = FakeSandbox(self.world, fields)
         self.world.machines[sandbox.id] = sandbox

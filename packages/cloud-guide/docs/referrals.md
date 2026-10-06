@@ -24,8 +24,7 @@ The details:
   for 30 days in a cookie that holds only the code, and it carries through
   Google and email sign-in.
 - The reward is paid once per referred company, on its first top-up of {{topup-min}} or
-  more, and matches that top-up. Later top-ups pay nothing more. Free trial
-  time never counts. It is paid when Stripe confirms the card behind the
+  more, and matches that top-up. Later top-ups pay nothing more. Included usage never counts. It is paid when Stripe confirms the card behind the
   top-up, usually within seconds of it; the top-up's own credit never waits.
   When that top-up, or one of yours, went through Link or another wallet that
   does not tell us the card, the reward is paid once someone at Runtime has

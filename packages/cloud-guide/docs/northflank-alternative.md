@@ -40,7 +40,7 @@ Weighing more than two? [Northflank alternatives](/compare/northflank-alternativ
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run --trial -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -65,7 +65,7 @@ Northflank's figures come from its public pricing and documentation, checked
 | CPU billing    | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:northflank:cpu}} per allocated vCPU-hour   |
 | Memory billing | {{memory-rate}} per reserved GiB-hour                          | {{rate:northflank:memory}} per GB-hour            |
 | Plan fee       | None; prepaid credit from {{topup-min}}                        | None published for compute                        |
-| Free start     | {{trial-hours}} sandbox hours, no card                         | 2 free services and 1 free database               |
+| Free start     | {{included-machine}} every month, no card                      | 2 free services and 1 free database               |
 | Sandbox model  | A sandbox, created in one call                                 | A service with a deployment plan                  |
 
 ## Cost for the same job
@@ -98,7 +98,7 @@ traffic is free, and each account's first {{outbound-allowance}} out a month is 
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Northflank calls on a branch, tests them on the free trial, and
+replaces the Northflank calls on a branch, tests them on the included usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge.
 
@@ -106,7 +106,7 @@ Runtime:
 
 ```ts
 import { Sandbox } from "withruntime";
-const box = await Sandbox.create({ funding: "trial" });
+const box = await Sandbox.create();
 try {
   await box.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
   console.log((await box.exec("python3 /workspace/invoice.py", { check: true })).stdout);

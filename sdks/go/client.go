@@ -124,8 +124,8 @@ func WithMaxRetries(n int) Option {
 }
 
 // WithWaitForCapacity is how long Sandboxes.Create keeps retrying, with the
-// same key and input, when every trial slot, the account's quota or the region
-// is full (trial_busy, quota_exceeded, no_capacity and the like). Default two
+// same key and input, when every slot without credit, the account's quota or the region
+// is full (no_credit_running_limit, quota_exceeded, no_capacity and the like). Default two
 // minutes; 0 fails at once.
 func WithWaitForCapacity(d time.Duration) Option {
 	return func(c *Client) error {
@@ -230,7 +230,7 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 	return &me, c.do(ctx, &call{method: http.MethodGet, path: "/v1/me"}, &me)
 }
 
-// Usage is the account's credit, holds, trial time and per-resource charges.
+// Usage is the account's credit, holds, free time and per-resource charges.
 func (c *Client) Usage(ctx context.Context) (*Usage, error) {
 	var usage Usage
 	return &usage, c.do(ctx, &call{method: http.MethodGet, path: "/v1/usage"}, &usage)

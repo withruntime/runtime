@@ -73,10 +73,13 @@ as a sandbox. `USER` applies to the build's `RUN` steps; commands in a sandbox
 run as the sandbox user, uid 1000, with passwordless `sudo` as in the base
 image: an image with its own `sudo` keeps it, and one without gets Runtime's.
 A command that names no directory starts in
-the last `WORKDIR` when it is inside `/workspace`, and in `/workspace`
-otherwise. The image's start and ready commands (`CMD`, `ENTRYPOINT`,
-`HEALTHCHECK`) run in the last `WORKDIR` wherever it is, as Docker runs them;
-a `WORKDIR` outside `/workspace` stays readable.
+the last `WORKDIR`, as on Docker and E2B, and in `/workspace` when there is
+none; so do the image's start and ready commands (`CMD`, `ENTRYPOINT`,
+`HEALTHCHECK`). The build gives that directory and everything in it to the
+sandbox user, so commands can write where they start. A system directory such
+as `/usr` or `/tmp` stays root's, and the build log says so. An image built
+earlier with a `WORKDIR` outside `/workspace` starts commands in `/workspace`
+until it is built again.
 
 Names resolve through Runtime's resolver in every image: the image's own
 `/etc/resolv.conf` is replaced, in each `RUN` step and in the sandbox, as
@@ -246,9 +249,12 @@ A few seconds after an image is ready, Runtime keeps a started copy of it at
 the default size (2 vCPU, 4 GiB of memory, a 4 GiB disk), and a sandbox of that
 size created from the image starts from the copy. Measured through the API on
 25 September 2026: 481 ms at the median from create to running, 533 ms at p95,
-against 3.7 s to boot the image. Other sizes boot the image as before. The copy
-is your account's alone, stays on the server with the image, goes when the
-image is deleted, and counts toward your image disk quota; it is not charged.
+against 3.7 s to boot the image. A copy serves only its own size, so the first
+sandbox of another size boots the image, and Runtime then keeps a started copy
+of that size too: up to two more sizes per image, each with up to 8 GiB of
+memory. A pilot's servers keep one at the pilot's size from the start. Each copy
+is your account's alone, goes when the image is deleted, and counts toward your
+image disk quota; it is not charged.
 
 ## Faster rebuilds
 
@@ -348,8 +354,6 @@ Dockerfile, and we are alerted; build again in a few minutes.
 
 A stored image is charged on its whole file. Storage
 quotas follow the same allocation ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
-with credit. On the free trial a build counts toward the {{trial-hours}} hours, only for
-the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
+with credit. Without credit, a build counts toward the included usage, only for the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
 a day. A build that fails through a fault of ours, such as a build machine
-that does not start, uses none of the trial's hours. A free trial keeps its
-first three images free.
+that does not start, uses none of the included usage. An account without credit keeps its first three images free.
