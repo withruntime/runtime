@@ -1,4 +1,4 @@
-"""runtime.domains, runtime.ports, runtime.addresses and runtime.tunnel against
+"""runtime.domains, runtime.ports, runtime.ips and runtime.networks.wireguard against
 a stub API, sync and async. The handlers are tested on Postgres in
 packages/cloud (network-products-postgres.test.ts)."""
 import asyncio
@@ -60,12 +60,12 @@ class NetworkProductsTest(unittest.TestCase):
             runtime.ports.open(sandbox_id=SANDBOX, port=5432)
             runtime.ports.list(sandbox_id=SANDBOX)
             runtime.ports.close("p1")
-            runtime.addresses.reserve(family=6)
-            runtime.addresses.release("a1")
-            runtime.tunnel.create(subnet="10.9.0.0/16")
-            runtime.tunnel.add_peer("office", routes=["10.0.0.0/16"])
-            runtime.tunnel.rotate_peer("peer1", public_key="k")
-            runtime.tunnel.remove_peer("peer1")
+            runtime.ips.reserve(family=6)
+            runtime.ips.release("a1")
+            runtime.networks.wireguard.create(subnet="10.9.0.0/16")
+            runtime.networks.wireguard.add_peer("office", routes=["10.0.0.0/16"])
+            runtime.networks.wireguard.rotate_peer("peer1", public_key="k")
+            runtime.networks.wireguard.remove_peer("peer1")
         self.assertEqual([(m, p) for m, p, _ in Stub.seen], [
             ("POST", "/v1/domains"),
             ("POST", "/v1/domains/app.example.com:verify"),
@@ -74,12 +74,12 @@ class NetworkProductsTest(unittest.TestCase):
             ("POST", "/v1/ports"),
             ("GET", f"/v1/ports?sandboxId={SANDBOX}"),
             ("DELETE", "/v1/ports/p1"),
-            ("POST", "/v1/addresses"),
-            ("DELETE", "/v1/addresses/a1"),
-            ("POST", "/v1/tunnel"),
-            ("POST", "/v1/tunnel/peers"),
-            ("POST", "/v1/tunnel/peers/peer1:rotate"),
-            ("DELETE", "/v1/tunnel/peers/peer1"),
+            ("POST", "/v1/ips"),
+            ("DELETE", "/v1/ips/a1"),
+            ("POST", "/v1/networks/wireguard"),
+            ("POST", "/v1/networks/wireguard/peers"),
+            ("POST", "/v1/networks/wireguard/peers/peer1:rotate"),
+            ("DELETE", "/v1/networks/wireguard/peers/peer1"),
         ])
         self.assertEqual(Stub.seen[0][2], {"hostname": "app.example.com", "sandboxId": SANDBOX, "port": 3000})
         self.assertEqual(Stub.seen[7][2], {"family": 6})

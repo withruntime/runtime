@@ -7,13 +7,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A create's fields, every one optional. With none you get the included usage while it lasts, the
+ * A create's fields, every one optional. With none you get the free usage while it lasts, the
  * default region and a 2 vCPU / 4 GiB machine for up to 30 minutes.
  */
 public final class CreateSandbox extends Params<CreateSandbox> {
   public CreateSandbox() {}
 
   boolean noWait;
+  boolean keep;
   Duration waitForCapacity;
 
   public CreateSandbox name(String name) {
@@ -31,7 +32,8 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("labels", new LinkedHashMap<>(labels));
   }
 
-  /** Accepted and ignored: the included usage is used first, then prepaid credit. */
+  /** @deprecated Accepted and ignored: the free usage is used first, then prepaid credit. */
+  @Deprecated
   public CreateSandbox funding(String funding) {
     return set("funding", funding);
   }
@@ -58,14 +60,14 @@ public final class CreateSandbox extends Params<CreateSandbox> {
   }
 
   /**
-   * A time limit, 60 to 3600 seconds. Left unset (or 0), it has none: it runs while it works and
+   * A time limit, 60 to 86400 seconds (24 hours). Left unset (or 0), it has none: it runs while it works and
    * pauses when idle, until you stop it or credit runs out.
    */
   public CreateSandbox timeoutSeconds(int seconds) {
     return set("timeoutSeconds", seconds);
   }
 
-  /** What its time limit or credit running out does: "pause" (the default) or "stop". */
+  /** What its time limit or credit running out does: "pause" (the default), "stop" or "delete" (the time limit running out deletes it and its files). */
   public CreateSandbox onLeaseEnd(String what) {
     return set("onLeaseEnd", what);
   }
@@ -117,6 +119,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     mount.put("path", path);
     if (mode != null) mount.put("mode", mode);
     volumes.add(mount);
+    return this;
+  }
+
+  /**
+   * Closing it (the end of a try-with-resources block) stops it and keeps its disk, which bills,
+   * instead of deleting it. The SDK's own setting: nothing is sent.
+   */
+  public CreateSandbox keep() {
+    this.keep = true;
     return this;
   }
 

@@ -34,6 +34,14 @@ class TimeoutException(SandboxException):
     pass
 
 
+class SandboxNotRunningException(TimeoutException):
+    """The sandbox is confirmed stopped or paused; resume or create one."""
+
+
+class SandboxUnreachableException(TimeoutException):
+    """The sandbox cannot be reached; it has not been confirmed stopped."""
+
+
 class InvalidArgumentException(SandboxException):
     pass
 
@@ -486,11 +494,44 @@ def on_timeout(lifecycle: Optional[Dict[str, Any]], timeout_asked: bool) -> str:
         return "delete" if timeout_asked else "pause"
     action = lifecycle.get("on_timeout", "kill")
     if isinstance(action, dict):
-        if action.get("keep_memory") is False:
-            raise NotSupportedException("A files-only pause (keep_memory=False)",
-                                        "Runtime's pause keeps memory and files; leave keep_memory out.")
+        pause_opts = action
         action = action.get("action", "kill")
+        # As e2b 2.55 checks: mode (or keep_memory) belongs to a pause alone.
+        if ("mode" in pause_opts or "keep_memory" in pause_opts) and action != "pause":
+            raise InvalidArgumentException("mode is only allowed when on_timeout action is 'pause'.")
+        if snapshot_memory('on_timeout["mode"]', pause_opts.get("mode"), pause_opts.get("keep_memory")) is False:
+            raise files_only_pause()
     return "pause" if action == "pause" else "delete"
+
+
+SNAPSHOT_MODES = ("full", "filesystem")
+
+
+def snapshot_memory(field: str, mode: Any, keep_memory: Optional[bool] = None) -> Optional[bool]:
+    """e2b 2.55's reading of ``mode``, or the deprecated ``keep_memory``: whether
+    memory is kept, or None when neither was given. Both at once, or a mode E2B
+    does not know, is E2B's InvalidArgumentException."""
+    if mode is not None and keep_memory is not None:
+        raise InvalidArgumentException(f"Pass either {field} or the deprecated keep_memory, not both.")
+    if mode is None:
+        return keep_memory
+    if mode not in SNAPSHOT_MODES:
+        raise InvalidArgumentException(f"{field} must be one of: {', '.join(SNAPSHOT_MODES)} (got {mode!r}).")
+    return mode == "full"
+
+
+def snapshot_mode(mode: Any) -> Optional[str]:
+    """Runtime's snapshot mode for E2B's: "disk" for "filesystem", "memory" for
+    "full", None (Runtime's default, the whole machine) when not given."""
+    memory = snapshot_memory("mode", mode)
+    return None if memory is None else ("memory" if memory else "disk")
+
+
+def files_only_pause() -> NotSupportedException:
+    return NotSupportedException(
+        "A files-only pause (mode='filesystem', or keep_memory=False)",
+        "Runtime's pause keeps memory and files; leave mode out or pass mode='full'. "
+        "For a copy of the files alone, use create_snapshot(mode='filesystem').")
 
 
 def image_name_for(template: str) -> str:
@@ -533,7 +574,7 @@ def template_missing(template: str, cause: Optional[BaseException] = None, accou
     error = TemplateException(
         f'No Runtime image is named "{image}"{account}. E2B templates do not run on Runtime; build the same '
         f"environment as a Runtime image with that name and this call starts from it: "
-        f"`npx withruntime image build --dockerfile e2b.Dockerfile --name {name}`, or "
+        f"`npx withruntime images build --dockerfile e2b.Dockerfile --name {name}`, or "
         f'runtime.images.build(name="{name}", dockerfile=...).')
     error.code = "template_not_found"
     error.__cause__ = cause
@@ -950,7 +991,14 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
     message = "\n".join(parts)
     status, code = error.status, error.code or ""
     out: BaseException
-    if status == 503 and code.endswith("_unavailable"):
+    # Runtime's controller gives an explicit state, unlike E2B's envd proxy.
+    # Do not infer stopped from a generic transport failure or a deadline, and
+    # do not retry a possibly completed command/write to classify its error.
+    if code in ("sandbox_stopped", "sandbox_paused", "sandbox_not_running"):
+        out = SandboxNotRunningException(message)
+    elif code in ("sandbox_not_ready", "host_unavailable"):
+        out = SandboxUnreachableException(message)
+    elif status == 503 and code.endswith("_unavailable"):
         out = NotSupportedException(code[: -len("_unavailable")], error.hint or "", message)
     elif code == "public_preview_not_allowed":
         # A 403 about the sandbox's funding, not the key.

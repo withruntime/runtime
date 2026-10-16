@@ -7,16 +7,24 @@ module WithRuntime
   # is safe for use from many threads and keeps its connections open.
   #
   #   runtime = WithRuntime::Client.new # RUNTIME_API_KEY, or this machine's saved connection
-  #   sbx = runtime.sandboxes.create(funding: "trial")
+  #   sbx = runtime.sandboxes.create
   #   sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
   #   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
   #   sbx.stop
   #
   # Every product is +runtime.<product>.<verb>+. Money is integer microdollars
   # (1,000,000 is one US dollar).
+  # The account's networks: +wireguard+, a tunnel from your own network into
+  # your sandboxes.
+  Networks = Struct.new(:wireguard)
+
+  # The day the 6 October 2026 rename stops serving its old names, set when it
+  # ships (packages/cloud/src/product-names.ts); nil until then.
+  RENAME_RETIRES = nil
+
   class Client
     attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :limits, :referrals,
-                :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :addresses, :tunnel, :sso, :mcp
+                :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp
 
     # +api_key+: default RUNTIME_API_KEY, then this machine's saved connection.
     # +base_url+: default RUNTIME_API_URL, then https://api.withruntime.com.
@@ -58,11 +66,16 @@ module WithRuntime
       @support = Support.new(@transport)
       @domains = Domains.new(@transport)
       @ports = Ports.new(@transport)
-      @addresses = Addresses.new(@transport)
-      @tunnel = PrivateTunnel.new(@transport)
+      @ips = Addresses.new(@transport)
+      @networks = Networks.new(PrivateTunnel.new(@transport))
       @sso = SSO.new(@transport)
       @mcp = MCP.new(@transport)
     end
+
+    # Renamed on 6 October 2026, one plural word per product: each old name is the product it became, with a warning,
+    # until RENAME_RETIRES, then raises name_retired.
+    def addresses = renamed("addresses", "ips") { @ips }
+    def tunnel = renamed("tunnel", "networks.wireguard") { @networks.wireguard }
 
     def base_url = @transport.base_url
 
@@ -80,6 +93,21 @@ module WithRuntime
       method = method.to_s.upcase
       body = {} if body.nil? && !%w[GET DELETE].include?(method)
       @transport.json(method, path, query: query, body: body)
+    end
+
+    private
+
+    def renamed(old, new, retires: RENAME_RETIRES, now: Time.now.utc)
+      if retires && now >= Time.utc(*retires.split("-").map(&:to_i))
+        raise Error.new("runtime.#{old} was renamed runtime.#{new} and stopped working on #{retires}.",
+                        code: "name_retired", status: 410, hint: "Use runtime.#{new}.")
+      end
+      @renamed_said ||= {}
+      unless @renamed_said[old]
+        @renamed_said[old] = true
+        warn("Runtime: runtime.#{old} is now runtime.#{new}.#{retires ? " It stops working on #{retires}." : ""}")
+      end
+      yield
     end
   end
 end

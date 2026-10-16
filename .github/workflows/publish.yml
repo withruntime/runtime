@@ -1,0 +1,231 @@
+# Publishes the SDKs from this public mirror (Marc, 14 October 2026: agents
+# update and publish the SDKs end to end, and nobody needs his Mac). Runtime's
+# hub copies a commit of its main repository here, as its GitHub App, then
+# starts this workflow with that commit and a record its release signer
+# signed for it. Its source is scripts/public-sdk/publish.yml in Runtime's
+# main repository; export.sh copies it here.
+#
+# The first job checks the record with the signer's public key below, so a
+# run nobody at Runtime asked for publishes nothing. Then each registry's job,
+# in the environment `release` (main only): it skips a version the registry
+# has and refuses one at or below its newest, then publishes. npm, PyPI and
+# RubyGems trust this workflow by OIDC (no token anywhere); Maven Central and
+# the MCP registry read the environment's secrets. The Go module is released
+# by the hub itself (withruntime/go), never here.
+name: Publish SDKs
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "The commit of Runtime's main repository this copy came from"
+        required: true
+        type: string
+      record:
+        description: "The hub's signed release record for it, base64"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  # The hub's release signer's public key (/etc/release-signer/release-sign.pub,
+  # pinned on Marc's Mac by agents/install-signer.sh). A new signer key means
+  # a new line here.
+  RELEASE_SIGN_PUB: |
+    -----BEGIN PUBLIC KEY-----
+    MCowBQYDK2VwAyEAcqHpPZc8FIhBBb7LQZU86rx/QNZHwDZQSm+6tWzx7Ws=
+    -----END PUBLIC KEY-----
+
+jobs:
+  verify:
+    name: The hub's signed record
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    # The mirror commit checked here is the one every job publishes from.
+    outputs:
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # The inputs reach the check as data only (the environment), never as
+      # code; it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
+
+  npm:
+    name: npm withruntime
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - id: decide
+        run: node .github/release/cli.ts decide npm >> "$GITHUB_OUTPUT"
+      - if: steps.decide.outputs.do == 'publish'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - name: Build
+        if: steps.decide.outputs.do == 'publish'
+        run: bun install && cd packages/cloud-sdk && bun run build
+      - name: Publish
+        if: steps.decide.outputs.do == 'publish'
+        working-directory: packages/cloud-sdk
+        # Trusted publishing needs npm 11.5.1 or later; provenance comes with it.
+        run: |
+          npm install -g npm@11.6.2
+          npm publish --provenance --access public --ignore-scripts
+
+  mcp:
+    name: MCP registry com.withruntime/runtime
+    needs: [verify, npm]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: decide
+        run: node .github/release/cli.ts decide mcp >> "$GITHUB_OUTPUT"
+      # The registry checks the version on npm, which can take minutes to
+      # show it (it refused 0.3.1 on 23 September 2026 for exactly that).
+      - if: steps.decide.outputs.do == 'publish'
+        run: node .github/release/cli.ts wait npm
+      - name: Publish
+        if: steps.decide.outputs.do == 'publish'
+        working-directory: packages/cloud-sdk
+        env:
+          # withruntime.com's key, whose public half is the domain's TXT
+          # record: its 32-byte seed, hex.
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          curl -fsSL -o /tmp/mcp-publisher.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  /tmp/mcp-publisher.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
+          /tmp/mcp-publisher login dns --domain withruntime.com --private-key "$MCP_REGISTRY_KEY"
+          /tmp/mcp-publisher publish
+
+  pypi:
+    name: PyPI ${{ matrix.project }}
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: withruntime
+            target: pypi
+            dir: sdks/python
+          - project: langchain-withruntime
+            target: langchain
+            dir: sdks/python/integrations/langchain-withruntime
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: decide
+        run: node .github/release/cli.ts decide ${{ matrix.target }} >> "$GITHUB_OUTPUT"
+      - name: Build
+        if: steps.decide.outputs.do == 'publish'
+        run: pipx run --spec build==1.3.0 pyproject-build --outdir dist "${{ matrix.dir }}"
+      - name: Publish
+        if: steps.decide.outputs.do == 'publish'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist
+
+  rubygems:
+    name: RubyGems withruntime
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: decide
+        run: node .github/release/cli.ts decide rubygems >> "$GITHUB_OUTPUT"
+      - name: Build
+        if: steps.decide.outputs.do == 'publish'
+        working-directory: sdks/ruby
+        run: gem build withruntime.gemspec --output "withruntime-${{ steps.decide.outputs.version }}.gem"
+      - if: steps.decide.outputs.do == 'publish'
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+      - name: Publish
+        if: steps.decide.outputs.do == 'publish'
+        working-directory: sdks/ruby
+        run: gem push "withruntime-${{ steps.decide.outputs.version }}.gem"
+
+  maven:
+    name: Maven Central com.withruntime:withruntime
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: decide
+        run: node .github/release/cli.ts decide maven >> "$GITHUB_OUTPUT"
+      - name: Build, sign, upload and publish
+        if: steps.decide.outputs.do == 'publish'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
+          CENTRAL_TOKEN_PASS: ${{ secrets.CENTRAL_TOKEN_PASS }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: sh .github/release/maven.sh

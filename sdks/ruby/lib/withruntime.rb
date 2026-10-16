@@ -6,7 +6,7 @@
 #   require "withruntime"
 #
 #   runtime = WithRuntime::Client.new # RUNTIME_API_KEY, or this machine's saved connection
-#   sbx = runtime.sandboxes.create(funding: "trial")
+#   sbx = runtime.sandboxes.create
 #   sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
 #   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
 #   sbx.stop
@@ -22,6 +22,7 @@ require_relative "withruntime/record"
 require_relative "withruntime/fields"
 require_relative "withruntime/transport"
 require_relative "withruntime/credentials"
+require_relative "withruntime/wallet"
 require_relative "withruntime/tar"
 require_relative "withruntime/sandbox"
 require_relative "withruntime/products"

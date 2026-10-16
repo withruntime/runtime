@@ -114,7 +114,7 @@ class RuntimeProvider:
             timeout: The new sandbox's lease in seconds (`timeout_seconds`).
             command_timeout: Default seconds for a command that names none.
             **fields: Create fields for a new sandbox, as `Sandbox.create`
-                takes them: `funding`, `image`, `region`, `vcpu`, `memory_mib`,
+                takes them: `image`, `region`, `vcpu`, `memory_mib`,
                 `name`, `labels` and the rest.
 
         Returns:

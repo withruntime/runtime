@@ -4,7 +4,7 @@ import type { RequestOptions, Transport } from "../transport.js";
  * and only for an account with a kept top-up;
  * any other account gets `payment_required` (402).
  *
- *   await runtime.network.private.set({ enabled: true });
+ *   await runtime.networks.private.set({ enabled: true });
  *   // in any of your sandboxes: psql -h db.sandbox.internal -p 5432
  *
  * A sandbox is reached at <name>.sandbox.internal:<port> (the name it was
@@ -26,7 +26,7 @@ export type PrivateNetwork = {
 };
 
 export function privateNetwork(t: Transport) {
-  const path = "/v1/network/private";
+  const path = "/v1/networks/private";
   return {
     /** On or off, and whether this account may turn it on. */
     get: (options?: RequestOptions) => t.json<PrivateNetwork>({ method: "GET", path, ...options }),

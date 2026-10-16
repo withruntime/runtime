@@ -35,7 +35,7 @@ public final class Files {
 
   /** A file's bytes, any size. */
   public byte[] read(String path) {
-    return t().bytes(
+    return t().fileBytes(
             new Transport.Call("GET", sandbox.path("/files/content"))
                 .query("path", path)
                 .accept("application/octet-stream"));

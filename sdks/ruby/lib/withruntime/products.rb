@@ -109,7 +109,8 @@ module WithRuntime
     def get = Record.new(@t.json("GET", "/v1/limits"))
   end
 
-  # +runtime.referrals+: the account's referral link and what it earned.
+  # +runtime.referrals+: the account's referral link and what it earned. Money is
+  # integer microdollars in strings.
   class Referrals < Product
     def get = Record.new(@t.json("GET", "/v1/referrals"))
   end

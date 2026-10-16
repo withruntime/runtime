@@ -27,7 +27,8 @@ public final class ForkOptions extends Params<ForkOptions> {
     return set("keepSnapshot", keep);
   }
 
-  /** Accepted and ignored: copies run on what the account's new sandboxes run on. */
+  /** @deprecated Accepted and ignored: copies run on the free usage first, then prepaid credit. */
+  @Deprecated
   public ForkOptions funding(String funding) {
     return set("funding", funding);
   }

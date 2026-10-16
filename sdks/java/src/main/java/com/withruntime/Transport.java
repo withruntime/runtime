@@ -199,6 +199,19 @@ final class Transport {
     return URI.create(target.toString());
   }
 
+  /**
+   * Whether a failure, or one of its causes, is a connection that never opened, so no byte of
+   * the request left this machine. A timeout or a reset never counts.
+   */
+  static boolean neverSent(Throwable failure) {
+    Throwable at = failure;
+    for (int depth = 0; at != null && depth < 5; depth++, at = at.getCause()) {
+      if (at instanceof java.net.ConnectException || at instanceof java.net.NoRouteToHostException)
+        return true;
+    }
+    return false;
+  }
+
   static Duration backoff(int attempt) {
     double base = Math.min(8000, 250 * Math.pow(2, Math.min(attempt, 10)));
     return Duration.ofMillis((long) (base * (0.5 + ThreadLocalRandom.current().nextDouble())));
@@ -241,7 +254,44 @@ final class Transport {
    * Sends a call and returns the response once it succeeded. The caller reads and closes the body.
    */
   HttpResponse<InputStream> send(Call call) {
-    return exchange(call, false).response();
+    Exchange exchange = exchange(call, false);
+    // A late answer was read whole to tell an answer from a failure.
+    return exchange.body() == null ? exchange.response() : new Read(exchange);
+  }
+
+  /** A response whose body was read already, given again from its bytes. */
+  private record Read(Exchange exchange) implements HttpResponse<InputStream> {
+    public int statusCode() {
+      return exchange.response().statusCode();
+    }
+
+    public HttpRequest request() {
+      return exchange.response().request();
+    }
+
+    public java.util.Optional<HttpResponse<InputStream>> previousResponse() {
+      return exchange.response().previousResponse();
+    }
+
+    public java.net.http.HttpHeaders headers() {
+      return exchange.response().headers();
+    }
+
+    public InputStream body() {
+      return new java.io.ByteArrayInputStream(exchange.body());
+    }
+
+    public java.util.Optional<javax.net.ssl.SSLSession> sslSession() {
+      return exchange.response().sslSession();
+    }
+
+    public URI uri() {
+      return exchange.response().uri();
+    }
+
+    public HttpClient.Version version() {
+      return exchange.response().version();
+    }
   }
 
   /**
@@ -283,6 +333,8 @@ final class Transport {
       contentType = "application/json";
     }
     URI uri = uri(call);
+    // The last try never left, and was sent again at once.
+    boolean resentAtOnce = false;
     for (int attempt = 0; ; attempt++) {
       if (call.cancellation != null && call.cancellation.cancelled())
         throw connectionError(true, write, key, null);
@@ -308,6 +360,11 @@ final class Transport {
       if (call.wait > 0) request.header("Prefer", "wait=" + Math.min(120, call.wait));
       HttpResponse<InputStream> response;
       byte[] answer = null;
+      // An answer that took longer than the API holds its headers (90 s) comes as a 200 sent
+      // early, and then its JSON: the answer, or {"error": ...} when the work failed after the
+      // status went (runtime-late-answer). It is read whole, so a failure is thrown as the error it
+      // is, never returned as a success.
+      boolean lateAnswer = false;
       try {
         if (call.cancellation == null) {
           response = http.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -337,7 +394,10 @@ final class Transport {
           response.body().close();
           throw new IOException("Runtime answered a redirect (" + response.statusCode() + ")");
         }
-        if (whole && response.statusCode() < 300) {
+        lateAnswer =
+            response.statusCode() < 300
+                && response.headers().firstValue("runtime-late-answer").orElse("").equals("true");
+        if ((whole || lateAnswer) && response.statusCode() < 300) {
           try (InputStream body = response.body()) {
             answer = body.readAllBytes();
           }
@@ -354,13 +414,28 @@ final class Transport {
                 || (call.cancellation != null && call.cancellation.cancelled());
         if (late || call.noRetry || attempt >= maxRetries)
           throw connectionError(late, write, key, failure);
-        pause(backoff(attempt), deadline, write, key, failure, call.cancellation);
+        // A connection that never opened sent no byte of the request, so the
+        // next try, which may reach another server, goes at once; once in a
+        // row, so an API that is down is not hammered. A reset or a timeout
+        // may have reached a server and keeps the backoff and its key's rules.
+        boolean atOnce = neverSent(failure) && !resentAtOnce;
+        resentAtOnce = atOnce;
+        pause(
+            atOnce
+                ? Duration.ofMillis(ThreadLocalRandom.current().nextLong(50))
+                : backoff(attempt),
+            deadline,
+            write,
+            key,
+            failure,
+            call.cancellation);
         continue;
       }
-      int status = response.statusCode();
+      int status = lateAnswer ? lateFailure(answer) : response.statusCode();
       if (status < 300) return new Exchange(response, answer);
       Object parsed;
-      String text = readText(response);
+      String text =
+          lateAnswer ? new String(answer, StandardCharsets.UTF_8) : readText(response);
       try {
         parsed = Json.parse(text);
       } catch (IllegalArgumentException notJson) {
@@ -410,6 +485,26 @@ final class Transport {
               (long) (wait.toMillis() * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2)));
       pause(wait, deadline, write, key, failure, call.cancellation);
     }
+  }
+
+  /**
+   * The status a late answer's body failed with, or 200 when it is an answer. An API error is a body
+   * of {@code error} alone, with a code; an answer may carry an {@code error} of its own (a code
+   * cell's exception) beside other fields. A body that is not JSON was cut or garbled: 502.
+   */
+  static int lateFailure(byte[] body) {
+    Object parsed;
+    try {
+      parsed = Json.parse(new String(body, StandardCharsets.UTF_8));
+    } catch (IllegalArgumentException notJson) {
+      return 502;
+    }
+    if (!(parsed instanceof Map<?, ?> fields) || fields.size() != 1) return 200;
+    if (!(fields.get("error") instanceof Map<?, ?> error) || !(error.get("code") instanceof String))
+      return 200;
+    return error.get("status") instanceof Number status && status.doubleValue() >= 400
+        ? status.intValue()
+        : 500;
   }
 
   private static Duration min(Duration a, Duration b) {
@@ -500,6 +595,59 @@ final class Transport {
     } finally {
       slots.release();
     }
+  }
+
+  /**
+   * A file's bytes, checked against the length (x-content-length) and SHA-256 (x-content-sha256) the
+   * API sent with them: a stream that broke can arrive as one that ended, short. A short or
+   * different body is read again twice, then download_incomplete.
+   */
+  byte[] fileBytes(Call call) {
+    take(call);
+    try {
+      for (int attempt = 0; ; attempt++) {
+        Exchange exchange = exchange(call, true);
+        RuntimeCloudException problem = checkBody(exchange.response().headers(), exchange.body());
+        if (problem == null) return exchange.body();
+        if (attempt >= 2) throw problem;
+        try {
+          sleep(backoff(attempt));
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw problem;
+        }
+      }
+    } finally {
+      slots.release();
+    }
+  }
+
+  /** Why a whole file body cannot be trusted, or null when it can. */
+  static RuntimeCloudException checkBody(java.net.http.HttpHeaders headers, byte[] body) {
+    String length = headers.firstValue("x-content-length").orElse("");
+    if (length.matches("\\d{1,18}") && body.length != Long.parseLong(length))
+      return new RuntimeCloudException(
+          "The download ended at " + body.length + " of " + length + " bytes.",
+          "download_incomplete",
+          0,
+          "Read the file again; nothing was written for this read.",
+          null,
+          Map.of("received", body.length, "expected", Long.parseLong(length)),
+          null,
+          null,
+          null);
+    String sha256 = headers.firstValue("x-content-sha256").orElse("");
+    if (sha256.isEmpty()) return null;
+    try {
+      byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(body);
+      if (java.util.HexFormat.of().formatHex(digest).equalsIgnoreCase(sha256)) return null;
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException(impossible);
+    }
+    return new RuntimeCloudException(
+        "The file's bytes did not match the SHA-256 the API sent with them.",
+        "download_incomplete",
+        "Read the file again.");
   }
 
   /** Reads a body as it arrives. */

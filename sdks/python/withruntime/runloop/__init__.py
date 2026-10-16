@@ -3,4 +3,4 @@ from ._sync import Runloop, RunloopSDK, Devbox, Execution, ExecutionResult, Snap
 from ._async import AsyncRunloop, AsyncRunloopSDK, AsyncDevbox, AsyncExecution, AsyncExecutionResult, AsyncSnapshot
 from ._exceptions import RunloopError
 from .lib.polling import PollingConfig, PollingTimeout
-UPSTREAM_VERSION = "1.32.0"
+UPSTREAM_VERSION = "2.0.0"

@@ -4,19 +4,497 @@ What shipped in Runtime Cloud, newest first.
 
 Runtime ships every day. Each entry is something you can use or see; the
 guides hold the current terms, and [pricing](./pricing) holds the current rates.
-Each day also has a page of its own at
+Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
-## 5 October 2026
+## 15 October 2026
 
+- **Dockerfiles read more like Docker reads them.** An `ENV` now beats an
+  `ARG` of the same name in `RUN`, an `ARG` with no value stays unset (so
+  `${FOO:-default}` gives the default), quotes and `\$` keep `$` literal in
+  `COPY` and `ARG`, and `COPY --chmod` takes symbolic modes such as `a+x`.
+  `COPY --from` naming its own stage is refused with a clear message. See
+  [Custom images](./images#build-from-a-dockerfile).
+- **Containers from slow registries start.** Reading a container's image
+  allows 5 seconds for each request rather than for the whole read, accepts
+  `index.docker.io` and `registry.hub.docker.com` as Docker Hub, and refuses
+  an image built only for arm64 at create instead of failing later.
+
+## 14 October 2026
+
+- **Image rebuilds get the newest base image.** A build `FROM python:3.12-slim`
+  or `:latest` now starts from the image the tag names today, as
+  `docker buildx build` does, instead of an earlier pull kept from a past
+  build. `cache: false` (`--no-cache`) now always builds every step afresh.
+  See [Faster rebuilds](./images#faster-rebuilds).
+
+- **A worker's own workers share its daily limit.** When a key with a daily
+  limit makes keys, the limits of every live key under it, at any depth, now
+  add up to at most its own, so a worker cannot multiply its cap by making
+  workers of its own. Keys are made at most 8 deep, and a key in a
+  compartment makes no keys. See [Run a swarm](./teams#run-a-swarm).
+
+- **A wallet account's key is never lost to a failed save.** If
+  `runtime_wallet_claim` cannot save the key it was just issued (a read-only
+  config directory, say), it still connects and shows the key once, to keep.
+- **A command on a paused sandbox starts sooner.** An exec, a file call or
+  any other command sent to a paused sandbox with `autoWake` wakes it with two
+  fewer steps before the command runs. A key that may run commands but not
+  read the sandbox is still refused before anything wakes, as before. See
+  [Wake on request](./javascript#wake-on-request).
+- **Cost breakdowns you can read at a glance.** The worked sums on the
+  comparison, blog and use-case pages, such as "Cost for the same job", now
+  show as one card per provider with its total and a bar to scale, instead of
+  text in a code box. The blog, how-to guides, glossary, pricing and changelog
+  pages share the cleaner look of the sandbox page. Each page's Markdown is
+  unchanged for agents. See [Runtime vs E2B](./e2b-alternative#cost-for-the-same-job).
+
+- **Swarm worker keys stay inside their own sandboxes.** A key made by
+  another key with reach `agent` now gets `403 forbidden` on the account's own
+  settings, whatever its person's role: closing the account, webhooks,
+  telemetry exports, the audit log, credit and billing, secrets, domains and
+  networks. It still runs sandboxes, reads its own usage and makes its own
+  keys; an account-wide one keeps everything. See
+  [Run a swarm](./teams#run-a-swarm).
+
+- **`mkdir -p /workspace` through the files API is success.** `files:mkdir`
+  (and the files tool's mkdir) on `/workspace` or `/` answered 400 "Refusing
+  the root of a tree"; it now answers `created: false`, as for any folder that
+  already exists. And `GET /v1/usage?key=` with something that is not a key's
+  id answers 400 `invalid_request` rather than 500.
+
+- **Wallet accounts and the welcome match.** An account an agent opened with a
+  wallet, and that no person has taken over, no longer earns the welcome match
+  or a referral reward on its payments. Once a person takes it over, its later
+  payments earn them as usual. See
+  [paying with stablecoins](./pricing#pay-with-stablecoins).
+- **A key makes more keys over the API, with no browser.** For agent swarms and
+  for accounts opened with a wallet. `POST /v1/keys`, `GET /v1/keys` and
+  `DELETE /v1/keys/{id}`, `runtime.keys.create/list/revoke/usage` in the
+  TypeScript SDK, and `runtime keys create --name worker-1 --daily-limit 5`
+  with a key on the machine (`--browser` keeps the browser approval). New:
+  `runtime keys ls`, `runtime keys usage <keyId>`, `runtime keys revoke <keyId>`,
+  and `GET /v1/usage?key=`. Each key is its own agent, a new key never has more
+  than its maker, and the daily limits of the keys a key made add up to at most
+  its own. See [run a swarm](./teams#run-a-swarm).
+
+- **The Python, Go, Java and Ruby SDKs no longer take a failure or a cut
+  stream for a success.** A call that runs longer than 90 seconds gets its
+  status early and its answer after; when that answer is an error (a create
+  whose host was lost, say), Go, Java and Ruby now raise it, as JavaScript and
+  Python did, instead of returning an empty result. A file read in Go, Java or
+  Ruby is checked against the length and SHA-256 the API sends with it, read
+  again if it came short, and refused rather than returned short. In Python's
+  synchronous client, an event stream (a watch, a log follow) whose connection
+  closed part way raises instead of ending as if it had finished. Each arrives
+  with that SDK's next release.
+- **Free usage is for trying Runtime, and a lower limit applies to every
+  account at once.** An account that has never paid gets its 100 free hours
+  (100 GiB-hours of memory and 25 vCPU-hours of active CPU) once, across the
+  30 days from its opening, and then nothing until it adds credit. An account
+  that has paid gets them every month, as before. Saved copies (10 GB) and
+  disks (5 GB) stay monthly for every account, and the startup hours are
+  unchanged. `GET /v1/usage` shows `freeUntil` on each of `allowances`: when
+  the free machine time ends, or null once the account has paid. Usage &
+  billing and the sign-in and offer pages say it the same way.
+- **Without credit, fewer sandboxes at once, and a few new limits.** Four
+  sandboxes run at once, not eight, with at most 8 vCPU and 16 GiB in all,
+  not 16 and 32. An account keeps at most 10 sandboxes, running, paused or
+  stopped (a create past it is refused with `no_credit_kept_limit`, 409), and
+  makes at most 50 a day, in any 24 hours (`no_credit_daily_limit`, 429).
+  Waking, resuming or deleting a sandbox you already keep is never refused.
+  Scheduled jobs do not run without credit: a job waits with `blockedReason`
+  `credits` until the account holds credit. Adding credit lifts all of these.
+  Public previews and ports other than 80 and 443 were already for paid
+  accounts only. The Python SDK's Inspect integration defaults to four
+  sandboxes at a time.
+- **Every limit is published, and an account with credit is charged, not
+  capped.** With credit, an account keeps up to 10,000 volumes, snapshots,
+  images, volume backups, jobs and secrets (5 volumes before), with no limit
+  on the GBs of volumes and images, which its credit pays for. A
+  `quota_exceeded` now names the limit and its number in its message and in
+  `details` (`limit`, `max`, `raise`), including the vCPU, memory and disk
+  limits that said only "quota exceeded". The [limits](./limits) guide lists
+  every one, and the console's Limits page shows each with what the account
+  uses.
+- **A stop or delete never loses a snapshot or a sandbox's disk.** Stopping
+  or deleting a sandbox while a snapshot of it is still being taken is now
+  refused with `snapshot_in_progress` (409) and nothing changes, instead of
+  destroying the sandbox and failing the snapshot; wait until the snapshot is
+  `ready` and stop it again (see [troubleshooting](./troubleshooting)). A stop
+  that comes while a paused sandbox is waking from its saved copy, or is still
+  being copied to another host, or just after that copy was restored, keeps
+  the copy and the disk. A resize of a sandbox that only its saved copy holds
+  wakes it from that copy. A volume lost with its host keeps its newest ready
+  backup past its retention, so the backup the error tells you to restore from
+  is still there.
+- **An agent with no shell can open and pay for an account over MCP.** Two new
+  tools, `runtime_wallet_open` and `runtime_wallet_claim` (also at
+  `/mcp?signup=wallet`), open an account paid in USDC: the first answers with
+  an address per network, the exact amount and a claim code; the second
+  connects once the payment lands. There is no free trial on this path. The
+  Go, Ruby and Java SDKs gain the wallet calls, and `runtime_connect` picks up a key saved after the MCP server
+  started. See [pay with stablecoins](./pricing#pay-with-stablecoins).
+- **No paid-or-trial choice in the SDKs.** Free usage comes first, then
+  credit, and there is nothing to choose, so the examples and options that
+  showed `funding` are gone and Harbor and Inspect tell an account without
+  credit to add credit for a bigger size. The option is still accepted
+  (deprecated in Go and Java), so existing code runs.
+- **A preview, port or private stream keeps going when you extend the time
+  limit.** A long download through a private preview was cut at the end of
+  the limit it began under even though you had extended the sandbox, and it
+  now carries on into the new limit. A limit that really ends still cuts it.
+- **Pages in the console answer faster.** Every page waits less for the
+  sign-in check and makes fewer database round trips, a click from page to
+  page no longer waits a fixed 0.3 seconds, and a new account's Home is
+  built once, not twice.
+- **A working sandbox's memory is not swapped out.** A running sandbox keeps
+  its RAM in memory, and one near its own memory ceiling gives back disk cache
+  before the kernel swaps its RAM.
+- **A slow command start no longer holds up the sandbox's other calls.**
+  Starting a command no longer blocks listing processes, reading or writing
+  files and killing processes while it waits for a slot. A command that
+  waits in line longer than 6 seconds is refused as busy, which is safe to
+  retry, instead of ending with an unknown outcome.
+- **Snapshots of badly fragmented disks no longer stall the host.** A
+  snapshot of a private disk of 400,000 extents took the host's daemon
+  8.2 seconds to map and now takes 0.32 seconds, with the same result. A busy
+  host also keeps every running sandbox's disk use measured.
+- **A short database outage no longer fails a start, stop, wake or delete.**
+  A broken database connection no longer ends one of these as
+  `operation_failed`, and after a database restart the first request on a
+  reconnected connection is answered instead of failing with the old
+  session's error.
+- **A member an owner removed stays removed.** If an owner removes someone,
+  or they leave, after your directory had deactivated and an invitation had
+  brought them back, [single sign-on](./single-sign-on) directory sync no
+  longer restores their membership when it turns them on again.
+- **A wallet top-up that never reached the payment provider says so.** A
+  claim whose top-up was never created no longer shows a pay-by time; it
+  says to send the top-up again with the claim code.
+
+## 13 October 2026
+
+- **A secret can go to only some of your sandboxes.** A secret reached every
+  sandbox of the account; it can now name the sandboxes that get it, by
+  label or by id. `runtime secrets set NAME --host api.example.com
+--only-label role=hub` (once per selector) or `--only-sandbox <id>` gives it
+  to those alone, `--all-sandboxes` gives it to every sandbox again, and
+  `runtime secrets scope NAME` changes who gets an existing secret without
+  its value. The API takes `only` (and `PUT /v1/egress-secrets/{name}/sandboxes`),
+  the SDKs `only` and `secrets.scope`, and MCP the same `only`. A new value
+  keeps the scope it had. Settings → Secrets sets the scope and shows which
+  sandboxes each secret reaches, and `GET /v1/egress-secrets` gives each
+  scoped secret's `reaches`. See
+  [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
+- **Every account page is drawn from one kit.** Home, Usage & billing,
+  Sandboxes, Jobs, Secrets, Networking, Settings, Support and the rest are
+  one column 1040px wide with the same spacing, bigger buttons, 13px text at
+  AA contrast or better, and one Select, DatePicker and Input everywhere.
+  Each page's loading outline is measured from the page that follows it, so
+  nothing moves when it arrives.
+- **Identity tokens work in a scheduled job's run.** `identity_token()` in a
+  [job](./jobs) answered `identity_refused` (403) because the run read a
+  token left from the sandbox's warm start. The command now gets the
+  sandbox's current identity-token request token, as a command in the
+  sandbox does. See [identity tokens](./identity-tokens).
+- **Commands run in a sandbox at its open-connection limit.** A sandbox
+  holding all of its open connections (a crawler, a server's keep-alives) had
+  every command answered 503 "environment unavailable" until one closed. Its
+  environment read now goes through, and everything else over the limit is
+  still refused.
+- **A terminal or tunnel cut by its sandbox ending says so.** When a sandbox's
+  stop, pause, time limit or delete closes a terminal or a tunnel, you now
+  get that reason, not `503 guest_failed`.
+- **A full house names what it is waiting for.** A create from a snapshot,
+  image or volume starts only on the servers that keep it. When those are
+  full it answers `no_capacity` (409) saying so, with `details.keptOn` set to
+  `snapshot`, `image` or `volume`, instead of saying the whole region is
+  full; create without it to start anywhere in the region.
+- **A custom image's creates start faster.** A create from a custom image
+  goes first to a host that already ran the image at the same vCPU, memory and
+  disk, where it restores from a start template instead of booting cold.
+- **An email before your sandboxes are deleted.** Every account's owners are
+  emailed the day-before deletion warning (it was sent only to pilots), with
+  how many sandboxes and other items go and when, and a sandbox is told its
+  retention started once, not again beside the warning. On an account without credit, adding credit before the deadline keeps them.
+- **Deleting a sandbox the host had already removed completes.** A delete the
+  host had carried out is answered as done, no longer "Guest not found" for
+  good.
+- **The support chat shows what it is doing.** Until the answer arrives, the
+  chat says "Searching the docs…" and the like instead of bare dots. Account
+  → Support is one chat window, and a short conversation lets the page scroll.
+- **A quieter free hours card.** The card on Usage & billing is small: it says
+  the hours are included every month for paying accounts, shows one plain
+  line once they are used, and is never red.
+- **Pasted secrets and plural CLI options work.** `runtime secrets set` drops
+  the line breaks, bracketed-paste markers and outer spaces a pasted token
+  carries, from standard input and the hidden prompt alike. `--hosts a,b` is
+  `--host a --host b`, and likewise for `--allow`, `--deny` and `--connect`;
+  any other plural is still refused as a typo.
+- **A full snapshot count names its limit.** A snapshot refused at the
+  account's count says which limit it is and that every key's snapshots
+  count. See [limits](./limits).
+
+## 12 October 2026
+
+- **A new look for the console.** Usage & billing, Home, Settings, Close
+  account, Sandboxes, Jobs, Secrets, Agents & API keys, Webhooks, Networking
+  and two-step sign-in are rebuilt from one set of pieces: a near-white ground,
+  white cards, pill controls and Inter. Usage & billing leads with the balance
+  and the amounts to add, with auto top-up and the referral as rows, the month
+  beside its products, limits as meters and the statement as a ledger. Home
+  opens with one line, "All healthy." or "One thing needs you."
+- **A scheduled job whose sandbox was deleted before it started runs
+  again.** A run whose sandbox was deleted under it stayed "provisioning" for
+  good, and a job runs once at a time, so the job never ran again. The run
+  now ends as unknown (`compute_stopped`) and the next occurrence runs.
+- **100 free hours every month.** Every account's free usage is now told
+  in one figure: 100 free hours a month of a 1 GB machine, which is 100
+  GiB-hours of memory and 25 vCPU-hours of active CPU (about 25 hours of a
+  2 vCPU, 4 GB sandbox at half busy). Saved copies (10 GB) and disks (5 GB)
+  are unchanged. It applies to every account.
+  Usage & billing now
+  shows the free hours left this month, with the memory and active CPU behind
+  them, and the guides call it free usage throughout.
+- **The Blaxel and Daytona drop-ins honour the create options they used to
+  drop.** In `withruntime.blaxel`, `SandboxInstance.create(config, timeout=N)`
+  (1 to 50 seconds, as Blaxel 0.4.13) deletes a sandbox not running in time
+  and raises `SandboxCreationTimeoutError`, and `safe=True` checks the new
+  sandbox answers. In `withruntime.daytona`, `create(timeout=...)` bounds the
+  create, `queue_timeout` is how many minutes it waits for room (then
+  `DaytonaQueueTimeoutError`), `pip_install_from_requirements` takes pip's
+  index and link options, and `kvm`, a `dockerfile_commands` build context
+  and `wait_for_resize_complete` are refused by name instead of ignored.
+- **A busy sandbox's refusal keeps its own error.** When a call waits to
+  retry `guest_busy` or a full house and its deadline ends the wait, the
+  JavaScript SDK now throws that refusal, as it judged it would, instead of
+  "The call was cancelled or ran past its deadline". Your own cancel still
+  ends the call as a cancel.
+- **Why a secret's placeholder arrived unchanged.** The troubleshooting
+  guide now covers a rule's near-miss (`/ingest` is not `/ingest/`), paths
+  that read two ways, clients that ignore `HTTPS_PROXY`, and what the
+  sandbox's own `NO_PROXY` lists; the security guide links to it.
+- **JavaScript cells with `await` keep their variables.** A `const`, `let`,
+  `class` or function declared in a JavaScript or TypeScript interpreter cell
+  that uses top-level `await` is there in the next cell, as in every other
+  cell. Before, it ended with its cell and the next one read
+  `a is not defined`. A cell run again may declare its `const` and `let`
+  again, as in a browser console. See
+  [code interpreter](./javascript#code-interpreter).
+- **A paused sandbox that will not wake tells you what to do.** When
+  `autoWake` is off, a call to a paused sandbox answers `sandbox_paused` (409)
+  with "…and autoWake is off, so requests do not wake it: call wake, or update
+  it with autoWake: true." The Go KeepAlive example no longer turns `autoWake`
+  off, since it is on by default
+  ([the API reference](./api)).
+- **Clear words for an image limit below the base.** A build from Runtime's
+  base (`FROM runtime`, or a recipe without a base) with a `build.maxImageMiB`
+  under {{runtime-base-image-mib}}, the base's own size, is now refused when you
+  send it, with the smallest value that works, instead of failing after it was
+  queued.
+- **Know when your usage export is final.** Every page of
+  `GET /v1/usage/export` now carries `finalThrough`: no row settled before it
+  can still appear or change, so a range ending at or before it is complete
+  for good. Each row also says `final: true` once its sandbox or volume is
+  deleted and every charge it will ever have is in the export. A volume's
+  backups bill until their retention ends, so they are not final when the
+  volume is. The CSV gains a last column, `final`. See
+  [export settled usage](./api#export-settled-usage).
+- **Compartments.** Wall a group of keys off from the rest of your account:
+  choose **One compartment** when you make a key at API keys. A key in a
+  compartment sees and uses only the sandboxes, snapshots, images, volumes,
+  previews, ports and jobs its compartment's keys made; everything else answers
+  "not found", and no other key reaches in except an account-wide one. Give one
+  to each customer of your platform, or to an agent whose sandboxes nobody
+  else may touch. Each compartment has its own sandbox names, so every
+  customer can have its own `main` ([compartments](./security#compartments)).
+- **An email when your credit is in.** Each time you buy credit, Runtime emails
+  you once it lands: what you added, the welcome or referral match it earned,
+  and your balance now. An automatic top-up emails everyone on the account who
+  may pay. See [pricing](./pricing).
+- **Delete sandboxes by label.** `runtime sandboxes rm --label team=search`,
+  `sandboxes.deleteAll({ labels })` in JavaScript and
+  `sandboxes.delete_all(labels=...)` in Python delete for good every sandbox
+  with all the labels given, stopped ones too, the way stop by label already
+  stops them. Each returns what it deleted and what failed. In the CLI's and
+  each SDK's next release. See [the CLI](./cli).
+- **Wallet top-ups say when they are off.** `POST /api/wallet/topups` answers
+  404 with code `not_available` while wallet top-ups are switched off, instead
+  of 503, so a client can tell an option not offered from an outage.
+- **Storage reaches your usage export an hour sooner.** Each hour of storage (a
+  paused sandbox's memory and disk, a stopped sandbox's disk, images,
+  snapshots, volumes and volume backups) now settles within a minute of its
+  end, usually seconds, instead of 58 minutes after it. Nothing is charged
+  differently. See [export settled usage](./api#export-settled-usage).
+- **A code for a new account by email.** Opening an account by email now asks
+  for the six-digit code the email carries, typed on the page where you asked
+  for it, instead of a link click. An address with an account gets one email
+  with its link and a code, so signing in is still one click. Every address
+  sees the same page, "check your email", so the page never says whether an
+  address has an account. New accounts by email are not opened from
+  data-centre or VPN networks, and no email comes: use Google there, or write
+  to support@withruntime.com. An address gets at most five sign-in emails an
+  hour, and ten wrong code tries a day; past that, its email has only the
+  link.
+
+- **A paused sandbox tells you how to reach it.** When a sandbox has paused
+  and its autoWake is off, a request to it now answers `409 sandbox_paused`
+  with what to do: call wake, or update the sandbox with `autoWake: true`. The
+  Go keep-alive example no longer turns autoWake off, so a sandbox copied from
+  it wakes on its next request. See [troubleshooting](./troubleshooting).
+
+## 11 October 2026
+
+- **Faster retries when a server cannot be reached.** When a connection to the
+  API is refused before your request leaves, the SDKs (JavaScript, Python, Go,
+  Java and Ruby) send it again at once instead of after a quarter of a second,
+  so a server that just went away costs your call almost nothing. A request
+  that may have reached a server waits and retries under its idempotency key as
+  before, so nothing runs twice. In each SDK's next release.
+
+## 10 October 2026
+
+- **Auto top-up.** Usage & billing can add credit from a saved card when your
+  balance falls below a line you pick, up to a monthly most you set. Each
+  automatic top-up earns {{auto-bonus}} more as credit, and while it is on your
+  account runs {{auto-sandboxes}} sandboxes at once instead of
+  {{paid-sandboxes}}. A declined charge turns it off and never stops a running
+  sandbox. Also `runtime billing auto-top-up`, the SDKs and
+  `/v1/billing/auto-top-up`. See [auto top-up](./pricing#auto-top-up).
+- **Jobs in the console.** A Jobs page lists every scheduled job: its schedule
+  in words, its size, its last run and how it ended, its next run and this
+  month's cost, with what needs you first. A job's page shows each run's state,
+  start, length, exit code, cost and output, and pauses, resumes or cancels the
+  job. See [scheduled jobs](./jobs).
+- **Run a job now, or change its schedule.** Run now starts one run at once,
+  beside the job's schedule; a paused job runs once and stays paused. Change
+  schedule moves the next run to the new schedule's next time, and a run going
+  finishes as it started. On the job's page, `runtime jobs trigger` and
+  `runtime jobs reschedule`, the SDKs, MCP and `/v1/jobs/{id}:trigger` and
+  `:reschedule`. See [jobs](./jobs).
+- **Secrets in the console.** Settings → Secrets lists every secret your
+  sandboxes and jobs use: the hosts each may reach, where its value goes, its
+  rules, whether jobs have a copy, and who added and last changed it. Add a
+  secret, replace its value or delete it there, as with `runtime secrets`.
+  Values are never shown, there or anywhere. See
+  [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
+- **Referrals pay on every payment, and for a year.** When a company signs up
+  with your link, every credit it adds in its first {{referral-days}} days is
+  matched for both of you, up to {{referral-max}} for each company, not only
+  its first top-up. Then, for {{referral-share-months}} months, you earn
+  {{referral-share}} of what it spends from credit it paid for, up to
+  {{referral-cap}} a year. Your link opens an invite page with the offer and a
+  way to sign up. See [referrals](./referrals).
+- **Creates stay fast with a thousand sandboxes.** A create now costs the same
+  beside a thousand of your account's sandboxes as beside none: what it checks
+  (sandboxes at once, quotas, a server's room) is kept as a running total
+  instead of counted again at each create. On a test database with one account
+  on one server, a create's database work beside 1,000 sandboxes went from 11
+  to 85 ms to 6.3 to 9.7 ms, and 100 creates over 8 connections from 6 to
+  11.5 s to 0.5 to 0.6 s. Every limit holds exactly as before.
+
+## 9 October 2026
+
+- **A limit without credit says plainly how to lift it.** Every refusal an
+  account meets because it has not paid (sizes, sandboxes at once, builds,
+  used-up included usage, public previews, open ports and the network
+  features) now answers in one shape: what was refused and the limit, what to
+  do now, and that the account's owner adds credit at Usage & billing, with
+  the [welcome match](./pricing#welcome-match). `details.addCredit` says the
+  same for code. See [responses and errors](./api#responses-and-errors).
+- **Out-of-memory kills are reported.** When Linux ends a program because its
+  sandbox ran out of memory, the command's result, its process and the
+  stream's `exit` event carry `outOfMemory`: the code `out_of_memory`, how
+  many processes were ended, the sandbox's `memoryMiB` and a hint (1,024 MiB or
+  more, or a resize while paused). Each such command also sends the event
+  `sandbox.out_of_memory` to your webhooks. See
+  [when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory).
+- **Rebuilt custom images start warm from their first sandbox.** A new build of
+  an image starts at the sizes your account's other images use on that
+  server, before any sandbox asks for them; only your own account's images
+  count. On a test server, a rebuilt image's first 1 vCPU, 512 MiB sandbox
+  started in 120 to 139 ms, where it took 2,364 ms. See
+  [fast starts](./images#fast-starts).
+- **Custom images behave as on Docker in three more places.** A file the image
+  puts in `/tmp` is there when a sandbox starts; a string command on an image
+  without bash, such as Alpine or BusyBox, runs under `/bin/sh`; and
+  `0.0.0.0` and the sandbox's own addresses skip the proxy, so a server you
+  start in the sandbox answers from inside it. Existing images get this at
+  their next cold start, with no rebuild. See [images](./images).
+- **A secret goes only into a request header.** The proxy puts a secret's value
+  in the header you set for it, or, with none set, in the credential headers
+  (`Authorization`, `x-api-key`, `x-goog-api-key`, `api-key`, `xi-api-key`,
+  `x-subscription-token` and `private-token`), never in a URL's path or query
+  or another header, where the placeholder now goes out as it is. Stored
+  OpenAI, Anthropic and Gemini keys keep working; code that put a placeholder
+  in a URL should send it in a header. See
+  [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
+- **A full disk answers `no_space` with how to free it.** A command, file
+  write or other call that finds the sandbox's disk full answers 409
+  `no_space`, with a hint: delete files, or create a sandbox with a larger
+  `diskMiB`. The sandbox keeps taking commands, so the `rm` that frees space
+  runs. See
+  [troubleshooting](./troubleshooting#a-command-or-a-write-answers-no-space).
+
+## 8 October 2026
+
+- **Runtime for Startups now speaks of startup hours.** The machine time is
+  {{startup-machine}}. Storage kept free each month and the at-once limits
+  are what Runtime for Startups includes; the amounts and terms are unchanged.
+  `GET /v1/usage` now names its fields `startupIncluded` and `startupLimits`,
+  with the same shapes.
+  The old fields `pot` and `potLimits` still work for 30 days after this change ships, with a warning.
+  See [included usage](./included-usage).
+- **Sign up with Google in one click, and start a sandbox from Home.** "Start
+  free, no card" opens Google sign-in at once, with no human check to wait for
+  (a sign-in by email link still has one), and a new account's Home opens on
+  a sandbox you start with one click, then the prompt to paste into your
+  agent.
+
+## 7 October 2026
+
+- **Every credit you add in your first {{welcome-days}} days is matched, up to {{welcome-max}} in total.**
+  The welcome match now covers each payment, not only the first: add $20 and
+  then $500 and you get $520 more. Home, the billing page and `runtime switch`
+  show how much of the {{welcome-max}} is used and left
+  ([welcome match](./pricing#welcome-match)).
+- **Your first top-up is matched, up to {{welcome-max}}.** Every organization's
+  first top-up made within {{welcome-days}} days of signing up is matched with
+  credit, up to {{welcome-max}}, with nothing to claim; Home and the billing
+  page show the date it ends ([welcome match](./pricing#welcome-match)). A
+  referral now matches up to {{referral-max}} on each side
+  ([referrals](./referrals)); the two never stack, and the larger applies.
+- **Runtime for Startups gives a startup pot.** An accepted startup gets
+  {{startup-machine}}, given once and used within 12 months, with
+  {{startup-saved-copies}} of saved copies and {{startup-disks}} of volumes
+  kept free each month for those 12 months, {{startup-builds}} image builds
+  at once, {{startup-at-once}} sandboxes at once (up to {{startup-at-once-most}} on
+  request), and every paid feature. The pot is used after each month's included
+  usage and before credit. Apply at
+  [withruntime.com/startups](https://withruntime.com/startups).
+- **One plural word names each product everywhere.** `/v1/sandboxes`,
+  `runtime.sandboxes`, `runtime sandboxes` and `runtime_sandboxes`, and the
+  same for every product; from SDK 0.12.0, each product can also be
+  imported alone, as `withruntime/<product>`. The old words keep working for 30 days, and each use
+  warns with the new name ([the API](./api)).
+
+## 6 October 2026
+
+- **A browser says when its sandbox is small for heavy apps.** `browser:start`
+  now answers the sandbox's `memoryMiB` and, under 2 GiB, a `hint`: heavy apps
+  such as Google Sheets, YouTube and StackBlitz need 2 GiB. Of 100 visits to
+  ten heavy pages, 56 crashed for memory at 1 GiB, 20 at 1.5 GiB and none at
+  2 GiB. 1 GiB still suits light pages and scraping, and the browser starts
+  at any size. `runtime sandbox browser start` prints the hint.
 - **Usage included every month, for every account, and jobs run on it.**
   Every account now gets {{free-memory}} of machine memory, {{free-cpu}} of
   active CPU, {{free-saved-copies}} of saved copies (snapshots, images,
-  backups) and {{free-disks}} of volumes each calendar month,
+  backups) and {{free-disks}} of volumes each calendar month, enough for
   {{included-machine}}, with no card. It renews on the 1st (UTC), is used
   before credit and is never charged. New accounts get it in place of free
-  hours; an account given free hours before today keeps what is left of them,
+  hours; an account given free hours before 6 October keeps what is left of them,
   and has the included usage as well. `GET /v1/usage` lists each product's
   share under `allowances`, and `trial` gains `offer` and `renewsAt`. A
   scheduled job's runs spend it first, then credit, as a sandbox does; a run
@@ -37,6 +515,28 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   `included_usage_unavailable`; code that compares with an old name should
   compare with both until it updates. See [included usage](./included-usage)
   and [what a job costs](./jobs#what-it-costs).
+
+- **Volume backups cost {{backup-rate}} per decimal GB per 30-day month.** They
+  cost {{backup-rate-before}}, which is below what keeping each backup in two
+  places costs us: one copy beside the servers and one with a second provider.
+  A backup made from now costs the new rate. One you already have keeps
+  {{backup-rate-before}} until {{backup-raise-date}}, then costs the new rate
+  too; a backup on the included usage stays free. Nothing else changes, and
+  nothing is charged twice: a backup's hour that runs across the date is
+  charged each part at its own rate. `GET /v1/usage` shows each backup's rate now under `rates`. See
+  [pricing](./pricing).
+
+- **Leaving a block deletes the sandbox it made.** From the next release of
+  the TypeScript and Python SDKs, the end of an `await using` or `with` block
+  deletes a sandbox that `Sandbox.create()` made there, where it used to stop
+  it and keep its disk, which bills. Create it with `keep: true` (Python
+  `keep=True`) to stop it instead, as before. A sandbox the block got with
+  `get()`, or one `getOrCreate()` found already there, is still only stopped.
+  The drop-ins keep each rival's own block exit: `withruntime/e2b` (Python)
+  kills, `withruntime/vercel` stops in TypeScript and deletes in Python.
+
+## 5 October 2026
+
 - **A hundred sandboxes at once from the first top-up, and time limits up to
   24 hours.** A paid account runs {{paid-sandboxes}} sandboxes at once as
   soon as its first top-up clears, where a new one ran 50 for its first week;
@@ -79,6 +579,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   longer pays {{volume-month}} per GiB for a reserved disk all the time: its
   disk is billed as any sandbox's, and `persistent` means only "keep it
   running". See [pricing](./pricing).
+- **More E2B code runs unchanged on `withruntime/e2b`.** In the JavaScript SDK
+  0.11.2 and the Python SDK 0.11.1, a hundred commands at once run at once,
+  `kill()` deletes the sandbox, a template name resolves with its team and
+  tag, `commands.list` gives `cmd` and `args`, file entries carry permissions
+  and owners, paths under `/home/user` come back as E2B gives them, and in
+  Python every module path e2b 2.52.1 defines a public name in imports. See
+  [migrating](./migrate).
 
 ## 4 October 2026
 
@@ -128,10 +635,10 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   same when your code sets no timeout. See [the API](./api#sandboxes).
 - **Runtime for Startups.** A venture-backed startup building with AI agents
   can apply at [withruntime.com/startups](https://withruntime.com/startups)
-  for {{startup-credit}} of credit, added over {{startup-months}} months:
-  over {{startup-busy-hours}} hours of a 2 vCPU, 4 GiB sandbox. An accepted
-  startup's account counts as paid from the day it is accepted. See
-  [pricing](./pricing).
+  for $5,000 of credit, added over 12 months (since 7 October 2026, the
+  startup pot instead: {{startup-machine}}, given once, to use within 12 months).
+  An accepted startup's account counts as paid from the day it is accepted.
+  See [pricing](./pricing).
 - **Two error codes are renamed.** A command whose timeout outlasts the
   sandbox's time limit or its funded time is refused with 409
   `time_limit_too_short`, and `details.secondsLeft` says how long is left:
@@ -183,6 +690,10 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   billing shows the account's API calls and errors by operation and exports
   settled usage as a CSV file; a sandbox's Activity tab charts CPU wait and
   memory stalls. See [observability](./observability#account-api-calls).
+- **Request a feature from the console.** The Support page has a Request a
+  feature button, which opens the feedback form on a feature request and asks
+  what the feature would let you build. See
+  [send feedback](./feedback-and-support#send-feedback).
 
 ## 30 September 2026
 
@@ -358,7 +869,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   (0.8.1). Processes, files, previews, snapshots, forks and the code interpreter
   carry over, and standby becomes a pause that keeps memory and processes until
   the next call wakes it. A switch from Blaxel now earns the [switching
-  credit](./pricing#switching-credit): run `runtime switch --from blaxel` before
+  credit](./pricing#welcome-match): run `runtime switch --from blaxel` before
   your first top-up, and that top-up is matched, up to $100. See [Runtime vs
   Blaxel](./blaxel-alternative).
 - **Start a sandbox from the browser.** A new account's Home offers

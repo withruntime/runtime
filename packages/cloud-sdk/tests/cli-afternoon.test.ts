@@ -261,7 +261,7 @@ test("`sandbox get` and `extend` say a sandbox with no time limit runs while it 
       : undefined;
   const got = await cli(["sandbox", "get", SANDBOX], (_m, url) => unlimited(url));
   expect(got.out).toMatch(/time limit\s+none/);
-  expect(got.out).toMatch(/ends\s+when idle, stopped or out of credit/);
+  expect(got.out).toMatch(/ends\s+no limit/);
   const extended = await cli(["sandbox", "extend", SANDBOX, "600"], (_m, url) => unlimited(url));
   expect(extended.out).toContain("has no time limit");
   // A limited one, or one from an older server with no endsAt, says its end.
@@ -293,8 +293,9 @@ test("`sandbox ls` shows when each sandbox ends by itself, not where it is paid 
   });
   expect(code).toBe(0);
   const [header, limited, unlimited, older] = out.split("\n");
-  expect(header).toMatch(/FUNDING\s+ENDS$/);
+  expect(header).toMatch(/CPU\/MIB\s+ENDS$/);
+  expect(header).not.toContain("FUNDING");
   expect(limited).toMatch(new RegExp(`${ends}$`));
-  expect(unlimited).toMatch(/\s-$/);
+  expect(unlimited).toMatch(/\sno limit$/);
   expect(older).toMatch(/2026-09-30T00:00:00\.000Z$/);
 });

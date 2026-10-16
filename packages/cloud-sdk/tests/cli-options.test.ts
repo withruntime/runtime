@@ -72,7 +72,9 @@ test("--help anywhere before -- prints the product's help and runs nothing", asy
     const { code, text, sent } = await cli(argv);
     expect(sent).toEqual([]);
     expect(code).toBe(0);
-    expect(text).toContain(`runtime ${argv[0]} <command>`);
+    expect(text).toContain(
+      `runtime ${argv[0] === "sandbox" ? "sandboxes" : `${argv[0]}s`} <command>`,
+    );
   }
   // After --, it belongs to the command.
   const { sent } = await cli(["sandbox", "exec", SANDBOX, "--", "ls", "--help"]);
@@ -83,7 +85,7 @@ test("an option of the command itself points after --", async () => {
   const { error, sent } = await cli(["sandbox", "run", "python3", "-c", "print(1)"]);
   expect(sent).toEqual([]);
   expect(error?.message).toBe(
-    "Unknown option -c. If it belongs to the command, put the command after --: runtime sandbox run -- python3 < invoice.py",
+    "Unknown option -c. If it belongs to the command, put the command after --: runtime sandboxes run -- python3 < invoice.py",
   );
 });
 
@@ -114,6 +116,13 @@ test("create takes the SDK's CPU and cost options, checked before sending", asyn
   expect(cpu.error?.message).toBe("--cpu takes shared or reserved.");
   const cost = await cli(["sandbox", "create", "--max-cost", "$5"]);
   expect(cost.error?.message).toBe("--max-cost takes dollars, such as 25 or 2.50.");
+});
+
+test("create sends --on-timeout delete, and refuses a word that is not pause, stop or delete", async () => {
+  const { sent } = await cli(["sandbox", "create", "--timeout", "86400", "--on-timeout", "delete"]);
+  expect(sent[0]?.body).toMatchObject({ timeoutSeconds: 86_400, onLeaseEnd: "delete" });
+  const bad = await cli(["sandbox", "create", "--on-timeout", "kill"]);
+  expect(bad.sent).toEqual([]);
 });
 
 test("a mistyped command is matched only when it is close", async () => {
@@ -230,4 +239,42 @@ test("--json after -- belongs to the command, even when the CLI has its own befo
   const { sent } = await cli(["sandbox", "exec", SANDBOX, "--json", "--", "tool", "--json"]);
   const exec = sent.find((request) => request.path.endsWith(":exec"));
   expect(exec?.body?.argv).toEqual(["tool", "--json"]);
+});
+
+test("a plural of a list option is the option once per comma: --allows a,b is --allow a --allow b", async () => {
+  // 13 October 2026: `runtime secrets set NAME --hosts api.anthropic.com,claude.ai` was refused.
+  const plural = await cli([
+    "sandbox",
+    "network",
+    SANDBOX,
+    "--allows",
+    "api.example.com,claude.ai",
+  ]);
+  const repeated = await cli([
+    "sandbox",
+    "network",
+    SANDBOX,
+    "--allow",
+    "api.example.com",
+    "--allow",
+    "claude.ai",
+  ]);
+  // The fixture's answer is a sandbox, not a network: what was sent is compared.
+  expect(plural.error?.code).not.toBe("usage");
+  expect(plural.sent.length).toBeGreaterThan(0);
+  expect(plural.sent).toEqual(repeated.sent);
+  expect(JSON.stringify(plural.sent)).toContain("claude.ai");
+  // Only list options: --vcpus is still a typo for --vcpu.
+  expect((await cli(["sandbox", "create", "--vcpus", "4"])).error?.message).toContain(
+    "Did you mean --vcpu?",
+  );
+});
+
+test("a pasted secret loses line breaks, paste markers and outer spaces, as the header it becomes", async () => {
+  const { cleanSecret } = await import("../src/cli");
+  expect(cleanSecret("sk-ant-oat01-abc\n")).toBe("sk-ant-oat01-abc");
+  // Wrapped by the terminal it was copied from.
+  expect(cleanSecret("sk-ant-oat01-ab\r\ncd-ef\n")).toBe("sk-ant-oat01-abcd-ef");
+  expect(cleanSecret("\u001b[200~  sk-ant-oat01-abc \u001b[201~")).toBe("sk-ant-oat01-abc");
+  expect(cleanSecret("Bearer abc def")).toBe("Bearer abc def");
 });

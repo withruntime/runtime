@@ -101,13 +101,13 @@ type VolumeMount struct {
 	Mode     string `json:"mode,omitempty"`
 }
 
-// CreateOptions are a create's fields, every one optional. With none you get the included usage while it lasts, the default region and a 2 vCPU / 4 GiB
+// CreateOptions are a create's fields, every one optional. With none you get the free usage while it lasts, the default region and a 2 vCPU / 4 GiB
 // machine for up to 30 minutes.
 type CreateOptions struct {
 	Name   string            `json:"name,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
-	// Funding is accepted and ignored: the included usage is used first, then
-	// prepaid credit.
+	// Deprecated: Funding is accepted and ignored: the free usage is used
+	// first, then prepaid credit.
 	Funding        string `json:"funding,omitempty"`
 	Region         string `json:"region,omitempty"`
 	VCPU           int    `json:"vcpu,omitempty"`
@@ -115,14 +115,15 @@ type CreateOptions struct {
 	DiskMiB        int    `json:"diskMiB,omitempty"`
 	CPU            string `json:"cpu,omitempty"`
 	CPUFloorMillis int    `json:"cpuFloorMillis,omitempty"`
-	// TimeoutSeconds is a time limit, 60 to 3600 seconds. Left 0, it has none:
+	// TimeoutSeconds is a time limit, 60 to 86400 seconds (24 hours). Left 0, it has none:
 	// it runs while it works and pauses when idle, until you stop it or
 	// credit runs out.
 	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 	// Deprecated: ignored since 5 October 2026: every sandbox can pause.
 	Pausable *bool `json:"pausable,omitempty"`
 	// OnLeaseEnd is what its time limit or credit running out does: "pause"
-	// (the default) or "stop".
+	// (the default), "stop" or "delete" (when the time limit runs out, delete
+	// it and its files; credit or a spending limit only stops it).
 	OnLeaseEnd string `json:"onLeaseEnd,omitempty"`
 	// IdlePauseSeconds pauses it after this many seconds in which nothing
 	// happens in it: no request, no command or terminal running, no open
@@ -281,7 +282,7 @@ type Usage struct {
 	Resources  []map[string]any `json:"resources"`
 }
 
-// Allowance is one product's included usage this month: Quantity in Unit
+// Allowance is one product's free usage this month: Quantity in Unit
 // (GiB-hour, vCPU-hour or GB-month), what is Used, Reserved for what runs now,
 // and Left. It renews at RenewsAt, the 1st of next month, 00:00 UTC.
 type Allowance struct {
@@ -298,9 +299,9 @@ type Allowance struct {
 // TrialTime is the machine time an account can still run without credit, in
 // milliseconds. TotalMs and UsedMs count free hours given before 5 October
 // 2026 (0 for an account given none); AvailableMs is the larger of those
-// hours left and this month's included usage, as time at 2 vCPU and 4 GiB.
-// Offer is "monthly" (the included usage only) or "hours" (free hours given
-// before 5 October 2026, kept); RenewsAt is when the included usage renews.
+// hours left and this month's free usage, as time at 2 vCPU and 4 GiB.
+// Offer is "monthly" (the free usage only) or "hours" (free hours given
+// before 5 October 2026, kept); RenewsAt is when the free usage renews.
 type TrialTime struct {
 	TotalMs     int64  `json:"totalMs"`
 	UsedMs      int64  `json:"usedMs"`

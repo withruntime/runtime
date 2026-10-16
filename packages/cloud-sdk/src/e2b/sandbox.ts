@@ -51,8 +51,27 @@ const STOCK_TEMPLATES = new Set(["base", "code-interpreter-v1", "code-interprete
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type SandboxState = "running" | "paused";
+/** What a pause or snapshot keeps (E2B 2.55): `"full"` keeps memory and
+ * files, `"filesystem"` only files, so what starts from it boots afresh. */
+export type SnapshotMode = "full" | "filesystem";
+const SNAPSHOT_MODES: readonly SnapshotMode[] = ["full", "filesystem"];
 export type SandboxOnTimeout =
-  "pause" | "kill" | { action: "pause" | "kill"; keepMemory?: boolean };
+  | "pause"
+  | "kill"
+  | {
+      action: "pause";
+      mode?: SnapshotMode;
+      /** @deprecated E2B 2.55: use `mode`. */
+      keepMemory?: boolean;
+    }
+  | { action: "kill" };
+/** E2B's pause options: `mode`, or the deprecated `keepMemory`. */
+export type SandboxPauseOpts = SandboxApiOpts & {
+  mode?: SnapshotMode;
+  /** @deprecated E2B 2.55: use `mode`. */
+  keepMemory?: boolean;
+};
+export type CreateSnapshotOpts = SandboxApiOpts & { name?: string; mode?: SnapshotMode };
 export type SandboxLifecycle = { onTimeout: SandboxOnTimeout; autoResume?: boolean };
 
 export interface SandboxOpts extends ConnectionOpts {
@@ -173,13 +192,42 @@ function onTimeout(
   if (!lifecycle) return timeoutAsked ? "delete" : "pause";
   const action =
     typeof lifecycle.onTimeout === "string" ? lifecycle.onTimeout : lifecycle.onTimeout.action;
-  if (typeof lifecycle.onTimeout === "object" && lifecycle.onTimeout.keepMemory === false)
-    throw new NotSupportedError(
-      "A files-only pause (keepMemory: false)",
-      "Runtime's pause keeps memory and files; leave keepMemory out.",
-    );
+  // As E2B 2.55 checks: mode (or keepMemory) belongs to a pause alone.
+  const pauseOpts = (typeof lifecycle.onTimeout === "string" ? {} : lifecycle.onTimeout) as {
+    mode?: unknown;
+    keepMemory?: boolean | null;
+  };
+  if (("mode" in pauseOpts || "keepMemory" in pauseOpts) && action !== "pause")
+    throw new InvalidArgumentError("onTimeout.mode is only allowed when action is 'pause'.");
+  if (snapshotMemory("onTimeout.mode", pauseOpts.mode, pauseOpts.keepMemory) === false)
+    throw filesOnlyPause();
   return action === "pause" ? "pause" : "delete";
 }
+
+/** E2B 2.55's reading of `mode`, or the deprecated `keepMemory`: whether
+ * memory is kept, or undefined when neither was given. Both at once, or a
+ * mode E2B does not know, is E2B's InvalidArgumentError. */
+function snapshotMemory(
+  field: string,
+  mode: unknown,
+  keepMemory?: boolean | null,
+): boolean | undefined {
+  if (mode != null && keepMemory != null)
+    throw new InvalidArgumentError(`Pass either ${field} or the deprecated keepMemory, not both.`);
+  if (mode == null) return keepMemory ?? undefined;
+  if (!SNAPSHOT_MODES.includes(mode as SnapshotMode))
+    throw new InvalidArgumentError(
+      `${field} must be one of: ${SNAPSHOT_MODES.join(", ")} (got ${JSON.stringify(mode)}).`,
+    );
+  return mode === "full";
+}
+
+const filesOnlyPause = () =>
+  new NotSupportedError(
+    "A files-only pause (mode: 'filesystem', or keepMemory: false)",
+    "Runtime's pause keeps memory and files; leave mode out or pass mode: 'full'. " +
+      "For a copy of the files alone, use createSnapshot({ mode: 'filesystem' }).",
+  );
 
 function refuseCreate(opts: SandboxOpts) {
   const refusals: Array<[keyof SandboxOpts, string, string]> = [
@@ -265,7 +313,7 @@ function templateMissing(template: string, cause: unknown, account?: string): Te
   const error = new TemplateError(
     `No Runtime image is named "${imageNameFor(template)}"${account ?? ""}. E2B templates do not run on Runtime; build the same ` +
       `environment as a Runtime image with that name and this call starts from it: ` +
-      `\`npx withruntime image build --dockerfile e2b.Dockerfile --name ${name}\`, or ` +
+      `\`npx withruntime images build --dockerfile e2b.Dockerfile --name ${name}\`, or ` +
       `runtime.images.build({ name: "${name}", dockerfile }).`,
   );
   error.code = "template_not_found";
@@ -451,7 +499,7 @@ export class Sandbox {
 
   /** Creates a sandbox from `template` (default "base", Runtime's stock image)
    * with E2B's default machine, 2 vCPU and 512 MiB, and waits until it runs.
-   * Funding is left to Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
+   * Funding is left to Runtime: the free usage first, then prepaid credit, exactly as withruntime's own create. */
   static create<S extends typeof Sandbox>(this: S, opts?: SandboxOpts): Promise<InstanceType<S>>;
   static create<S extends typeof Sandbox>(
     this: S,
@@ -599,24 +647,21 @@ export class Sandbox {
   }
 
   /** Pauses the sandbox, keeping memory and files. False when it was paused. */
-  static async pause(
-    sandboxId: string,
-    opts: SandboxApiOpts & { keepMemory?: boolean } = {},
-  ): Promise<boolean> {
+  static async pause(sandboxId: string, opts: SandboxPauseOpts = {}): Promise<boolean> {
     const client = clientFor(opts);
     return pause(
       await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts))),
       opts,
     );
   }
-  static betaPause(sandboxId: string, opts: SandboxApiOpts & { keepMemory?: boolean } = {}) {
+  static betaPause(sandboxId: string, opts: SandboxPauseOpts = {}) {
     return this.pause(sandboxId, opts);
   }
-  async pause(opts: SandboxApiOpts & { keepMemory?: boolean } = {}): Promise<boolean> {
+  async pause(opts: SandboxPauseOpts = {}): Promise<boolean> {
     await guard("sandbox", () => this.#runtime.refresh(request(opts)));
     return pause(this.#runtime, opts);
   }
-  async betaPause(opts: SandboxApiOpts & { keepMemory?: boolean } = {}): Promise<boolean> {
+  async betaPause(opts: SandboxPauseOpts = {}): Promise<boolean> {
     return this.pause(opts);
   }
 
@@ -653,17 +698,25 @@ export class Sandbox {
     return copies.map((copy) => new Kind(copy, this.#client));
   }
 
-  /** Keeps the sandbox's whole machine as a Runtime snapshot; start from it
-   * with Sandbox.create(snapshotId). */
-  async createSnapshot(opts: SandboxApiOpts & { name?: string } = {}): Promise<SnapshotInfo> {
+  /** Keeps the sandbox's whole machine as a Runtime snapshot, or with
+   * `mode: "filesystem"` its disk alone, from which a sandbox boots afresh;
+   * start from it with Sandbox.create(snapshotId). */
+  async createSnapshot(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
+    const memory = snapshotMemory("mode", opts.mode);
+    const mode =
+      memory === undefined ? undefined : memory ? ("memory" as const) : ("disk" as const);
     const snapshot = await guard("sandbox", () =>
-      this.#runtime.snapshot({ ...(opts.name ? { name: opts.name } : {}), ...request(opts) }),
+      this.#runtime.snapshot({
+        ...(opts.name ? { name: opts.name } : {}),
+        ...(mode ? { mode } : {}),
+        ...request(opts),
+      }),
     );
     return { snapshotId: snapshot.id, names: snapshot.name ? [snapshot.name] : [] };
   }
   static async createSnapshot(
     sandboxId: string,
-    opts: SandboxApiOpts & { name?: string } = {},
+    opts: CreateSnapshotOpts = {},
   ): Promise<SnapshotInfo> {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
@@ -821,12 +874,8 @@ async function extendTo(
   if (later > 1) await guard("sandbox", () => runtime.extend(Math.ceil(later), request(opts)));
 }
 
-async function pause(runtime: RuntimeSandbox, opts: SandboxApiOpts & { keepMemory?: boolean }) {
-  if (opts.keepMemory === false)
-    throw new NotSupportedError(
-      "A files-only pause (keepMemory: false)",
-      "Runtime's pause keeps memory and files; leave keepMemory out.",
-    );
+async function pause(runtime: RuntimeSandbox, opts: SandboxPauseOpts) {
+  if (snapshotMemory("mode", opts.mode, opts.keepMemory) === false) throw filesOnlyPause();
   const current = state(runtime);
   if (current === "paused") return false;
   if (current === "stopped") throw new SandboxNotFoundError(`Sandbox ${runtime.id} has ended.`);

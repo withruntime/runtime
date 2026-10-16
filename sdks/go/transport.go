@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -63,6 +66,18 @@ var answerStart = 125 * time.Second
 
 // errNoAnswerStarted ends an attempt whose answer did not start in time.
 var errNoAnswerStarted = errors.New("no answer started")
+
+// neverSent reports whether a failed attempt's connection never opened, so
+// no byte of the request left this machine. A timeout or a reset never counts.
+func neverSent(err error) bool {
+	for _, code := range []syscall.Errno{syscall.ECONNREFUSED, syscall.ENOENT, syscall.EHOSTUNREACH,
+		syscall.ENETUNREACH, syscall.EADDRNOTAVAIL} {
+		if errors.Is(err, code) {
+			return true
+		}
+	}
+	return false
+}
 
 func backoff(attempt int) time.Duration {
 	base := min(8000, 250*(1<<min(attempt, 10)))
@@ -130,6 +145,8 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 		}
 		payload, contentType = encoded, "application/json"
 	}
+	// The last try never left, and was sent again at once.
+	resentAtOnce := false
 	for attempt := 0; ; attempt++ {
 		request, err := http.NewRequestWithContext(ctx, cl.method, target, bytes.NewReader(payload))
 		if err != nil {
@@ -166,8 +183,14 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			response.Body.Close()
 			err = fmt.Errorf("runtime answered a redirect (%d)", response.StatusCode)
 		}
-		if err == nil && whole && response.StatusCode < 300 {
-			var body []byte
+		// An answer that took longer than the API holds its headers (90 s)
+		// comes as a 200 sent early, and then its JSON: the answer, or
+		// {"error": ...} when the work failed after the status went
+		// (runtime-late-answer). It is read whole here, so a failure is
+		// returned as the error it is, never as a success.
+		late := err == nil && response.StatusCode < 300 && response.Header.Get("Runtime-Late-Answer") == "true"
+		var body []byte
+		if err == nil && (whole || late) && response.StatusCode < 300 {
 			body, err = io.ReadAll(response.Body)
 			response.Body.Close()
 			response.Body = io.NopCloser(bytes.NewReader(body))
@@ -175,19 +198,36 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 		if err != nil {
 			// The error is read before cancel, which would make every
 			// failure read as a timeout.
-			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries || sleep(ctx, backoff(attempt)) != nil {
+			// A connection that never opened sent no byte of the request,
+			// so the next try, which may reach another server, goes at
+			// once; once in a row, so an API that is down is not
+			// hammered. A reset or a timeout may have reached a server
+			// and keeps the backoff and its key's rules.
+			atOnce := response == nil && neverSent(err) && !resentAtOnce
+			resentAtOnce = atOnce
+			pause := backoff(attempt)
+			if atOnce {
+				pause = time.Duration(mathrand.Float64() * float64(50*time.Millisecond))
+			}
+			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries || sleep(ctx, pause) != nil {
 				failure := c.connectionError(ctx, write, key, err)
 				cancel()
 				return nil, nil, failure
 			}
 			continue
 		}
-		if response.StatusCode < 300 {
+		status := response.StatusCode
+		if late {
+			status = lateFailure(body)
+		}
+		if status < 300 {
 			return response, cancel, nil
 		}
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-		response.Body.Close()
-		failure := errorFor(response.StatusCode, body, key)
+		if !late {
+			body, _ = io.ReadAll(io.LimitReader(response.Body, 1<<20))
+			response.Body.Close()
+		}
+		failure := errorFor(status, body, key)
 		// A full house: wait for a slot or for room, then send the same call
 		// again. A request that can never fit is not waited for.
 		if !cl.noRetry && cl.room > 0 && waitsForRoom[failure.Code] && failure.Details["field"] != "count" {
@@ -208,8 +248,7 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			attempt--
 			continue
 		}
-		retryable := (response.StatusCode == 429 || response.StatusCode == 502 ||
-			response.StatusCode == 503 || response.StatusCode == 504) && !deliberate[failure.Code]
+		retryable := (status == 429 || status == 502 || status == 503 || status == 504) && !deliberate[failure.Code]
 		if cl.noRetry || !retryable || attempt >= c.maxRetries {
 			cancel()
 			return nil, nil, failure
@@ -228,6 +267,35 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			return nil, nil, failure
 		}
 	}
+}
+
+// lateFailure is the status a late answer's body failed with, or 200 when it
+// is an answer. An API error is a body of `error` alone, with a code; an answer
+// may carry an `error` of its own (a code cell's exception) beside other
+// fields. A body that is not JSON was cut or garbled: 502.
+func lateFailure(body []byte) int {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		var value any
+		if json.Unmarshal(body, &value) != nil {
+			return http.StatusBadGateway
+		}
+		return http.StatusOK
+	}
+	if len(fields) != 1 || fields["error"] == nil {
+		return http.StatusOK
+	}
+	var failed struct {
+		Code   *string  `json:"code"`
+		Status *float64 `json:"status"`
+	}
+	if json.Unmarshal(fields["error"], &failed) != nil || failed.Code == nil {
+		return http.StatusOK
+	}
+	if failed.Status != nil && *failed.Status >= 400 {
+		return int(*failed.Status)
+	}
+	return http.StatusInternalServerError
 }
 
 func (c *Client) connectionError(ctx context.Context, write bool, key string, cause error) *Error {
@@ -316,6 +384,68 @@ func (c *Client) bytes(ctx context.Context, cl *call) ([]byte, error) {
 	}
 	defer cancel()
 	return io.ReadAll(response.Body)
+}
+
+// fileBytes sends a call for a file's bytes and checks them against the
+// length (x-content-length) and SHA-256 (x-content-sha256) the API sent with
+// them: a stream that broke can arrive as one that ended, short. A short or
+// different body is read again twice, then download_incomplete.
+func (c *Client) fileBytes(ctx context.Context, cl *call) ([]byte, error) {
+	for attempt := 0; ; attempt++ {
+		var problem *Error
+		body, err := func() ([]byte, error) {
+			admitted, err := c.acquire(ctx, cl)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { <-c.slots }()
+			response, cancel, err := c.send(ctx, admitted, true)
+			if err != nil {
+				return nil, err
+			}
+			defer cancel()
+			body, err := io.ReadAll(response.Body)
+			if err == nil {
+				problem = checkBody(response.Header, body)
+			}
+			return body, err
+		}()
+		if err != nil {
+			return nil, err
+		}
+		if problem == nil {
+			return body, nil
+		}
+		if attempt >= 2 {
+			return nil, problem
+		}
+		if sleep(ctx, backoff(attempt)) != nil {
+			return nil, problem
+		}
+	}
+}
+
+// checkBody says why a whole file body cannot be trusted, or nil when it can.
+func checkBody(header http.Header, body []byte) *Error {
+	if value := header.Get("X-Content-Length"); value != "" {
+		if expected, err := strconv.ParseInt(value, 10, 64); err == nil && expected >= 0 && int64(len(body)) != expected {
+			return &Error{
+				Code: "download_incomplete", Message: fmt.Sprintf("The download ended at %d of %d bytes.", len(body), expected),
+				Hint:    "Read the file again; nothing was written for this read.",
+				Details: map[string]any{"received": len(body), "expected": expected},
+			}
+		}
+	}
+	if want := header.Get("X-Content-Sha256"); want != "" {
+		sum := sha256.Sum256(body)
+		if !strings.EqualFold(hex.EncodeToString(sum[:]), want) {
+			return &Error{
+				Code: "download_incomplete", Message: "The file's bytes did not match the SHA-256 the API sent with them.",
+				Hint: "Read the file again.",
+			}
+		}
+	}
+	return nil
 }
 
 // stream sends a call and returns its body to read as it arrives. It holds a

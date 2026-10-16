@@ -10,18 +10,20 @@ import { generateWireGuardKeyPair } from "./wireguard.js";
 /* The CLI's network products, each its own product under `runtime <product>`
  * (AGENTS.md: the top level holds only what spans products):
  *
- *   runtime domain  add|verify|ls|get|rm     your own hostname for a sandbox's port, with HTTPS
- *   runtime port    open|ls|close            a public TCP port to a sandbox's port
- *   runtime address reserve|ls|release       a dedicated outbound address for allow-lists
- *   runtime tunnel  create|get|rm|peer ...   a WireGuard tunnel from your network into your sandboxes
- *   runtime network upstream-proxy set|get|remove   the account's network settings
- *   runtime network private on|off|status          your sandboxes reach each other by name
+ *   runtime domains add|verify|ls|get|rm     your own hostname for a sandbox's port, with HTTPS
+ *   runtime ports   open|ls|close            a public TCP port to a sandbox's port
+ *   runtime ips     reserve|ls|release       a dedicated outbound address for allow-lists
+ *   runtime networks wireguard create|get|rm|peer ...   a WireGuard tunnel from your network into your sandboxes
+ *   runtime networks upstream-proxy set|get|remove      the account's proxy out
+ *   runtime networks private on|off|status              your sandboxes reach each other by name
+ *   runtime networks signed-requests on|off|status      your sandboxes sign requests as Runtime's agents
  *
  * A dedicated address needs credit on the account, the rest a kept top-up
  *; a refusal says which. */
 
 import type { NetworkFunding, UpstreamProxy } from "./products/network-products.js";
 import type { PrivateNetwork } from "./products/private-network.js";
+import type { SignedRequests } from "./products/signed-requests.js";
 
 function fundingState(value: NetworkFunding): string {
   if (value.funded === false)
@@ -35,11 +37,19 @@ function fundingState(value: NetworkFunding): string {
 type Out = { json: boolean; write: (text: string) => void; error: (text: string) => void };
 type Args = { positional: string[]; flags: Map<string, string[]> };
 
-export const NETWORK_PRODUCTS = ["domain", "port", "address", "tunnel", "network"] as const;
+export const NETWORK_PRODUCTS = ["domains", "ports", "ips", "wireguard", "networks"] as const;
 export type NetworkProduct = (typeof NETWORK_PRODUCTS)[number];
+/** The command each is typed as: WireGuard is inside networks. */
+export const NETWORK_COMMAND: Record<NetworkProduct, string> = {
+  domains: "domains",
+  ports: "ports",
+  ips: "ips",
+  wireguard: "networks wireguard",
+  networks: "networks",
+};
 
 export const NETWORK_HELP: Record<NetworkProduct, string> = {
-  domain: `runtime domain <command>
+  domains: `runtime domains <command>
 
   add <hostname> <sandbox> <port>        Serve a sandbox's port at your own hostname, with HTTPS
                                          Prints the DNS records to set: a TXT that proves the
@@ -50,7 +60,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   rm <hostname>                          Stop serving it
   Needs a kept top-up. The first visit gets the certificate, in a few seconds.
 `,
-  port: `runtime port <command>
+  ports: `runtime ports <command>
 
   open <sandbox> <port>                  A public TCP port to a port in the sandbox: Postgres,
                                          Redis, a game server, anything that is not HTTP
@@ -59,7 +69,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   close <portId>                         Close one, its open connections too
   Needs a kept top-up. TCP, carried as it is: use your service's own password and TLS.
 `,
-  address: `runtime address <command>
+  ips: `runtime ips <command>
 
   reserve [--ipv6]                       A dedicated outbound address: every sandbox of your
                                          account sends from it, for allow-lists
@@ -67,7 +77,7 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   release <addressId>                    Give it back; sandboxes use the shared addresses again
   Needs credit on the account.
 `,
-  tunnel: `runtime tunnel <command>
+  wireguard: `runtime networks wireguard <command>
 
   create [--subnet 10.250.0.0/16]        A WireGuard tunnel from your network into your sandboxes
   get                                    The tunnel, its peers, and each sandbox's address in it
@@ -81,7 +91,9 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   peer rm <peerId>                       Remove it; its tunnel ends within seconds
   --route: your own ranges behind the peer that sandboxes may reach. Needs a kept top-up.
 `,
-  network: `runtime network <command>
+  networks: `runtime networks <command>
+  wireguard <command>                    A WireGuard tunnel from your network into your
+                                         sandboxes: runtime networks wireguard help
 
   upstream-proxy set <http://host:port|https://host:port> [--secret NAME] [--host <host>]...
                                          Send your sandboxes' outbound connections through your
@@ -99,6 +111,12 @@ export const NETWORK_HELP: Record<NetworkProduct, string> = {
   private off                            They stop; open connections between them are cut
   private status                         On or off
   Only your own sandboxes answer. Needs a kept top-up; free.
+
+  signed-requests on                     Your sandboxes can get Runtime's Web Bot Auth signature
+                                         for outbound HTTP requests (https://withruntime.com/docs/egress)
+  signed-requests off                    New signatures stop at once; given ones expire within 5 minutes
+  signed-requests status                 On or off
+  Needs credit on the account; free.
 `,
 };
 
@@ -107,7 +125,7 @@ function usage(product: NetworkProduct, message: string) {
     message,
     code: "usage",
     status: 0,
-    hint: `Run \`${named("runtime")} ${product} help\`.`,
+    hint: `Run \`${named("runtime")} ${NETWORK_COMMAND[product]} help\`.`,
   });
 }
 
@@ -161,7 +179,10 @@ async function prepareOutput(path: string, privateKey?: string) {
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink())
-      throw usage("tunnel", "The output must be a regular file, not a directory or symbolic link.");
+      throw usage(
+        "wireguard",
+        "The output must be a regular file, not a directory or symbolic link.",
+      );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -229,7 +250,7 @@ export async function networkProductCommand(
     return 0;
   }
   const runtime = await client();
-  if (product === "domain") {
+  if (product === "domains") {
     const records = (domain: { records: Array<{ type: string; name: string; value: string }> }) =>
       table([
         ["TYPE", "NAME", "VALUE"],
@@ -267,7 +288,7 @@ export async function networkProductCommand(
                   String(d.port),
                 ]),
               ])
-            : named("No domains. Add one: runtime domain add app.example.com <sandbox> 3000"),
+            : named("No domains. Add one: runtime domains add app.example.com <sandbox> 3000"),
           all,
         );
         return 0;
@@ -285,7 +306,7 @@ export async function networkProductCommand(
       }
     }
   }
-  if (product === "port") {
+  if (product === "ports") {
     switch (verb) {
       case "open": {
         const opened = await runtime.ports.open({
@@ -306,7 +327,7 @@ export async function networkProductCommand(
                 ["ID", "CONNECT", "SANDBOX", "PORT"],
                 ...all.map((p) => [p.id, p.connect, p.sandboxId, String(p.port)]),
               ])
-            : named("No open ports. Open one: runtime port open <sandbox> 5432"),
+            : named("No open ports. Open one: runtime ports open <sandbox> 5432"),
           all,
         );
         return 0;
@@ -319,10 +340,10 @@ export async function networkProductCommand(
       }
     }
   }
-  if (product === "address") {
+  if (product === "ips") {
     switch (verb) {
       case "reserve": {
-        const reserved = await runtime.addresses.reserve({ family: has("ipv6") ? 6 : 4 });
+        const reserved = await runtime.ips.reserve({ family: has("ipv6") ? 6 : 4 });
         if (!out.json)
           out.error(
             reserved.funded === true
@@ -334,27 +355,27 @@ export async function networkProductCommand(
       }
       case "ls":
       case "list": {
-        const all = await runtime.addresses.list();
+        const all = await runtime.ips.list();
         print(
           all.length
             ? table([
                 ["ID", "ADDRESS", "FAMILY", "FUNDING"],
                 ...all.map((a) => [a.id, a.address, `IPv${a.family}`, fundingState(a)]),
               ])
-            : named("No dedicated address. Reserve one: runtime address reserve"),
+            : named("No dedicated address. Reserve one: runtime ips reserve"),
           all,
         );
         return 0;
       }
       case "release":
       case "rm": {
-        const gone = await runtime.addresses.release(need(rest[0], "an address id"));
+        const gone = await runtime.ips.release(need(rest[0], "an address id"));
         print(`Released ${gone.address}.`, gone);
         return 0;
       }
     }
   }
-  if (product === "tunnel") {
+  if (product === "wireguard") {
     const view = (
       tunnel: NetworkFunding & {
         endpoint: string;
@@ -378,7 +399,9 @@ export async function networkProductCommand(
               ["PEER", "NAME", "ADDRESS", "ROUTES"],
               ...tunnel.peers.map((p) => [p.id, p.name, p.address, p.routes.join(",") || "-"]),
             ])
-          : named("No peers. Add one: runtime tunnel peer add office --route 10.0.0.0/16"),
+          : named(
+              "No peers. Add one: runtime networks wireguard peer add office --route 10.0.0.0/16",
+            ),
         "",
         tunnel.sandboxes.length
           ? table([
@@ -389,19 +412,21 @@ export async function networkProductCommand(
       ].join("\n");
     switch (verb) {
       case "create": {
-        const made = await runtime.tunnel.create(flag("subnet") ? { subnet: flag("subnet")! } : {});
+        const made = await runtime.networks.wireguard.create(
+          flag("subnet") ? { subnet: flag("subnet")! } : {},
+        );
         print(view(made), made);
         return 0;
       }
       case "get":
       case "ls": {
-        const found = await runtime.tunnel.get();
+        const found = await runtime.networks.wireguard.get();
         print(view(found), found);
         return 0;
       }
       case "rm":
       case "delete": {
-        const gone = await runtime.tunnel.delete();
+        const gone = await runtime.networks.wireguard.delete();
         print(`Deleted the tunnel ${gone.id}.`, gone);
         return 0;
       }
@@ -423,15 +448,15 @@ export async function networkProductCommand(
           try {
             const answer =
               action === "add"
-                ? await runtime.tunnel.addPeer({
+                ? await runtime.networks.wireguard.addPeer({
                     name: argument,
                     publicKey,
                     routes: args.flags.get("route") ?? [],
                   })
-                : await runtime.tunnel.rotatePeer(argument, { publicKey });
+                : await runtime.networks.wireguard.rotatePeer(argument, { publicKey });
             const configReady = answer.configReady ?? !!answer.config;
             const draftHint =
-              "Keep this file: it preserves your private key. Read runtime tunnel get when the gateway is ready, replace PublicKey in [Peer] with gatewayPublicKey, then run wg-quick up.";
+              "Keep this file: it preserves your private key. Read runtime networks wireguard get when the gateway is ready, replace PublicKey in [Peer] with gatewayPublicKey, then run wg-quick up.";
             // Older servers returned no config while the gateway was starting.
             // Preserve the locally generated key in a draft rather than discard it.
             const supplied =
@@ -443,7 +468,7 @@ export async function networkProductCommand(
                 `Address = ${answer.peer.address}/32`,
                 "",
                 "[Peer]",
-                `PublicKey = ${answer.tunnel.gatewayPublicKey ?? "<gatewayPublicKey from runtime tunnel get>"}`,
+                `PublicKey = ${answer.tunnel.gatewayPublicKey ?? "<gatewayPublicKey from runtime networks wireguard get>"}`,
                 `Endpoint = ${answer.tunnel.endpoint}`,
                 `AllowedIPs = ${answer.tunnel.subnet}`,
                 "PersistentKeepalive = 25",
@@ -488,7 +513,7 @@ export async function networkProductCommand(
           }
         }
         if (action === "rm" || action === "remove") {
-          const after = await runtime.tunnel.removePeer(need(rest[1], "a peer id"));
+          const after = await runtime.networks.wireguard.removePeer(need(rest[1], "a peer id"));
           print(`Removed. ${after.peers.length} peer(s) left.`, after);
           return 0;
         }
@@ -496,17 +521,17 @@ export async function networkProductCommand(
       }
     }
   }
-  if (product === "network" && verb === "private") {
+  if (product === "networks" && verb === "private") {
     const describe = (state: PrivateNetwork) =>
       state.enabled
         ? "On: your sandboxes reach each other at <name>.sandbox.internal:<port> over TCP."
         : state.allowed
-          ? "Off. Turn it on: runtime network private on"
+          ? "Off. Turn it on: runtime networks private on"
           : "Off. Reaching your sandboxes by name needs a kept top-up.";
     switch (rest[0]) {
       case "on":
       case "off": {
-        const state = await runtime.network.private.set({ enabled: rest[0] === "on" });
+        const state = await runtime.networks.private.set({ enabled: rest[0] === "on" });
         print(
           state.enabled ? describe(state) : "Off. Open connections between your sandboxes are cut.",
           state,
@@ -515,16 +540,46 @@ export async function networkProductCommand(
       }
       case "status":
       case undefined: {
-        const state = await runtime.network.private.get();
+        const state = await runtime.networks.private.get();
         print(describe(state), state);
         return 0;
       }
     }
     throw usage(product, "private takes on, off or status.");
   }
-  if (product === "network") {
-    if (verb !== "upstream-proxy") throw usage(product, `Unknown network command ${verb}.`);
-    const upstream = runtime.network.upstreamProxy;
+  if (product === "networks" && verb === "signed-requests") {
+    const describe = (state: SignedRequests) =>
+      state.enabled
+        ? "On. Each site's headers: https://withruntime.com/docs/egress"
+        : state.allowed
+          ? "Off. Turn it on: runtime networks signed-requests on"
+          : state.why === "no_credit"
+            ? "Needs credit on the account."
+            : `Not available (${state.why ?? "unknown"}).`;
+    switch (rest[0]) {
+      case "on":
+      case "off": {
+        const state = await runtime.networks.signedRequests.set({ enabled: rest[0] === "on" });
+        print(
+          state.enabled
+            ? describe(state)
+            : "Off. New signatures stop at once; ones already given expire within 5 minutes.",
+          state,
+        );
+        return 0;
+      }
+      case "status":
+      case undefined: {
+        const state = await runtime.networks.signedRequests.get();
+        print(describe(state), state);
+        return 0;
+      }
+    }
+    throw usage(product, "signed-requests takes on, off or status.");
+  }
+  if (product === "networks") {
+    if (verb !== "upstream-proxy") throw usage(product, `Unknown networks command ${verb}.`);
+    const upstream = runtime.networks.upstreamProxy;
     const describe = (proxy: UpstreamProxy) =>
       [
         `Outbound connections${proxy.hosts?.length ? ` to ${proxy.hosts.join(", ")}` : ""} go through ${proxy.url}.`,
@@ -559,7 +614,7 @@ export async function networkProductCommand(
           if (!(error instanceof RuntimeError) || error.code !== "not_found") throw error;
           print(
             named(
-              "No upstream proxy. Set one: runtime network upstream-proxy set http://proxy.example.com:3128",
+              "No upstream proxy. Set one: runtime networks upstream-proxy set http://proxy.example.com:3128",
             ),
             null,
           );
@@ -577,5 +632,5 @@ export async function networkProductCommand(
     }
     throw usage(product, "upstream-proxy takes set, get or remove.");
   }
-  throw usage(product, `Unknown ${product} command ${verb}.`);
+  throw usage(product, `Unknown ${NETWORK_COMMAND[product]} command ${verb}.`);
 }

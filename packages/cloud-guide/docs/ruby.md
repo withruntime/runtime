@@ -34,9 +34,9 @@ ensure
 end
 ```
 
-`create` returns once the sandbox is running. With no arguments you get the included usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
+`create` returns once the sandbox is running. With no arguments you get the free usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
 a 4 GiB disk, running while it works and pausing itself when idle, with no
-time limit (`timeout_seconds:` sets one, 60 to 86,400). The included usage is spent first, then prepaid credit; `funding:` is accepted and ignored. Every
+time limit (`timeout_seconds:` sets one, 60 to 86,400). The free usage is spent first, then prepaid credit; `funding:` is accepted and ignored. Every
 field is optional, in snake_case:
 
 ```ruby
@@ -230,9 +230,9 @@ runtime.domains.remove("app.example.org")
 sbx.stop
 ```
 
-`runtime.addresses.reserve(family: 4)` reserves a dedicated address;
+`runtime.ips.reserve(family: 4)` reserves a dedicated address;
 `list` and `release(id)` manage it. Returned funding fields and integer money
-are preserved. `runtime.tunnel` manages the account's WireGuard network with
+are preserved. `runtime.networks.wireguard` manages the account's WireGuard network with
 `create`, `get`, `delete`, `add_peer`, `rotate_peer` and `remove_peer`.
 Save a generated peer's `config` securely even when `config_ready` is false:
 its private key is returned once. Calls generating a private key are not
@@ -373,7 +373,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `retryable?` says whether trying the same call again may work.
 
-**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
+**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. Pass `wait_for_capacity:` (seconds) to the client or to one

@@ -38,7 +38,7 @@ Weighing more than two? [AWS Lambda MicroVMs alternatives](/compare/aws-lambda-m
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No access key
   goes into a prompt or a config file, and the [MCP server](./mcp) reuses the
   same connection.
@@ -101,7 +101,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the MicroVM calls on a branch, tests them on the included usage, and tells
+replaces the MicroVM calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 

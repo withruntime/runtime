@@ -38,6 +38,33 @@ class SandboxAPIError(_Carries, Exception):
         self.code = code
 
 
+#: The most whole seconds blaxel 0.4.13's create(config, timeout=N) takes.
+MAX_CREATION_TIMEOUT_SECONDS = 50
+
+
+class SandboxCreationTimeoutError(SandboxAPIError):
+    """blaxel 0.4.13's error for a sandbox not running within create's
+    ``timeout``: the sandbox was deleted. ``sandbox_name`` and ``timeout``
+    name which and how long."""
+
+    def __init__(self, sandbox_name: str, timeout: int, state: str) -> None:
+        super().__init__(f"Sandbox {sandbox_name} was not ready within {timeout}s; the creation was cancelled. "
+                         f"It was still {state} after {timeout}s.", 408, "CREATION_TIMEOUT")
+        self.sandbox_name = sandbox_name
+        self.timeout = timeout
+
+
+def is_creation_timeout_error(error: BaseException) -> bool:
+    return isinstance(error, SandboxCreationTimeoutError)
+
+
+def check_creation_timeout(timeout: Any) -> None:
+    """Blaxel's check of create's ``timeout``, before any request."""
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= MAX_CREATION_TIMEOUT_SECONDS:
+        raise ValueError("SandboxInstance.create: 'timeout' must be a whole number of seconds between 1 and "
+                         f"{MAX_CREATION_TIMEOUT_SECONDS}, got {timeout!r}.")
+
+
 class SnapshotAPIError(SandboxAPIError):
     """Blaxel's error for a workspace snapshot call (``Snapshot``)."""
 
@@ -1634,7 +1661,7 @@ def image_ref(image: str) -> Tuple[str, str]:
 
 def image_alternative(image: str) -> str:
     name, tag = image_ref(image)
-    return (f"Build it as a Runtime image named {name}: `npx withruntime image build --dockerfile Dockerfile "
+    return (f"Build it as a Runtime image named {name}: `npx withruntime images build --dockerfile Dockerfile "
             f"--name {name} -t {name}:{tag}`. The code can keep \"{image}\": the adapter starts from {name}:{tag}.")
 
 

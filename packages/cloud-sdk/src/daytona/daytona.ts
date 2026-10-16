@@ -8,7 +8,15 @@ import {
   type RuntimeSandbox,
   type WithRuntime,
 } from "./client.js";
-import { DaytonaError, DaytonaNotFoundError, guard, NotSupportedError } from "./errors.js";
+import {
+  DaytonaError,
+  DaytonaInvalidArgumentError,
+  DaytonaNotFoundError,
+  DaytonaQueueTimeoutError,
+  guard,
+  NotSupportedError,
+} from "./errors.js";
+import { RuntimeError } from "../errors.js";
 import type { Image } from "./image.js";
 import { LEASE_MAX_SECONDS } from "../compat/lease.js";
 import {
@@ -74,7 +82,13 @@ export type CreateSandboxBaseParams = {
   autoArchiveInterval?: number;
   autoDeleteInterval?: number;
   ttlMinutes?: number;
+  /** Minutes the create may wait for room before it fails with
+   * DaytonaQueueTimeoutError: Runtime's own wait for capacity, which is two
+   * minutes when not given. */
+  queueTimeout?: number;
   volumes?: VolumeMount[];
+  /** Refused: a Runtime sandbox has no /dev/kvm. */
+  kvm?: boolean;
   networkBlockAll?: boolean;
   networkAllowList?: string;
   domainAllowList?: string;
@@ -382,12 +396,15 @@ export class Daytona implements AsyncDisposable {
 
   /** Creates a sandbox and waits until it runs, with Daytona's defaults: 1
    * vCPU, 1 GiB, 3 GiB disk, pausing after 15 minutes without calls. Funding
-   * is left to Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
+   * is left to Runtime: the free usage first, then prepaid credit, exactly as withruntime's own create. */
   async create(
     params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams = {},
     options: { timeout?: number; onSnapshotCreateLogs?: (chunk: string) => void } = {},
   ): Promise<Sandbox> {
     refuseCreate(params);
+    const timeout = options.timeout;
+    if (timeout !== undefined && timeout !== null && !(timeout >= 0))
+      throw new DaytonaInvalidArgumentError("Timeout must be a non-negative number");
     const client = params.withruntime?.client ?? this.#client;
     const lifecycle = lifecycleOf(params);
     const resources = { ...DEFAULT_RESOURCES, ...params.resources };
@@ -437,7 +454,32 @@ export class Daytona implements AsyncDisposable {
       ...this.#create,
       ...params.withruntime?.create,
     };
-    const runtime = await guard("sandbox", () => client.sandboxes.create(input));
+    // Daytona's timeout bounds the create and its wait to run (0: none);
+    // queueTimeout bounds the wait for room, which Runtime counts apart.
+    let refused: string | undefined;
+    const runtime = await guard("sandbox", () =>
+      client.sandboxes.create(input, {
+        ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
+        ...(params.queueTimeout !== undefined
+          ? {
+              waitForCapacityMs: params.queueTimeout * 60_000,
+              onCapacityWait: (refusal: RuntimeError) => {
+                refused = refusal.code;
+              },
+            }
+          : {}),
+      }),
+    ).catch((error: unknown) => {
+      const cause = (error as { cause?: unknown }).cause;
+      if (refused !== undefined && cause instanceof RuntimeError && cause.code === refused)
+        throw new DaytonaQueueTimeoutError(
+          `No room for the sandbox within its queueTimeout of ${params.queueTimeout} minutes. ${cause.message}`,
+          cause.status,
+          undefined,
+          cause.code,
+        );
+      throw error;
+    });
     if (user) await asUser(runtime, user);
     if (lifecycle.autoDeleteInterval > 0)
       await guard("sandbox", () =>
@@ -495,7 +537,7 @@ export class Daytona implements AsyncDisposable {
     throw new DaytonaNotFoundError(
       `No Runtime image or snapshot is named "${name}". Daytona snapshots do not move to Runtime; build the same ` +
         `environment as a Runtime image with that name: daytona.snapshot.create({ name: "${name}", image }) with this ` +
-        `package, or \`npx withruntime image build --dockerfile Dockerfile --name ${imageName(name)}\`.`,
+        `package, or \`npx withruntime images build --dockerfile Dockerfile --name ${imageName(name)}\`.`,
       404,
     );
   }
@@ -666,6 +708,16 @@ function refuseCreate(params: CreateSandboxBaseParams & { resources?: Resources 
     );
   if (params.volumes?.some((mount) => mount.subpath))
     throw new NotSupportedError("Mounting part of a volume (subpath)", "Mount the whole volume.");
+  if (params.kvm)
+    throw new NotSupportedError(
+      "Nested virtualization (kvm)",
+      "Remove kvm: a Runtime sandbox is a microVM without /dev/kvm. Run the workload directly in the sandbox, or in a container with `sudo enable-docker`.",
+    );
+  if (
+    params.queueTimeout !== undefined &&
+    (!Number.isInteger(params.queueTimeout) || params.queueTimeout < 1)
+  )
+    throw new DaytonaInvalidArgumentError("queueTimeout must be a positive integer");
   const refusals: Array<[keyof CreateSandboxBaseParams, string, string]> = [
     ["spot", "Spot GPU sandboxes (spot)", "Remove it: Runtime runs sandboxes on CPUs."],
     [

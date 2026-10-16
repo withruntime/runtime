@@ -21,6 +21,9 @@ export {
   type SandboxState,
   type SandboxLifecycle,
   type SandboxOnTimeout,
+  type SandboxPauseOpts,
+  type CreateSnapshotOpts,
+  type SnapshotMode,
   type SnapshotInfo,
 } from "./sandbox.js";
 export {
@@ -56,6 +59,8 @@ export {
   NotFoundError,
   FileNotFoundError,
   SandboxNotFoundError,
+  SandboxNotRunningError,
+  SandboxUnreachableError,
   TemplateError,
   RateLimitError,
   AuthenticationError,
@@ -72,6 +77,7 @@ export {
   VolumePathNotFoundError,
   SecretError,
   SecretNotFoundError,
+  DockerfileSyntaxError,
   type CommandResult,
 } from "./errors.js";
 export type { ConnectionOpts, HttpVersion, RuntimeOpts } from "./client.js";

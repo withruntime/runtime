@@ -12,10 +12,10 @@ class PrivateNetwork:
 
     def get(self) -> dict[str, Any]:
         """``enabled``, ``allowed`` (paid accounts only) and, when not, ``why``."""
-        return self._t.json("GET", "/v1/network/private")
+        return self._t.json("GET", "/v1/networks/private")
 
     def set(self, *, enabled: bool) -> dict[str, Any]:
         """``enabled=True`` lets your sandboxes reach each other by name;
         ``False`` stops it and cuts open connections between them within
         seconds."""
-        return self._t.json("PUT", "/v1/network/private", body={"enabled": enabled})
+        return self._t.json("PUT", "/v1/networks/private", body={"enabled": enabled})

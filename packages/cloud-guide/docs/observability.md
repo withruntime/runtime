@@ -36,7 +36,7 @@ print(m["latest"]["cpuPercent"], m["latest"]["memoryBytes"])
 ```
 
 ```bash check
-npx withruntime sandbox metrics <id> --range 6h
+npx withruntime sandboxes metrics <id> --range 6h
 ```
 
 What you get:
@@ -130,28 +130,37 @@ through `withruntime/e2b`; its `diskUsed` is null.
 ## Events
 
 Every lifecycle change of a sandbox, a snapshot or a volume is an event, kept
-14 days.
+14 days, and so is every change to your egress secrets and your upstream
+proxy.
 
-| Type                       | When                                                                                                        |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `sandbox.created`          | A sandbox is made; it is starting                                                                           |
-| `sandbox.running`          | It is ready and running                                                                                     |
-| `sandbox.paused`           | It paused, keeping its memory and files                                                                     |
-| `sandbox.woken`            | A paused sandbox is running again                                                                           |
-| `sandbox.stopped`          | It stopped. `stopReason` says why                                                                           |
-| `sandbox.start_failed`     | It stopped before it ever ran; `sandbox.stopped` follows                                                    |
-| `sandbox.wake_failed`      | A wake did not complete; the sandbox is paused or stopped                                                   |
-| `sandbox.host_unreachable` | Its server has not answered for 35 s, so what runs there is frozen; `host.unreachableSince` says since when |
-| `sandbox.host_reachable`   | Its server answers again, and the sandbox runs on as it was                                                 |
-| `sandbox.recovered`        | Its server was lost and it is back; `recovery` says from when                                               |
-| `sandbox.recovery_failed`  | Its server was lost and it cannot come back; `recovery.reason` says why                                     |
-| `sandbox.files.changed`    | Files changed under a watch that sends to webhooks                                                          |
-| `snapshot.ready`           | A snapshot finished and can be started from                                                                 |
-| `snapshot.failed`          | A snapshot could not be taken                                                                               |
-| `snapshot.deleted`         | A snapshot was deleted or expired                                                                           |
-| `volume.ready`             | A volume is made and can be attached                                                                        |
-| `volume.failed`            | A volume could not be made                                                                                  |
-| `volume.deleted`           | A volume was deleted                                                                                        |
+| Type                         | When                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `sandbox.created`            | A sandbox is made; it is starting                                                                            |
+| `sandbox.running`            | It is ready and running                                                                                      |
+| `sandbox.paused`             | It paused, keeping its memory and files                                                                      |
+| `sandbox.woken`              | A paused sandbox is running again                                                                            |
+| `sandbox.stopped`            | It stopped. `stopReason` says why                                                                            |
+| `sandbox.start_failed`       | It stopped before it ever ran; `sandbox.stopped` follows                                                     |
+| `sandbox.wake_failed`        | A wake did not complete; the sandbox is paused or stopped                                                    |
+| `sandbox.host_unreachable`   | Its server has not answered for 35 s, so what runs there is frozen; `host.unreachableSince` says since when  |
+| `sandbox.host_reachable`     | Its server answers again, and the sandbox runs on as it was                                                  |
+| `sandbox.recovered`          | Its server was lost and it is back; `recovery` says from when                                                |
+| `sandbox.recovery_failed`    | Its server was lost and it cannot come back; `recovery.reason` says why                                      |
+| `sandbox.files.changed`      | Files changed under a watch that sends to webhooks                                                           |
+| `sandbox.out_of_memory`      | The sandbox ran out of memory and Linux ended a command's program; `outOfMemory` says how many and its size  |
+| `sandbox.secret_not_applied` | A request carried a secret's placeholder that was not replaced; `secretNotApplied` says which secret and why |
+| `snapshot.ready`             | A snapshot finished and can be started from                                                                  |
+| `snapshot.failed`            | A snapshot could not be taken                                                                                |
+| `snapshot.deleted`           | A snapshot was deleted or expired                                                                            |
+| `volume.ready`               | A volume is made and can be attached                                                                         |
+| `volume.failed`              | A volume could not be made                                                                                   |
+| `volume.deleted`             | A volume was deleted                                                                                         |
+| `volume.recovered`           | Its server was lost and it is back on another, from the copy kept of it; `recovery` says from when           |
+| `egress_secret.created`      | An egress secret was added; `secret` has its name, hosts and number of rules, never its value                |
+| `egress_secret.updated`      | An egress secret was replaced                                                                                |
+| `egress_secret.deleted`      | An egress secret was deleted                                                                                 |
+| `upstream_proxy.set`         | Your upstream proxy was set or changed; `upstreamProxy` has its address, credential's name and hosts         |
+| `upstream_proxy.removed`     | Your upstream proxy was removed                                                                              |
 
 Each event carries the resource as it was:
 
@@ -174,6 +183,61 @@ Each event carries the resource as it was:
       "region": "us-east",
       "funding": "paid",
       "pausable": true
+    }
+  }
+}
+```
+
+`sandbox.out_of_memory` is sent once for each command the out-of-memory killer
+ended: for a command run to its end, with its result; for a background
+process, when it is first read, got or listed after it ended. A process
+nobody reads after it ends sends none. The command is named by its program
+only, never its arguments:
+
+```json
+{
+  "type": "sandbox.out_of_memory",
+  "data": {
+    "sandbox": {
+      "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f",
+      "state": "running",
+      "memoryMiB": 512
+    },
+    "command": { "program": "node", "processId": "p-4", "exitCode": -9, "outcome": "exited" },
+    "outOfMemory": { "code": "out_of_memory", "processesKilled": 1, "memoryMiB": 512 }
+  }
+}
+```
+
+`sandbox.secret_not_applied` is sent when a request from the sandbox carried
+an [egress secret](./security#secrets-sandboxes-never-see)'s placeholder that
+went out as it is, so the server got the placeholder and not the key. It is
+sent once for each secret, reason and destination of a sandbox, with the
+host's next usage reading, within about a minute. The placeholder is never the
+secret, so nothing leaked; the event names the secret, never its placeholder
+or value. `reason` is one of:
+
+| `reason`                   | What happened                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| `unencrypted`              | It went without TLS, over plain HTTP or another cleartext protocol. A secret goes only over HTTPS |
+| `not_in_credential_header` | It went to the secret's host in the path or query (`place` is `target`) or in the `place` header  |
+| `rule_not_matched`         | It went in a credential header, but none of the secret's `rules` allows that method and path      |
+| `by_address`               | HTTPS went to an IP address, asking for one of the secret's hosts. Use the host name in the URL   |
+
+Runtime does not read inside HTTPS to a host no secret names, so a placeholder
+sent there sends no event: check the host against `npx withruntime secrets ls`.
+
+```json
+{
+  "type": "sandbox.secret_not_applied",
+  "data": {
+    "sandbox": { "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f", "state": "running" },
+    "secretNotApplied": {
+      "secret": { "name": "OPENAI_API_KEY" },
+      "reason": "unencrypted",
+      "destination": { "host": "api.openai.com", "port": 80 },
+      "at": "2026-10-10T18:00:00.000Z",
+      "message": "A request to api.openai.com:80 carried the placeholder of OPENAI_API_KEY without HTTPS, so the secret was not added. A secret goes only over HTTPS."
     }
   }
 }
@@ -385,6 +449,6 @@ account can have three exports.
 
 ## MCP
 
-`runtime_sandbox_metrics` reads a sandbox's CPU, memory, CPU wait and memory stalls, and
+`runtime_sandboxes_metrics` reads a sandbox's CPU, memory, CPU wait and memory stalls, and
 `runtime_events_list` its events. `runtime_webhooks_manage` and
 `runtime_otel_manage` list, create, test and change webhooks and exports.

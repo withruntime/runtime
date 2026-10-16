@@ -18,10 +18,11 @@ import withruntime  # noqa: E402
 from withruntime.vercel import sandbox as async_sandbox  # noqa: E402
 from withruntime.vercel.api import session  # noqa: E402
 from withruntime.vercel.sandbox import sync as sandbox  # noqa: E402
-from withruntime.vercel.sandbox import (GitSource, NetworkPolicy, NetworkPolicySubnets,  # noqa: E402
+from withruntime.vercel.sandbox import (GitSource, NetworkPolicy, NetworkPolicyResponse,  # noqa: E402
+                                        NetworkPolicyRule, NetworkPolicySubnets, NetworkPolicyTransform,
                                         NotSupportedError, SandboxApiError, SandboxCredentialsError,
-                                        SandboxPathNotFoundError, SandboxQueryByName, SandboxResources,
-                                        SandboxStatus, SnapshotSource)
+                                        SandboxError, SandboxInteractiveError, SandboxPathNotFoundError,
+                                        SandboxQueryByName, SandboxResources, SandboxStatus, SnapshotSource)
 from withruntime.vercel._core import network_rules, pick_key, to_runtime_path  # noqa: E402
 
 
@@ -102,6 +103,34 @@ class Create(Base):
         with self.assertRaises(NotSupportedError) as caught:
             network_rules(NetworkPolicy.custom(allow={"api.github.com": ["rule"]}))
         self.assertIn("withruntime secrets set NAME --host api.github.com", caught.exception.alternative)
+
+    def test_network_policy_shapes_of_vercel_sandbox_0_8(self):
+        # 0.8.0 took header_names off a transform: it only described a policy read back.
+        with self.assertRaises(TypeError):
+            NetworkPolicyTransform(header_names=["authorization"])
+        # A rule does exactly one thing.
+        with self.assertRaises(ValueError):
+            NetworkPolicyRule()
+        with self.assertRaises(ValueError):
+            NetworkPolicyRule(transform=[NetworkPolicyTransform(headers={"a": "b"})], forward_url="https://b.test")
+        # A rule may answer the request itself, checked as Vercel checks it.
+        for bad in ({"status_code": 99}, {"status_code": 200, "body": "x"},
+                    {"status_code": 204, "body": "x", "content_type": "text/plain"},
+                    {"status_code": 200, "headers": {"Content-Length": "1"}},
+                    {"status_code": 200, "headers": {"X-A": "1", "x-a": "2"}}):
+            with self.assertRaises(ValueError):
+                NetworkPolicyResponse(**bad)
+        answer = NetworkPolicyRule(response=NetworkPolicyResponse(status_code=403, body="no", content_type="text/plain"))
+        # Runtime's rules allow and deny; one that answers is refused before anything happens.
+        with self.assertRaises(NotSupportedError) as caught:
+            network_rules(NetworkPolicy.custom(allow={"api.github.com": [answer]}))
+        self.assertIn("withruntime secrets set NAME --host api.github.com", caught.exception.alternative)
+        for module in (async_sandbox, sandbox):
+            for name in ("NetworkPolicyResponse", "NetworkPolicyReadback", "NetworkPolicyInjectionRuleSummary",
+                         "NetworkPolicyForwardRuleSummary", "NetworkPolicyResponseRuleSummary",
+                         "SandboxInteractiveError"):
+                self.assertIn(name, module.__all__)
+                self.assertIs(getattr(module, name), getattr(async_sandbox, name))
 
 
 class Keys(unittest.TestCase):
@@ -244,10 +273,32 @@ class Lifecycle(Base):
     def test_gaps(self):
         box = self.create()
         for refuse in (box.list_sessions, box.list_snapshots, lambda: sandbox.query_sessions(),
-                       lambda: sandbox.get_or_create_drive(name="d"), lambda: async_sandbox.Drive()):
+                       lambda: sandbox.get_or_create_drive(name="d"), lambda: async_sandbox.Drive(),
+                       # vercel-sandbox 0.9.0 added get_drive; drives are Runtime volumes.
+                       lambda: sandbox.get_drive(name_or_id="d"), lambda: async_sandbox.get_drive(name_or_id="d")):
             with self.assertRaises(NotSupportedError) as caught:
                 refuse()
             self.assertTrue(caught.exception.alternative)
+
+    def test_open_interactive_is_refused_before_anything_happens(self):
+        # vercel-sandbox 0.8.0 added open_interactive; Runtime's own terminal is the way.
+        box = self.create()
+        before = len(self.world.calls)
+        with self.assertRaises(NotSupportedError) as caught:
+            box.open_interactive("/bin/bash", cols=100, rows=30)
+        self.assertIn("open_interactive", caught.exception.feature)
+        self.assertIn("box.withruntime.terminal(", caught.exception.alternative)
+        self.assertEqual(len(self.world.calls), before)
+        for refuse in (sandbox.SyncInteractiveSession, async_sandbox.InteractiveSessionOperation):
+            with self.assertRaises(NotSupportedError):
+                refuse()
+        self.assertTrue(issubclass(SandboxInteractiveError, SandboxError))
+
+    def test_update_network_policy_returns_the_session(self):
+        # Vercel returns the session; a Runtime sandbox is its own session.
+        box = self.create()
+        self.assertIs(box.update_network_policy(NetworkPolicy.deny_all()), box)
+        self.assertEqual(self.world.called("network.set")[-1][1], {"internet": False})
 
     def test_runtime_errors_become_sandbox_api_errors(self):
         box = self.create()
@@ -274,6 +325,9 @@ class Async(unittest.TestCase):
                 self.assertEqual(await box.fs.read_text("a.txt"), "x")
                 process = await box.create_process("sh", ["-c", "echo hi"])
                 self.assertEqual([line async for line in process.stdout], ["ran ['sh', '-c', 'echo hi']\n"])
+                self.assertIs(await box.update_network_policy(NetworkPolicy.allow_all()), box)
+                with self.assertRaises(NotSupportedError):
+                    box.open_interactive()
             kept = await async_sandbox.create_sandbox(client=client, destroy=False)
             await kept.stop()
             found = [one.name async for one in async_sandbox.query_sandboxes(client=client)]

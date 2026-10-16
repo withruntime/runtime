@@ -33,7 +33,7 @@ def solve(model, task: str) -> str:
 ```
 
 The key comes from `RUNTIME_API_KEY` or this machine's `npx withruntime login`,
-as for the rest of the SDK. Leaving the `with` block stops the sandbox.
+as for the rest of the SDK. Leaving the `with` block deletes the sandbox.
 `Sandbox.create()` takes the sandbox's settings, such as `image`, `region`,
 `vcpu`, `memory_mib` and `timeout_seconds`; see the [Python guide](./python).
 

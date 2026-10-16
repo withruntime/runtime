@@ -17,7 +17,7 @@ def not_found(code: str, message: str) -> withruntime.NotFoundError:
 def unavailable() -> withruntime.ServiceUnavailableError:
     return withruntime.ServiceUnavailableError(
         "Forks are paused while we fix an issue; your sandbox is unaffected.", code="fork_unavailable",
-        status=503, hint="Build a custom image (runtime image build) and create each sandbox from it.")
+        status=503, hint="Build a custom image (runtime images build) and create each sandbox from it.")
 
 
 EXEC_RESULT_BYTES = 65_536
@@ -447,8 +447,8 @@ class FakeSandbox:
             copies.append(copy)
         return copies
 
-    def snapshot(self, name: Optional[str] = None) -> Dict[str, Any]:
-        self._w.record("sandbox.snapshot", self.id, name)
+    def snapshot(self, name: Optional[str] = None, mode: Optional[str] = None) -> Dict[str, Any]:
+        self._w.record("sandbox.snapshot", self.id, name, mode)
         if not self._w.forks_enabled:
             raise unavailable()
         snapshot_id = self._w.new_id()

@@ -10,7 +10,7 @@ from ._core import (AuthenticationException, BuildException, CommandExitExceptio
                     FileNotFoundException, FileType, FileUploadException, FilesystemEvent, FilesystemEventType,
                     GitAuthException, GitUpstreamException, InvalidArgumentException, NotEnoughSpaceException,
                     NotFoundException, NotSupportedException, PublicPreviewNotAllowedException, ProcessInfo, PtySize, RateLimitException, SandboxException,
-                    SandboxInfo, SandboxInfoLifecycle, SandboxNotFoundException, SandboxQuery, SecretException,
+                    SandboxInfo, SandboxInfoLifecycle, SandboxNotFoundException, SandboxNotRunningException, SandboxUnreachableException, SandboxQuery, SecretException,
                     SecretNotFoundException, ServiceBusyException, SnapshotInfo, TemplateException, TimeoutException,
                     VolumeException, VolumeNotFoundException, VolumePathNotFoundException, WriteInfo, HttpVersion)
 from ._core import unsupported as _unsupported
@@ -18,7 +18,7 @@ from ._sync_sandbox import CommandHandle, Commands, Filesystem, Pty, Sandbox, Sa
 
 __version__ = "0.1.0"
 
-_TEMPLATES = ("Build a Runtime image instead: `npx withruntime image build --dockerfile e2b.Dockerfile --name "
+_TEMPLATES = ("Build a Runtime image instead: `npx withruntime images build --dockerfile e2b.Dockerfile --name "
               "<template>`, then Sandbox.create('<template>').")
 
 
@@ -47,7 +47,7 @@ AsyncSecret = Secret
 wait_for_port = wait_for_url = wait_for_process = wait_for_file = wait_for_timeout = _Unsupported(
     "template ready checks", _TEMPLATES)
 
-# The rest of what e2b 2.52.1 exports (its __all__, read 5 October 2026), so
+# The rest of what e2b 2.55.1 exports (its __all__, read 9 October 2026), so
 # that every import written for E2B resolves. Types and values are E2B's own;
 # anything that would act raises NotSupportedException when used.
 from enum import Enum as _Enum
@@ -78,6 +78,25 @@ class VolumeFileType(str, _Enum):
 SandboxListOrder = _Literal["asc", "desc"]
 SandboxOnResume = _Literal["restore", "reboot"]
 SandboxOnTimeout = _Union[_Literal["pause", "kill"], _Dict[str, _Any]]
+# e2b 2.55: what a pause or snapshot keeps. Runtime's pause keeps memory, so
+# a pause with "filesystem" raises NotSupportedException; a snapshot with it is
+# Runtime's disk snapshot.
+SnapshotMode = _Literal["full", "filesystem"]
+
+
+class DockerfileSyntaxError(ValueError):
+    """e2b 2.55's Dockerfile parse error (from e2b-dockerfile-utils), with the
+    line it names. Runtime parses no Dockerfile here (templates are Runtime
+    images), so nothing raises it; it exists so code that imports or catches it
+    still loads."""
+
+    def __init__(self, message: str, line: _Any = None) -> None:
+        self.line = line
+        if line is None:
+            super().__init__(f"Dockerfile parse error: {message}")
+        else:
+            super().__init__(f"Dockerfile parse error on line {line}: {message}")
+
 GitResetMode = _Literal["soft", "mixed", "hard", "merge", "keep"]
 LogEntryLevel = _Literal["debug", "info", "warn", "error"]
 SandboxIamTokenType = _Union[_Literal["JWT-SVID"], str]
@@ -118,7 +137,7 @@ __all__ = [
     "AsyncFilesystem", "SandboxPaginator", "AsyncSandboxPaginator", "CommandResult", "CommandExitException",
     "EntryInfo", "WriteInfo", "FileType", "FilesystemEvent", "FilesystemEventType", "ProcessInfo", "SandboxInfo", "SandboxInfoLifecycle", "SandboxQuery",
     "SnapshotInfo", "SandboxException", "TimeoutException", "InvalidArgumentException", "NotEnoughSpaceException",
-    "NotFoundException", "FileNotFoundException", "SandboxNotFoundException", "AuthenticationException",
+    "NotFoundException", "FileNotFoundException", "SandboxNotFoundException", "SandboxNotRunningException", "SandboxUnreachableException", "AuthenticationException",
     "TemplateException", "RateLimitException", "ServiceBusyException", "NotSupportedException", "PublicPreviewNotAllowedException", "HttpVersion", "Template",
     "AsyncTemplate", "Volume", "AsyncVolume", "Secret", "AsyncSecret", "wait_for_port", "wait_for_url",
     "wait_for_process", "wait_for_file", "wait_for_timeout",
@@ -142,5 +161,5 @@ __all__ += [
     "SnapshotPaginator", "AsyncSnapshotPaginator", "VolumeInfo", "VolumeAndToken", "VolumeEntryStat",
     "get_signature", "SandboxNetworkSelectorContext", "SandboxNetworkTransformContext", "TemplateBase", "BuildInfo",
     "BuildStatusReason", "TemplateBuildStatusResponse", "TemplateTag", "TemplateTagInfo", "ReadyCmd", "LogEntry",
-    "LogEntryStart", "LogEntryEnd", "default_build_logger",
+    "LogEntryStart", "LogEntryEnd", "default_build_logger", "SnapshotMode", "DockerfileSyntaxError",
 ]

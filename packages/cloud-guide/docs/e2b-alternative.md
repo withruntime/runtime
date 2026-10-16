@@ -31,8 +31,7 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
   needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox has no time limit:
   it runs while it works, with no plan at all: prepaid credit from {{topup-min}}.
 - **A one-line switch.** `withruntime/e2b` runs code written for E2B's SDK, in
-  JavaScript and Python, including the code interpreter. Run `runtime switch --from e2b` before your
-  first top-up and it is matched, up to {{switching-max}}.
+  JavaScript and Python, including the code interpreter. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)). E2B lists SSO, SCIM and roles as
@@ -47,7 +46,7 @@ Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the 
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -104,7 +103,7 @@ E2B      CPU    1,000 × 60 s / 3,600 × 2 × {{rate:e2b:cpu}} = {{part:e2b:cpu}
 
 Plan fees, storage, network, taxes and free credits are left out of both.
 `runtime compare --from e2b` prices your own usage the same way, with
-sandboxes the included usage paid for at the standard rates, so included usage never
+sandboxes the free usage paid for at the standard rates, so free usage never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
 first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
@@ -112,14 +111,14 @@ for Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the E2B calls on a branch, tests them on the included usage, and tells
+replaces the E2B calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
 ### Change one import
 
-Runtime's SDK (0.4.0 and later) runs code written for E2B's SDK. Change the
-import and set `RUNTIME_API_KEY`:
+Runtime's SDK runs code written for E2B's SDK, as this page describes from
+version 0.12.0 (Python 0.12.0). Change the import and set `RUNTIME_API_KEY`:
 
 ```ts no-run
 import { Sandbox } from "withruntime/e2b"; // was: from "e2b"
@@ -138,7 +137,7 @@ which keeps memory and files at {{paused-storage-rate}} per GB (10⁹ bytes) a
 month while the account has credit, so call `kill()` when the work is done.
 Unlike E2B's, sandboxes pause after {{idle-pause}} with nothing happening and
 wake on the next call, and E2B code still sees them running;
-`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the included usage first, then prepaid credit, with nothing to
+`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the free usage first, then prepaid credit, with nothing to
 choose.
 
 `commands.run` returns the command's whole output and, as E2B's does, throws

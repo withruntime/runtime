@@ -54,6 +54,21 @@ export function checkBrowserOrigins(origins: ReturnType<typeof connectionOrigins
       "Browser login supports Runtime's production endpoints or local test endpoints. Check RUNTIME_AUTH_URL and RUNTIME_API_URL.",
     );
 }
+/** A wallet account's key, from its claim, saved as this machine's connection
+ * (the MCP bridge's runtime_wallet_claim; `billing claim` saves the same). */
+export function saveWalletConnection(env: NodeJS.ProcessEnv, key: string, orgId: string) {
+  const origins = connectionOrigins(env);
+  checkBrowserOrigins(origins);
+  return connectionStore(env).save({
+    version: 1,
+    apiOrigin: origins.api,
+    authOrigin: origins.auth,
+    key,
+    connectionId: "pasted",
+    orgId,
+    agentName: "Wallet agent",
+  });
+}
 function defaultDirectory(env: NodeJS.ProcessEnv) {
   const root = env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
   if (!isAbsolute(root)) throw new Error("XDG_CONFIG_HOME must be an absolute path.");

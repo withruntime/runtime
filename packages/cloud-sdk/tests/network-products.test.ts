@@ -60,7 +60,7 @@ test("the SDK's four products call their own paths, never a sandbox's", async ()
   const { runtime, calls } = recorder({
     "GET /v1/domains": { data: [], nextCursor: null },
     "GET /v1/ports": { data: [], nextCursor: null },
-    "GET /v1/addresses": { data: [], nextCursor: null },
+    "GET /v1/ips": { data: [], nextCursor: null },
   });
   const sandboxId = "11111111-2222-4333-8444-555555555555";
   await runtime.domains.add({ hostname: "app.example.com", sandboxId, port: 3000 });
@@ -70,15 +70,19 @@ test("the SDK's four products call their own paths, never a sandbox's", async ()
   await runtime.ports.open({ sandboxId, port: 5432 });
   await runtime.ports.list({ sandboxId });
   await runtime.ports.close("p1");
-  await runtime.addresses.reserve({ family: 6 });
-  await runtime.addresses.list();
-  await runtime.addresses.release("a1");
-  await runtime.tunnel.create({ subnet: "10.9.0.0/16" });
-  await runtime.tunnel.addPeer({ name: "office", publicKey: "k", routes: ["10.0.0.0/16"] });
-  await runtime.tunnel.rotatePeer("peer1", { publicKey: "k2" });
-  await runtime.tunnel.removePeer("peer1");
-  await runtime.tunnel.get();
-  await runtime.tunnel.delete();
+  await runtime.ips.reserve({ family: 6 });
+  await runtime.ips.list();
+  await runtime.ips.release("a1");
+  await runtime.networks.wireguard.create({ subnet: "10.9.0.0/16" });
+  await runtime.networks.wireguard.addPeer({
+    name: "office",
+    publicKey: "k",
+    routes: ["10.0.0.0/16"],
+  });
+  await runtime.networks.wireguard.rotatePeer("peer1", { publicKey: "k2" });
+  await runtime.networks.wireguard.removePeer("peer1");
+  await runtime.networks.wireguard.get();
+  await runtime.networks.wireguard.delete();
   expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
     "POST /v1/domains",
     "POST /v1/domains/app.example.com:verify",
@@ -87,26 +91,26 @@ test("the SDK's four products call their own paths, never a sandbox's", async ()
     "POST /v1/ports",
     `GET /v1/ports?sandboxId=${sandboxId}`,
     "DELETE /v1/ports/p1",
-    "POST /v1/addresses",
-    "GET /v1/addresses",
-    "DELETE /v1/addresses/a1",
-    "POST /v1/tunnel",
-    "POST /v1/tunnel/peers",
-    "POST /v1/tunnel/peers/peer1:rotate",
-    "DELETE /v1/tunnel/peers/peer1",
-    "GET /v1/tunnel",
-    "DELETE /v1/tunnel",
+    "POST /v1/ips",
+    "GET /v1/ips",
+    "DELETE /v1/ips/a1",
+    "POST /v1/networks/wireguard",
+    "POST /v1/networks/wireguard/peers",
+    "POST /v1/networks/wireguard/peers/peer1:rotate",
+    "DELETE /v1/networks/wireguard/peers/peer1",
+    "GET /v1/networks/wireguard",
+    "DELETE /v1/networks/wireguard",
   ]);
   expect(calls[0]!.body).toEqual({ hostname: "app.example.com", sandboxId, port: 3000 });
   expect(calls[7]!.body).toEqual({ family: 6 });
   expect(calls[11]!.body).toEqual({ name: "office", publicKey: "k", routes: ["10.0.0.0/16"] });
 });
 
-test("runtime tunnel peer add makes the key pair here, sends only the public half, and writes the file", async () => {
+test("runtime networks wireguard peer add makes the key pair here, sends only the public half, and writes the file", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rc-cli-tunnel-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const { runtime, calls } = recorder({
-    "POST /v1/tunnel/peers": {
+    "POST /v1/networks/wireguard/peers": {
       tunnel: { endpoint: "203.0.113.10:51820", peers: [], sandboxes: [] },
       peer: { id: "peer1", name: "office", address: "10.250.0.2", routes: [] },
       config:
@@ -118,7 +122,7 @@ test("runtime tunnel peer add makes the key pair here, sends only the public hal
   const path = join(directory, "runtime.conf");
   expect(
     await networkProductCommand(
-      "tunnel",
+      "wireguard",
       ["peer", "add", "office"],
       args(["peer", "add", "office"], { route: ["10.0.0.0/16"], out: [path] }),
       out,
@@ -170,7 +174,7 @@ test("runtime domain add prints the records to set, and runtime port open the ad
   });
   const domain = output();
   await networkProductCommand(
-    "domain",
+    "domains",
     ["add"],
     args(["add", "app.example.com", "11111111-2222-4333-8444-555555555555", "3000"]),
     domain.out,
@@ -180,7 +184,7 @@ test("runtime domain add prints the records to set, and runtime port open the ad
   expect(domain.lines[0]).toContain("domains.runtimehost.com");
   const port = output();
   await networkProductCommand(
-    "port",
+    "ports",
     ["open"],
     args(["open", "11111111-2222-4333-8444-555555555555", "5432"]),
     port.out,
@@ -189,7 +193,7 @@ test("runtime domain add prints the records to set, and runtime port open the ad
   expect(port.lines).toEqual(["203.0.113.10:23456"]);
   await expect(
     networkProductCommand(
-      "port",
+      "ports",
       ["open"],
       args(["open", "x", "99999"]),
       port.out,

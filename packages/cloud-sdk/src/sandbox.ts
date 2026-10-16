@@ -17,7 +17,7 @@ import {
   type WatchHandle,
   type WatchOptions,
 } from "./products/watch.js";
-import { Transport, type RequestOptions } from "./transport.js";
+import { Transport, timeoutSignal, type RequestOptions } from "./transport.js";
 import type {
   CommandResult,
   DeletedSandbox,
@@ -52,7 +52,7 @@ function requestScope(options: RequestOptions) {
   const deadline =
     options.timeoutMs === undefined || options.timeoutMs === 0
       ? undefined
-      : AbortSignal.timeout(options.timeoutMs);
+      : timeoutSignal(options.timeoutMs);
   const signal =
     deadline && options.signal
       ? AbortSignal.any([deadline, options.signal])
@@ -124,9 +124,13 @@ function commandBody(command: string | readonly string[], options: ExecOptions) 
   };
 }
 
+/** How long past its timeoutMs a streamed exec waits for an exit that never came. */
+export const EXEC_EXIT_GRACE = { ms: 120_000 };
+
 /** A running (or stopped) sandbox. Every method is one API call or a short
- * sequence of them; `await using sbx = await Sandbox.create()` stops it for
- * you at the end of the block. */
+ * sequence of them; `await using sbx = await Sandbox.create()` deletes it at
+ * the end of the block, or stops it, keeping its disk, if created with
+ * `keep: true`. */
 // Declaration merging is how a product lane's sandbox methods (sbx.previews,
 // sbx.network, ...) appear typed on every Sandbox: see products/index.ts.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
@@ -201,8 +205,23 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       let exit: Extract<OutputEvent, { type: "exit" }> | undefined;
       let processId: string | undefined;
       let dropped = false;
+      // A command with a time limit ends by it, the server killing it if need
+      // be; an exit that never comes after (a follow that resumes forever)
+      // ends the wait past the limit and EXEC_EXIT_GRACE.ms, as a timeout,
+      // its process named and sent SIGTERM. The hub's release train waited
+      // 29 min on a 10 min command (15 October 2026).
+      // A timer cleared when the call ends, so none outlives the exec.
+      const deadline = options.timeoutMs === undefined ? undefined : new AbortController();
+      const timer = deadline
+        ? setTimeout(() => deadline.abort(), options.timeoutMs! + EXEC_EXIT_GRACE.ms)
+        : undefined;
+      (timer as { unref?: () => void } | undefined)?.unref?.();
+      const signal =
+        deadline && options.signal
+          ? AbortSignal.any([options.signal, deadline.signal])
+          : (deadline?.signal ?? options.signal);
       try {
-        for await (const event of this.execStream(command, options)) {
+        for await (const event of this.execStream(command, { ...options, signal })) {
           if (event.type === "start") processId = event.processId;
           else if (event.type === "stdout" || event.type === "stderr") {
             out[event.type] += event.data;
@@ -211,7 +230,18 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
           else if (event.type === "exit") exit = event;
         }
       } catch (error) {
-        throw await this.#unfinished(error, processId, options.signal);
+        if (!deadline?.signal.aborted || options.signal?.aborted)
+          throw await this.#unfinished(error, processId, signal);
+        if (processId)
+          await new Process(this.#t, this.id, { id: processId } as ProcessInfo)
+            .kill("SIGTERM")
+            .catch(() => {});
+        exit = { type: "exit", exitCode: null, timedOut: true } as Extract<
+          OutputEvent,
+          { type: "exit" }
+        >;
+      } finally {
+        clearTimeout(timer);
       }
       result = {
         exitCode: exit?.exitCode ?? null,
@@ -220,6 +250,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
         ...truncation(dropped),
         ...(exit?.durationMs === undefined ? {} : { durationMs: exit.durationMs }),
         ...(processId ? { processId } : {}),
+        ...(exit?.outOfMemory ? { outOfMemory: exit.outOfMemory } : {}),
       };
     }
     if (options.check && (result.exitCode !== 0 || result.timedOut)) throw new CommandError(result);
@@ -251,8 +282,8 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
         code: "cancelled",
         status: 0,
         hint: stopped
-          ? `See what it printed: runtime sandbox logs ${id}`
-          : `Stop it: runtime sandbox kill ${id}, or sandbox.processes.get("${processId}") and kill().`,
+          ? `See what it printed: runtime sandboxes logs ${id}`
+          : `Stop it: runtime sandboxes kill ${id}, or sandbox.processes.get("${processId}") and kill().`,
         details: { sandboxId: this.id, processId, stopped },
         cause: error,
       });
@@ -262,7 +293,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       message: `Lost the output of process ${processId}; the command may still be running.`,
       code: "connection_error",
       status: 0,
-      hint: `Follow it: runtime sandbox logs ${id} -f (sandbox.processes.get("${processId}")), or stop it: runtime sandbox kill ${id}.`,
+      hint: `Follow it: runtime sandboxes logs ${id} -f (sandbox.processes.get("${processId}")), or stop it: runtime sandboxes kill ${id}.`,
       details: { sandboxId: this.id, processId },
       cause: error,
     });
@@ -685,7 +716,7 @@ export class Processes {
             message: `Lost the output stream of process ${processId} for ${FOLLOW_OUTAGE_MS / 60_000} minutes; the command may still be running.`,
             code: "connection_error",
             status: 0,
-            hint: `Follow it again: runtime sandbox logs ${this.sandboxId} ${processId} -f`,
+            hint: `Follow it again: runtime sandboxes logs ${this.sandboxId} ${processId} -f`,
             details: { sandboxId: this.sandboxId, processId },
             cause: failure,
           });
@@ -696,7 +727,7 @@ export class Processes {
           message: `The output stream of process ${processId} keeps closing before it ends.`,
           code: "connection_error",
           status: 0,
-          hint: `Read what it printed so far: runtime sandbox logs ${this.sandboxId} ${processId}`,
+          hint: `Read what it printed so far: runtime sandboxes logs ${this.sandboxId} ${processId}`,
           details: { sandboxId: this.sandboxId, processId },
         });
     }
@@ -788,6 +819,7 @@ export class Process {
         ...this.info,
         state: exit.state as ProcessInfo["state"],
         exitCode: exit.exitCode,
+        ...(exit.outOfMemory ? { outOfMemory: exit.outOfMemory } : {}),
       };
     return {
       exitCode: exit?.exitCode ?? null,
@@ -795,6 +827,7 @@ export class Process {
       timedOut: exit?.timedOut ?? false,
       ...truncation(dropped),
       processId: this.id,
+      ...(exit?.outOfMemory ? { outOfMemory: exit.outOfMemory } : {}),
     };
   }
   /** Sends input. Offsets protect transport retries; signal and timeoutMs cover
@@ -1488,9 +1521,14 @@ export class Files {
       const data = await readFile(localPath);
       const mode = info.mode & 0o777;
       await this.write(remotePath, data, { mode }).catch(async (error: unknown) => {
-        // A missing parent is made, as a directory upload makes its own.
+        // Make a missing parent, but keep errors about the sandbox or upload.
         const parent = remotePath.slice(0, remotePath.lastIndexOf("/"));
-        if (!(error instanceof NotFoundError) || !parent) throw error;
+        if (
+          !(error instanceof NotFoundError) ||
+          (error.code !== "file_not_found" && error.code !== "path_not_found") ||
+          !parent
+        )
+          throw error;
         await this.mkdir(parent, { parents: true });
         await this.write(remotePath, data, { mode });
       });

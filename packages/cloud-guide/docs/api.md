@@ -33,8 +33,10 @@ A key sees and uses what its own agent made: another key's sandbox answers 404
 `not_found`. An account-wide key, which an owner or admin makes at
 [API keys](https://withruntime.com/account/keys) or approves for
 `runtime keys create --account-wide`, sees and uses everything in the account,
-and `getOrCreate` returns a sandbox another key named. The API cannot make or
-change keys ([keys in a team](./teams#keys-in-a-team)).
+and `getOrCreate` returns a sandbox another key named. A key in a
+[compartment](./security#compartments) sees what its compartment's keys made,
+and nothing else. A full-access key of an owner or admin can make, list and revoke keys with
+`/v1/keys`; no other key can ([run a swarm](./teams#run-a-swarm)).
 
 ```bash no-run
 curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}:exec" \
@@ -61,9 +63,17 @@ Every response carries `x-request-id`. Every error has one shape:
   "error": {
     "code": "no_credit_running_limit",
     "status": 409,
-    "message": "An account without credit runs 8 sandboxes at once; ... are running.",
-    "hint": "Stop or pause one (runtime sandbox stop <id>). Once the account holds prepaid credit, it runs more at once.",
-    "details": { "sandboxIds": ["..."], "concurrent": 8 },
+    "message": "An account without credit runs at most 4 sandboxes at once.",
+    "hint": "... Stop or pause one you no longer need (runtime sandboxes stop <id>, or pause <id>), or wait for one to end, then retry. ... Adding credit lifts this. Only the account's owner adds credit, at https://withruntime.com/account/billing#add-credit, so tell them what was refused; an agent never adds or spends it on its own. Credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total. ...",
+    "details": {
+      "running": ["..."],
+      "addCredit": {
+        "url": "https://withruntime.com/account/billing#add-credit",
+        "by": "owner",
+        "givenCreditCounts": true,
+        "welcomeMatch": { "withinDays": {{welcome-days}}, "upToUsd": {{welcome-max-usd}} }
+      }
+    },
     "requestId": "req_0mud1dtgjogtn2z8t6y"
   }
 }
@@ -72,32 +82,57 @@ Every response carries `x-request-id`. Every error has one shape:
 Follow the `hint`. Quote the `requestId` when you report a problem. A 5xx never
 carries internal detail, only a fixed message and the request id.
 
+**A refusal that adding credit lifts has one shape**, whatever the product, so
+an agent can tell its person plainly what to do. It answers with one of
+`no_credit_size_limit`, `no_credit_running_limit`, `no_credit_total_limit`,
+`no_credit_kept_limit`, `no_credit_daily_limit`, `no_credit_domain_limit`, `no_credit_capacity_full`, `no_credit_build_limit`,
+`included_usage_used_up`, `included_usage_unavailable`, `insufficient_funds`,
+`payment_required`, `public_preview_not_allowed` or `connect_not_allowed`:
+
+- `message`: what was refused, and the limit.
+- `hint`: what you can do now without credit, then the one way past it: the
+  account's owner adds credit at
+  [Usage & billing](https://withruntime.com/account/billing#add-credit).
+  Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+  ([welcome match](./pricing#welcome-match)).
+- `details.addCredit`: the same, for code. `givenCreditCounts` is `false` where
+  only credit paid for lifts the refusal (public previews, ports beyond 80 and
+  443, custom domains, public TCP ports and private networks); `welcomeMatch`
+  holds the match's days and dollars.
+
+An agent never adds or spends credit on its own: it tells the owner which
+limit it met. `connect_not_allowed` for an organization whose port access
+Runtime turned off has no `addCredit`, since credit does not change it.
+
 **A 5xx says whose fault it is.** A message that says the fault is ours, not
 your request's, was reported to us automatically, with its `requestId`. Retry with the same key; write to us only if it keeps
 failing.
 
-| Status   | Codes you may see                                                                                                             | Safe next step                                                                                                                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `no_credit_size_limit`, `disk_too_small`                         | Fix the named fields                                                                                                                                                           |
-| 401      | `unauthorized`                                                                                                                | Check the key                                                                                                                                                                  |
-| 402      | `included_usage_used_up`, `insufficient_funds`, `spending_limit_reached`                                                      | Add credit (sandboxes then run on it), or read `GET /v1/limits`                                                                                                                |
-| 402      | `payment_required`, `included_usage_unavailable`                                                                              | A feature that needs credit or a kept top-up, or no included usage on this account yet; the message says which ([pricing](./pricing#how-many-at-once))                         |
-| 402      | `account_blocked`                                                                                                             | A payment is disputed or under review; the message says what clears it                                                                                                         |
-| 402      | `pilot_hours_used`                                                                                                            | This pilot's sandbox hours are used: its sandboxes pause, files kept. The account's owner may write to support to extend the pilot or ask for more hours. Credit does not help |
-| 402      | `pilot_ended`                                                                                                                 | The pilot this sandbox ran on has ended, so it cannot run again. The account's owner may write to support to extend the pilot. Credit does not help                            |
-| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`                   | Do not work around a refusal                                                                                                                                                   |
-| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                     | Check the id, name or path                                                                                                                                                     |
-| 405      | `method_not_allowed`                                                                                                          | Use the method this page lists for the path                                                                                                                                    |
-| 409      | `no_capacity`, `no_credit_running_limit`, `no_credit_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing` | Clears when something else ends or finishes: wait, then retry with the same key                                                                                                |
-| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached`    | Resolve the state, then retry                                                                                                                                                  |
-| 409      | `time_limit_too_short`                                                                                                        | The command's timeout outlasts the sandbox's time limit or its funded time: extend it, add credit, or give the command a shorter timeout                                       |
-| 422      | `idempotency_key_reused`                                                                                                      | Same key, same body; or a new key for new work                                                                                                                                 |
-| 426      | `upgrade_required`                                                                                                            | Move to this API version                                                                                                                                                       |
-| 429      | `rate_limited`, `no_credit_build_limit`                                                                                       | Wait `Retry-After`, then retry with the same key                                                                                                                               |
-| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                                   | Retry after `Retry-After` with the same key (the SDKs do)                                                                                                                      |
-| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`                                                                     | Switched off here on purpose; retrying will not help                                                                                                                           |
-| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                                  | Something in your sandbox failed; the message says what                                                                                                                        |
-| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                           | A fault on our side, reported to us; retry with the same key                                                                                                                   |
+| Status   | Codes you may see                                                                                                                                                                                                                                                                 | Safe next step                                                                                                                                                                 |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `no_credit_size_limit`, `disk_too_small`, `env_name_reserved`                                                                                                                                                        | Fix the named fields                                                                                                                                                           |
+| 401      | `unauthorized`                                                                                                                                                                                                                                                                    | Check the key                                                                                                                                                                  |
+| 402      | `included_usage_used_up`, `insufficient_funds`, `spending_limit_reached`                                                                                                                                                                                                          | Add credit (sandboxes then run on it), or read `GET /v1/limits`                                                                                                                |
+| 402      | `payment_required`, `included_usage_unavailable`                                                                                                                                                                                                                                  | A feature that needs credit or a kept top-up, or no free usage on this account yet; the message says which ([pricing](./pricing#how-many-at-once))                             |
+| 402      | `account_blocked`                                                                                                                                                                                                                                                                 | A payment is disputed or under review; the message says what clears it                                                                                                         |
+| 402      | `pilot_hours_used`                                                                                                                                                                                                                                                                | This pilot's sandbox hours are used: its sandboxes pause, files kept. The account's owner may write to support to extend the pilot or ask for more hours. Credit does not help |
+| 402      | `pilot_ended`                                                                                                                                                                                                                                                                     | The pilot this sandbox ran on has ended, so it cannot run again. The account's owner may write to support to extend the pilot. Credit does not help                            |
+| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`, `product_in_beta` (a product in a private beta, open only to the accounts on its list), `outside_compartment` (a key in a compartment asking for an account setting) | Do not work around a refusal                                                                                                                                                   |
+| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                                                                                                                                                                         | Check the id, name or path                                                                                                                                                     |
+| 405      | `method_not_allowed`                                                                                                                                                                                                                                                              | Use the method this page lists for the path                                                                                                                                    |
+| 409      | `no_capacity`, `no_credit_running_limit`, `no_credit_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing`                                                                                                                                                     | Clears when something else ends or finishes: wait, then retry with the same key                                                                                                |
+| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached`, `compartment_not_empty`                                                                                                                               | Resolve the state, then retry                                                                                                                                                  |
+| 409      | `time_limit_too_short`                                                                                                                                                                                                                                                            | The command's timeout outlasts the sandbox's time limit or its funded time: extend it, add credit, or give the command a shorter timeout                                       |
+| 410      | `name_retired`                                                                                                                                                                                                                                                                    | Use the name the hint gives                                                                                                                                                    |
+| 422      | `idempotency_key_reused`                                                                                                                                                                                                                                                          | Same key, same body; or a new key for new work                                                                                                                                 |
+| 426      | `upgrade_required`                                                                                                                                                                                                                                                                | Move to this API version                                                                                                                                                       |
+| 429      | `rate_limited`, `no_credit_build_limit`                                                                                                                                                                                                                                           | Wait `Retry-After`, then retry with the same key                                                                                                                               |
+| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`                                                                                                                                                                                                                       | Retry after `Retry-After` with the same key (the SDKs do)                                                                                                                      |
+| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`, `resize_unavailable`                                                                                                                                                                                                   | Switched off here on purpose; retrying will not help                                                                                                                           |
+| 503      | `operation_failed`                                                                                                                                                                                                                                                                | The sandbox's last start, wake, pause, stop or delete could not be completed, a fault of ours; files kept, nothing charged. Stop or delete it; retrying will not help          |
+| 503      | `wake_refused`                                                                                                                                                                                                                                                                    | A wake or restart refused at once by a fault of ours; nothing queued or charged, files kept. Retry it in a few minutes                                                         |
+| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                                                                                                                                                                                      | Something in your sandbox failed; the message says what                                                                                                                        |
+| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                                                                                                                                                                               | A fault on our side, reported to us; retry with the same key                                                                                                                   |
 
 **Temporary refusals are safe to retry.** `no_capacity`, `busy`,
 `host_unavailable`, `rate_limited` and `no_credit_running_limit` clear on their own: retry
@@ -110,6 +145,9 @@ with the same key, a growing delay and a bounded deadline.
   five minutes when it has none, however many retries `maxRetries` allows.
   Then the refusal itself is returned. A sandbox under heavy load can answer
   `guest_busy` for tens of seconds; the call is then slow, not failed.
+- A `quota_exceeded` names the limit in its message and in `details`:
+  `limit` (such as `volume.count`), `max` and how to `raise` it. Every limit
+  is listed in [limits](./limits).
 - An SDK create also waits out `no_credit_running_limit`, `quota_exceeded` and
   `no_capacity`, for up to two minutes by default, then returns the refusal.
   The error's `retryable` is `true` for `no_credit_running_limit` and `no_capacity`, for a
@@ -117,7 +155,7 @@ with the same key, a growing delay and a bounded deadline.
 - `no_capacity` answers with a `Retry-After` header, the wait before a first
   retry, for a client that reads only HTTP. The SDKs keep their own growing
   delay.
-- `no_credit_running_limit` clears when one of the eight running sandboxes without credit stops or pauses. A fork asking for more copies than that never fits.
+- `no_credit_running_limit` clears when one of the {{trial-sandboxes}} running sandboxes without credit stops or pauses. A fork asking for more copies than that never fits.
 
 ## Retries and idempotency
 
@@ -127,11 +165,17 @@ key for 24 hours:
 - The same key with the same body answers the first result again, marked
   `"replayed": true` and with the header `Idempotency-Replayed: true`. Nothing
   happens twice.
+- A secret or token shown once (a rotated webhook secret, a preview or MCP
+  token, a WireGuard key Runtime made) is left out of the replay; read the
+  resource for a fresh token. A first answer over 32 KiB is not kept: its
+  replay answers 409 `operation_conflict`, and nothing runs again.
 - The same key with a different body is refused with 422 `idempotency_key_reused`.
 - A new key is new work.
 
 The SDKs send a key on every change and retry transport failures, 429, 502, 503
-and 504 with it. Changing the body while reusing a key is not a retry.
+and 504 with it. A connection refused before the request left is sent again at
+once; anything that may have reached a server waits first. Changing the body
+while reusing a key is not a retry.
 
 ## Limits
 
@@ -141,6 +185,11 @@ These limits are protection, not quotas, and a refusal costs nothing.
   served at once. Past that, a request waits its turn for up to five seconds
   before it is refused. A key may have as many served at once as its
   organization (below) when that is more; its rate stays the same.
+- **Per address, for keys not yet seen to work:** until a request on a key
+  has been accepted once, requests on it, and on wrong or missing keys, also
+  count against the address they come from: about 50 a second in bursts of
+  200 (`address_rate`). A key that has worked is never refused because of
+  someone else's wrong keys.
 - **Per organization:** 192 requests in flight across all its keys, and six
   more for each sandbox it holds that is not stopped, up to 1,024, so every
   sandbox can stream four commands and two watches at once; a new sandbox's
@@ -149,7 +198,11 @@ These limits are protection, not quotas, and a refusal costs nothing.
   sandbox, up to 292 watch streams, 292 logins and forwards and 340
   terminals (a pilot's agreed count sets more), and at most 12 terminals in
   one sandbox. When the service as a whole holds as many as it can, a new one
-  is refused for a moment with a retry delay.
+  is refused for a moment with a retry delay. Requests beyond what an
+  organization's sandboxes bring share one room: while it is
+  three-quarters taken, an organization holding its fair share of it waits
+  for its own requests to finish (`organization_fair_share`), so a busy
+  account never crowds out the rest.
 - **Per sandbox:** up to 1,024 commands and background processes running at
   once; the sandbox's memory is usually the closer limit. Past that, a new one
   is refused with `process_limit` (409), which names the number. A command's
@@ -171,7 +224,11 @@ These limits are protection, not quotas, and a refusal costs nothing.
 
 Over a limit you get 429 with `Retry-After`.
 Streaming responses count as requests in flight until their bodies finish or
-you cancel them. Receiving the headers does not release a request slot.
+you cancel them. Receiving the headers does not release a request slot. A
+request you abandon, or one answered 503 because it ran past its deadline,
+is stopped and counts against its key and organization until its work has
+stopped: a read at once, a change once it is recorded, at most about four
+minutes more. A command it started keeps running in the sandbox.
 
 ## Sandboxes
 
@@ -196,15 +253,15 @@ The create body:
 | ------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `name`, `labels`          | none                                                  | Your own handle and up to 32 `key: value` tags                                                                                                                                                                                                                                                                                                                     |
 | `env`                     | none                                                  | Environment variables for every command, process, terminal, SSH session and image start command in it (see "Its environment" below)                                                                                                                                                                                                                                |
-| `funding`                 | ignored                                               | Accepted and ignored: the included usage is spent first, then prepaid credit, and an account that holds credit gets paid limits                                                                                                                                                                                                                                    |
+| `funding`                 | ignored                                               | Accepted and ignored: the free usage is spent first, then prepaid credit, and an account that holds credit gets paid limits                                                                                                                                                                                                                                        |
 | `region`                  | the default region                                    | Use a region listed for your account                                                                                                                                                                                                                                                                                                                               |
 | `vcpu`                    | 2                                                     | At most 16 on a paid sandbox, 2 without credit                                                                                                                                                                                                                                                                                                                     |
-| `memoryMiB`               | 4096                                                  | At least 128; at most 65,536 (64 GiB) on a paid sandbox, 4,096 without credit; a size outside that is refused with `invalid_request` naming the field                                                                                                                                                                                                              |
+| `memoryMiB`               | 4096                                                  | At least 128; at most 65,536 (64 GiB) on a paid sandbox, 4,096 without credit; a size outside that is refused with `invalid_request` naming the field. An odd size is rounded up to the next even number (4095 becomes 4096), which is the size it gets, is billed at and is returned; resize rounds the same way                                                  |
 | `diskMiB`                 | 4096                                                  | At least 3,072; at most 409,600 ({{max-disk}}), and 10,240 without credit. A larger disk is refused with `invalid_request`, naming the maximum. A sandbox is placed only on a server with that much free disk                                                                                                                                                      |
 | `cpu`                     | `"shared"`                                            | `"reserved"` guarantees every vCPU: the same as `cpuFloorMillis` at `vcpu` x 1000, which it sets, ignoring any other `cpuFloorMillis`; not without credit                                                                                                                                                                                                          |
 | `cpuFloorMillis`          | 50                                                    | Guaranteed CPU, in thousandths of a vCPU: at most `vcpu` x 1000 (16,000 at 16 vCPU), and 250 without credit. The highest, `vcpu` x 1000, is what `cpu: "reserved"` sets                                                                                                                                                                                            |
-| `timeoutSeconds`          | 0, none                                               | A time limit you choose, 60 to 86,400 seconds (24 hours): it pauses or stops when that runs out, busy or not. Left out (or 0), it has none: it runs while it works and pauses when idle, until you stop it or credit or included usage runs out                                                                                                                    |
-| `onTimeout`, `onLeaseEnd` | `"pause"`                                             | `"pause"` keeps memory and files when its time limit, credit or included usage runs out; wake it later. `"stop"` stops it and keeps its disk for `:restart`; `"delete"` stops it and deletes its disk. `onLeaseEnd` is its older name                                                                                                                              |
+| `timeoutSeconds`          | 0, none                                               | A time limit you choose, 60 to 86,400 seconds (24 hours): it pauses or stops when that runs out, busy or not. Left out (or 0), it has none: it runs while it works and pauses when idle, until you stop it or credit or free usage runs out. A large sandbox needs time to wake its memory: 190 s for 65,536 MiB; shorter is refused, naming the least             |
+| `onTimeout`, `onLeaseEnd` | `"pause"`                                             | `"pause"` keeps memory and files when its time limit, credit or free usage runs out; wake it later. `"stop"` stops it and keeps its disk for `:restart`; `"delete"` stops it and deletes its disk. `onLeaseEnd` is its older name                                                                                                                                  |
 | `idlePauseSeconds`        | {{idle-pause-seconds}}                                | Pause after this many seconds with nothing happening: no request, no command or terminal running, no open connection, no traffic and no CPU use. 0 is never, otherwise {{idle-pause-min}} to {{idle-pause-max}}. Not set on a `persistent` sandbox                                                                                                                 |
 | `autoWake`                | true                                                  | A request to a paused sandbox wakes it (see below)                                                                                                                                                                                                                                                                                                                 |
 | `persistent`              | false                                                 | Paid only: it runs until you stop it, while credit lasts, with no idle pause unless you set one. Its disk is billed as any sandbox's                                                                                                                                                                                                                               |
@@ -231,7 +288,10 @@ until `:wake`. A wake that cannot be paid for fails with the refusal, such as
 `insufficient_funds`, and leaves the sandbox paused.
 
 **Names.** A name is unique in the account while its sandbox can still run:
-starting, running, paused, or stopped and persistent. A create that names a
+starting, running, paused, or stopped and persistent. A
+[compartment](./security#compartments) is its own namespace: its keys' names
+are unique among its own sandboxes, so two compartments, and the account's
+other keys, can each have a `main`. A create that names a
 held name fails with `name_taken` (409); `details.sandboxId` names the holder
 when your key can reach it. With `getOrCreate: true` the create answers the
 holder instead, woken if paused and restarted if stopped and persistent, with
@@ -241,8 +301,8 @@ in its own record.
 
 **How long it runs.** A sandbox runs while it works and pauses itself when idle;
 there is no time limit unless you set one. Nothing needs extending: it runs on
-credit, or, without credit, on the included usage. It pauses (or stops, with `onTimeout: "stop"`) when it is
-idle for `idlePauseSeconds`, when you stop it, or when credit, included usage, a spending limit or `maxTotalCostMicros` run out. `endsAt` says when it will stop
+credit, or, without credit, on the free usage. It pauses (or stops, with `onTimeout: "stop"`) when it is
+idle for `idlePauseSeconds`, when you stop it, or when credit, free usage, a spending limit or `maxTotalCostMicros` run out. `endsAt` says when it will stop
 or pause by itself, and is `null` when it never will: it has no time limit and
 its funding goes on. It names a time when the sandbox has a time limit, or once
 credit or a limit stops its funding.
@@ -254,7 +314,7 @@ does it for you), and `endsAt` answers the new end. A wake starts the limit
 again from the wake: the sandbox's own length, or the `timeoutSeconds` the wake
 names. An extend of a sandbox with no time limit answers at once and changes
 nothing, so older code that extends keeps working. A persistent sandbox has no
-time limit, whatever `timeoutSeconds` says. Without credit, a limit longer than the included usage left is cut to it, and the answer's `timeoutSeconds` says so: the sandbox pauses when it ends either way.
+time limit, whatever `timeoutSeconds` says. Without credit, a limit longer than the free usage left is cut to it, and the answer's `timeoutSeconds` says so: the sandbox pauses when it ends either way.
 
 **Keep it running until you stop it.** `persistent: true`, at create or with
 `:update`, keeps it running with no idle pause (unless `idlePauseSeconds` sets
@@ -345,7 +405,7 @@ logged or written to the sandbox's disk. [Networking](./networking#your-tailscal
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or included usage end sooner; at
+fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage end sooner; at
 most 24 hours)
 and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
 is put over the sandbox's own environment; its values are never echoed and are
@@ -397,7 +457,7 @@ that joins your own network to your sandboxes
 `GET /v1/sandboxes/{id}/tunnel` with `Upgrade: websocket` and the bearer header
 opens one into the sandbox: TCP connections to any port on its loopback,
 and SSH logins, several at once over the one socket. It needs the key's `exec`
-permission, like a command. The CLI (`runtime sandbox ssh`, `runtime sandbox port-forward`)
+permission, like a command. The CLI (`runtime sandboxes ssh`, `runtime sandboxes port-forward`)
 and the SDKs (`sbx.tunnel()`, `sbx.forwardPort()`, `forward_port()`) speak it
 for you.
 
@@ -469,7 +529,9 @@ sets `user` when it begins; direct uploads detect gzip from the archive header. 
 `tar` and `base64` (and `gzip` for a compressed archive), which every image
 from Runtime's base has. At most four folders move in each direction in a
 sandbox at once. Like every file call, a folder call wakes a paused sandbox.
-The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandbox cp`
+A download whose reader takes no bytes for 60 seconds ends with 408
+`download_idle`; ask for it again.
+The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandboxes cp`
 use these routes. The SDKs also expose `files.archive` and `files.unarchive`
 for callers that need the archive bytes themselves.
 
@@ -514,7 +576,7 @@ A replay of a create with the same `Idempotency-Key` answers the session with
 
 `POST /v1/sandboxes/{id}/previews` accepts optional `ttlSeconds` and
 `expiresAt` fields. `GET /v1/sandboxes/{id}/previews/{port}` accepts them as
-query parameters; `runtime_sandbox_previews_create` accepts the same fields.
+query parameters; `runtime_sandboxes_previews_create` accepts the same fields.
 `expiresAt` is an ISO timestamp with a timezone, at least a minute and at most
 a week ahead. Invalid deadlines answer `invalid_request` (400) before changing
 the preview.
@@ -541,12 +603,14 @@ no fresh token. Sessions still cannot create or rotate previews, or use MCP.
 | `GET /v1/mcp/catalog`; `POST`, `GET`, `DELETE /v1/sandboxes/{id}/mcp`                                                                                                                                                                  | MCP servers                                                                                    |
 | `GET`, `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                | Network rules                                                                                  |
 | `GET /v1/egress-secrets`, `PUT`, `DELETE /v1/egress-secrets/{name}`                                                                                                                                                                    | Secrets                                                                                        |
-| `GET`, `PUT`, `DELETE /v1/network/upstream-proxy`                                                                                                                                                                                      | Your own proxy                                                                                 |
-| `GET`, `PUT /v1/network/private`                                                                                                                                                                                                       | Your sandboxes reach each other by name                                                        |
+| `GET`, `PUT`, `DELETE /v1/networks/upstream-proxy`                                                                                                                                                                                     | Your own proxy                                                                                 |
+| `GET`, `PUT /v1/networks/private`                                                                                                                                                                                                      | Your sandboxes reach each other by name                                                        |
+| `GET`, `PUT /v1/networks/signed-requests`                                                                                                                                                                                              | Your sandboxes sign requests as Runtime's agents                                               |
 | `POST`, `GET /v1/feedback`                                                                                                                                                                                                             | Feedback                                                                                       |
 | `POST /v1/support/messages`, `GET /v1/support/conversations/{id}`                                                                                                                                                                      | Support                                                                                        |
 | `GET /v1/me`, `GET /v1/usage`, `GET /v1/usage/requests?range=24h`, `GET /v1/limits`, `GET /v1/audit`                                                                                                                                   | Account                                                                                        |
 | `GET /v1/sso`                                                                                                                                                                                                                          | Single sign-on                                                                                 |
+| `GET`, `PUT`, `DELETE /v1/billing/auto-top-up`                                                                                                                                                                                         | [Auto top-up](./pricing#auto-top-up)                                                           |
 | `GET`, `POST /v1/identity/token?audience=` (from inside a sandbox, with its request token)                                                                                                                                             | Identity tokens                                                                                |
 | `GET /v1/usage/compare?provider=e2b&days=30`, `GET /v1/switching`, `POST /v1/switching`                                                                                                                                                | Switching                                                                                      |
 | `POST`, `GET /v1/images`, `GET /v1/images/{id}`, `…/logs?follow=true`, `:tag`, `:untag`, `:delete`, `GET /v1/images/resolve?ref=`                                                                                                      | Custom images                                                                                  |
@@ -586,7 +650,7 @@ Forks:
   and are quoted as a create with them would be.
 - Copies keep the source's `labels` unless the fork names others. They get no
   name unless the fork gives one (`name`, then `name-1`, `name-2` for several),
-  because names are unique in the account. A snapshot taken without labels
+  because names are unique in the account (or in a compartment). A snapshot taken without labels
   keeps its sandbox's, and a sandbox created from a snapshot keeps the
   snapshot's unless the create names others.
 - The snapshot a fork takes is deleted when the fork ends, whether every copy
@@ -622,7 +686,7 @@ microdollars in strings (1,000,000 is one dollar), exact however large:
 | `available`  | What can still be spent, after what running sandboxes are about to use                              |
 | `takenBack`  | The part of `spent` that refunds and disputes took                                                  |
 | `trial`      | Machine time without credit: `{totalMs, usedMs, reservedMs, availableMs, offer, renewsAt}`, or null |
-| `allowances` | This month's included usage, one row per pool, below                                                |
+| `allowances` | This month's free usage, one row per pool, below                                                    |
 | `outbound`   | This month's outbound traffic, below                                                                |
 | `kinds`      | Every resource, however many, a row a kind: `{kind, resources, chargedMicros, heldMicros}`          |
 | `resources`  | The newest hundred resources, with what each used and was charged                                   |
@@ -647,11 +711,30 @@ reads settled usage for every product visible to the key. `since` is inclusive
 and `until` exclusive, both UTC ISO timestamps ending in `Z`; the filter uses
 when an interval settled, rather than when its resource was created.
 
-The answer is `{since, until, data, nextCursor, csv}`. Rows name the interval
+The answer is `{since, until, data, nextCursor, finalThrough, csv}`. Rows name the interval
 and resource, kind, meter, funding, interval start/end, settlement time, billed
 milliseconds, `chargedMicros`, quoted component rates and measurement evidence.
 Money and quantities are exact decimal strings. `billedMilliseconds`,
 measurements and evidence can be null when unavailable.
+
+Each interval is one row, written once when it settles; a later read never
+changes or repeats it. Before the first page, a read settles your running
+sandboxes through about a minute ago, so their use is in the export, not just
+what ran up to their last hourly window: up to 100 sandboxes per read, the
+longest unsettled first, and only sandboxes paid from credit (a trial's are
+not). Storage (a paused sandbox's memory and disk, a stopped sandbox's disk,
+images, snapshots, volumes and volume backups) is paid an hour at a time, and
+each hour is in the export within a minute of its end, usually seconds.
+
+`finalThrough` is a UTC timestamp before which nothing can still change: no row
+with `settledAt` earlier than it can still appear, and rows never change once
+written. A range whose `until` is at or before `finalThrough` is complete for
+good; usage that settles later is stamped at or after it. It is null only when
+the marker could not be taken in time; read again. Each row's `final` (and the
+CSV's last column) is true once its resource is deleted, nothing of it is still
+running or open, and every charge it will ever have settled before
+`finalThrough`. A volume's backups are resources of their own and bill until
+their retention ends, so they are not final when the volume is.
 
 Follow `nextCursor` with the same range until it is null. Each page rechecks
 the key's `usage` permission and resource visibility. These are live reads;
@@ -683,11 +766,12 @@ hundred resources in `GET /v1/usage`.
   what its running sandboxes are about to use.
 - Past the limit, a create, wake, extension or renewal fails with 402
   `spending_limit_reached` and charges nothing.
-- `trial` is the machine time the account can run without credit, the same figures as `GET /v1/usage`, in milliseconds, or null when the account has none, as here. `availableMs` is what a new sandbox without credit can still use. `offer` is `monthly` for the included usage every month, or `hours` for an account given free hours before 5 October 2026, which keeps what is left of them; `renewsAt` is when the included usage renews. The field keeps its older name so code that reads it goes on working.
+- `trial` is the machine time the account can run without credit, the same figures as `GET /v1/usage`, in milliseconds, or null when the account has none, as here. `availableMs` is what a new sandbox without credit can still use. `offer` is `monthly` for the free usage, or `hours` for an account given free hours before 5 October 2026, which keeps what is left of them; `renewsAt` is when the next month starts, and an account that has never paid has its free machine time once, until `freeUntil` on its `allowances` rows. The field keeps its older name so code that reads it goes on working.
 
 A limit is set, changed or removed only on the website, at
 [API keys](https://withruntime.com/account/keys): by the member who made the key,
-or by an owner or admin. No key can.
+or by an owner or admin. A key can only make keys with a daily limit that fits
+within its own, and cannot change its own.
 
 `GET /v1/audit` is the account's audit log, newest first: member and role
 changes, keys, connections, limits, credit, network rules, secrets and
@@ -715,19 +799,19 @@ not an API key, and answers `{"token", "expiresAt", "issuer", "subject",
 Paid accounts only; see [networking](./networking). Each is its own product,
 not a sandbox's:
 
-| Route                                            | What it does                                                             |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| `POST /v1/domains`                               | `{hostname, sandboxId, port}`: claim a hostname; answers its DNS records |
-| `POST /v1/domains/{hostname}:verify`             | Check the TXT record; `active` when it matches                           |
-| `GET`, `DELETE /v1/domains/{hostname}`           | One domain; stop serving it                                              |
-| `POST /v1/ports`                                 | `{sandboxId, port}`: a public TCP port; answers `connect`                |
-| `GET /v1/ports`, `DELETE /v1/ports/{id}`         | List (`?sandboxId=`); close                                              |
-| `POST /v1/addresses`                             | `{family}`: reserve a dedicated outbound address (4 or 6)                |
-| `GET /v1/addresses`, `DELETE /v1/addresses/{id}` | List; release                                                            |
-| `POST`, `GET`, `DELETE /v1/tunnel`               | Create (`{subnet}`), read or delete the WireGuard tunnel                 |
-| `POST /v1/tunnel/peers`                          | `{name, publicKey?, routes?}`: add a peer; answers its wg-quick `config` |
-| `POST /v1/tunnel/peers/{id}:rotate`              | `{publicKey?}`: a new key for the peer                                   |
-| `DELETE /v1/tunnel/peers/{id}`                   | Remove a peer                                                            |
+| Route                                           | What it does                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `POST /v1/domains`                              | `{hostname, sandboxId, port}`: claim a hostname; answers its DNS records |
+| `POST /v1/domains/{hostname}:verify`            | Check the TXT record; `active` when it matches                           |
+| `GET`, `DELETE /v1/domains/{hostname}`          | One domain; stop serving it                                              |
+| `POST /v1/ports`                                | `{sandboxId, port}`: a public TCP port; answers `connect`                |
+| `GET /v1/ports`, `DELETE /v1/ports/{id}`        | List (`?sandboxId=`); close                                              |
+| `POST /v1/ips`                                  | `{family}`: reserve a dedicated outbound address (4 or 6)                |
+| `GET /v1/ips`, `DELETE /v1/ips/{id}`            | List; release                                                            |
+| `POST`, `GET`, `DELETE /v1/networks/wireguard`  | Create (`{subnet}`), read or delete the WireGuard tunnel                 |
+| `POST /v1/networks/wireguard/peers`             | `{name, publicKey?, routes?}`: add a peer; answers its wg-quick `config` |
+| `POST /v1/networks/wireguard/peers/{id}:rotate` | `{publicKey?}`: a new key for the peer                                   |
+| `DELETE /v1/networks/wireguard/peers/{id}`      | Remove a peer                                                            |
 
 A dedicated address needs credit on the account; the rest need a kept top-up. Without it a request gets `payment_required` (402).
 
@@ -757,3 +841,12 @@ talking to.
 The 0.1.0 routes under `/v1/resources` were removed on 22 September 2026. Each
 answers 410 `upgrade_required`, and `details.replacement` names the route that
 replaced it. [The migration guide](./migrate) maps each old call to its new one.
+
+Each product has one plural name in every path, SDK call, command and MCP tool:
+`/v1/sandboxes`, `runtime.sandboxes`, `runtime sandboxes`, `runtime_sandboxes`.
+When a name changes, the old one keeps working for 30 days. Each answer to it
+carries a `Warning` header with the new name and a `Link` to the new path; the
+SDKs and the CLI print the warning once, and an MCP answer carries it as
+`warning`. Once the day it stops is set, answers also carry `Deprecation` and
+`Sunset` (that day), and the warning names it. From that day the old name
+answers 410 `name_retired`, and its `hint` names the new one.

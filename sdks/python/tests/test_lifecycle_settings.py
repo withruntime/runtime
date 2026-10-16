@@ -123,11 +123,33 @@ class LifecycleSettingsTest(unittest.TestCase):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             sbx = runtime.sandboxes.get(ID)
             sbx.keep_alive(every_seconds=3600)
-            for _ in range(100):
-                if sbx._keep_alive is None:
-                    break
+            # Waits on the keep-alive's own end, not a deadline: a loaded
+            # check part took longer than a second to run its first refresh.
+            deadline = time.monotonic() + 30
+            while sbx._keep_alive is not None and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertIsNone(sbx._keep_alive)
+        self.assertEqual(self.posts(":extend"), [])
+
+    def test_a_keep_alive_whose_loop_ends_before_it_returns_is_not_left_marked(self):
+        # The loop's thread can find the sandbox stopped and finish before
+        # keep_alive() returns. Run it to the end inside the call to be sure.
+        import withruntime._sync_client as client
+
+        def at_once(loop):
+            loop()
+            return lambda: None
+
+        Stub.state = "stopped"
+        started = client.background
+        client.background = at_once
+        try:
+            with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                sbx = runtime.sandboxes.get(ID)
+                sbx.keep_alive(every_seconds=3600)
+                self.assertIsNone(sbx._keep_alive)
+        finally:
+            client.background = started
         self.assertEqual(self.posts(":extend"), [])
 
 

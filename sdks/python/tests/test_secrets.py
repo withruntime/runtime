@@ -1,4 +1,4 @@
-"""runtime.secrets and runtime.network.upstream_proxy against a stub API, sync and async. The routes, and the
+"""runtime.secrets and runtime.networks.upstream_proxy against a stub API, sync and async. The routes, and the
 host proxy opening what the API sealed, are tested in packages/cloud
 (secrets-open-ports-postgres.test.ts)."""
 import asyncio
@@ -142,7 +142,7 @@ class UpstreamProxyStub(BaseHTTPRequestHandler):
 
 
 class UpstreamProxyTest(unittest.TestCase):
-    """runtime.network.upstream_proxy, sync and async. The routes, and the
+    """runtime.networks.upstream_proxy, sync and async. The routes, and the
     host's CONNECT through the proxy, are tested in packages/cloud
     (linux-egress-upstream.test.ts)."""
 
@@ -163,15 +163,15 @@ class UpstreamProxyTest(unittest.TestCase):
     def test_sync_set_get_remove(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             with self.assertRaises(NotFoundError):
-                runtime.network.upstream_proxy.get()
-            saved = runtime.network.upstream_proxy.set("http://proxy.example.com:3128", secret="PROXY_AUTH",
+                runtime.networks.upstream_proxy.get()
+            saved = runtime.networks.upstream_proxy.set("http://proxy.example.com:3128", secret="PROXY_AUTH",
                                                        hosts=["*.internal.example.com"])
             self.assertTrue(saved["enforced"])
-            self.assertEqual(runtime.network.upstream_proxy.get()["secret"], "PROXY_AUTH")
-            self.assertTrue(runtime.network.upstream_proxy.remove()["deleted"])
+            self.assertEqual(runtime.networks.upstream_proxy.get()["secret"], "PROXY_AUTH")
+            self.assertTrue(runtime.networks.upstream_proxy.remove()["deleted"])
             with self.assertRaises(NotFoundError):
-                runtime.network.upstream_proxy.remove()
-        path = "/v1/network/upstream-proxy"
+                runtime.networks.upstream_proxy.remove()
+        path = "/v1/networks/upstream-proxy"
         self.assertEqual(UpstreamProxyStub.seen, [
             ("GET", path, None),
             ("PUT", path, {"url": "http://proxy.example.com:3128", "secret": "PROXY_AUTH",
@@ -184,8 +184,8 @@ class UpstreamProxyTest(unittest.TestCase):
     def test_async_set_sends_only_what_is_given(self):
         async def go():
             async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
-                await runtime.network.upstream_proxy.set("https://proxy.example.com:8443")
-                return await runtime.network.upstream_proxy.get()
+                await runtime.networks.upstream_proxy.set("https://proxy.example.com:8443")
+                return await runtime.networks.upstream_proxy.get()
 
         self.assertEqual(asyncio.run(go())["url"], "https://proxy.example.com:8443")
         self.assertEqual(UpstreamProxyStub.seen[0][2], {"url": "https://proxy.example.com:8443"})

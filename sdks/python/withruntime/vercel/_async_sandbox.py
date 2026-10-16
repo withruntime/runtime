@@ -748,10 +748,12 @@ class AsyncSandbox:
         await self._keep(force=True)
         return self
 
-    async def update_network_policy(self, policy: Any) -> Any:
+    async def update_network_policy(self, policy: Any) -> "AsyncSandbox":
+        """Replaces the network rules and returns the session, as Vercel does;
+        a Runtime sandbox is its own session."""
         rules = core.network_rules(policy)
         await self._resuming(lambda box: box.network.set(**rules))
-        return policy
+        return self
 
     async def update(self, *, ports: Optional[List[int]] = None, execution_time_limit: Any = None,
                      network_policy: Any = None, snapshot_expiration: Any = None, **other: Any) -> "AsyncSandbox":
@@ -812,6 +814,8 @@ class AsyncSandbox:
                 data={"snapshotId": taken["id"], "sourceSandboxId": self.withruntime.id})
         return AsyncSnapshot(taken, self._client)
 
+    open_interactive = staticmethod(core.unsupported("Vercel's interactive terminals (open_interactive)",
+                                                     core.INTERACTIVE[1]))
     list_sessions = staticmethod(core.unsupported("Listing a sandbox's sessions",
                                                   "A Runtime sandbox has one session: itself."))
     list_snapshots = staticmethod(core.unsupported("Listing a sandbox's snapshots from the sandbox",
@@ -850,7 +854,7 @@ async def _create(client: AsyncRuntime, *, name: Optional[str], image: Optional[
                 if not listing.data:
                     raise NotSupportedError(
                         f"The image {image}, which is not a Runtime image",
-                        f"Build it as a Runtime image with that name: `npx withruntime image build --dockerfile "
+                        f"Build it as a Runtime image with that name: `npx withruntime images build --dockerfile "
                         f"Dockerfile --name {image}`.")
                 fields["image"] = listing.data[0]["id"]
     # No execution_time_limit, no time limit: it runs while it works (0300).
@@ -892,7 +896,7 @@ def create_sandbox(*, name: Optional[str] = None, image: Optional[str] = None, s
                    **_private: Any) -> Any:
     """Creates a sandbox with Vercel's defaults (2 vCPUs with 2048 MiB each,
     5 minutes, persistent). Await it, or use it as a context manager that
-    stops (and by default destroys) it. Funding is left to Runtime: the included usage first, then prepaid credit.
+    stops (and by default destroys) it. Funding is left to Runtime: the free usage first, then prepaid credit.
     ``runtime_create`` passes Runtime fields (snake_case)."""
     core.refuse_create(mounts, network_id, region, failover_regions)
     if snapshot_retention is not None:
@@ -1013,6 +1017,7 @@ async def query_snapshots(*, name: Optional[str] = None, page_size: Optional[int
 
 _DRIVES = ("Vercel Drives", "Use a Runtime volume (runtime.volumes) and mount it with "
            "runtime_create={'volumes': [{'volume_id': ..., 'path': ...}]}.")
+get_drive = core.unsupported(*_DRIVES)
 get_or_create_drive = core.unsupported(*_DRIVES)
 delete_drive = core.unsupported(*_DRIVES)
 query_drives = core.unsupported(*_DRIVES)
@@ -1020,5 +1025,5 @@ query_sessions = core.unsupported("Querying sessions", "A Runtime sandbox is its
 
 __all__ = ["AsyncSandbox", "AsyncProcess", "AsyncTextReader", "AsyncSandboxFilesystem", "AsyncSnapshot",
            "AsyncFileHandle", "AsyncBatch", "create_sandbox", "get_sandbox", "resume_sandbox", "get_or_create_sandbox",
-           "fork_sandbox", "query_sandboxes", "get_snapshot", "query_snapshots", "get_or_create_drive", "delete_drive",
-           "query_drives", "query_sessions"]
+           "fork_sandbox", "query_sandboxes", "get_snapshot", "query_snapshots", "get_drive", "get_or_create_drive",
+           "delete_drive", "query_drives", "query_sessions"]

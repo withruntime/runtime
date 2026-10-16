@@ -84,6 +84,41 @@ export class NotSupportedError extends Error {
   }
 }
 
+/** Thrown by SandboxInstance.create / createIfNotExists when the sandbox was
+ * not running within the `timeout` asked for. The sandbox is deleted first,
+ * so its name is free and the creation can simply be started over, as on
+ * Blaxel. */
+export class SandboxCreationTimeoutError extends Error {
+  readonly sandboxName: string | undefined;
+  readonly timeout: number | undefined;
+  readonly code = "CREATION_TIMEOUT";
+  readonly status = 408;
+  readonly data: unknown;
+  constructor(sandboxName: string | undefined, timeout: number | undefined, data: unknown) {
+    const detail =
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as { message?: unknown }).message === "string"
+        ? (data as { message: string }).message
+        : undefined;
+    const target = sandboxName ? `Sandbox ${sandboxName}` : "Sandbox";
+    const deadline =
+      timeout !== undefined ? ` within ${timeout}s` : " within the creation deadline";
+    super(
+      `${target} was not ready${deadline}; the creation was cancelled.${detail ? ` ${detail}` : ""}`,
+    );
+    this.name = "SandboxCreationTimeoutError";
+    this.sandboxName = sandboxName;
+    this.timeout = timeout;
+    this.data = data;
+  }
+}
+
+/** True when `err` is a sandbox creation timeout (408 CREATION_TIMEOUT). */
+export function isCreationTimeoutError(err: unknown): err is SandboxCreationTimeoutError {
+  return err instanceof SandboxCreationTimeoutError;
+}
+
 /** A ResponseError of this status and message, made here rather than by
  * Runtime: a process or preview that is not there, a wait that ran out. */
 export function responseError(status: number, message: string): ResponseError {

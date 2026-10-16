@@ -5,12 +5,25 @@ import { Runtime } from "../src/client";
 /* runtime.switching and `runtime compare` / `runtime switch` against a stub
    API. The routes are tested in packages/cloud (switching-api.test.ts). */
 
+const WELCOME = {
+  enabled: true,
+  maxMicros: "1000000000",
+  endsAt: "2026-10-23T12:00:00.000Z",
+  eligible: true,
+  toppedUp: false,
+  status: null as string | null,
+  creditMicros: "0",
+  usedMicros: "0",
+  leftMicros: "1000000000",
+};
+
 const SUMMARY = {
   enabled: true,
-  maxMicros: "100000000",
+  maxMicros: "1000000000",
   providers: ["e2b", "daytona", "vercel", "modal", "cloudflare", "fly", "blaxel"],
   eligible: true,
   switch: null as null | Record<string, unknown>,
+  welcome: WELCOME,
 };
 
 const COMPARISON = {
@@ -96,7 +109,7 @@ test("switching.compare(), get() and record() call the routes", async () => {
   );
 });
 
-test("`runtime compare --from e2b` says what the month saves, and how to claim the credit", async () => {
+test("`runtime compare --from e2b` says what the month saves, and offers the welcome match", async () => {
   await withStub(
     () => COMPARISON,
     async (seen) => {
@@ -109,7 +122,7 @@ test("`runtime compare --from e2b` says what the month saves, and how to claim t
       expect(text).toContain("Priced: 1,000 sandboxes, 16.67 hours running.");
       expect(text).toContain("E2B's published rates, checked 22 September 2026:");
       expect(text).toContain(
-        "Switching from E2B? Run `runtime switch --from e2b` before your first top-up and we match that top-up, up to $100.00.",
+        "Switching from E2B? Run `runtime switch --from e2b` before your first top-up to record it. Credit you add by 23 October 2026 is matched, up to $1,000 in total.",
       );
       expect(seen).toEqual(["GET /v1/usage/compare?provider=e2b"]);
 
@@ -127,7 +140,7 @@ test("`runtime compare` is honest when the rival costs less, and when it prices 
     savingMicros: "-1500000",
     savingPercent: -12.5,
     perMonth: { ...COMPARISON.perMonth, savingMicros: "-3000000" },
-    switching: { ...SUMMARY, eligible: false },
+    switching: { ...SUMMARY, eligible: false, welcome: { ...WELCOME, eligible: false } },
   };
   await withStub(
     () => dearer,
@@ -175,7 +188,7 @@ test("`runtime switch --from e2b` records it; `runtime switch` shows where it st
       expect(await run(["switch", "--from", "e2b"], env, out)).toBe(0);
       expect(lines.join("\n")).toBe(
         [
-          "Recorded: switching from E2B. This organization's switch from E2B was recorded on 23 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+          "Recorded: switching from E2B. Credit you add by 23 October 2026 is matched, up to $1,000 in total.",
           ...dropInLines("e2b"),
         ].join("\n"),
       );
@@ -186,12 +199,19 @@ test("`runtime switch --from e2b` records it; `runtime switch` shows where it st
     () => ({
       ...recorded,
       switch: { ...recorded.switch, status: "paid", creditMicros: "40000000" },
+      welcome: {
+        ...WELCOME,
+        eligible: false,
+        toppedUp: true,
+        status: "paid",
+        creditMicros: "40000000",
+      },
     }),
     async (seen) => {
       const { lines, out } = capture();
       await run(["switch"], env, out);
       expect(lines.join("\n")).toBe(
-        "This organization's switch from E2B was recorded on 23 September 2026 and matched its first top-up: $40.00 of credit.",
+        "This organization's switch from E2B was recorded on 23 September 2026. Your credit was matched: $40.00 of credit.",
       );
       expect(seen).toEqual(["GET /v1/switching"]);
     },
@@ -229,7 +249,7 @@ test("`runtime switch --from blaxel` records a switch from Blaxel by name", asyn
       expect(await run(["switch", "--from", "Blaxel"], env, out)).toBe(0);
       expect(lines.join("\n")).toBe(
         [
-          "Recorded: switching from Blaxel. This organization's switch from Blaxel was recorded on 27 September 2026: its first top-up is matched, up to $100.00, once the payment settles.",
+          "Recorded: switching from Blaxel. Credit you add by 23 October 2026 is matched, up to $1,000 in total.",
           ...dropInLines("blaxel"),
         ].join("\n"),
       );
@@ -262,7 +282,7 @@ test("`runtime compare --from daytona` names a switch already recorded from E2B,
       expect(await run(["compare", "--from", "daytona"], env, out)).toBe(0);
       const text = lines.join("\n");
       expect(text).toContain(
-        "This organization's switch from E2B was recorded on 23 September 2026: its first top-up is matched, up to $100.00, once the payment settles. A switch is recorded once, so it stays E2B, not Daytona.",
+        "This organization's switch from E2B was recorded on 23 September 2026. A switch is recorded once, so it stays E2B, not Daytona. Credit you add by 23 October 2026 is matched, up to $1,000 in total.",
       );
       expect(text).not.toContain("Your switch from");
       // Comparing only reads: nothing is recorded.
@@ -336,6 +356,63 @@ test("`runtime compare` never shows a short trial test as $0 or 0 hours", async 
       const { lines, out } = capture();
       await run(["compare", "--from", "daytona"], env, out);
       expect(lines.join("\n")).toContain("1 sandbox, 1.5 minutes running.");
+    },
+  );
+});
+
+test("`runtime switch` offers the welcome match until its day, and stays quiet after it", async () => {
+  await withStub(
+    () => SUMMARY,
+    async () => {
+      const { lines, out } = capture();
+      await run(["switch"], env, out);
+      expect(lines.join("\n")).toBe(
+        "Moving from a rival? Run `runtime switch --from <provider>` (e2b, daytona, vercel, modal, cloudflare, fly, blaxel) before your first top-up to record it. Credit you add by 23 October 2026 is matched, up to $1,000 in total.",
+      );
+    },
+  );
+  await withStub(
+    () => ({ ...SUMMARY, welcome: { ...WELCOME, eligible: false } }),
+    async () => {
+      const { lines, out } = capture();
+      await run(["switch"], env, out);
+      expect(lines.join("\n")).not.toContain("matched");
+    },
+  );
+  await withStub(
+    () => ({
+      ...SUMMARY,
+      eligible: false,
+      welcome: { ...WELCOME, eligible: false, toppedUp: true, status: "superseded" },
+    }),
+    async () => {
+      const { lines, out } = capture();
+      await run(["switch"], env, out);
+      expect(lines.join("\n")).toBe(
+        "Your payments are matched by your referral instead, which is never less.",
+      );
+    },
+  );
+  // After a first payment, while some is left: how much is used and what is left.
+  await withStub(
+    () => ({
+      ...SUMMARY,
+      eligible: false,
+      welcome: {
+        ...WELCOME,
+        toppedUp: true,
+        status: "paid",
+        creditMicros: "20000000",
+        usedMicros: "20000000",
+        leftMicros: "980000000",
+      },
+    }),
+    async () => {
+      const { lines, out } = capture();
+      await run(["switch"], env, out);
+      expect(lines.join("\n")).toBe(
+        "$20 of $1,000 matched so far; credit you add by 23 October 2026 is matched, up to $980 more.",
+      );
     },
   );
 });

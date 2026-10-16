@@ -82,3 +82,38 @@ test("an uncertain staging upload is cleaned without applying the destination mu
     expect(removed[0]).toContain(`/workspace/.runtime-compat/${operation}-`);
   }
 });
+
+test("a staging copy whose removal failed is removed by the next staged write or append", async () => {
+  const bytes = new Uint8Array(1_048_577);
+  for (const next of ["append", "write"] as const) {
+    const removed: string[] = [];
+    let failing = true;
+    const files = new GuestFiles(
+      async () =>
+        ({
+          files: {
+            write: async () => undefined,
+            remove: async (path: string) => {
+              removed.push(path);
+              if (failing) throw new Error("connection lost");
+            },
+          },
+          exec: async () => undefined,
+        }) as unknown as Sandbox,
+    );
+    await files.writeFile("/tmp/first", bytes);
+    expect(removed).toHaveLength(1);
+    const first = removed[0]!;
+    failing = false;
+    if (next === "append") await files.appendFile("data", bytes);
+    else await files.writeFile("/tmp/second", bytes);
+    // The sweep tried the first copy again, then the new call cleaned its own.
+    expect(removed).toHaveLength(3);
+    expect(removed[1]).toBe(first);
+    expect(removed[2]).not.toBe(first);
+    // Removed once, it is not tried a third time.
+    await files.writeFile("/tmp/third", bytes);
+    expect(removed).toHaveLength(4);
+    expect(removed.filter((p) => p === first)).toHaveLength(2);
+  }
+});

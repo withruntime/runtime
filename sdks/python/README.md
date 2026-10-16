@@ -25,12 +25,13 @@ with Sandbox.create() as sbx:
 ```
 
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
-leaving the `with` block stops it. With no arguments you get the included usage,
-a 1 GB machine running all month every month with no card, up to eight
+leaving the `with` block deletes it (`keep=True` stops it instead and keeps its
+disk). With no arguments you get the free usage,
+with no card, up to four
 sandboxes running at once without credit.
 The current default image includes NumPy, pandas and matplotlib; see the
 [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-The included usage is spent first, then prepaid credit, with nothing to
+The free usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 `AsyncRuntime` is the same client for asyncio, method for method:
 
@@ -62,12 +63,10 @@ also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
 the sandbox with that name or creates it. A sandbox pauses itself after 60 seconds
 with nothing happening in it, keeping its memory and processes, so an
 idle sandbox costs no compute; `idle_pause_seconds` sets 10 to 86,400, or 0 for
-never. `runtime.sandbox`, `snapshot`, `image`, `volume`, `job`, `domain`,
-`port` and `address` name the products as the CLI does. Their existing plural
-names remain aliases of the same product clients. The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
+never. One plural word names each product, as in the CLI: `runtime.sandboxes`, `snapshots`, `images`, `volumes`, `jobs`, `domains`, `ports`, `ips` and `networks`. The old singular names (`runtime.sandbox`, `address`, `tunnel` and the rest) still work for now and are listed in the [guide](https://withruntime.com/docs/python). The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
 `secrets`, `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and
-`audit` to watch the account; `domains`, `ports`, `addresses`, `tunnel` and
-`network` to connect sandboxes to your own world (paid accounts); and `mcp`,
+`audit` to watch the account; `domains`, `ports`, `ips` and
+`networks` (with `networks.wireguard`) to connect sandboxes to your own world (paid accounts); and `mcp`,
 `sso`, `billing`, `referrals` and `switching`. `runtime.limits.get()` (0.3.1 and later) says whether the key is read-only and
 what its agent may still spend today. Every write carries an
 idempotency key, so retries never do anything twice; errors are typed and carry
@@ -105,7 +104,7 @@ from withruntime.e2b.code_interpreter import Sandbox  # was: from e2b_code_inter
 Sandboxes get E2B's defaults, 2 vCPU and 512 MiB, and no time limit unless
 you pass `timeout`: a sandbox runs while it works and pauses itself when idle.
 Timeouts are in seconds, as in E2B's Python SDK. `runtime_create={...}` passes
-Runtime's own create fields, for example `{"funding": "trial"}`. What Runtime
+Runtime's own create fields, for example `{"idle_pause_seconds": 0}`. What Runtime
 does not do the way E2B does raises `NotSupportedException` before anything
 happens, naming what to use instead. Importing `withruntime` alone does not
 load it. The sync `Sandbox` is generated from the async one by
@@ -156,7 +155,7 @@ How it maps:
   image `ns/name:tag` starts from the ready Runtime image `ns-name:tag`
   (every `/` becomes `-`; the tag is `latest` when none is given), so the
   code keeps Blaxel's image string. A missing one raises `NotSupportedError`
-  with the build command, for example `npx withruntime image build
+  with the build command, for example `npx withruntime images build
 --dockerfile Dockerfile --name my-company-agent-image -t
 my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
   name. Without credit a sandbox has at most 4096 MB of memory (2 vCPUs).
@@ -189,7 +188,7 @@ my-company-agent-image:latest`. Volumes mount Runtime volumes of the same
   `ResponseError` and `SnapshotAPIError`. Each also carries Runtime's `code`,
   `hint` and `request_id`.
 - **Runtime fields.** `runtime_create={...}` passes Runtime's own create
-  fields, for example `{"funding": "trial"}`. `sandbox.withruntime` is the
+  fields, for example `{"idle_pause_seconds": 0}`. `sandbox.withruntime` is the
   Runtime sandbox underneath.
 
 Differences you can hit:

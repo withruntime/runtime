@@ -87,12 +87,12 @@ test("`runtime limits` prints the access, the daily limit and what is left, or t
   });
 });
 
-test("`runtime limits` says the free time left: old free hours, or this month's included usage", async () => {
+test("`runtime limits` says the free time left: old free hours, or this month's free usage", async () => {
   await withStub(ON_TRIAL, async () => {
     const { lines, out } = output();
     expect(await run(["limits"], env, out)).toBe(0);
     expect(lines.join("\n")).toMatch(
-      /free time\s+39 hours left \(50 free hours given before 5 October 2026, and the included usage\)$/m,
+      /free time\s+39 hours left \(50 free hours given before 5 October 2026, and the free usage\)$/m,
     );
   });
   const monthly = {

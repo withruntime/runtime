@@ -1,9 +1,18 @@
-import { clientFactories, clientProductAliases, type ClientExtensions } from "./products/index.js";
+import { clientFactories, type ClientExtensions } from "./products/index.js";
+import { installRenamedProducts, type RenamedProducts } from "./renamed-products.js";
 import { usageExport as makeUsageExport } from "./products/observability.js";
 import { Machines } from "./machine.js";
 import { SANDBOXES, Sandbox } from "./sandbox.js";
 import { Snapshots } from "./snapshots.js";
-import { DEFAULT_BASE_URL, Transport, missingKey, type RequestOptions } from "./transport.js";
+import {
+  DEFAULT_BASE_URL,
+  Transport,
+  missingKey,
+  sayRenamed,
+  type RequestOptions,
+} from "./transport.js";
+import { RuntimeError } from "./errors.js";
+import { RENAMED_FIELDS, fieldUse } from "./product-renames.js";
 import type { CreateSandbox, DeletedSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
 
 export type { CreateOptions } from "./machine.js";
@@ -50,15 +59,12 @@ const env = (name: string) =>
 
 /** One client for every Runtime Cloud product. Create it once and reuse it:
  * it keeps its connections open. */
-// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
-export interface Runtime extends ClientExtensions {}
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+export interface Runtime extends ClientExtensions, RenamedProducts {}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class Runtime {
   readonly transport: Transport;
-  /** The sandbox product; `sandboxes` remains the same client for compatibility. */
-  readonly sandbox: Sandboxes;
   readonly sandboxes: Sandboxes;
-  readonly snapshot: Snapshots;
   readonly snapshots: Snapshots;
   readonly feedback: FeedbackApi;
   readonly support: SupportApi;
@@ -85,17 +91,14 @@ export class Runtime {
         : {}),
     });
     this.sandboxes = new Sandboxes(this.transport);
-    this.sandbox = this.sandboxes;
     this.snapshots = new Snapshots(this.transport);
-    this.snapshot = this.snapshots;
     this.feedback = new FeedbackApi(this.transport);
     this.support = new SupportApi(this.transport);
     this.account = new AccountApi(this.transport);
     this.usageExport = makeUsageExport(this.transport);
     for (const [name, make] of clientFactories())
       Object.defineProperty(this, name, { value: make(this.transport), enumerable: true });
-    for (const [alias, name] of Object.entries(clientProductAliases))
-      Object.defineProperty(this, alias, { value: this[name], enumerable: true });
+    installRenamedProducts(this);
   }
   /** Who this key is: organization, agent and credential. */
   me(options: RequestOptions = {}) {
@@ -116,12 +119,29 @@ export class Runtime {
   }
   /** Balance, holds, free time and per-resource charges, in integer microdollars. */
   /** Credit, holds, free time and per-resource charges. */
-  usage(options: RequestOptions = {}) {
-    return this.transport.json<Usage>({
+  async usage(options: RequestOptions = {}) {
+    const value = await this.transport.json<Usage>({
       method: "GET",
       path: "/v1/usage",
       ...options,
     });
+    const fields = value as unknown as Record<string, unknown>;
+    for (const field of RENAMED_FIELDS) {
+      // An older server only sends the old name. Preserve its value before
+      // replacing that property with the warning getter.
+      if (!(field.now in fields) && field.name in fields) fields[field.now] = fields[field.name];
+      Object.defineProperty(value, field.name, {
+        configurable: true,
+        enumerable: false,
+        get() {
+          const use = fieldUse(field.name);
+          if (use.kind === "retired") throw new RuntimeError({ ...use.error });
+          sayRenamed(`299 runtime "${use.warning.replaceAll('"', "'")}"`);
+          return fields[field.now];
+        },
+      });
+    }
+    return value;
   }
   /** This account's authenticated API answers, in hourly windows. Counts are
    * exact decimal strings, and an empty window has a null error percentage.

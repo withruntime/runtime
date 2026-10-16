@@ -59,6 +59,7 @@ export async function runE2BFiles() {
         ensureHome: async () => {},
         runtime: {
           files: {
+            stat: async () => ({ type: "directory" }),
             watch: async (path, callback, opts) => {
               nativeTimeout = opts.timeoutMs;
               return { stop: async () => {} };

@@ -10,7 +10,7 @@ import java.util.Map;
  *
  * <pre>{@code
  * RuntimeClient runtime = RuntimeClient.create(); // RUNTIME_API_KEY, or this machine's saved connection
- * try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox().funding("trial"))) {
+ * try (Sandbox sbx = runtime.sandboxes().create(new CreateSandbox())) {
  *   sbx.files().write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
  *   CommandResult result = sbx.exec("python3 /workspace/invoice.py", new ExecOptions().check(true));
  *   System.out.print(result.stdout());
@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.1.0";
+  public static final String VERSION = "0.2.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -244,12 +244,34 @@ public final class RuntimeClient {
     return new NetworkProducts.Ports(transport);
   }
 
-  public NetworkProducts.Addresses addresses() {
+  /** Dedicated outbound addresses every sandbox of the account sends from. */
+  public NetworkProducts.Addresses ips() {
     return new NetworkProducts.Addresses(transport);
   }
 
+  /** The account's networks: {@code networks().wireguard()}. */
+  public NetworkProducts.Networks networks() {
+    return new NetworkProducts.Networks(transport);
+  }
+
+  /**
+   * Renamed {@link #ips()} on 6 October 2026, one plural word per product.
+   *
+   * @deprecated use {@link #ips()}; removed by a release after the 30 days of overlap.
+   */
+  @Deprecated
+  public NetworkProducts.Addresses addresses() {
+    return ips();
+  }
+
+  /**
+   * Renamed {@code networks().wireguard()} on 6 October 2026.
+   *
+   * @deprecated use {@code networks().wireguard()}; removed by a release after the 30 days of overlap.
+   */
+  @Deprecated
   public NetworkProducts.PrivateTunnel tunnel() {
-    return new NetworkProducts.PrivateTunnel(transport);
+    return networks().wireguard();
   }
 
   public IdentityProducts.SSO sso() {

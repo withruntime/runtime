@@ -1,4 +1,4 @@
-"""runtime.network.private against a stub API, sync and async. The routes are tested on Postgres in packages/cloud
+"""runtime.networks.private against a stub API, sync and async. The routes are tested on Postgres in packages/cloud
 (private-network-api-postgres.test.ts), and the connections by name in private-mesh.test.ts."""
 import asyncio
 import json
@@ -53,18 +53,18 @@ class PrivateNetworkTest(unittest.TestCase):
 
     def test_sync_on_then_read(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
-            self.assertTrue(runtime.network.private.set(enabled=True)["enabled"])
-            self.assertEqual(runtime.network.private.get()["suffix"], "sandbox.internal")
-        self.assertEqual(Stub.seen, [("PUT", "/v1/network/private", {"enabled": True}),
-                                     ("GET", "/v1/network/private", None)])
+            self.assertTrue(runtime.networks.private.set(enabled=True)["enabled"])
+            self.assertEqual(runtime.networks.private.get()["suffix"], "sandbox.internal")
+        self.assertEqual(Stub.seen, [("PUT", "/v1/networks/private", {"enabled": True}),
+                                     ("GET", "/v1/networks/private", None)])
 
     def test_async_off(self):
         async def go():
             async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
-                return await runtime.network.private.set(enabled=False)
+                return await runtime.networks.private.set(enabled=False)
 
         self.assertFalse(asyncio.run(go())["enabled"])
-        self.assertEqual(Stub.seen, [("PUT", "/v1/network/private", {"enabled": False})])
+        self.assertEqual(Stub.seen, [("PUT", "/v1/networks/private", {"enabled": False})])
 
 
 if __name__ == "__main__":

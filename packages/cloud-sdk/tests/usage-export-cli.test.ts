@@ -9,7 +9,14 @@ const env = { RUNTIME_API_KEY: "rk_export_test", RUNTIME_API_URL: "https://api.e
 
 test("the account export keeps exact server CSV, range, cursor and authentication", async () => {
   let seen: Request | undefined;
-  const page = { since, until, data: [], nextCursor: null, csv: 'charged\n"9007199254740993"\n' };
+  const page = {
+    since,
+    until,
+    data: [],
+    nextCursor: null,
+    finalThrough: null,
+    csv: 'charged\n"9007199254740993"\n',
+  };
   const runtime = new Runtime({
     apiKey: env.RUNTIME_API_KEY,
     baseUrl: env.RUNTIME_API_URL,

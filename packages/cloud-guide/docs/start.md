@@ -4,9 +4,9 @@ Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use, and
 
 Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
 One API, one CLI, one MCP server and SDKs for JavaScript, Python, Go, Ruby and Java cover
-every Runtime product. New accounts get [{{included-machine}} included every month](./included-usage), no card.
+every Runtime product. New accounts get [{{included-machine}} every month](./included-usage), no card.
 
-- **{{included-machine}} included every month, no card:** enough to run your real workload before you pay.
+- **{{included-machine}} every month, no card:** enough to run your real workload before you pay.
 - **Pay for the CPU you use:** {{cpu-rate}} per active vCPU-hour, measured, and
   {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
 - **Idle time costs almost nothing:** a sandbox pauses itself after
@@ -28,8 +28,9 @@ every Runtime product. New accounts get [{{included-machine}} included every mon
   sandbox ([MCP](./mcp)), and mount your S3, R2 or Google Cloud Storage bucket
   as a folder ([storage](./storage#mount-your-own-bucket)).
 - **Connected to the rest of your world:** your own domain with HTTPS, public
-  TCP ports, a dedicated outbound address and a WireGuard private network once
-  the account has credit or a kept top-up ([networking](./networking)), and
+  TCP ports and a WireGuard private network once the account has a kept
+  top-up, and a dedicated outbound address once it has credit
+  ([networking](./networking)), and
   [identity tokens](./identity-tokens) that reach AWS or Google Cloud with no
   stored key.
 - **See what runs:** each sandbox's CPU and memory over time, signed webhooks
@@ -64,36 +65,38 @@ one import that changes.
 
 ```bash
 printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-npx withruntime sandbox run -- python3 - < invoice.py
+npx withruntime sandboxes run -- python3 - < invoice.py
 ```
 
 The first time, it connects this machine:
 
 1. Your browser opens a Runtime page, or the command prints a link and a code.
-2. You sign in with Google or an email link, check the code and choose
-   **Connect agent**.
+2. You sign in with Google or by email (type the six-digit code the email
+   gives you, or click its link if you already have an account), check the
+   code and choose **Connect agent**.
 3. A fresh sandbox runs the command, prints the invoice total, 750, and stops.
 
 Exit code zero means the command succeeded. Confirm cleanup with
-`npx withruntime sandbox ls --json`, and stop the test sandbox if it is still
-there. Later commands reuse the connection.
+`npx withruntime sandboxes ls --json`, and delete the test sandbox
+(`npx withruntime sandboxes rm <id>`) if it is still there: a stopped one keeps
+its disk, billed until it is deleted. Later commands reuse the connection.
 
 An agent running it shows you the link and code. If you approve after the
 command stopped waiting (50 seconds when no one is at a terminal), the agent
 runs it again and it finishes, with no new link.
 
-For several commands in one sandbox, this shell block stops it on exit:
+For several commands in one sandbox, this shell block deletes it on exit:
 
 ```bash
 (
-  id=$(npx withruntime sandbox create) || exit
-  trap 'npx withruntime sandbox stop "${id}"' EXIT
-  npx withruntime sandbox exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
+  id=$(npx withruntime sandboxes create) || exit
+  trap 'npx withruntime sandboxes rm "${id}"' EXIT
+  npx withruntime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 )
 ```
 
 Installed with `npm install --global withruntime`, the command is `runtime`:
-`runtime sandbox run -- ls`, `runtime sandbox create`. See
+`runtime sandboxes run -- ls`, `runtime sandboxes create`. See
 [the CLI](./cli).
 
 ## Give an agent Runtime's tools
@@ -126,16 +129,19 @@ try {
   const result = await sbx.exec("python3 /workspace/invoice.py", { check: true });
   console.log(result.stdout);
 } finally {
-  await sbx.stop();
+  await sbx.delete();
 }
 ```
 
 ```python
 from withruntime import Sandbox
 
-with Sandbox.create() as sbx:
+sbx = Sandbox.create()
+try:
     sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
     print(sbx.exec("python3 /workspace/invoice.py", check=True).stdout)
+finally:
+    sbx.delete()
 ```
 
 - Install with `npm install withruntime` or `pip install withruntime`.
@@ -146,8 +152,9 @@ with Sandbox.create() as sbx:
   as `RUNTIME_API_KEY` from your secret manager.
 - `create()` needs no arguments. It waits until the sandbox is ready, and
   raises `start_failed` if it stops first.
-- The examples check the command's result, and stop the sandbox even after an
-  error. Export anything you need before stopping.
+- The examples check the command's result, and delete the sandbox even after
+  an error. A stop would keep its disk, billed until it is deleted. Export
+  anything you need before deleting.
 
 ## Connect once in your browser
 
@@ -163,8 +170,12 @@ own credential automatically, and you do not copy an API key.
   link to open on another device.
 - To use a key you already have, `npx withruntime login --with-key` reads it
   from standard input, never from the command line.
+- An agent with no person to approve can open its own account and pay in
+  USDC instead: `npx withruntime billing topup 20 --new-account --accept-terms --wait`.
+  No free trial on that path; the key comes once the payment lands. See
+  [pay with stablecoins](./pricing#pay-with-stablecoins).
 
-There is nothing to choose between included usage and credit: the included usage is spent first, then prepaid credit, and `funding` in a request is ignored.
+There is nothing to choose between free usage and credit: the free usage is spent first, then prepaid credit, and `funding` in a request is ignored.
 Once the account holds credit, its sandboxes have paid limits.
 
 ## Switch from another provider
@@ -176,8 +187,7 @@ Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after changing one
 import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
 `withruntime/blaxel`.
 `npx withruntime compare --from <provider>` prints what you save, and
-`npx withruntime switch --from <provider>` before your first top-up gets it
-matched, up to {{switching-max}}.
+credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 
 ## If the first run fails
 
@@ -187,7 +197,7 @@ that nothing ran: inspect the original resource before trying another create.
 | Error                                                 | What to do                                                                |
 | ----------------------------------------------------- | ------------------------------------------------------------------------- |
 | `connection_pending`                                  | Approve the printed request, then rerun the same command                  |
-| `no_credit_running_limit` or `included_usage_used_up` | Check your included usage; once the account holds credit, it runs on that |
+| `no_credit_running_limit` or `included_usage_used_up` | Check your free usage; once the account holds credit, it runs on that     |
 | `start_failed`                                        | Read the sandbox's state and `stopReason`; a stopped sandbox is not ready |
 
 See [troubleshooting](./troubleshooting) for safe retries and cleanup.

@@ -30,7 +30,9 @@ logger = logging.getLogger("withruntime")
 # runtime-builder/4 (26 September 2026) fixed that sudo's -s, -i and VAR=value.
 # runtime-builder/5 (30 September 2026): an image's own /etc/resolv.conf no
 # longer shadows the guest's resolver, so Debian and Ubuntu images look up names.
-IMAGE_RECIPE = "runtime-builder/5"
+# runtime-builder/6 (9 October 2026): ENV expands the base image's variables, and
+# a step's HOME is its user's home.
+IMAGE_RECIPE = "runtime-builder/6"
 
 
 def image_tag(key: str) -> str:
@@ -301,7 +303,7 @@ def _file_error(path: str, result: _Result) -> OSError:
 
 
 def _sizes(cpus: Optional[int], memory_mb: Optional[int], storage_mb: Optional[int],
-           trial: bool) -> tuple[dict[str, int], list[str]]:
+           no_credit: bool) -> tuple[dict[str, int], list[str]]:
     """Harbor's resources as Runtime's create fields, and what had to change."""
     fields: dict[str, int] = {}
     notes: list[str] = []
@@ -315,7 +317,7 @@ def _sizes(cpus: Optional[int], memory_mb: Optional[int], storage_mb: Optional[i
             notes.append(f"disk {disk} MiB raised to the smallest, {_MIN_DISK_MIB} MiB")
             disk = _MIN_DISK_MIB
         fields["disk_mib"] = disk
-    if trial:
+    if no_credit:
         for key, most, unit in (("vcpu", _TRIAL_VCPU, "vCPU"), ("memory_mib", _TRIAL_MEMORY_MIB, "MiB of memory"),
                                 ("disk_mib", _TRIAL_DISK_MIB, "MiB of disk")):
             if fields.get(key, 0) > most:

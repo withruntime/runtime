@@ -233,7 +233,7 @@ class Create(Base):
             with self.assertRaises(NotSupportedError) as caught:
                 self.create({"image": image})
             self.assertEqual(core.image_ref(image), (name, tag))
-            self.assertIn(f"`npx withruntime image build --dockerfile Dockerfile --name {name} -t {name}:{tag}`",
+            self.assertIn(f"`npx withruntime images build --dockerfile Dockerfile --name {name} -t {name}:{tag}`",
                           caught.exception.alternative)
             self.assertIn(f'The code can keep "{image}"', caught.exception.alternative)
 

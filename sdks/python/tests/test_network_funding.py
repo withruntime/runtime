@@ -7,7 +7,7 @@ from withruntime._async_products.network_products import AsyncAddresses, AsyncTu
 VALUE = {"id":"reservation", "funded":False,"fundedUntil":"2026-09-24T00:00:00.000Z","rateMicros":5000000,"rateUnit":"unit_month"}
 class SyncTransport:
     def json(self, method, path, **kwargs):
-        return {"data":[VALUE]} if path == '/v1/addresses' and method == 'GET' else VALUE
+        return {"data":[VALUE]} if path == '/v1/ips' and method == 'GET' else VALUE
 class AsyncTransport:
     async def json(self, method, path, **kwargs):
         return SyncTransport().json(method,path,**kwargs)

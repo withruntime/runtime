@@ -126,7 +126,7 @@ test("a stream that keeps closing with nothing new is given up with the process 
     .catch((e: unknown) => e);
   expect(error).toBeInstanceOf(ConnectionError);
   expect((error as RuntimeError).details).toEqual({ sandboxId: ID, processId: "p1" });
-  expect((error as RuntimeError).hint).toContain(`runtime sandbox logs ${ID} p1 -f`);
+  expect((error as RuntimeError).hint).toContain(`runtime sandboxes logs ${ID} p1 -f`);
   expect(calls.filter((c) => c.includes("/output")).length).toBe(4);
 });
 
@@ -262,3 +262,67 @@ test("the CLI exits non-zero and says so when a streamed exec lost output", asyn
   }
   expect(errors.join("\n")).toContain("some of the command's output was lost");
 });
+
+test("a follow that never brings an exit ends past the command's limit, as a timeout, its process stopped", async () => {
+  /* The hub's release train waited 29 minutes on a 10 minute command
+     (15 October 2026): the stream handed over to a follow whose exit never
+     came, and nothing bounded the wait. */
+  const { EXEC_EXIT_GRACE } = await import("../src/sandbox");
+  const grace = EXEC_EXIT_GRACE.ms;
+  EXEC_EXIT_GRACE.ms = 50;
+  try {
+    const { runtime, calls } = server((method, url, init) => {
+      if (method === "POST" && url.pathname.endsWith(":exec"))
+        return stream([
+          { type: "start", processId: "p1" },
+          { type: "stdout", data: "reading\n", offset: 0 },
+          { type: "continue", processId: "p1", cursor: 8 },
+        ]);
+      if (url.pathname.endsWith("/processes/p1/output"))
+        return stream([], "hang", init.signal ?? undefined);
+      if (url.pathname.endsWith("/processes/p1:signal")) return Response.json({ ok: true });
+      return undefined;
+    });
+    const started = Date.now();
+    const result = await (
+      await runtime.sandboxes.get(ID)
+    ).exec("x", { timeoutMs: 100, onStdout: () => {} });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result).toMatchObject({
+      exitCode: null,
+      timedOut: true,
+      stdout: "reading\n",
+      processId: "p1",
+    });
+    expect(calls).toContain(`POST /v1/sandboxes/${ID}/processes/p1:signal`);
+  } finally {
+    EXEC_EXIT_GRACE.ms = grace;
+  }
+});
+
+test("a command with a long limit that ended lets its process exit at once", async () => {
+  /* The deadline's timer is cleared when the call ends, so a script that
+     ran an hour-limit command finishes when the command does. */
+  const child = Bun.spawn(
+    [
+      "bun",
+      "-e",
+      `import { Runtime } from "${new URL("../src/index", import.meta.url).pathname}";
+       const lines = [{ type: "start", processId: "p1" }, { type: "exit", exitCode: 0, state: "exited", timedOut: false }];
+       const body = lines.map((l) => JSON.stringify(l)).join("\\n") + "\\n";
+       const fetcher = async (input, init = {}) => String(input).endsWith(":exec")
+         ? new Response(body, { headers: { "content-type": "application/x-ndjson" } })
+         : Response.json(${JSON.stringify(info)});
+       const runtime = new Runtime({ apiKey: "rk", baseUrl: "https://api.example.test", fetch: fetcher });
+       const r = await (await runtime.sandboxes.get("${ID}")).exec("x", { timeoutMs: 3_600_000, onStdout: () => {} });
+       console.log(r.exitCode);`,
+    ],
+    { stdout: "pipe" },
+  );
+  const started = Date.now();
+  const exited = await Promise.race([child.exited, Bun.sleep(8_000).then(() => "held")]);
+  if (exited === "held") child.kill();
+  expect(exited).toBe(0);
+  expect(await new Response(child.stdout).text()).toBe("0\n");
+  expect(Date.now() - started).toBeLessThan(8_000);
+}, 15_000);

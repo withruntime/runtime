@@ -30,6 +30,10 @@ export type MachineInfo = {
   expiresAt: string;
   endsAt?: string | null;
   start?: unknown;
+  /** True when getOrCreate found the name already held. */
+  reused?: boolean;
+  /** True when the answer repeats an earlier call under the same idempotency key. */
+  replayed?: boolean;
 };
 
 /** Any other call's request options, as the caller gave them: `timeoutMs` is
@@ -87,6 +91,11 @@ export function machinePage<M, Info>(
 }
 
 /** One machine: its record and the verbs every machine product shares. */
+/** Machines `create` made, which the end of an `await using` block deletes
+ * (Marc, 6 October 2026: deleted unless the code passes `keep: true`). One
+ * from `get`, or an existing one `getOrCreate` found, is only stopped. */
+const deleteAtBlockEnd = new WeakSet<object>();
+
 export abstract class Machine<
   Info extends MachineInfo,
   Settings extends object,
@@ -295,8 +304,9 @@ export abstract class Machine<
     void tick();
     return end;
   }
-  /** Days a paused sandbox is kept before deletion (1 to 365). */
-  async setRetention(days: number, options: RequestOptions = {}): Promise<this> {
+  /** Days a paused sandbox is kept before deletion (1 to 365), or `null` to
+   * keep it while your account has credit. */
+  async setRetention(days: number | null, options: RequestOptions = {}): Promise<this> {
     return this.#lifecycle("retention", { ...options, wait: false }, { days });
   }
   /** Keeps this sandbox's whole machine (files, memory, running processes) as
@@ -441,8 +451,16 @@ export abstract class Machine<
     );
     return this;
   }
+  /** The end of an `await using` block. A sandbox this client created is
+   * deleted, as E2B's block kills it, unless it was created with
+   * `keep: true`; one it found with `get` or `getOrCreate` is stopped, which
+   * keeps its disk. */
   async [Symbol.asyncDispose](): Promise<void> {
     this.#keepAlive?.();
+    if (deleteAtBlockEnd.has(this)) {
+      await this.delete().catch(() => undefined);
+      return;
+    }
     if (this.#info.state === "stopped") return;
     await this.stop({ wait: false }).catch(() => undefined);
   }
@@ -466,7 +484,7 @@ export type CreateOptions = RequestOptions & {
 export abstract class Machines<
   M extends Machine<Info, object, Deleted>,
   Info extends MachineInfo,
-  Create extends { name?: string; getOrCreate?: boolean },
+  Create extends { name?: string; getOrCreate?: boolean; keep?: boolean },
   Deleted,
 > {
   readonly #t: Transport;
@@ -478,7 +496,7 @@ export abstract class Machines<
     this.#wrap = wrap;
   }
   /** Creates a sandbox and waits until it is running. Every field is optional:
-   * with none you get the included usage while it lasts, the default region and a
+   * with none you get the free usage while it lasts, the default region and a
    * 2 vCPU / 4 GiB machine from a warm template. `wait: false` returns at once.
    * When every slot without credit or the account's quota is taken, it waits for one to
    * free, up to `waitForCapacityMs` (the client's, two minutes by default). */
@@ -486,7 +504,7 @@ export abstract class Machines<
     input: Create & { wait?: boolean } = {} as Create,
     options: CreateOptions = {},
   ): Promise<M> {
-    const { wait, ...body } = input;
+    const { wait, keep, ...body } = input;
     const began = performance.now();
     // Time spent waiting for capacity is the room's, not the deadline's.
     let waited = 0;
@@ -503,6 +521,7 @@ export abstract class Machines<
       },
     });
     const machine = this.#wrap(this.#t, info);
+    if (!keep && !info.reused) deleteAtBlockEnd.add(machine);
     if (wait !== false && info.state !== "running") {
       // One deadline for the whole create: the wait for running gets what the
       // create left of it (1 ms when nothing is left, so it ends as a timeout).
@@ -517,7 +536,9 @@ export abstract class Machines<
       });
       if (machine.state !== "running")
         throw new RuntimeError({
-          message: `${this.#product.noun} ${info.id} is ${machine.state}, not running.`,
+          message: info.replayed
+            ? `${this.#product.noun} ${info.id} was made by an earlier call with this idempotency key and is ${machine.state} now. It did not fail to start; create again with a new key.`
+            : `${this.#product.noun} ${info.id} is ${machine.state}, not running.`,
           code: "start_failed",
           status: 0,
           hint: `Read it with runtime.${this.#product.plural}.get(id); stopReason says why.`,
@@ -595,31 +616,62 @@ export abstract class Machines<
     filter: { labels: Record<string, string> },
     options: RequestOptions = {},
   ): Promise<{ stopped: string[]; failed: { id: string; error: unknown }[] }> {
+    const { done, failed } = await this.#eachLabelled("stop", filter, false, options, (m, each) =>
+      m.stop(each),
+    );
+    return { stopped: done, failed };
+  }
+  /** Deletes for good every sandbox whose labels all match, stopped ones
+   * included, eight at a time, as `delete()` does one: its disk and paused
+   * memory go, its snapshots stay. Says which were deleted and which failed;
+   * one failure does not stop the rest. Needs at least one label, so deleting
+   * everything is never one call. */
+  async deleteAll(
+    filter: { labels: Record<string, string> },
+    options: RequestOptions = {},
+  ): Promise<{ deleted: string[]; failed: { id: string; error: unknown }[] }> {
+    const { done, failed } = await this.#eachLabelled("delete", filter, true, options, (m, each) =>
+      m.delete(each),
+    );
+    return { deleted: done, failed };
+  }
+  /** Lists every match first, then acts on each, eight at a time: acting
+   * while paging would move the pages under the cursor. */
+  async #eachLabelled(
+    verb: "stop" | "delete",
+    filter: { labels: Record<string, string> },
+    includeStopped: boolean,
+    options: RequestOptions,
+    act: (machine: M, options: RequestOptions) => Promise<unknown>,
+  ): Promise<{ done: string[]; failed: { id: string; error: unknown }[] }> {
     if (!filter?.labels || Object.keys(filter.labels).length === 0) {
       const one = this.#product.noun.toLowerCase();
       throw new RuntimeError({
-        message: "stopAll needs at least one label to match.",
+        message: `${verb}All needs at least one label to match.`,
         code: "invalid_request",
         status: 0,
-        hint: `Stop one ${one} with ${one}.stop(), or label the ones to stop together.`,
+        hint: `${verb === "stop" ? "Stop" : "Delete"} one ${one} with ${one}.${verb}(), or label the ones to ${verb} together.`,
       });
     }
-    const live = await (
-      await this.list({ labels: filter.labels, limit: 100 }, options)
+    const matches = await (
+      await this.list(
+        { labels: filter.labels, limit: 100, ...(includeStopped ? { includeStopped } : {}) },
+        options,
+      )
     ).toArray(Infinity);
-    // One key cannot name several stops: each stop makes its own.
+    // One key cannot name several acts: each makes its own.
     const { idempotencyKey: _one, ...each } = options;
     // In list order, oldest first, whichever finishes first.
-    const errors: unknown[] = new Array(live.length);
+    const errors: unknown[] = new Array(matches.length);
     let next = 0;
     const worker = async () => {
-      for (let at = next++; at < live.length; at = next++)
-        await live[at]!.stop(each).catch((error: unknown) => (errors[at] = error ?? "failed"));
+      for (let at = next++; at < matches.length; at = next++)
+        await act(matches[at]!, each).catch((error: unknown) => (errors[at] = error ?? "failed"));
     };
-    await Promise.all(Array.from({ length: Math.min(8, live.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(8, matches.length) }, worker));
     return {
-      stopped: live.filter((_, at) => errors[at] === undefined).map((m) => m.id),
-      failed: live.flatMap((m, at) =>
+      done: matches.filter((_, at) => errors[at] === undefined).map((m) => m.id),
+      failed: matches.flatMap((m, at) =>
         errors[at] === undefined ? [] : [{ id: m.id, error: errors[at] }],
       ),
     };

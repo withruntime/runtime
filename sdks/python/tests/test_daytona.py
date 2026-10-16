@@ -237,7 +237,7 @@ class Process(Base):
         sandbox = self.daytona.create()
         for call, text in ((sandbox.update_secrets, "withruntime secrets set"),
                            (sandbox.get_metrics, "sandbox.withruntime.metrics("),
-                           (sandbox.create_ssh_access, "withruntime sandbox ssh"),
+                           (sandbox.create_ssh_access, "withruntime sandboxes ssh"),
                            (lambda: self.daytona.create(CreateSandboxFromSnapshotParams(secrets={"A": "s"})),
                             "withruntime secrets set")):
             with self.assertRaises(NotSupportedError) as caught:

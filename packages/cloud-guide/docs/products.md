@@ -55,11 +55,11 @@ The sidebar holds everything. At its top is your account: its menu switches
 account and holds Refer & earn, Support, the documentation, Runtime's status and
 Sign out. Under it are **Search or create**, **Home**, then **Sandboxes**,
 **Images** and **Volumes**, and at its foot **Usage & billing**, with your credit
-(or the included usage left) beside it, and **Settings**. New accounts begin with a
+(or the free usage left) beside it, and **Settings**. New accounts begin with a
 focused connection flow until their first sandbox has started.
 
 - **Home** is today's report. **Needs you** comes first when something does: a
-  sandbox that failed to start or wake, or credit or included usage about to
+  sandbox that failed to start or wake, or credit or free usage about to
   run out (credit five days ahead at this month's pace). Then the few things a
   person still does by hand: connect another agent, open a terminal in a
   running sandbox, make a key and start a sandbox. Then sandbox
@@ -117,7 +117,7 @@ focused connection flow until their first sandbox has started.
   daily spend by product, with where the month is heading, beside daily spend
   by who started it; what each meter came to, with its rate, beside each key's
   spend over the last 24 hours against its daily limit. Its ledger lists
-  purchases, referral and switching credit, refunds and the included usage; a card
+  purchases, referral credit and the welcome match, refunds and the free usage; a card
   purchase links to its Stripe receipt.
 - **Settings** holds Agents & API keys, webhooks, members, single sign-on, the
   audit log and two-step sign-in, in groups in the sidebar.
@@ -149,6 +149,6 @@ settings. See [teams and the audit log](./teams).
 
 Sandboxes, images, volumes and snapshots take a `name` and up to 32 `labels`,
 and their lists filter by them:
-`npx withruntime sandbox ls --label team=search`,
+`npx withruntime sandboxes ls --label team=search`,
 `GET /v1/sandboxes?label=team:search`. Use them for tenants, jobs and cost
 attribution.

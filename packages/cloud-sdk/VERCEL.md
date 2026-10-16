@@ -16,9 +16,11 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 from withruntime.vercel.sandbox import sync as sandbox  # was: from vercel.sandbox import sync as sandbox
 ```
 
-The mapping was written against `@vercel/sandbox` 3.5.1 and `vercel-sandbox`
-0.7.0 on PyPI (the `vercel.sandbox` module of `vercel` 0.11.4), checked
-30 September 2026.
+The JavaScript mapping was checked against `@vercel/sandbox` 3.6.1 on
+8 October 2026. Python was checked against `vercel-sandbox` 0.9.0 on PyPI
+(the `vercel.sandbox` module of `vercel` 0.11.6) on 7 October 2026.
+0.9.0 adds `get_drive`, which raises `NotSupportedError` like
+the other Drive calls; `vercel` 0.11.6 only raises its `vercel-sandbox` floor.
 
 ## Keys
 
@@ -90,13 +92,13 @@ Each of these throws `NotSupportedError` before anything happens. Its
 
 | Vercel Sandbox                                             | Use instead                                                                                           |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| An `image` with no Runtime image of that name              | Build it: `npx withruntime image build --dockerfile Dockerfile --name <image>`.                       |
+| An `image` with no Runtime image of that name              | Build it: `npx withruntime images build --dockerfile Dockerfile --name <image>`.                      |
 | Drives (`mounts`), `networkId`                             | Runtime volumes through `withruntime: { create: { volumes } }`; network rules.                        |
 | A region outside the US, `failoverRegions`                 | Runtime runs in one US region.                                                                        |
 | Network rules that transform or forward requests           | Allow the domain and store the credential as a Runtime secret for it: the sandbox sees a placeholder. |
 | A `timeout` earlier than the current lease's end           | Stop the sandbox when you are done with it.                                                           |
 | Sessions (`currentSession`, `listSessions`)                | A Runtime sandbox is its own session.                                                                 |
-| `openInteractive`                                          | `sandbox.withruntime.terminal(...)` or `npx withruntime sandbox shell <id>`.                          |
+| `openInteractive` (Python: `open_interactive`)             | `sandbox.withruntime.terminal(...)` or `npx withruntime sandboxes shell <id>`.                        |
 | `update` of tags, resources, persistence or region         | Create a new sandbox with them.                                                                       |
 | Overrides on `Sandbox.fork`                                | Fork, then change what Runtime can change.                                                            |
 | `delete({ deleteOrphanSnapshots: true })`, `Snapshot.tree` | Delete snapshots one by one; `Snapshot.list`.                                                         |
@@ -122,6 +124,42 @@ Some differences are not refusals:
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun;
   Vercel's `universal` has Python 3.14.
 - A git source is cloned into the working directory itself.
+
+## JavaScript qualification, 8 October 2026
+
+Reviewed the exact published npm tarballs for `@vercel/sandbox` 3.5.1 → 3.6.1.
+Both tarballs matched their registry SHA-512 integrities; the 3.6.1 value in
+`compatibility-lock.json` came from `npm view @vercel/sandbox@3.6.1 dist.integrity`.
+No downloaded package code was installed or executed.
+
+The distribution diff changes 31 files, representing five TypeScript source
+files in the source maps: `drive.ts`, `version.ts`, `api-client.ts`,
+`base-client.ts` and `validators.ts`. CommonJS and ES-module source-map
+contents match. The changes and their dispositions:
+
+| Upstream change                                                                                                                                                                                             | Drop-in disposition                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Drive.get({ name, signal?, token?, teamId?, projectId?, fetch? })` retrieves an existing drive without creating one. Internally it sends GET to the encoded drive-name path with `projectId` in the query. | Already refused by the `Drive` export before credentials or requests, with `NotSupportedError` naming `runtime.volumes` and `withruntime: { create: { volumes } }`.                                                                                                                                                   |
+| `drive.fork({ name, signal? })` creates a drive inheriting data, maximum size and region. Its POST uses the source drive name, `projectId` query and `{ name }` body.                                       | All Drive construction and retrieval remain refused, so no unsupported Drive instance can reach this call. Use Runtime volumes; no Vercel Drive fork is claimed.                                                                                                                                                      |
+| `drive.parentDriveId` and `drive.rootDriveId`, optional strings, expose ancestry. Drive response validation now retains those fields, including list/get/create/fork/update responses.                      | The same Drive refusal applies. No ancestry or Vercel drive metadata is fabricated.                                                                                                                                                                                                                                   |
+| Streaming `runCommand` disables retry of the command POST. After receiving its command id, a cut, early EOF or incomplete final JSON record recovers logs and then waits for the same command.              | Mapped through native Runtime process ids and byte cursors: no command is restarted after its id arrives. Initial Runtime transport retries use the same idempotency key. Attached commands now throw `StreamError` with `output_truncated` when recovery reports missing bytes, as detached commands already do.     |
+| `Command.logs()` reconnects interrupted log bodies up to twice, waiting 200 ms then 400 ms, skipping previously delivered stdout/stderr characters separately.                                              | Mapped through Runtime's byte cursor across both streams. Runtime follows stream slices and connection cuts; repeated empty streams stop after four reads, and continuous failures have a five-minute recovery budget. These are Runtime's recovery limits, not Vercel's retry timing.                                |
+| `getCommand`, including waiting for completion, retries failures while reading the response body, up to twice. Parsing can consume the already-read body.                                                   | Native Runtime JSON reads already retry through the complete body, with the client's `maxRetries` (four by default). Completion comes from the native process output's exit event rather than Vercel's command-wait endpoint.                                                                                         |
+| Stream parsing now preserves UTF-8 across chunks, classifies connection cuts and incomplete final JSON, closes readers and propagates cancellation or application errors without recovery.                  | Runtime already uses a persistent `TextDecoderStream`, closes its readers and resumes at the byte cursor after a cut or partial record. Permanent structured API errors and cancellation are not replayed. Runtime also retries parse failures as stream cuts; it does not expose Vercel's private `ConnectionError`. |
+| Sandbox/snapshot declarations reorder existing status union members; the package and internal version advance.                                                                                              | No status values, package exports, dependencies or other caller signatures change. No adapter change needed.                                                                                                                                                                                                          |
+
+`tests/vercel-3-6.test.ts` exercises the real Runtime transport with controlled
+HTTP responses: attached and detached recovery, stdout/stderr ordering, one-byte
+UTF-8 chunks, incomplete JSON, no command replay, bounded empty-stream failure,
+permanent errors, Drive lookup refusal and missing-output refusal. Before the
+adapter change, both missing-output cases resolved successfully instead of
+throwing. These tests do not prove live-host recovery, isolation, performance
+superiority or full Vercel compatibility; the provider remains `partial`.
+
+`tests/compat/reference.bun.lock` has no Vercel entry. The consumer declaration
+check in `tests/compat/check-consumers.ts` reads the main compatibility lock and
+requires the extracted upstream version to match it; neither needs a separate
+Vercel version edit. The separate oracle was not run for this source review.
 
 ## Tests
 

@@ -3,6 +3,7 @@ file by ``scripts/generate_sync.py``; edit this one and regenerate."""
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import math
 import os
@@ -30,6 +31,7 @@ _NOTHING_RAN_SECONDS = 300.0
 from ._http import AsyncHTTP as HTTP
 from ._http import NoAnswerStarted, Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
+from ._renamed import renamed
 from ._unpack import Unpacker
 from ._ws import AsyncWebSocket as WebSocket
 from ._tunnel import AsyncPortForward
@@ -83,17 +85,22 @@ def _check_key(key: str) -> str:
 
 class CommandResult:
     """What a command did: its exit code (None when it did not exit by itself),
-    its output, and whether it ran out of time."""
+    its output, and whether it ran out of time. ``out_of_memory`` is set when
+    the sandbox's out-of-memory killer ended it (the program, or anything it
+    started): a dict with code ``out_of_memory``, processesKilled, memoryMiB,
+    message and hint, as the API gives it; None otherwise."""
 
     __slots__ = ("exit_code", "stdout", "stderr", "timed_out", "stdout_truncated", "stderr_truncated",
-                 "duration_ms", "process_id", "replayed")
+                 "duration_ms", "process_id", "replayed", "out_of_memory")
 
     def __init__(self, exit_code: Optional[int], stdout: str, stderr: str, timed_out: bool = False,
                  stdout_truncated: bool = False, stderr_truncated: bool = False, duration_ms: Optional[int] = None,
-                 process_id: Optional[str] = None, replayed: bool = False) -> None:
+                 process_id: Optional[str] = None, replayed: bool = False,
+                 out_of_memory: Optional[dict[str, Any]] = None) -> None:
         self.exit_code, self.stdout, self.stderr, self.timed_out = exit_code, stdout, stderr, timed_out
         self.stdout_truncated, self.stderr_truncated = stdout_truncated, stderr_truncated
         self.duration_ms, self.process_id, self.replayed = duration_ms, process_id, replayed
+        self.out_of_memory = out_of_memory
 
     def __repr__(self) -> str:
         return (f"CommandResult(exit_code={self.exit_code!r}, stdout={self.stdout!r}, stderr={self.stderr!r}, "
@@ -108,12 +115,14 @@ class CommandResult:
             exit_code=data.get("exitCode"), stdout=data.get("stdout", ""), stderr=data.get("stderr", ""),
             timed_out=bool(data.get("timedOut")), stdout_truncated=bool(data.get("stdoutTruncated")),
             stderr_truncated=bool(data.get("stderrTruncated")), duration_ms=data.get("durationMs"),
-            process_id=data.get("processId"), replayed=bool(data.get("replayed")))
+            process_id=data.get("processId"), replayed=bool(data.get("replayed")),
+            out_of_memory=data.get("outOfMemory"))
 
     def to_dict(self) -> dict[str, Any]:
         return {"exitCode": self.exit_code, "stdout": self.stdout, "stderr": self.stderr, "timedOut": self.timed_out,
                 "stdoutTruncated": self.stdout_truncated, "stderrTruncated": self.stderr_truncated,
-                "durationMs": self.duration_ms, "processId": self.process_id}
+                "durationMs": self.duration_ms, "processId": self.process_id,
+                **({"outOfMemory": self.out_of_memory} if self.out_of_memory else {})}
 
 
 
@@ -256,6 +265,8 @@ class _Transport:
         idle_until = deadline if deadline is not None else time.monotonic() + _NOTHING_RAN_SECONDS
         idle_attempt = 0
         attempt = 0
+        # The last try never left, and was sent again at once.
+        resent_at_once = False
         async def retry_pause(delay):
             if hold is not None:
                 await hold.lend()
@@ -302,7 +313,14 @@ class _Transport:
                         else f"No answer from Runtime at {self.base_url}{via}.",
                         code="connection_error", idempotency_key=key,
                         hint=hint or "Check the network, and RUNTIME_API_URL if you set it.") from error
-                await retry_pause(_backoff(attempt))
+                # A connection that never opened sent no byte of the request,
+                # so the next try, which may reach another server, goes at
+                # once; once in a row, so an API that is down is not
+                # hammered. A reset or a timeout may have reached a server
+                # and keeps the backoff and its key's rules.
+                at_once = _never_sent(error) and not resent_at_once
+                resent_at_once = at_once
+                await retry_pause(random.uniform(0, 0.05) if at_once else _backoff(attempt))
                 attempt += 1
                 continue
             try:
@@ -518,6 +536,25 @@ def _check_body(headers: dict[str, str], data: bytes) -> Optional[RuntimeError]:
     return None
 
 
+# A connection that never opened: no byte of the request left this machine.
+_NEVER_OPENED = {errno.ECONNREFUSED, errno.ENOENT, errno.EHOSTUNREACH, errno.ENETUNREACH,
+                 errno.EADDRNOTAVAIL}
+
+
+def _never_sent(error: BaseException) -> bool:
+    """Whether a failure, or one of its causes, is a connection that never
+    opened. A timeout or a reset never counts."""
+    at: Optional[BaseException] = error
+    for _ in range(5):
+        if at is None:
+            return False
+        if isinstance(at, ConnectionRefusedError) or (
+                isinstance(at, OSError) and not isinstance(at, TimeoutError) and at.errno in _NEVER_OPENED):
+            return True
+        at = at.__cause__ or at.__context__
+    return False
+
+
 def _backoff(attempt: int) -> float:
     return min(8.0, 0.25 * 2 ** attempt) * random.uniform(0.5, 1.5)
 
@@ -664,6 +701,12 @@ class AsyncProcess:
         """None while it runs, and when it was killed or timed out."""
         return self.info.get("exitCode")
 
+    @property
+    def out_of_memory(self) -> Optional[dict[str, Any]]:
+        """As of the last answer: set when the sandbox's out-of-memory killer
+        ended it (CommandResult.out_of_memory's shape); None otherwise."""
+        return self.info.get("outOfMemory")
+
     def __repr__(self) -> str:
         return (f"{type(self).__name__}(id={self.id!r}, sandbox_id={self.sandbox_id!r}, command={self.command!r}, "
                 f"state={self.state!r}, exit_code={self.exit_code!r})")
@@ -732,7 +775,7 @@ class AsyncProcess:
                         f"Lost the output stream of process {self.id} for {int(_FOLLOW_OUTAGE_SECONDS // 60)} "
                         "minutes; the command may still be running.",
                         code="connection_error", details={"sandboxId": self.sandbox_id, "processId": self.id},
-                        hint=f"Follow it again: runtime sandbox logs {self.sandbox_id} {self.id} -f") from failure
+                        hint=f"Follow it again: runtime sandboxes logs {self.sandbox_id} {self.id} -f") from failure
                 # Within this call's own deadline, and the caller's request
                 # scope (an E2B command's timeout): past either, the failure
                 # stands.
@@ -747,7 +790,7 @@ class AsyncProcess:
                 raise ConnectionError(
                     f"The output stream of process {self.id} keeps closing before it ends.",
                     code="connection_error", details={"sandboxId": self.sandbox_id, "processId": self.id},
-                    hint=f"Read what it printed so far: runtime sandbox logs {self.sandbox_id} {self.id}")
+                    hint=f"Read what it printed so far: runtime sandboxes logs {self.sandbox_id} {self.id}")
 
     async def output_bytes(self, cursor: int = 0, *, timeout_seconds: Optional[float] = None) -> AsyncIterator[dict[str, Any]]:
         """Lossless bytes for a process spawned with output_encoding="base64"."""
@@ -780,10 +823,12 @@ class AsyncProcess:
             elif event["type"] == "exit":
                 exit_event = event
         if exit_event:
-            self.info = {**self.info, "state": exit_event.get("state"), "exitCode": exit_event.get("exitCode")}
+            self.info = {**self.info, "state": exit_event.get("state"), "exitCode": exit_event.get("exitCode"),
+                         **({"outOfMemory": exit_event["outOfMemory"]} if exit_event.get("outOfMemory") else {})}
         return CommandResult(exit_code=exit_event.get("exitCode"), stdout=out["stdout"], stderr=out["stderr"],
                              timed_out=bool(exit_event.get("timedOut")), stdout_truncated=dropped,
-                             stderr_truncated=dropped, process_id=self.id)
+                             stderr_truncated=dropped, process_id=self.id,
+                             out_of_memory=exit_event.get("outOfMemory"))
 
     async def write(self, data: Union[str, bytes], eof: bool = False) -> None:
         """Sends input; offsets are tracked, so a retried write is never typed twice."""
@@ -914,7 +959,8 @@ class AsyncFiles:
         octal = None if mode is None else format(mode & 0o777, "03o")
         if len(payload) <= CHUNK:
             query = {"path": path, **({"mode": octal} if octal else {})}
-            response = await self._t.send("PUT", self._path("/files/content"), query=query, raw=payload)
+            response = await self._t.send("PUT", self._path("/files/content"), query=query, raw=payload,
+                                          read_body=True)
             await response.read()
             return {"path": path, "size": len(payload)}
         import hashlib
@@ -931,7 +977,7 @@ class AsyncFiles:
 
         async def chunk(offset: int) -> None:
             response = await self._t.send("PUT", self._path(f"/uploads/{_enc(upload)}"), query={"offset": offset},
-                                          raw=payload[offset:offset + step])
+                                          raw=payload[offset:offset + step], read_body=True)
             await response.read()
         try:
             await parallel(chunk, range(0, len(payload), step), PARALLEL_CHUNKS)
@@ -939,9 +985,13 @@ class AsyncFiles:
             if octal and begin.get("mode") != octal:  # Older images need chmod after commit.
                 await self._t.json("POST", self._path("/files:chmod"), body={"path": path, "mode": octal})
         except BaseException:
+            # An expired caller scope must not skip cleanup or replace the
+            # original failure with a failure to abort the partial upload.
+            from ._request_scope import cleanup_scope
             try:
-                await self._t.json("POST", self._path(f"/uploads/{_enc(upload)}:abort"), body={})
-            except RuntimeError:
+                with cleanup_scope():
+                    await self._t.json("POST", self._path(f"/uploads/{_enc(upload)}:abort"), body={})
+            except BaseException:
                 pass
             raise
         return {"path": path, "size": len(payload)}
@@ -990,7 +1040,6 @@ class AsyncFiles:
         detected from the header when omitted. Large archives use bounded
         upload parts. ``user='root'`` explicitly uses guest root."""
         import hashlib
-        from ._request_scope import Limits, request_scope
         payload = bytes(data)
         compressed = payload.startswith(b"\x1f\x8b")
         if gzip is not None and gzip != compressed:
@@ -1017,8 +1066,9 @@ class AsyncFiles:
         except BaseException:
             # An expired caller scope must not skip cleanup or replace the
             # original failure with a failure to abort the partial upload.
+            from ._request_scope import cleanup_scope
             try:
-                with request_scope(captured=Limits()):
+                with cleanup_scope():
                     await self._t.json("POST", upload + ":abort", body={}, idempotency_key=phase("abort"))
             except BaseException:
                 pass
@@ -1146,9 +1196,8 @@ _M = TypeVar("_M", bound="AsyncMachine")
 
 
 class AsyncMachine:
-    """One machine of the machine engine (CLOUD.md section 2,
-    engines/machine/ENGINE.md): its record and the verbs every machine product
-    shares, written once. A product is a subclass that names its path and adds
+    """One machine: its record and the verbs every machine product shares,
+    written once. A product is a subclass that names its path and adds
     what only it does; ``AsyncSandbox`` is the one today."""
 
     #: The API serves the product at /v1/<_plural>; its errors call one a <_noun>.
@@ -1159,6 +1208,10 @@ class AsyncMachine:
         self._t = t
         self.info = info
         self._keep_alive: Optional[Callable[[], None]] = None
+        # Marc, 6 October 2026: the end of a ``with`` block deletes a sandbox
+        # ``create`` made, unless it was created with ``keep=True``. One from
+        # ``get``, or an existing one ``get_or_create`` found, is only stopped.
+        self._delete_at_block_end = False
 
     @property
     def info(self) -> dict[str, Any]:
@@ -1317,15 +1370,16 @@ class AsyncMachine:
             if self._keep_alive is state.get("end"):
                 self._keep_alive = None
 
-        cancel = background(loop)
-
         def end() -> None:
             state["on"] = False
             cancel()
             if self._keep_alive is end:
                 self._keep_alive = None
+        # Set before the loop starts: a thread that found the sandbox stopped
+        # before these lines ran would leave a dead keep-alive marked as running.
         state["end"] = end
         self._keep_alive = end
+        cancel = background(loop)
         return end
 
     def stop_keep_alive(self) -> None:
@@ -1428,7 +1482,16 @@ class AsyncMachine:
         return self
 
     async def __aexit__(self, *_: Any) -> None:
+        """The end of a ``with`` block: deletes a sandbox this client created,
+        as E2B's block kills it, unless it was created with ``keep=True``;
+        stops one found with ``get`` or ``get_or_create``, keeping its disk."""
         self.stop_keep_alive()
+        if self._delete_at_block_end:
+            try:
+                await self.delete()
+            except RuntimeError:
+                pass
+            return
         if self.state != "stopped":
             try:
                 await self.stop(wait=False)
@@ -1440,7 +1503,8 @@ class AsyncMachine:
 
 
 class AsyncSandbox(AsyncMachine):
-    """A sandbox. ``async with await runtime.sandboxes.create() as sbx:`` stops it at the end."""
+    """A sandbox. ``async with await runtime.sandboxes.create() as sbx:`` deletes it at the
+    end, or stops it, keeping its disk, if created with ``keep=True``."""
 
     _plural = "sandboxes"
     _noun = "Sandbox"
@@ -1520,12 +1584,12 @@ class AsyncSandbox(AsyncMachine):
                 raise ConnectionError(
                     f"Lost the output of process {process_id}; the command may still be running.",
                     code="connection_error", details={"sandboxId": self.id, "processId": process_id},
-                    hint=(f"Follow it: runtime sandbox logs {self.id} {process_id} -f, or stop it: "
-                          f"runtime sandbox kill {self.id} {process_id}.")) from error
+                    hint=(f"Follow it: runtime sandboxes logs {self.id} {process_id} -f, or stop it: "
+                          f"runtime sandboxes kill {self.id} {process_id}.")) from error
             result = CommandResult(exit_code=exit_event.get("exitCode"), stdout=out["stdout"], stderr=out["stderr"],
                                    timed_out=bool(exit_event.get("timedOut")), stdout_truncated=dropped,
                                    stderr_truncated=dropped, duration_ms=exit_event.get("durationMs"),
-                                   process_id=process_id)
+                                   process_id=process_id, out_of_memory=exit_event.get("outOfMemory"))
         if check and (result.exit_code != 0 or result.timed_out):
             raise CommandError(result.to_dict())
         return result
@@ -1543,7 +1607,7 @@ class AsyncSandbox(AsyncMachine):
             aliases = {"processId": "process_id", "exitCode": "exit_code", "timedOut": "timed_out",
                        "durationMs": "duration_ms", "stdoutTruncated": "stdout_truncated",
                        "stderrTruncated": "stderr_truncated", "droppedBytes": "dropped_bytes",
-                       "resumeAt": "resume_at"}
+                       "resumeAt": "resume_at", "outOfMemory": "out_of_memory"}
             return {**event, **{alias: event[name] for name, alias in aliases.items() if name in event}}
         body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS), "stream": True}
         events = self._t.events("POST", self._path(":exec"), body=body, idempotency_key=idempotency_key,
@@ -1632,9 +1696,9 @@ class AsyncSandbox(AsyncMachine):
         """Copies of this sandbox as it is now (files, memory, running processes),
         answered once they run. A running sandbox is paused for the moment its
         snapshot takes, then woken. One Sandbox without ``count``; a list with it.
-        ``funding`` ("trial" or "paid") is what the copies run on, as for a
-        create; omitted, they keep this sandbox's."""
-        body = {"count": count, "name": name, "labels": labels, "keepSnapshot": keep_snapshot, "funding": funding}
+        ``funding`` is accepted and ignored: copies run on free usage first,
+        then credit."""
+        body = {"count": count, "name": name, "labels": labels, "keepSnapshot": keep_snapshot}
         reply = await self._t.json("POST", self._path(":fork"), body={k: v for k, v in body.items() if v is not None},
                                    wait=60, idempotency_key=idempotency_key)
         sandboxes = [AsyncSandbox(self._t, info) for info in reply["sandboxes"]]
@@ -1654,15 +1718,15 @@ class AsyncMachines(Generic[_M]):
     def _check_create(self, fields: dict[str, Any]) -> None:
         """Refuses a create field the product does not take."""
 
-    async def create(self, *, wait: bool = True, idempotency_key: Optional[str] = None,
+    async def create(self, *, wait: bool = True, idempotency_key: Optional[str] = None, keep: bool = False,
                      wait_for_capacity: Optional[float] = None,
                      on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
                      **fields: Any) -> _M:
         """Creates a sandbox and waits until it is running. Every field is
         optional (name, labels, env (variables for every command, terminal
-        and SSH session in it; values are never shown again), funding, region, vcpu, memory_mib, disk_mib,
-        cpu, cpu_floor_millis, timeout_seconds (a time limit, 60 to 3600; leave it
-        out for none: it runs while it works and pauses when idle), on_lease_end,
+        and SSH session in it; values are never shown again), region, vcpu, memory_mib, disk_mib,
+        cpu, cpu_floor_millis, timeout_seconds (a time limit, 60 to 86400; leave it
+        out for none: it runs while it works and pauses when idle), on_lease_end ("pause", "stop" or "delete"),
         max_cost_micros, network={"internet": True, "deny": [...]}, and
         image, snapshot, volumes and the rest of _CREATE_FIELDS; a misspelled one
         raises TypeError, naming the one meant).
@@ -1670,7 +1734,9 @@ class AsyncMachines(Generic[_M]):
         to free, up to ``wait_for_capacity`` seconds (the client's, 120 by
         default; 0 fails at once), then raises the refusal as it came;
         ``on_capacity_wait(refusal, seconds)`` is called before each wait, to
-        tell a person why nothing has happened yet."""
+        tell a person why nothing has happened yet. ``keep=True`` makes the end
+        of a ``with`` block stop it, keeping its disk (billed while kept); by
+        default the block deletes it. It is not sent to the API."""
         self._check_create(fields)
         body = {_camel(k): v for k, v in fields.items() if v is not None}
         if isinstance(body.get("volumes"), list):
@@ -1681,10 +1747,14 @@ class AsyncMachines(Generic[_M]):
                                   else max(0.0, float(wait_for_capacity)),
                                   on_capacity_wait=on_capacity_wait)
         machine = self._machine(self._t, info)
+        machine._delete_at_block_end = not keep and not info.get("reused")
         if wait and machine.state != "running":
             await machine.wait_for("running", WAIT_FOR_TIMEOUT_SECONDS)
             if machine.state != "running":
-                raise RuntimeError(f"{self._machine._noun} {machine.id} is {machine.state}, not running.",
+                again = (f"{self._machine._noun} {machine.id} was made by an earlier call with this idempotency key "
+                         f"and is {machine.state} now. It did not fail to start; create again with a new key."
+                         if info.get("replayed") else f"{self._machine._noun} {machine.id} is {machine.state}, not running.")
+                raise RuntimeError(again,
                                    code="start_failed",
                                    hint=f"Read it with runtime.{self._machine._plural}.get(id); stopReason says why.")
         return machine
@@ -1725,21 +1795,39 @@ class AsyncMachines(Generic[_M]):
         ``{"stopped": [ids], "failed": [{"id", "error"}]}``, in list order. One
         failure does not stop the rest. Needs at least one label, so stopping
         everything is never one call."""
+        done, failed = await self._each_labelled("stop", labels, False)
+        return {"stopped": done, "failed": failed}
+
+    async def delete_all(self, *, labels: dict[str, str]) -> dict[str, Any]:
+        """Deletes for good every sandbox whose labels all match, stopped ones
+        included, eight at a time, as ``delete()`` does one: its disk and paused
+        memory go, its snapshots stay. ``{"deleted": [ids], "failed": [{"id",
+        "error"}]}``, in list order. One failure does not stop the rest. Needs
+        at least one label, so deleting everything is never one call."""
+        done, failed = await self._each_labelled("delete", labels, True)
+        return {"deleted": done, "failed": failed}
+
+    async def _each_labelled(self, verb: str, labels: dict[str, str],
+                             include_stopped: bool) -> tuple[list[str], list[dict[str, Any]]]:
+        """Lists every match first, then acts on each: acting while paging
+        would move the pages under the cursor."""
         if not labels:
             one = self._machine._noun.lower()
-            raise RuntimeError("stop_all needs at least one label to match.", code="invalid_request",
-                               hint=f"Stop one {one} with {one}.stop(), or label the ones to stop together.")
-        live = [sandbox async for sandbox in await self.list(labels=labels, limit=100)]
+            raise RuntimeError(f"{verb}_all needs at least one label to match.", code="invalid_request",
+                               hint=f"{verb.capitalize()} one {one} with {one}.{verb}(), "
+                                    f"or label the ones to {verb} together.")
+        matches = [sandbox async for sandbox in await self.list(labels=labels, limit=100,
+                                                                include_stopped=include_stopped)]
         errors: dict[int, BaseException] = {}
 
-        async def stop(at: int) -> None:
+        async def act(at: int) -> None:
             try:
-                await live[at].stop()
+                await getattr(matches[at], verb)()
             except Exception as error:  # noqa: BLE001 - reported per sandbox, the rest go on
                 errors[at] = error
-        await parallel(stop, range(len(live)), 8)
-        return {"stopped": [s.id for at, s in enumerate(live) if at not in errors],
-                "failed": [{"id": s.id, "error": errors[at]} for at, s in enumerate(live) if at in errors]}
+        await parallel(act, range(len(matches)), 8)
+        return ([s.id for at, s in enumerate(matches) if at not in errors],
+                [{"id": s.id, "error": errors[at]} for at, s in enumerate(matches) if at in errors])
 
 
 class AsyncSandboxes(AsyncMachines[AsyncSandbox]):
@@ -1868,20 +1956,19 @@ class AsyncRuntime:
                              max_connections, wait_for_capacity, on_queued)
         self.base_url = self._t.base_url
         self.sandboxes = AsyncSandboxes(self._t)
-        self.sandbox = self.sandboxes
         self.snapshots = AsyncSnapshots(self._t)
-        self.snapshot = self.snapshots
         self.feedback = AsyncFeedback(self._t)
         self.account = AsyncAccount(self._t)
         self.support = AsyncSupport(self._t)
         from ._async_products import CLIENT as PRODUCTS
         for name, product in PRODUCTS.items():
             setattr(self, name, product(self._t))
-        # Match the CLI's product names without making another client or pool.
-        # Account commands such as secrets, events and billing keep their names.
-        for singular, plural in (("image", "images"), ("volume", "volumes"), ("job", "jobs"),
-                                ("domain", "domains"), ("port", "ports"), ("address", "addresses")):
-            setattr(self, singular, getattr(self, plural))
+
+    def __getattr__(self, name: str) -> Any:
+        # An old product word (runtime.sandbox, runtime.tunnel) answers the
+        # product it became for 30 days, with a warning, then raises
+        # name_retired (_renamed.py).
+        return renamed(self, name)
 
     async def me(self) -> dict[str, Any]:
         """Who this key is: organization, agent and credential."""

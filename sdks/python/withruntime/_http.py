@@ -286,14 +286,41 @@ class SyncResponse:
                 timer = threading.Timer(remaining, expire)
                 timer.daemon = True
                 timer.start()
+            # Read in pieces, not readline: http.client's readline ends a
+            # Content-Length body that stopped short, or a chunked one that
+            # lost its last chunk, as if it were whole, so a cut stream passed
+            # as one that ended. read1 lets both be told apart.
+            buffer = b""
+            # Where the buffer has no newline before, so a long line is not
+            # searched again from its start at each piece.
+            scanned = 0
             while True:
-                line = self._response.readline(4 * 1024 * 1024)
+                newline = buffer.find(b"\n", scanned)
+                if newline >= 0:
+                    line, buffer, scanned = buffer[:newline].strip(), buffer[newline + 1:], 0
+                    if line:
+                        yield line
+                    continue
+                scanned = len(buffer)
+                try:
+                    data = self._response.read1(65536)
+                except _incomplete_read() as error:
+                    self._response.will_close = True
+                    raise ConnectionResetError("Connection closed mid-body") from error
+                except OSError:
+                    if expired:
+                        raise TimeoutError("Process output deadline exceeded") from None
+                    raise
                 if expired or (deadline is not None and time.monotonic() >= deadline):
                     raise TimeoutError("Process output deadline exceeded")
-                if not line:
+                if not data:
+                    if self._response.length not in (None, 0):
+                        self._response.will_close = True
+                        raise ConnectionResetError("Connection closed early")
+                    if buffer.strip():
+                        yield buffer.strip()
                     return
-                if line.strip():
-                    yield line.strip()
+                buffer += data
         finally:
             with lock:
                 finished = True

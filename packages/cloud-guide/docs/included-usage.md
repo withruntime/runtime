@@ -1,35 +1,53 @@
-# Included usage
+# Free usage
 
-Every account gets usage included **every calendar month**, with no card,
-after a verified sign-in. It is {{included-machine}}:
+Every account gets free usage, with no card, after a verified sign-in. It is
+{{included-machine}}. An account that has never paid has the machine time
+**once, across its first 30 days**, and then none until it adds credit. An
+account that has paid (bought credit) has it **every calendar month**. Saved
+copies and disks are monthly for every account:
 
-| Product                                   | Included each month   |
+| Product                                   | Free usage            |
 | ----------------------------------------- | --------------------- |
 | Machine memory                            | {{free-memory}}       |
 | Machine active CPU                        | {{free-cpu}}          |
 | Saved copies (snapshots, images, backups) | {{free-saved-copies}} |
 | Disks (volumes)                           | {{free-disks}}        |
 
-- It renews on the 1st of each month, 00:00 UTC. What is left at the end of a
-  month does not carry over.
+- For an account that has paid, it renews on the 1st of each month, 00:00 UTC;
+  what is left at the end of a month does not carry over. For one that has
+  never paid, the machine time ends 30 days after the account was opened
+  (`freeUntil` in `GET /v1/usage`), whatever is left, and comes back every
+  month once the account has paid. Credit Runtime gave, such as the welcome
+  match, is not paying.
 - It is used first, before any credit, on every account, with credit or
   without, and is never charged. There is nothing to choose: a request's
   `funding` is accepted and ignored.
 - An account given free hours before 5 October 2026 keeps what is left of
-  them, and has the included usage as well.
+  them, and has the free usage as well.
 - Model calls are not included.
+- An account opened from a data-centre or VPN network (a cloud provider's
+  address, or a VPN company's) gets its free usage once it adds credit,
+  not before, since that is where accounts are made in bulk. An account opened
+  from a home, office or mobile network gets it at sign-in, as above.
 
 ## Without credit
 
 The limits below hold while the account holds no credit. Once it does, its
-sandboxes have paid limits and still use the included usage first
+sandboxes have paid limits and still use the free usage first
 ([after you add credit](#after-you-add-credit)).
 
-- Up to **eight sandboxes running at once**, each up to **2 vCPU and 4 GiB of
-  memory**, with up to 10 GiB of disk (4 GiB by default). Paused sandboxes do
-  not count toward the eight.
+- Up to **{{trial-sandboxes}} sandboxes running at once**, each up to **2 vCPU
+  and 4 GiB of memory**, with up to 10 GiB of disk (4 GiB by default). Paused
+  sandboxes do not count toward the {{trial-sandboxes}}.
 - At most **{{no-credit-total}} at once** across every sandbox and image build
   that is running.
+- At most **{{no-credit-kept}} sandboxes kept**, running, paused or stopped. A
+  create past that is refused with `no_credit_kept_limit`; delete one to make
+  room. Waking, resuming or deleting a sandbox you already keep is never
+  refused.
+- At most **{{no-credit-daily}} sandboxes made a day** (any 24 hours), copies
+  made by a fork included, refused with `no_credit_daily_limit` past that.
+- No [scheduled job](./jobs) runs: it waits until the account holds credit.
 - CPU is shared, never reserved, and its guaranteed floor (`cpuFloorMillis`)
   is at most 250 thousandths of a vCPU; the default is 50. A create that asks
   for more is refused with `no_credit_size_limit`, naming each field, and so is
@@ -46,7 +64,7 @@ sandboxes have paid limits and still use the included usage first
   Public previews need a kept top-up: one paid and not refunded. Credit given
   alone does not open them ([pricing](./pricing#how-many-at-once)).
 - A sandbox runs while it works and pauses itself when idle, until the
-  included usage runs out; then it pauses, unless the account holds credit, in
+  free usage runs out; then it pauses, unless the account holds credit, in
   which case it carries on on credit. There is no time limit unless you set
   one with `timeoutSeconds` (60 to 86,400); one longer than the usage left is
   cut to it. Idle means nothing happening in it for `idlePauseSeconds`
@@ -54,14 +72,15 @@ sandboxes have paid limits and still use the included usage first
   port forward open, no CPU use and no traffic; a browser tab left open on a
   preview does not count. Wake it to keep going.
 - Your first three images and first 10 GiB of volumes are stored free, for as
-  long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)). A
-  build uses the included usage: at most 2 vCPU and 4 GiB,
+  long as you keep them ([pricing](./pricing#snapshots-images-and-volumes)).
+  That is apart from the table: the {{free-disks}} of disks a month there pays
+  for volumes past your first 10 GiB. A
+  build uses the free usage: at most 2 vCPU and 4 GiB,
   {{trial-build-time}} and {{trial-builds-a-day}} builds a day, with only the
   time it builds used, and none when it fails through a fault of ours.
-- A [scheduled job](./jobs)'s runs use it too, each a sandbox without credit
-  within the same size and count. A run it cannot take waits with
-  `blockedReason` `credits` until the account holds credit or the month
-  renews.
+- A [scheduled job](./jobs) does not run without credit: it waits with
+  `blockedReason` `credits` until the account holds credit. Once it does,
+  each run is a sandbox like any other and uses the free usage first.
 - A sandbox without credit reaches the internet on ports 80 and 443 only.
   Other ports, such as a database's or git over SSH, need a paid sandbox of an
   account with a kept top-up.
@@ -82,12 +101,12 @@ empty body is the same:
 ## Tell your agent
 
 Paste the setup prompt from [Get started](./start#give-your-agent-one-instruction).
-The agent runs everything on the included usage, switches any sandbox code the
+The agent runs everything on the free usage, switches any sandbox code the
 project has on another provider, and tells you what you would save each month.
 
 ## Use it from code
 
-**You do not have to ask for it.** `create()` uses the included usage while the
+**You do not have to ask for it.** `create()` uses the free usage while the
 month has some left, sized to fit.
 
 ```ts
@@ -109,28 +128,52 @@ Use a region listed for your account. Leave `region` out for the default.
 Read it with `npx withruntime usage`, or `GET /v1/usage`:
 
 - `allowances` has one row per product: `pool`, `unit`, `quantity`, `used`,
-  `reserved` (held for what runs now, given back unless used), `left`, `month`
-  and `renewsAt`.
+  `reserved` (held for what runs now, given back unless used), `left` (the
+  quantity less what is used; what is held is not taken off), `month`,
+  `renewsAt` and `freeUntil` (when the free usage ends for an account that has
+  never paid; null once it has paid).
 - `trial` is the machine time a new sandbox without credit can still run, in
   milliseconds: `availableMs`, with `offer` (`monthly`, or `hours` for an
   account given free hours before 5 October 2026) and `renewsAt`. The field
   keeps its older name, so code that reads it goes on working.
+- `startupIncluded` lists what [Runtime for Startups](https://withruntime.com/startups)
+  includes for an accepted startup, one row per product.
+  `machine-cpu` and `machine-memory` have `period` `once`: `quantity`,
+  `used`, `reserved` and `left`, used after the month's free usage and
+  before credit, never renewed, and what is left ends at `expiresAt`, 12
+  months after it was given. `saved-copies` and `disks` have `period`
+  `month`: `quantity` GB added to each month's included storage until
+  `expiresAt`, never used up, with `keptGB`, the GB kept now; storage past it
+  is charged at the published rates. `startupLimits` lists the at-once limits
+  that Runtime for Startups includes, `buildsAtOnce` and `sandboxesAtOnce`, until the same `expiresAt`;
+  after it, null. The account is paid with no top-up until then, and after
+  it once it holds credit it bought.
+
+The old fields `pot` and `potLimits` still work for 30 days after this change ships, with a warning.
 
 In the browser, [Usage & billing](https://withruntime.com/account/billing)
 shows what each product used this month and what is left.
 
 ## When you reach a limit
 
-| Code                         | What it means                                                                                     | What to do                                         |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `no_credit_running_limit`    | Eight sandboxes without credit are running; `details.running` names them                          | Stop or pause one; an SDK create waits for a slot  |
-| `no_credit_total_limit`      | Running sandboxes and builds would pass {{no-credit-total}}; the message says what runs now       | Stop or pause one, or wait for a build to end      |
-| `no_credit_domain_limit`     | Accounts on your company's email domain share eight running sandboxes without credit, all running | Stop or pause one, or add credit                   |
-| `no_credit_size_limit`       | The size asked for is larger than 2 vCPU, 4 GiB and 10 GiB of disk                                | Omit the size fields for the default               |
-| `no_credit_build_limit`      | {{trial-builds-a-day}} builds started in the last 24 hours                                        | Reuse an image, or retry later                     |
-| `no_credit_capacity_full`    | The room servers keep for accounts without credit is full right now                               | Retry shortly; an SDK create waits                 |
-| `included_usage_used_up`     | This month's included usage is used and the account holds no credit                               | Add credit, or wait for the 1st (UTC)              |
-| `included_usage_unavailable` | The account has no included usage yet: its owner has not signed in with a verified email          | Sign in with Google or an email address you verify |
+| Code                         | What it means                                                                                                                                                                                                                           | What to do                                           |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `no_credit_running_limit`    | Four sandboxes without credit are running; `details.running` names them                                                                                                                                                                 | Stop or pause one; an SDK create waits for a slot    |
+| `no_credit_total_limit`      | Running sandboxes and builds would pass {{no-credit-total}}; the message says what runs now                                                                                                                                             | Stop or pause one, or wait for a build to end        |
+| `no_credit_kept_limit`       | The account keeps {{no-credit-kept}} sandboxes, running, paused or stopped, and a create would make another                                                                                                                             | Delete one, or add credit                            |
+| `no_credit_daily_limit`      | {{no-credit-daily}} sandboxes made in the last 24 hours                                                                                                                                                                                 | Reuse a sandbox, retry later, or add credit          |
+| `no_credit_domain_limit`     | Accounts on your company's email domain share eight running sandboxes without credit, all running                                                                                                                                       | Stop or pause one, or add credit                     |
+| `no_credit_size_limit`       | The size asked for is larger than 2 vCPU, 4 GiB and 10 GiB of disk                                                                                                                                                                      | Omit the size fields for the default                 |
+| `no_credit_build_limit`      | {{trial-builds-a-day}} builds started in the last 24 hours                                                                                                                                                                              | Reuse an image, or retry later                       |
+| `no_credit_capacity_full`    | The room servers keep for accounts without credit is full right now                                                                                                                                                                     | Retry shortly; an SDK create waits                   |
+| `included_usage_used_up`     | The free usage is used and the account holds no credit                                                                                                                                                                                  | Add credit, or wait for the 1st (UTC) if it has paid |
+| `included_usage_unavailable` | The account has no free usage: it goes once to each verified email address, and the owner's is unverified or already has it on another account; or the account was opened from a data-centre or VPN network, where it comes with credit | Verify your email, or add credit                     |
+
+Each of these answers says what was refused and the limit, then, in its
+`hint` and in `details.addCredit`, the one way past it: the account's owner
+adds credit, and credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+([how refusals look](./api#responses-and-errors)). An agent tells its person
+which limit it met; it never adds credit on its own.
 
 These codes were named `trial_busy`, `trial_capacity`, `invalid_trial`,
 `trial_domain_limit`, `trial_build_limit`, `trial_exhausted` and
@@ -141,21 +184,22 @@ them may be the one refused. Shared mail providers such as gmail.com,
 outlook.com and icloud.com have no domain limit. Temporary inbox services such
 as Guerrilla Mail and Mailinator cannot open an account.
 
-Included usage cannot be cashed out, refunded, carried over or gained by
+Free usage cannot be cashed out, refunded, carried over or gained by
 signing in again.
 
 ## After you add credit
 
 **Add credit and keep going.** An owner, admin or billing member adds prepaid
 credit at [Usage & billing](https://withruntime.com/account/billing), any
-amount from {{topup-min}}, with no subscription. There is nothing to switch:
-from then on
+amount from {{topup-min}}, with no subscription. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+([welcome match](./pricing#welcome-match)). There is nothing to switch: from
+then on
 
 - new sandboxes are paid, with paid limits (larger sizes, any port, public
-  previews, persistence, more at once), and still use the included usage
+  previews, persistence, more at once), and still use the free usage
   first, then credit;
 - a paused sandbox without credit wakes on credit;
-- a running sandbox without credit carries on on credit when the included
+- a running sandbox without credit carries on on credit when the free
   usage ends, without pausing.
 
 - A paid sandbox runs the same way: while it works, until you stop it, it idles
@@ -165,7 +209,7 @@ from then on
 - A paid account runs {{paid-sandboxes}} sandboxes at once from its first
   top-up, paused ones not counted, and more on request
   ([pricing](./pricing#how-many-at-once)).
-- Refer a company and you both get credit matching its first top-up, from
-  {{referral-min}} to {{referral-max}} each ([referrals](./referrals)).
+- Refer a company and you both get up to {{referral-max}}, then {{referral-share}} of what it
+  spends for {{referral-share-months}} months ([referrals](./referrals)).
 
 For what a sandbox may reach, see [security](./security).

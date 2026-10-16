@@ -12,22 +12,22 @@ A custom domain or a TCP port also needs the sandbox it serves to be a paid one.
 - **Dedicated outbound address:** every sandbox of your account sends from one
   address of its own, so you can allow-list it.
 - **Private network:** a WireGuard tunnel from your own network, in any cloud or
-  on your premises, into your sandboxes (`runtime tunnel`). This is the only
-  "tunnel" on this page; `runtime sandbox ssh` and `port-forward` are a
+  on your premises, into your sandboxes (`runtime networks wireguard`). This is the only
+  "tunnel" on this page; `runtime sandboxes ssh` and `port-forward` are a
   separate connection from your own computer ([SSH and editors](./editors)).
 - **Sandboxes by name:** your sandboxes reach each other at
   `<name>.sandbox.internal`, free. It needs no tunnel: the CLI and MCP call it
-  `network private` (`runtime network private on`), which is not the WireGuard
+  `networks private` (`runtime networks private on`), which is not the WireGuard
   private network above.
 - **Your Tailscale network:** a sandbox joins your tailnet as a machine of its
   own, with your auth key.
 
 None of them belongs to one sandbox alone, so each is its own product in the CLI,
-the SDKs and MCP: `runtime domain`, `runtime port`, `runtime address` and
-`runtime tunnel`; `runtime.domains`, `runtime.ports`, `runtime.addresses` and
-`runtime.tunnel`; `runtime_domain_*`, `runtime_port_*`, `runtime_address_*` and
-`runtime_tunnel_*`. A tailnet belongs to one sandbox: `runtime sandbox tailscale`,
-`sbx.tailscale` and `runtime_sandbox_tailscale`. A dedicated IPv4 address and a tunnel each cost {{address-month}} per
+the SDKs and MCP: `runtime domains`, `runtime ports`, `runtime ips` and
+`runtime networks wireguard`; `runtime.domains`, `runtime.ports`, `runtime.ips`
+and `runtime.networks.wireguard`; `runtime_domains_*`, `runtime_ports_*`,
+`runtime_ips_*` and `runtime_networks_wireguard_*`. A tailnet belongs to one sandbox: `runtime sandboxes tailscale`,
+`sbx.tailscale` and `runtime_sandboxes_tailscale`. A dedicated IPv4 address and a tunnel each cost {{address-month}} per
 30-day month, prorated to funded time. IPv6, custom domains, TCP ports and
 joining a tailnet are included. See [pricing](./pricing).
 
@@ -36,6 +36,15 @@ joining a tailnet are included. See [pricing](./pricing).
 A [preview link](./sandbox-environment) shares an HTTP port without adding a
 custom domain. Keep it private when only selected visitors should connect;
 anyone holding its token can use it until it expires or you rotate it.
+Revoking the key or sandbox session that was handed a token, or removing the
+member whose key it was, also refuses every token for that preview at once, as
+a rotate does; read the preview again for a new one.
+
+A page on another preview cannot open a private preview with the visitor's
+cookie: a link, image, frame or request from another sandbox's preview is
+refused with `origin_not_allowed`. Another port of the same sandbox, a site
+listed in `embedOrigins`, and a request that sends the token itself are
+allowed.
 
 The API can issue a token with a relative `ttlSeconds` lifetime or an absolute
 `expiresAt` ISO timestamp. With both, the earlier deadline wins; tokens issued
@@ -47,7 +56,7 @@ for the supported API and MCP inputs.
 ## Custom domains
 
 ```bash no-run
-runtime domain add app.example.com <sandbox> 3000
+runtime domains add app.example.com <sandbox> 3000
 ```
 
 The answer lists two DNS records to set at your DNS provider:
@@ -62,7 +71,7 @@ the answer gives an A record (and an AAAA for an IPv6 address) with the
 addresses to set instead. Then check:
 
 ```bash no-run
-runtime domain verify app.example.com
+runtime domains verify app.example.com
 ```
 
 The name goes live when the TXT record matches. The first visit gets its
@@ -78,7 +87,7 @@ woken by a visit, like a preview.
 - **The DNS owner wins.** If another account proves the same name later, it
   takes the name over and your claim ends.
 - **To move the name to another sandbox or port,** run `add` again with the new
-  target. To stop serving it, `runtime domain rm app.example.com`. Either
+  target. To stop serving it, `runtime domains rm app.example.com`. Either
   takes effect, open connections included, before the command returns.
 - **Limits:** 50 domains per account, 20 added a day. Certificates are issued
   for proved names only.
@@ -89,7 +98,7 @@ woken by a visit, like a preview.
 ## TCP ports
 
 ```bash no-run
-runtime port open <sandbox> 5432
+runtime ports open <sandbox> 5432
 # 203.0.113.10:23456
 psql "postgres://app@203.0.113.10:23456/app?sslmode=require"
 ```
@@ -119,14 +128,14 @@ sandbox. Opening the same sandbox and port again returns the same public port.
   monthly allowance and then at {{outbound-rate}} per GB, for sandboxes created
   from 5 October 2026; what clients send in is free. See
   [pricing](./pricing#network-products).
-- `runtime port ls` lists them; `runtime port close <portId>` closes one, and
+- `runtime ports ls` lists them; `runtime ports close <portId>` closes one, and
   its open connections, before it returns. A port you open listens before its
   address is returned.
 
 ## Dedicated outbound addresses
 
 ```bash no-run
-runtime address reserve
+runtime ips reserve
 # 203.0.113.50
 ```
 
@@ -135,13 +144,16 @@ port, so a database, an API provider or a firewall can admit exactly you. No
 other account sends from it while you hold it.
 
 - One IPv4 address per account, and one IPv6 with `--ipv6`.
+- Your sandboxes send only in the families you hold an address of: with an
+  IPv4 address and no IPv6 one, a site that has no IPv4 address is refused
+  with `address-family`, never reached from a shared IPv6 address.
 - If funding expires, traffic stops while the reservation remains yours. There
   is no fallback to a shared address and no charge for the unpaid interval.
 - `funded` reports whether traffic is funded now. `fundedUntil` is the last
   funded-through time and may be in the past; it is null when no meter exists.
   `rateMicros` and `rateUnit` give the reserved address's price. Check your
   balance, spending limits and permissions if renewal is blocked.
-- `runtime address release <addressId>` gives it back, and your sandboxes send
+- `runtime ips release <addressId>` gives it back, and your sandboxes send
   from the shared addresses again at once. A released address rests for 30 days
   before any other account gets it. Remove it from your allow-lists first.
 - Addresses are added to Runtime as accounts need them. If none is free, the
@@ -158,14 +170,14 @@ proxy, after Runtime's own rules allow them, so your proxy's controls and logs
 apply.
 
 ```bash no-run
-runtime network upstream-proxy set http://proxy.example.com:3128 --host '*.internal.example.com'
-runtime network upstream-proxy get
-runtime network upstream-proxy remove
+runtime networks upstream-proxy set http://proxy.example.com:3128 --host '*.internal.example.com'
+runtime networks upstream-proxy get
+runtime networks upstream-proxy remove
 ```
 
-It is a setting of the whole account, so it lives under `runtime network`, as
-`runtime.network.upstreamProxy` in JavaScript, `runtime.network.upstream_proxy`
-in Python and `runtime_network_upstream_proxy_*` in MCP; the CLI and SDK lines
+It is a setting of the whole account, so it lives under `runtime networks`, as
+`runtime.networks.upstreamProxy` in JavaScript, `runtime.networks.upstream_proxy`
+in Python and `runtime_networks_upstream_proxy_*` in MCP; the CLI and SDK lines
 arrived in `withruntime` 0.7.0, and the API and MCP tools work
 now. Without `--host`, every connection goes through it. A proxy that fails
 fails the connection; nothing goes around it.
@@ -177,18 +189,18 @@ proxy sees, and UDP.
 Turn it on once, and every sandbox of your account reaches the others by name,
 over TCP, on any port: a database in one, a queue in another, the agent in a
 third. It is free, and off until you turn it on. The setting is named
-`network private` in the CLI, the API (`/v1/network/private`) and MCP
-(`runtime_network_private`); it has nothing to do with the WireGuard
+`networks private` in the CLI, the API (`/v1/networks/private`) and MCP
+(`runtime_networks_private`); it has nothing to do with the WireGuard
 [private network](#private-networks) below, which joins your own network to
 your sandboxes.
 
 ```bash no-run
-runtime network private on
+runtime networks private on
 # then, in any of your sandboxes:
 psql -h db.sandbox.internal -p 5432 app
 curl http://web.sandbox.internal:3000/
-runtime network private status
-runtime network private off                    # open connections are cut within seconds
+runtime networks private status
+runtime networks private off                    # open connections are cut within seconds
 ```
 
 - **The name** is the one the sandbox was created with (`name`), at
@@ -208,17 +220,17 @@ runtime network private off                    # open connections are cut within
   sandbox either.
 - **Not billed:** these connections are not outbound traffic.
 
-From the SDKs, `runtime.network.private` (MCP: `runtime_network_private_*`):
+From the SDKs, `runtime.networks.private` (MCP: `runtime_networks_private_*`):
 
 ```ts check
 import { Runtime } from "withruntime";
 const runtime = new Runtime();
-await runtime.network.private.set({ enabled: true });
-const { enabled } = await runtime.network.private.get();
+await runtime.networks.private.set({ enabled: true });
+const { enabled } = await runtime.networks.private.get();
 ```
 
 ```python check
-runtime.network.private.set(enabled=True)
+runtime.networks.private.set(enabled=True)
 ```
 
 A program that connects directly sees a refused connection close at once. Through
@@ -227,10 +239,49 @@ answer's `X-Runtime-Egress` header says why: `private-network-off` (turn it on),
 yours has that name or id), `private-network-not-running` (it is stopped, or
 could not be woken) or `private-network-port-reserved`.
 
+## Signed requests
+
+Turn it on once, and your sandboxes can sign their HTTP requests as Runtime's
+agents with Web Bot Auth, so sites behind Cloudflare and other bot managers
+can tell them from anonymous traffic ([Outbound traffic](./egress#signed-requests)).
+It is free, needs credit on the account, and is off until you turn it on. The
+setting is `networks signed-requests` in the CLI, the API
+(`/v1/networks/signed-requests`) and MCP (`runtime_networks_signed_requests_*`).
+
+```bash no-run
+runtime networks signed-requests on
+# then, in any of your sandboxes, the headers for one site:
+TOKEN=$(curl -s -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
+  "$RUNTIME_ID_TOKEN_REQUEST_URL?audience=https://withruntime.com/signed-requests" |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+curl -s -H "x-runtime-sandbox-identity: $TOKEN" \
+  "https://withruntime.com/api/signed-requests/sign?authority=example.com"
+# {"authority":"example.com","headers":{"Signature-Agent":...,"Signature-Input":...,"Signature":...},"expiresAt":"..."}
+runtime networks signed-requests off            # new signatures stop at once
+```
+
+- **Send the three headers** with every request to that site until
+  `expiresAt`, 5 minutes on, then ask again. `authority` is the site's host,
+  with its port when not 80 or 443.
+- **Refusals** say why: `signed_requests_off` (403: turn it on, or the sandbox
+  is not running), `invalid_identity` (401: a token for another audience),
+  `rate_limited` (429: more than 120 a minute from one sandbox).
+
+From the SDKs, `runtime.networks.signedRequests` (Python:
+`runtime.networks.signed_requests`):
+
+```ts check
+import { Runtime } from "withruntime";
+const runtime = new Runtime();
+await runtime.networks.signedRequests.set({ enabled: true });
+const { enabled, allowed } = await runtime.networks.signedRequests.get();
+```
+
 ## Private networks
 
 A WireGuard tunnel from a machine or router on your network into your
-sandboxes (`runtime tunnel`, `runtime.tunnel`, `runtime_tunnel`). For your
+sandboxes (`runtime networks wireguard`, `runtime.networks.wireguard`,
+`runtime_networks_wireguard`). For your
 sandboxes reaching each other, no tunnel is needed: see
 [reach your other sandboxes by name](#reach-your-other-sandboxes-by-name). Every sandbox gets an address in the tunnel's subnet, and your
 machines reach any port of it there.
@@ -239,14 +290,14 @@ both ways; with no room there just now, a create answers `no_capacity` (503),
 and a retry with the same idempotency key goes ahead once there is.
 
 ```bash no-run
-runtime tunnel create                                # subnet 10.250.0.0/16 by default
-runtime tunnel peer add office --route 10.0.0.0/16   # writes runtime.conf
+runtime networks wireguard create                                # subnet 10.250.0.0/16 by default
+runtime networks wireguard peer add office --route 10.0.0.0/16   # writes runtime.conf
 sudo wg-quick up ./runtime.conf
-runtime tunnel get                                   # each sandbox's address
+runtime networks wireguard get                                   # each sandbox's address
 psql -h 10.250.0.32 app
 ```
 
-`runtime tunnel peer add` makes the WireGuard key pair on your machine; the
+`runtime networks wireguard peer add` makes the WireGuard key pair on your machine; the
 private key goes only into `runtime.conf`, which only you can read. Any
 WireGuard client works with a complete file: `wg-quick` on Linux and macOS, the
 WireGuard apps on Windows, macOS, iOS and Android, or your router. To use a
@@ -264,9 +315,9 @@ Do not generate another peer just to retrieve the same private key.
   addresses, on any port except Runtime's own relays inside the sandbox (10800,
   10802 and 10853). Nothing else: not another account's sandboxes, not Runtime's
   servers, not the internet. Only TCP is carried.
-- **Rotate a key** with `runtime tunnel peer rotate <peerId>`: the old key stops
+- **Rotate a key** with `runtime networks wireguard peer rotate <peerId>`: the old key stops
   working within seconds, and connections opened with it end.
-  `runtime tunnel peer rm <peerId>` removes a peer the same way.
+  `runtime networks wireguard peer rm <peerId>` removes a peer the same way.
 - **Funding:** an unfunded tunnel stops traffic but keeps its reservation and
   peers until you delete it. Unpaid time is never billed. `funded`,
   `fundedUntil`, `rateMicros` and `rateUnit` report its current funding and quote.
@@ -278,15 +329,18 @@ From the SDKs:
 ```ts check
 import { Runtime } from "withruntime";
 const runtime = new Runtime();
-await runtime.tunnel.create();
-const office = await runtime.tunnel.addPeer({ name: "office", routes: ["10.0.0.0/16"] });
+await runtime.networks.wireguard.create();
+const office = await runtime.networks.wireguard.addPeer({
+  name: "office",
+  routes: ["10.0.0.0/16"],
+});
 // office.config is the wg-quick file; with no publicKey given, it holds the
 // private key Runtime generated for you, shown once.
 ```
 
 ```python check
-runtime.tunnel.create()
-office = runtime.tunnel.add_peer("office", routes=["10.0.0.0/16"])
+runtime.networks.wireguard.create()
+office = runtime.networks.wireguard.add_peer("office", routes=["10.0.0.0/16"])
 ```
 
 ## Your Tailscale network
@@ -299,9 +353,9 @@ jobs, which is the copy a sandbox can be given, then join:
 
 ```bash no-run
 printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs
-runtime sandbox tailscale up <sandbox> --auth-key-secret TS_AUTHKEY --tag tag:agents
-runtime sandbox tailscale status <sandbox>     # its 100.x address and name
-runtime sandbox tailscale down <sandbox>       # removed from the tailnet at once
+runtime sandboxes tailscale up <sandbox> --auth-key-secret TS_AUTHKEY --tag tag:agents
+runtime sandboxes tailscale status <sandbox>     # its 100.x address and name
+runtime sandboxes tailscale down <sandbox>       # removed from the tailnet at once
 ```
 
 `--hostname` names the machine; the default is the sandbox's name. At create,

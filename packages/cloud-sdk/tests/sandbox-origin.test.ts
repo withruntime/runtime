@@ -7,8 +7,10 @@ import {
   SANDBOX_BASE_URL,
   apiOrigin,
   defaultBaseUrl,
+  PLACEHOLDER,
   inRuntimeSandbox,
   reachable,
+  sandboxMarker,
 } from "../src/transport";
 import { Runtime } from "../src/index";
 
@@ -38,6 +40,32 @@ test("in a sandbox, calls for the public API go to runtime.internal, since the p
   expect(new Runtime({ apiKey: "rt_key", baseUrl: DEFAULT_BASE_URL }).transport.baseUrl).toBe(
     inRuntimeSandbox() ? SANDBOX_BASE_URL : DEFAULT_BASE_URL,
   );
+});
+
+test("in a sandbox, a secret's placeholder key calls the public API, where the sandbox's proxy puts the key in; a real key still calls runtime.internal", async () => {
+  // runtime.internal reaches the host without passing the proxy, so the
+  // placeholder arrived as the key and every call answered 401 (11 October 2026).
+  const directory = await mkdtemp(join(tmpdir(), "rt-sandbox-origin-"));
+  const before = sandboxMarker.path;
+  try {
+    sandboxMarker.path = join(directory, "environment.json");
+    await writeFile(sandboxMarker.path, "{}");
+    expect(new Runtime({ apiKey: `${PLACEHOLDER}5ab2668c` }).transport.baseUrl).toBe(
+      DEFAULT_BASE_URL,
+    );
+    expect(
+      new Runtime({ apiKey: `${PLACEHOLDER}5ab2668c`, baseUrl: DEFAULT_BASE_URL }).transport
+        .baseUrl,
+    ).toBe(DEFAULT_BASE_URL);
+    expect(new Runtime({ apiKey: "rt_key" }).transport.baseUrl).toBe(SANDBOX_BASE_URL);
+    expect(
+      new Runtime({ apiKey: `${PLACEHOLDER}5ab2668c`, baseUrl: "https://api.example.com" })
+        .transport.baseUrl,
+    ).toBe("https://api.example.com");
+  } finally {
+    sandboxMarker.path = before;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("a sandbox is recognised by the environment file every Runtime guest keeps", async () => {

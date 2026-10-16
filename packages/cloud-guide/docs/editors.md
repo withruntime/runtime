@@ -10,8 +10,8 @@ that may run commands in a sandbox is the only thing that can connect.
 ## Log in
 
 ```bash no-run
-runtime sandbox ssh <id>                  # a shell
-runtime sandbox ssh <id> -- make test     # one command; exits with its code
+runtime sandboxes ssh <id>                  # a shell
+runtime sandboxes ssh <id> -- make test     # one command; exits with its code
 ```
 
 `<id>` is the sandbox's id or its name. The first time, the CLI makes an SSH key
@@ -20,14 +20,14 @@ half, into the one login it opens. You log in as `runtime`, the user commands
 run as, with the same environment, the proxy settings and `sudo`.
 
 A sandbox whose image has no SSH server, such as a custom image, gets one:
-`runtime sandbox ssh` installs `openssh-server` once and says so first.
+`runtime sandboxes ssh` installs `openssh-server` once and says so first.
 
 ## VS Code, JetBrains and plain ssh
 
 Run this once on your machine:
 
 ```bash no-run
-runtime sandbox ssh config --install
+runtime sandboxes ssh config --install
 ```
 
 It writes a `Host *.runtime` entry and includes it from `~/.ssh/config`, so
@@ -40,7 +40,7 @@ uses OpenSSH:
 - **JetBrains Gateway:** add an SSH connection to host `<id>.runtime`, user
   `runtime`, authenticating with the OpenSSH config and agent.
 
-`runtime sandbox ssh config` without `--install` prints the entry to paste yourself.
+`runtime sandboxes ssh config` without `--install` prints the entry to paste yourself.
 The entry skips host key checks on purpose: each login gets a fresh host key,
 and the connection already goes to the sandbox you named, through Runtime's
 authenticated API.
@@ -48,13 +48,13 @@ authenticated API.
 ## Forward ports
 
 ```bash no-run
-runtime sandbox port-forward <id> 5432              # localhost:5432 here is 5432 in the sandbox
-runtime sandbox port-forward <id> 3000 15432:5432   # several at once, local:remote
+runtime sandboxes port-forward <id> 5432              # localhost:5432 here is 5432 in the sandbox
+runtime sandboxes port-forward <id> 3000 15432:5432   # several at once, local:remote
 ```
 
 Any TCP port works, not only HTTP: a database, Redis, a debugger, a dev server
 that uses WebSockets. The server in the sandbox can listen on `127.0.0.1`, `::1`
-or every address. Start it with `runtime sandbox spawn <id> -- <command>` (or
+or every address. Start it with `runtime sandboxes spawn <id> -- <command>` (or
 `sbx.spawn()`), which keeps it running; a process started by `exec` ends with
 its command. The forward listens on `127.0.0.1` unless you pass `--address`,
 runs until Ctrl-C, and says so when nothing listens on the port.

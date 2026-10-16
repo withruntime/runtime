@@ -1,4 +1,6 @@
-import type { RuntimeError } from "./errors.js";
+import { RuntimeError } from "./errors.js";
+import type { ProductName } from "./product-names.js";
+import { cliWords } from "./product-renames.js";
 import type { SandboxMetrics } from "./products/observability.js";
 
 /* What the CLI says in its own words where the API's would mislead: the
@@ -144,4 +146,23 @@ export function topicHelp(help: string, command: string): string | null {
     if (inside) out.push(line);
   }
   return out.length ? out.join("\n") : null;
+}
+
+/** A command line's product words (CLOUD.md section 4): the plural, or the
+ * singular as a typing shortcut, reach the product silently; an old word
+ * reaches it with `warning` to print, and from its date throws name_retired
+ * naming the new command. Anything else passes through. */
+export function productWords(
+  argv: string[],
+  now: Date = new Date(),
+  table?: readonly ProductName[],
+): { argv: string[]; warning?: string } {
+  const found = cliWords(argv, now, table);
+  if (!found) return { argv };
+  const { use } = found;
+  if (use.kind === "retired") throw new RuntimeError({ ...use.error });
+  return {
+    argv: found.args,
+    ...(use.kind === "renamed" ? { warning: use.warning } : {}),
+  };
 }

@@ -4,7 +4,7 @@ import { RuntimeError, ServiceUnavailableError } from "../errors.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
 /** A run's sandbox. Every field has a default; a run is a sandbox of this
- * size, on the included usage first and then on credit at the sandbox rates. */
+ * size, on the free usage first and then on credit at the sandbox rates. */
 export type JobCompute = {
   region: string;
   vcpu: number;
@@ -40,6 +40,9 @@ export type Job = {
   version: number;
   /** Unix milliseconds, or null when nothing more is scheduled. */
   nextRunAt: number | null;
+  /** When `trigger` asked for a run that has not started yet, in Unix
+   * milliseconds; null otherwise. */
+  runRequestedAt: number | null;
   /** Why the last due run could not start, retried every 30 seconds:
    * `credits` (add credit), `capacity`, `cost_cap` (maxTotalCostMicros or a
    * key's daily limit) or `permission` (the key that made the job lost it). */
@@ -63,6 +66,8 @@ export type JobRun = {
   occurrenceId: string;
   attempt: number;
   scheduledFor: number;
+  /** `manual`: a run `trigger` asked for, and its retries. */
+  trigger: "schedule" | "manual";
   resourceId: string;
   /** `unknown`: the outcome could not be observed (the sandbox stopped under
    * it). It is never retried by itself. */
@@ -165,26 +170,32 @@ export function jobTime(at: Date | string | number): number {
   return ms;
 }
 
-/** The API's job body from `CreateJob`, with every default filled in and the
- * sandbox's size checked before anything is sent. */
-export function jobBody(input: CreateJob): Record<string, unknown> {
-  const s = input.schedule as Record<string, unknown>;
-  let schedule: JobSchedule;
+/** The API's schedule from what `create` and `reschedule` take: `{ at }`,
+ * `{ cron, timezone? }` or the raw `{ kind: ... }`. */
+export function jobSchedule(input: CreateJob["schedule"]): JobSchedule {
+  const s = (input ?? {}) as Record<string, unknown>;
   if (s.kind === "once" || (s.kind === undefined && s.at !== undefined))
-    schedule = { kind: "once", at: jobTime(s.at as Date | string | number) };
-  else if (s.kind === "cron" || (s.kind === undefined && s.cron !== undefined)) {
+    return { kind: "once", at: jobTime(s.at as Date | string | number) };
+  if (s.kind === "cron" || (s.kind === undefined && s.cron !== undefined)) {
     const expression = String(s.expression ?? s.cron).trim();
     if (expression.split(/\s+/).length !== 5)
       throw invalid(
         `A cron schedule has five fields, minute hour day-of-month month day-of-week, such as "0 3 * * *"; got "${expression}".`,
         "schedule.cron",
       );
-    schedule = {
+    return {
       kind: "cron",
       expression,
       ...(s.timezone === undefined ? {} : { timezone: s.timezone as string }),
     };
-  } else throw invalid("schedule takes { at } or { cron }.", "schedule");
+  }
+  throw invalid("schedule takes { at } or { cron }.", "schedule");
+}
+
+/** The API's job body from `CreateJob`, with every default filled in and the
+ * sandbox's size checked before anything is sent. */
+export function jobBody(input: CreateJob): Record<string, unknown> {
+  const schedule = jobSchedule(input.schedule);
   const command = Array.isArray(input.command) ? { argv: input.command } : input.command;
   if (!command?.argv?.length)
     throw invalid('command is an argv array such as ["python3", "job.py"].', "command");
@@ -266,7 +277,7 @@ export function switchedOff(product: string) {
 }
 
 /** Scheduled jobs: a command run in a fresh sandbox, once or on a cron
- * schedule. Each run is a sandbox, paid for as one: from the included usage first while the run fits the limits without credit, then from credit
+ * schedule. Each run is a sandbox, paid for as one: from the free usage first while the run fits the limits without credit, then from credit
  * at the sandbox rates, through the same holds and spending limits.
  *
  *   const job = await runtime.jobs.create({
@@ -306,8 +317,11 @@ export function jobs(transport: Transport) {
       runs(jobId, { ...query, cursor }, options),
     );
   };
-  const verb = (id: string, action: "pause" | "resume" | "cancel", options?: RequestOptions) =>
-    t.json<Job>({ method: "POST", path: `/v1/jobs/${enc(id)}:${action}`, body: {}, ...options });
+  const verb = (
+    id: string,
+    action: "pause" | "resume" | "cancel" | "trigger",
+    options?: RequestOptions,
+  ) => t.json<Job>({ method: "POST", path: `/v1/jobs/${enc(id)}:${action}`, body: {}, ...options });
   return {
     /** Schedule a job. Nothing runs until its time comes; a time already past
      * runs at once. Sizes, timeout and region default to a 2 vCPU, 4 GiB
@@ -343,5 +357,20 @@ export function jobs(transport: Transport) {
     /** End the job for good and stop any run in progress. A run that already
      * finished keeps its result. Cancelling again answers the same job. */
     cancel: (id: string, options?: RequestOptions) => verb(id, "cancel", options),
+    /** Run it now, once, beside its schedule, which does not move. A paused
+     * job runs once and stays paused. While a run is starting or going it is
+     * refused with `run_in_progress`; a cancelled or finished job with
+     * `invalid_state`. The run is in `runs` with `trigger: "manual"`. */
+    trigger: (id: string, options?: RequestOptions) => verb(id, "trigger", options),
+    /** A new schedule, in any form `create` takes: `{ cron, timezone? }` or
+     * `{ at }`. The next run is the new schedule's next time; a run going
+     * finishes as it began, and a paused job stays paused. */
+    reschedule: (id: string, schedule: CreateJob["schedule"], options?: RequestOptions) =>
+      t.json<Job>({
+        method: "POST",
+        path: `/v1/jobs/${enc(id)}:reschedule`,
+        body: { schedule: jobSchedule(schedule) },
+        ...options,
+      }),
   };
 }

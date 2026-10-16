@@ -9,7 +9,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.11.1. `pip show withruntime` shows the
+This guide describes `withruntime` 0.12.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -22,19 +22,23 @@ On a server, put a key from https://withruntime.com/account/keys in
 or a command-line argument. With no key anywhere, the first call fails with
 `missing_api_key` and says how to get one.
 
-The singular product names match the CLI. Each pair below uses the same
-product client, connections and defaults; existing plural calls keep working.
+One plural word names each product, as in the CLI, the API and MCP. A
+name renamed on 6 October 2026 keeps working for 30 days after the rename
+ships, each use raising a `FutureWarning` with the new name, and then fails
+with `name_retired` and a hint naming the new one.
 
-| Preferred product  | Existing alias      |
-| ------------------ | ------------------- |
-| `runtime.sandbox`  | `runtime.sandboxes` |
-| `runtime.snapshot` | `runtime.snapshots` |
-| `runtime.image`    | `runtime.images`    |
-| `runtime.volume`   | `runtime.volumes`   |
-| `runtime.job`      | `runtime.jobs`      |
-| `runtime.domain`   | `runtime.domains`   |
-| `runtime.port`     | `runtime.ports`     |
-| `runtime.address`  | `runtime.addresses` |
+| Product                      | Old name                               |
+| ---------------------------- | -------------------------------------- |
+| `runtime.sandboxes`          | `runtime.sandbox`                      |
+| `runtime.snapshots`          | `runtime.snapshot`                     |
+| `runtime.images`             | `runtime.image`                        |
+| `runtime.volumes`            | `runtime.volume`                       |
+| `runtime.jobs`               | `runtime.job`                          |
+| `runtime.domains`            | `runtime.domain`                       |
+| `runtime.ports`              | `runtime.port`                         |
+| `runtime.ips`                | `runtime.address`, `runtime.addresses` |
+| `runtime.networks`           | `runtime.network`                      |
+| `runtime.networks.wireguard` | `runtime.tunnel`                       |
 
 ## Hello, sandbox
 
@@ -50,15 +54,16 @@ with Sandbox.create() as sbx:
 ```
 
 `Sandbox.create()` takes no required arguments and returns once the sandbox is
-running. Leaving the `with` block stops it, even after an exception.
+running. Leaving the `with` block deletes it, even after an exception; create it
+with `keep=True` to stop it instead and keep its disk.
 
-With no arguments you get the included usage while it lasts, the default region, and
+With no arguments you get the free usage while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
 itself when idle, with no time limit. A paid sandbox
 can have up to {{max-vcpu}} vCPUs and {{max-memory}}; one without credit, 2 vCPU and
 4 GiB.
 
-The included usage is spent first, then prepaid credit, with nothing to
+The free usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 Every field is optional and takes snake_case names:
 
@@ -81,7 +86,7 @@ sbx.stop()
 ```
 
 A sandbox needs no time limit: it runs while it works and pauses itself when
-idle, until you stop it or credit or the [included usage](./included-usage) runs out.
+idle, until you stop it or credit or the [free usage](./included-usage) runs out.
 `timeout_seconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: then it
 pauses or stops, as `on_lease_end` says, busy or not. `sbx.info["endsAt"]` is
 when it will stop or pause by itself, or `None` when it never will.
@@ -157,6 +162,11 @@ with Sandbox.create() as sbx:
   timeout is a result (`timed_out=True`, with the output so far), not an
   exception.
 - `check=True` raises `CommandError` on a non-zero exit.
+- A command the sandbox's out-of-memory killer ended has `out_of_memory` set on
+  its result and its process (code, processes killed, the sandbox's size, a
+  message and a hint), and `check=True` raises `CommandError` with the code
+  `out_of_memory`; `None` means it was not ended for memory
+  ([when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory)).
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
   `stderr`. The rest is dropped, and `stdout_truncated` or `stderr_truncated` is
   `True`; when nothing was dropped, both are `False`. For more output, pass
@@ -423,7 +433,7 @@ sandbox created with `timeout_seconds`, keeping ten minutes ahead, until
 ```python check
 from withruntime import Sandbox
 
-server = Sandbox.create(funding="paid", persistent=True, max_total_cost_micros=50_000_000)
+server = Sandbox.create(persistent=True, max_total_cost_micros=50_000_000)
 server.update(persistent=False)  # back to an ordinary sandbox
 
 worker = Sandbox.create(timeout_seconds=3600)  # a one-hour limit, moved on below
@@ -435,7 +445,8 @@ worker.stop()
 ## Sandboxes by name
 
 A name is unique in the account while its sandbox can still run: running,
-paused, or stopped and persistent. `Sandbox.get_or_create(name)` answers that
+paused, or stopped and persistent. A key in a
+[compartment](./security#compartments) has its compartment's own names. `Sandbox.get_or_create(name)` answers that
 sandbox, woken if paused and restarted if stopped and persistent, or creates
 one with the fields you pass; `sbx.info.get("reused")` is `True` when it found
 one. A create with a name another sandbox holds fails with `name_taken`.
@@ -463,7 +474,9 @@ Every list returns a page: `page.data`, `page.has_more`, `page.next_page()`,
 `runtime.sandboxes.stop_all(labels={"team": "search"})` stops every live
 sandbox with all those labels, eight at a time, and returns
 `{"stopped": [...], "failed": [...]}`: one failure does not stop the rest. It
-needs at least one label.
+needs at least one label. `runtime.sandboxes.delete_all(labels={"team": "search"})`
+deletes for good every sandbox with all those labels, stopped ones too, the
+same way, and returns `{"deleted": [...], "failed": [...]}`.
 
 ## Delete a sandbox
 
@@ -521,7 +534,7 @@ with Runtime() as runtime:
         sbx.exec(["python3", "-c", "print(42)"], idempotency_key=f"job-{job}-step-1")
 ```
 
-**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
+**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
@@ -580,7 +593,7 @@ from withruntime import Runtime
 
 with Runtime() as runtime:
     # At most 50 cents over this sandbox's whole life.
-    sbx = runtime.sandboxes.create(funding="paid", max_total_cost_micros=500_000)
+    sbx = runtime.sandboxes.create(max_total_cost_micros=500_000)
     sbx.stop()
 ```
 
@@ -829,14 +842,15 @@ domain = runtime.domains.add("app.example.com", sandbox_id=sbx.id, port=3000)
 print(domain["records"])  # the TXT and CNAME to set; then runtime.domains.verify(...)
 db = runtime.ports.open(sandbox_id=sbx.id, port=5432)
 print(db["connect"])  # "203.0.113.10:23456"
-ip = runtime.addresses.reserve()
-runtime.tunnel.create()
-office = runtime.tunnel.add_peer("office", routes=["10.0.0.0/16"])
+ip = runtime.ips.reserve()
+runtime.networks.wireguard.create()
+office = runtime.networks.wireguard.add_peer("office", routes=["10.0.0.0/16"])
 print(office["config"])  # a wg-quick file
-runtime.network.upstream_proxy.set("http://proxy.example.com:3128", secret="PROXY_AUTH")
+runtime.networks.upstream_proxy.set("http://proxy.example.com:3128", secret="PROXY_AUTH")
 ```
 
-`runtime.network.upstream_proxy`, from `withruntime` 0.7.0,
+`runtime.networks.upstream_proxy`, from `withruntime` 0.12.0
+(`runtime.network.upstream_proxy` from 0.7.0),
 sends every sandbox's outbound connections through your own proxy; `get()` and
 `remove()` read and undo it. See
 [your own proxy](./security#your-own-proxy).

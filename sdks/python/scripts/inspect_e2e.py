@@ -15,7 +15,7 @@ stopped when its case ends:
 - `eval()` of a one-sample task with sandbox=("runtime", "Dockerfile"), where
   the Dockerfile starts FROM python:3.12-slim, scored by a command in the
   sandbox, using Inspect's mockllm model. It builds one Runtime image (kept as
-  inspect-<folder>:<hash>; `runtime image rm` removes it).
+  inspect-<folder>:<hash>; `runtime images rm` removes it).
 - The same task with sandbox="runtime" named only by its string, to show the
   entry point registration.
 

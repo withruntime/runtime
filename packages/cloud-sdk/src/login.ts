@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { me, named } from "./cli-name.js";
 import { Runtime } from "./client.js";
 import { checkBrowserOrigins, connectionOrigins, connectionStore } from "./credentials.js";
+import { sandboxIdentityHeaders } from "./identity.js";
 import { describeRoute, envFetch } from "./proxy.js";
 
 class ConnectionError extends Error {
@@ -88,6 +89,7 @@ function connection(env: NodeJS.ProcessEnv, options: LoginOptions) {
         headers: {
           "content-type": "application/json",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
+          ...(await sandboxIdentityHeaders()),
         },
         body: JSON.stringify(body ?? {}),
       });

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "net/http"
 require "securerandom"
@@ -105,6 +106,60 @@ module WithRuntime
       with_connection(options, method) do |http, admitted|
         send_call(http, method, path, query: query, body: body, **admitted).body.to_s.b
       end
+    end
+
+    # A file's bytes, checked against the length (x-content-length) and
+    # SHA-256 (x-content-sha256) the API sent with them: a stream that broke
+    # can arrive as one that ended, short. A short or different body is read
+    # again twice, then download_incomplete.
+    def file_bytes(path, query: nil, accept: "application/octet-stream", **options)
+      attempt = 0
+      loop do
+        response = with_connection(options, "GET") do |http, admitted|
+          send_call(http, "GET", path, query: query, accept: accept, **admitted)
+        end
+        body = response.body.to_s.b
+        problem = Transport.check_body(response, body)
+        return body unless problem
+        raise problem if attempt >= 2
+
+        sleep(backoff(attempt))
+        attempt += 1
+      end
+    end
+
+    # Why a whole file body cannot be trusted, or nil when it can.
+    def self.check_body(response, body)
+      expected = response["x-content-length"]
+      if expected&.match?(/\A\d+\z/) && body.bytesize != expected.to_i
+        return Error.new("The download ended at #{body.bytesize} of #{expected} bytes.",
+                         code: "download_incomplete",
+                         hint: "Read the file again; nothing was written for this read.",
+                         details: { "received" => body.bytesize, "expected" => expected.to_i })
+      end
+      sha256 = response["x-content-sha256"]
+      return nil if sha256.nil? || sha256.empty? || Digest::SHA256.hexdigest(body).casecmp?(sha256)
+
+      Error.new("The file's bytes did not match the SHA-256 the API sent with them.",
+                code: "download_incomplete", hint: "Read the file again.")
+    end
+
+    # The status a late answer's body failed with, or 200 when it is an
+    # answer. An API error is a body of `error` alone, with a code; an answer
+    # may carry an `error` of its own (a code cell's exception) beside other
+    # fields. A body that is not JSON was cut or garbled: 502.
+    def self.late_failure(text)
+      body = begin
+        JSON.parse(text)
+      rescue JSON::ParserError
+        return 502
+      end
+      return 200 unless body.is_a?(Hash) && body.size == 1
+      error = body["error"]
+      return 200 unless error.is_a?(Hash) && error["code"].is_a?(String)
+
+      status = error["status"]
+      status.is_a?(Numeric) && status >= 400 ? status.to_i : 500
     end
 
     # Newline-delimited JSON events as they arrive, one Hash per event, on a
@@ -283,6 +338,23 @@ module WithRuntime
       end
     end
 
+    # A connection that never opened: no byte of the request left this machine.
+    NEVER_OPENED = [Errno::ECONNREFUSED, Errno::ENOENT, Errno::EHOSTUNREACH, Errno::ENETUNREACH,
+                    Errno::EADDRNOTAVAIL].freeze
+
+    # Whether a failure, or one of its causes, is a connection that never
+    # opened. A timeout or a reset never counts.
+    def self.never_sent?(error)
+      at = error
+      5.times do
+        return false if at.nil?
+        return true if NEVER_OPENED.any? { |kind| at.is_a?(kind) }
+
+        at = at.cause
+      end
+      false
+    end
+
     def backoff(attempt) = [8.0, 0.25 * (2**[attempt, 10].min)].min * (0.5 + rand)
 
     # 0.5 s, 1 s, 2 s, 4 s, then every 8 s, jittered, so a queue of CI jobs spreads out.
@@ -311,6 +383,8 @@ module WithRuntime
       room_attempt = 0
       payload = raw || (body.nil? ? nil : JSON.generate(body))
       attempt = 0
+      # The last try never left, and was sent again at once.
+      resent_at_once = false
       loop do
         raise connection_error(true, write, key) if cancel&.cancelled?
         left = deadline - now
@@ -361,7 +435,8 @@ module WithRuntime
               answered = true
               http.read_timeout = [deadline - now, 0.001].max
               response = answer
-              if answer.code.to_i < 300
+              # A late answer is read whole first: it may be a failure.
+              if answer.code.to_i < 300 && answer["runtime-late-answer"] != "true"
                 answer.read_body do |chunk|
                   streamed = true
                   begin
@@ -391,13 +466,29 @@ module WithRuntime
           late = (e.is_a?(Timeout::Error) && !unanswered) || now >= deadline || cancel&.cancelled?
           raise connection_error(late, write, key, e) if late || no_retry || streamed || attempt >= max_retries
 
-          pause(backoff(attempt), deadline, write, key, nil, cancel)
+          # A connection that never opened sent no byte of the request, so the
+          # next try, which may reach another server, goes at once; once in a
+          # row, so an API that is down is not hammered. A reset or a timeout
+          # may have reached a server and keeps the backoff and its key's rules.
+          at_once = Transport.never_sent?(e) && !resent_at_once
+          resent_at_once = at_once
+          pause(at_once ? rand * 0.05 : backoff(attempt), deadline, write, key, nil, cancel)
           attempt += 1
           next
         ensure
           watchdog.kill
         end
-        return response if status < 300
+        # An answer that took longer than the API holds its headers (90 s)
+        # comes as a 200 sent early, and then its JSON: the answer, or
+        # {"error": ...} when the work failed after the status went
+        # (runtime-late-answer). A failure is raised as the error it is,
+        # never returned as a success.
+        late = status < 300 && response["runtime-late-answer"] == "true"
+        status = Transport.late_failure(response.body.to_s) if late
+        if status < 300
+          stream&.call(response.body.to_s) if late
+          return response
+        end
 
         text = response.body.to_s
         parsed = begin

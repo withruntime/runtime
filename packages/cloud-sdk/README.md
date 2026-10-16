@@ -26,13 +26,14 @@ console.log(result.exitCode, result.stdout);
 ```
 
 `Sandbox.create()` needs no arguments and returns once the sandbox is running;
-`await using` stops it when the block ends (Node 24, Bun or TypeScript; on
-Node 22 call `await sbx.stop()`). With no arguments you get the
-included usage, a 1 GB machine running all month every month with no card (up to
-eight sandboxes running at once without credit), 2 vCPU, 4 GiB of
+`await using` deletes it when the block ends (Node 24, Bun or TypeScript; on
+Node 22 call `await sbx.delete()`), and `keep: true` stops it instead, keeping
+its disk. With no arguments you get the
+free usage, with no card (up to
+four sandboxes running at once without credit), 2 vCPU, 4 GiB of
 memory and a 4 GiB disk. The current default image includes NumPy, pandas and
 matplotlib; see the [sandbox environment](https://withruntime.com/docs/sandbox-environment).
-The included usage is spent first, then prepaid credit, with nothing to
+The free usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 
 The sandbox object does the rest:
@@ -41,7 +42,7 @@ The sandbox object does the rest:
   work, with `cwd`, `env` (the place for secrets), `stdin` and `timeoutMs`;
 - `terminal()` for an interactive terminal over a WebSocket;
 - `forwardPort(5432)` to reach any TCP port in the sandbox from this machine, and
-  `tunnel()` for single connections and SSH logins (`runtime sandbox ssh` uses it);
+  `tunnel()` for single connections and SSH logins (`runtime sandboxes ssh` uses it);
 - `files` to read, write, list, glob, stat, move and remove, and to copy whole
   directories with `upload` and `download`;
 - `pause`, `wake`, `extend`, `fork` and `snapshot` (a paused sandbox also wakes
@@ -161,14 +162,14 @@ https://withruntime.com/docs/frameworks.
 
 ```bash no-run
 printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-npx withruntime sandbox run -- python3 - < invoice.py   # connects on first use
-npx withruntime sandbox create
+npx withruntime sandboxes run -- python3 - < invoice.py   # connects on first use
+npx withruntime sandboxes create
 npx withruntime help
 ```
 
 Installed with `npm i -g withruntime`, the command is `runtime`:
-`runtime sandbox exec <id> -- ls`, `runtime sandbox shell <id>`,
-`runtime image build --pip pandas`, and `--json` on every command.
+`runtime sandboxes exec <id> -- ls`, `runtime sandboxes shell <id>`,
+`runtime images build --pip pandas`, and `--json` on every command.
 
 ## MCP
 

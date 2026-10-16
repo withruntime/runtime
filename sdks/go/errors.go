@@ -65,6 +65,7 @@ var deliberate = map[string]bool{
 	"secrets_unavailable":       true,
 	"identity_unavailable":      true,
 	"env_unavailable":           true,
+	"resize_unavailable":        true,
 }
 
 // passing are refusals that clear by themselves: a host frees room, a

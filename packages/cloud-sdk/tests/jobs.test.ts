@@ -208,6 +208,89 @@ test("list, runs, run, logs, pause, resume and cancel call their routes", async 
   );
 });
 
+test("trigger and reschedule call their routes, each schedule form in the API's shape", async () => {
+  await withStub(
+    () => JOB,
+    async (seen) => {
+      const jobs = runtime().jobs;
+      await jobs.trigger(JOB_ID);
+      await jobs.reschedule(JOB_ID, { cron: " 30 4 * * 1-5 ", timezone: "Europe/Berlin" });
+      await jobs.reschedule(JOB_ID, { at: "2026-11-01T03:00:00Z" });
+      await jobs.reschedule(JOB_ID, { kind: "cron", expression: "0 * * * *" });
+      expect(seen.map((s) => [s.line, s.body])).toEqual([
+        [`POST /v1/jobs/${JOB_ID}:trigger`, "{}"],
+        [
+          `POST /v1/jobs/${JOB_ID}:reschedule`,
+          JSON.stringify({
+            schedule: { kind: "cron", expression: "30 4 * * 1-5", timezone: "Europe/Berlin" },
+          }),
+        ],
+        [
+          `POST /v1/jobs/${JOB_ID}:reschedule`,
+          JSON.stringify({ schedule: { kind: "once", at: Date.parse("2026-11-01T03:00:00Z") } }),
+        ],
+        [
+          `POST /v1/jobs/${JOB_ID}:reschedule`,
+          JSON.stringify({ schedule: { kind: "cron", expression: "0 * * * *" } }),
+        ],
+      ]);
+      expect(new Set(seen.map((s) => s.key)).size).toBe(4);
+    },
+  );
+  // A schedule it cannot send is refused before anything is sent.
+  await withStub(
+    () => JOB,
+    async (seen) => {
+      const jobs = runtime().jobs;
+      expect(() => jobs.reschedule(JOB_ID, { cron: "0 3 * *" })).toThrow(/five fields/);
+      expect(() => jobs.reschedule(JOB_ID, { at: "tomorrow" })).toThrow(
+        /schedule.at must be a time/,
+      );
+      expect(() => jobs.reschedule(JOB_ID, {} as never)).toThrow(/\{ at \} or \{ cron \}/);
+      expect(seen).toHaveLength(0);
+    },
+  );
+});
+
+test("`runtime jobs trigger` and `reschedule` call the API and refuse mistakes before sending", async () => {
+  await withStub(
+    () => ({ ...JOB, state: "paused", nextRunAt: Date.parse("2026-11-01T03:00:00Z") }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(await run(["jobs", "trigger", JOB_ID], env, out)).toBe(0);
+      expect(lines.at(-1)).toBe(
+        `nightly runs now, once; it stays paused. Follow it: runtime jobs logs ${JOB_ID} -f`,
+      );
+      expect(
+        await run(
+          ["jobs", "reschedule", JOB_ID, "--cron", "30 4 * * 1-5", "--timezone", "Europe/Berlin"],
+          env,
+          out,
+        ),
+      ).toBe(0);
+      expect(lines.at(-1)).toBe(
+        "nightly: 0 3 * * * Europe/Berlin. Next run 2026-11-01T03:00:00.000Z.",
+      );
+      expect(seen.map((s) => s.line)).toEqual([
+        `POST /v1/jobs/${JOB_ID}:trigger`,
+        `POST /v1/jobs/${JOB_ID}:reschedule`,
+      ]);
+      expect(JSON.parse(seen[1]!.body)).toEqual({
+        schedule: { kind: "cron", expression: "30 4 * * 1-5", timezone: "Europe/Berlin" },
+      });
+    },
+  );
+  const { out } = output();
+  const fails = (argv: string[], pattern: RegExp) =>
+    expect(run(["jobs", ...argv], env, out)).rejects.toThrow(pattern);
+  await fails(["trigger"], /a job id/);
+  await fails(["reschedule", JOB_ID], /--cron.*--at/);
+  await fails(["reschedule", JOB_ID, "--at", "now", "--cron", "* * * * *"], /--cron.*--at/);
+  await fails(["reschedule", JOB_ID, "--at", "now", "--timezone", "UTC"], /--timezone goes with/);
+  await fails(["reschedule", JOB_ID, "--at", "2020-01-01T00:00:00Z"], /in the past/);
+  await fails(["reschedule", "--cron", "* * * * *"], /a job id/);
+});
+
 test("jobs switched off fail once, with the API's words and a hint that retrying will not help", async () => {
   await withStub(
     () =>
@@ -430,6 +513,88 @@ test("both copies: a jobs copy that fails after the sandboxes' copy is stored sa
       expect(seen.filter((s) => s.line.startsWith("PUT"))).toHaveLength(2);
     },
   );
+});
+
+/** A server that keeps each Idempotency-Key with the request it came with:
+ * the same request again answers as it did, a different one is refused, as
+ * cloud_secret_mutate does. `lose` drops the answer of the next write. */
+function keyedSecrets() {
+  const copy = { ...COPY, version: 0, id: SECRET_ID };
+  const keys = new Map<string, { request: string; answer: unknown }>();
+  let lose = false;
+  let writes = 0;
+  return {
+    lose: () => (lose = true),
+    writes: () => writes,
+    answer: (request: Request, path: string, body: string) => {
+      if (request.method === "GET") return copy.version ? [{ ...copy }] : [];
+      const key = request.headers.get("idempotency-key")!;
+      const asked = `${path} ${body}`;
+      const kept = keys.get(key);
+      let answer: unknown;
+      if (kept)
+        answer =
+          kept.request === asked
+            ? kept.answer
+            : Response.json(
+                { error: { code: "idempotency_conflict", message: "Key used." } },
+                { status: 409 },
+              );
+      else {
+        writes++;
+        copy.version = path.endsWith(":rotate") ? copy.version + 1 : 1;
+        answer = { ...copy };
+        keys.set(key, { request: asked, answer });
+      }
+      if (lose) {
+        lose = false;
+        return new Response(null, { status: 502 });
+      }
+      return answer;
+    },
+  };
+}
+
+test("a keyed set or rotate whose answer was lost answers again, with no second rotation", async () => {
+  const server = keyedSecrets();
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    const body = await request.clone().text();
+    const value = server.answer(request, new URL(request.url).pathname, body);
+    return value instanceof Response ? value : Response.json(value);
+  }) as typeof fetch;
+  // A client that does not retry, so the caller's retry is a fresh call.
+  const fresh = () =>
+    new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test", maxRetries: 0 }).secrets;
+  try {
+    // The create's answer is lost; the same set again is answered by it.
+    server.lose();
+    const options = { idempotencyKey: "set-1" };
+    await expect(fresh().set("DB_PASSWORD", { value: "a", jobs: true }, options)).rejects.toThrow();
+    expect(
+      (await fresh().set("DB_PASSWORD", { value: "a", jobs: true }, options)).jobs.version,
+    ).toBe(1);
+    // A rotate's answer is lost; the same rotate again does not rotate twice.
+    server.lose();
+    await expect(fresh().rotate("DB_PASSWORD", "b", { idempotencyKey: "rot-1" })).rejects.toThrow();
+    expect((await fresh().rotate("DB_PASSWORD", "b", { idempotencyKey: "rot-1" })).version).toBe(2);
+    // A set that rotated, its answer lost, the same.
+    server.lose();
+    const again = { idempotencyKey: "set-2" };
+    await expect(fresh().set("DB_PASSWORD", { value: "c", jobs: true }, again)).rejects.toThrow();
+    expect((await fresh().set("DB_PASSWORD", { value: "c", jobs: true }, again)).jobs.version).toBe(
+      3,
+    );
+    expect(server.writes()).toBe(3);
+    // A different value under a used key is still a conflict.
+    await expect(
+      fresh().set("DB_PASSWORD", { value: "other", jobs: true }, again),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    expect(server.writes()).toBe(3);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("reveal and rotate reach only the jobs copy; rm deletes every copy", async () => {

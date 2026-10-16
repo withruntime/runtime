@@ -83,13 +83,17 @@ export type SandboxInfo = {
 
 export type CreateSandbox = {
   name?: string;
+  /** What the end of an `await using` block does to it. By default the
+   * block deletes it; `keep: true` stops it instead, which keeps its disk
+   * (billed while it is kept). Not sent to the API. */
+  keep?: boolean;
   labels?: Record<string, string>;
   /** Environment variables for every command, process, terminal, SSH session
    * and the image's start command in this sandbox, under each command's own
    * `env`. At most 32 variables and 32 KiB. Values are never shown again;
    * answers list only `envNames`. Copies made by fork() keep them. */
   env?: Record<string, string>;
-  /** Omit to use the included usage while it lasts, then prepaid credit. */
+  /** Omit to use the free usage while it lasts, then prepaid credit. */
   funding?: "trial" | "paid";
   region?: string;
   vcpu?: number;
@@ -142,6 +146,19 @@ export type CreateSandbox = {
   tailscale?: { authKeySecret: string; hostname?: string; tags?: string[] };
 };
 
+/** Present on a command the sandbox's out-of-memory killer ended (the
+ * program, or anything it started): a bare exit -9, or 137 from a shell,
+ * does not say why. */
+export type OutOfMemory = {
+  code: "out_of_memory";
+  processesKilled: number;
+  /** The sandbox's memory size; null if it could not be read. */
+  memoryMiB: number | null;
+  message: string;
+  /** What to do: a larger memoryMiB, or a program that uses less. */
+  hint: string;
+};
+
 export type CommandResult = {
   exitCode: number | null;
   stdout: string;
@@ -152,6 +169,7 @@ export type CommandResult = {
   durationMs?: number | null;
   processId?: string;
   replayed?: boolean;
+  outOfMemory?: OutOfMemory;
 };
 
 export type ExecOptions = {
@@ -187,12 +205,20 @@ export type ProcessInfo = {
   timeoutMs: number | null;
   outputBytes: number;
   firstOffset: number;
+  outOfMemory?: OutOfMemory;
 };
 
 export type OutputEvent =
   | { type: "start"; processId: string; replayed?: boolean }
   | { type: "stdout" | "stderr"; data: string; offset: number; base64?: string }
-  | { type: "exit"; exitCode: number | null; state: string; timedOut: boolean; durationMs?: number }
+  | {
+      type: "exit";
+      exitCode: number | null;
+      state: string;
+      timedOut: boolean;
+      durationMs?: number;
+      outOfMemory?: OutOfMemory;
+    }
   | { type: "truncated"; droppedBytes: number; resumeAt: number }
   | { type: "continue"; processId: string; cursor: number }
   | {
@@ -245,11 +271,11 @@ export type Usage = {
     /** @deprecated Read `availableMs`. Still sent for older clients. */
     reservedMs: number;
     availableMs: number;
-    /** `monthly`: the included usage every month only. `hours`: free hours
-     * given before 5 October 2026, kept, beside the included usage. Absent
+    /** `monthly`: the free usage every month only. `hours`: free hours
+     * given before 5 October 2026, kept, beside the free usage. Absent
      * from an API older than 5 October 2026. */
     offer?: "monthly" | "hours";
-    /** When the included usage renews: the 1st of next month, 00:00 UTC. */
+    /** When the free usage renews: the 1st of next month, 00:00 UTC. */
     renewsAt?: string;
   } | null;
   /** What the account uses free this calendar month (UTC), one row per
@@ -268,7 +294,52 @@ export type Usage = {
     /** The month's first day, YYYY-MM-DD. */
     month: string;
     renewsAt: string;
+    /** When the free machine time ends for an account that has never paid
+     * (30 days after it opened); null once it has paid, when it renews
+     * every month. Absent from an API older than 14 October 2026. */
+    freeUntil?: string | null;
   }>;
+  /** What Runtime for Startups includes (https://withruntime.com/startups).
+   * Startup hours are given once, used after this month's free usage
+   * and before credit, never renewed, and gone after 12 months. Storage is
+   * GB kept free each month for those 12 months. Empty unless the account
+   * was accepted to the program or given it; absent from an older API. */
+  startupIncluded?: Array<{
+    /** machine-cpu, machine-memory, saved-copies (snapshots, images and
+     * backups) or disks (volumes). */
+    pool: string;
+    /** vCPU-hour or GiB-hour for startup hours given `once`, GB for `month` storage. */
+    unit: string;
+    /** `once`: given once and used up by what runs. `month`: `quantity` GB
+     * added to each month's included storage until `expiresAt`, never used
+     * up; storage past it bills at the published rate. Absent from an API
+     * before startup storage (7 October 2026): `once`. */
+    period?: "once" | "month";
+    quantity: number;
+    /** Null for monthly storage. */
+    used: number | null;
+    /** Held for what is running now; given back unless used. Null for
+     * monthly storage. */
+    reserved: number | null;
+    /** Null for monthly storage. */
+    left: number | null;
+    /** Storage GB kept now; null for startup hours given `once`. */
+    keptGB?: number | null;
+    /** `startup`. */
+    source: string;
+    grantedAt: string;
+    /** 12 months after `grantedAt`: what is left then is gone. */
+    expiresAt?: string;
+  }>;
+  /** What Runtime for Startups includes at once for its 12 months:
+   * image builds, and sandboxes (past it, a create answers quota_exceeded).
+   * Null without one or after them, when the account's own limits apply;
+   * absent from an API older than 7 October 2026. */
+  startupLimits?: { buildsAtOnce: number; sandboxesAtOnce: number } | null;
+  /** @deprecated Renamed `startupIncluded`; works for 30 days after the rename, with a warning. */
+  readonly pot?: Usage["startupIncluded"];
+  /** @deprecated Renamed `startupLimits`; works for 30 days after the rename, with a warning. */
+  readonly potLimits?: Usage["startupLimits"];
   /** Outbound traffic this calendar month, UTC: the first `allowanceBytes` an
    * account sends are free, and the rest is charged at the rate in the pricing
    * guide (https://withruntime.com/docs/pricing#network-products). */

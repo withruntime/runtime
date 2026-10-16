@@ -74,7 +74,10 @@ public final class Products {
     }
   }
 
-  /** {@code runtime.referrals()}: the account's referral link and what it earned. */
+  /**
+   * {@code runtime.referrals()}: the account's referral link and what it earned. Money is integer
+   * microdollars in strings.
+   */
   public static final class Referrals {
     private final Transport t;
 

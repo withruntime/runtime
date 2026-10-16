@@ -57,12 +57,21 @@ export type WebhookEventType =
   | "sandbox.host_reachable"
   | "sandbox.recovered"
   | "sandbox.recovery_failed"
+  | "sandbox.files.changed"
+  | "sandbox.out_of_memory"
+  | "sandbox.secret_not_applied"
   | "snapshot.ready"
   | "snapshot.failed"
   | "snapshot.deleted"
   | "volume.ready"
   | "volume.failed"
-  | "volume.deleted";
+  | "volume.deleted"
+  | "volume.recovered"
+  | "egress_secret.created"
+  | "egress_secret.updated"
+  | "egress_secret.deleted"
+  | "upstream_proxy.set"
+  | "upstream_proxy.removed";
 /** An event as /v1/events lists it and a webhook delivers it. */
 export type RuntimeEvent = {
   id: string;
@@ -133,7 +142,8 @@ export type UsageExportRow = {
   name: string | null;
   kind: string;
   meter: string;
-  fundedBy: "credit" | "trial";
+  /** credit, the trial's hours, or the month's free usage. */
+  fundedBy: "credit" | "trial" | "allowance";
   startsAt: string;
   endsAt: string;
   settledAt: string;
@@ -143,12 +153,17 @@ export type UsageExportRow = {
   /** Exact JSON text, preserving integers beyond JavaScript's number range. */
   measurementsJson: string | null;
   evidence: "measured" | "partial" | "missing" | null;
+  /** The resource is deleted and every charge it will ever have settled
+   * before finalThrough. A volume's backups bill on until retention ends. */
+  final: boolean;
 };
 export type UsageExportPage = {
   since: string;
   until: string;
   data: UsageExportRow[];
   nextCursor: string | null;
+  /** No row with settledAt before this can still appear or change. */
+  finalThrough: string | null;
   /** Concatenate pages in order; only the first page includes the header. */
   csv: string;
 };

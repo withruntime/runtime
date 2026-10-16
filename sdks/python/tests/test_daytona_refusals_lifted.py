@@ -240,6 +240,31 @@ def _seconds(stamp: str) -> float:
 
 
 class ComputerUse(Base):
+    def test_held_buttons_sideways_scrolls_and_click_counts(self):
+        """What 0.223.0 added: buttons held and released, scrolls left and
+        right, and ``clicks``; held keys are refused before anything is sent."""
+        use = self.create().computer_use
+        before = len(self.world.calls)
+        self.assertEqual((use.mouse.down(10, 20).x, use.mouse.up(30, 40, "right").y), (10, 40))
+        self.assertEqual(use.mouse.down().y, 6)
+        self.assertTrue(use.mouse.scroll(5, 6, "right", 2))
+        use.mouse.scroll(5, 6, "left")
+        use.mouse.click(1, 2, double=True, clicks=1, modifiers=[])
+        use.mouse.click(1, 2, clicks=2)
+        calls = [call for call in self.world.calls[before:] if call[0].startswith("desktop.")]
+        self.assertEqual(calls, [
+            ("desktop.move", 10, 20), ("desktop.mouse_down", "left"),
+            ("desktop.move", 30, 40), ("desktop.mouse_up", "right"),
+            ("desktop.mouse_down", "left"), ("desktop.cursor",),
+            ("desktop.scroll", 0, "dx=2", "x=5", "y=6"), ("desktop.scroll", 0, "dx=-1", "x=5", "y=6"),
+            ("desktop.click", 1, 2, "button=left", "double=False"),
+            ("desktop.click", 1, 2, "button=left", "double=True"),
+        ])
+        for wrong in (lambda: use.mouse.click(1, 2, clicks=0), lambda: use.mouse.click(1, 2, clicks=11),
+                      lambda: use.mouse.scroll(1, 2, "sideways")):
+            with self.assertRaises(ValueError):
+                wrong()
+
     def test_mouse_keyboard_screen_and_windows(self):
         use = self.create().computer_use
         self.assertEqual(use.start().status, {"desktop": {"running": True}})
@@ -267,7 +292,12 @@ class ComputerUse(Base):
         display = use.display.get_info().displays[0]
         self.assertEqual((display.width, display.height), (1280, 800))
         self.assertEqual(use.display.get_windows().windows[0].id, 77)
-        for refused in (lambda: use.screenshot.take_compressed(ScreenshotOptions(fmt="webp")),
+        for refused in (lambda: use.mouse.click(1, 2, clicks=3),
+                        lambda: use.mouse.click(1, 2, modifiers=["ctrl"]),
+                        lambda: use.mouse.drag(1, 2, 3, 4, modifiers=["shift"]),
+                        lambda: use.mouse.scroll(1, 2, "up", modifiers=["ctrl"]),
+                        lambda: use.keyboard.down("shift"), lambda: use.keyboard.up("shift"),
+                        lambda: use.screenshot.take_compressed(ScreenshotOptions(fmt="webp")),
                         lambda: use.screenshot.take_full_screen(show_cursor=True),
                         lambda: use.accessibility.get_tree(), lambda: use.get_process_status("xvfb")):
             with self.assertRaises(NotSupportedError):

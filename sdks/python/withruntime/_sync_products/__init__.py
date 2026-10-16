@@ -11,7 +11,7 @@ from .interpreter import Interpreter
 from .limits import Limits
 from .mcp import Mcp, SandboxMcp
 from .network import Network
-from .network_products import AccountNetwork, Addresses, Domains, Ports, Tunnel
+from .network_products import AccountNetwork, Addresses, Domains, Ports
 from .observability import Events, Metrics, Otel, Webhooks
 from .previews import Previews
 from .referrals import Referrals
@@ -40,9 +40,8 @@ CLIENT["audit"] = Audit
 CLIENT["mcp"] = Mcp
 CLIENT["domains"] = Domains
 CLIENT["ports"] = Ports
-CLIENT["addresses"] = Addresses
-CLIENT["tunnel"] = Tunnel
-CLIENT["network"] = AccountNetwork
+CLIENT["ips"] = Addresses
+CLIENT["networks"] = AccountNetwork
 SANDBOX["interpreter"] = Interpreter
 SANDBOX["previews"] = Previews
 SANDBOX["network"] = Network

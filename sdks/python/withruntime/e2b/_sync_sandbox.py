@@ -652,7 +652,7 @@ class Sandbox:
         server: when it runs out the sandbox is deleted, as E2B's kill does.
         Left out, E2B's 300 s ends in a pause instead, which keeps memory and
         files (a pilot account's sandbox is kept running). Funding is left to
-        Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. ``runtime_create`` passes
+        Runtime: the free usage first, then prepaid credit, exactly as withruntime's own create. ``runtime_create`` passes
         Runtime fields (snake_case) over the adapter's."""
         core.refuse_create({"mcp": mcp, "network": network, "iam": iam, "volume_mounts": volume_mounts})
         runtime_client = _client(api_key, client, **connection)
@@ -809,19 +809,20 @@ class Sandbox:
 
     @classmethod
     def _cls_pause(cls, sandbox_id: str, keep_memory: Optional[bool] = None, api_key: Optional[str] = None,
-                         client: Optional[Runtime] = None, **connection: Any) -> bool:
+                         client: Optional[Runtime] = None, *, mode: Optional[str] = None, **connection: Any) -> bool:
         runtime_client = _client(api_key, client, **connection)
-        return _pause(_guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id)), keep_memory)
+        return _pause(_guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id)), keep_memory, mode)
 
     @class_method_variant("_cls_pause")
-    def pause(self, keep_memory: Optional[bool] = None, **_: Any) -> bool:
-        """Pauses the sandbox, keeping memory and files. False when it was paused."""
+    def pause(self, keep_memory: Optional[bool] = None, *, mode: Optional[str] = None, **_: Any) -> bool:
+        """Pauses the sandbox, keeping memory and files. False when it was paused.
+        mode="filesystem" (keep_memory=False) is refused: Runtime's pause keeps memory."""
         _guard("sandbox", lambda: self.runtime.refresh())
-        return _pause(self.runtime, keep_memory)
+        return _pause(self.runtime, keep_memory, mode)
 
     @class_method_variant("_cls_pause")
-    def beta_pause(self, keep_memory: Optional[bool] = None, **_: Any) -> bool:
-        return self.pause(keep_memory)
+    def beta_pause(self, keep_memory: Optional[bool] = None, *, mode: Optional[str] = None, **_: Any) -> bool:
+        return self.pause(keep_memory, mode=mode)
 
     def __enter__(self) -> Any:
         return self
@@ -851,14 +852,20 @@ class Sandbox:
         return [type(self)(copy, self._client) for copy in copies]
 
     @classmethod
-    def _cls_create_snapshot(cls, sandbox_id: str, name: Optional[str] = None, **opts: Any) -> SnapshotInfo:
+    def _cls_create_snapshot(cls, sandbox_id: str, name: Optional[str] = None, *, mode: Optional[str] = None,
+                              **opts: Any) -> SnapshotInfo:
+        core.snapshot_mode(mode)
         source = cls._cls_connect_sandbox(sandbox_id, **opts)
-        return source.create_snapshot(name)
+        return source.create_snapshot(name, mode=mode)
 
     @class_method_variant("_cls_create_snapshot")
-    def create_snapshot(self, name: Optional[str] = None, **_: Any) -> SnapshotInfo:
-        """Keeps the whole machine as a Runtime snapshot; start from it with create(snapshot_id)."""
-        snapshot = _guard("sandbox", lambda: self.runtime.snapshot(name=name))
+    def create_snapshot(self, name: Optional[str] = None, *, mode: Optional[str] = None, **_: Any) -> SnapshotInfo:
+        """Keeps the whole machine as a Runtime snapshot, or with mode="filesystem"
+        its disk alone, from which a sandbox boots afresh; start from it with
+        create(snapshot_id)."""
+        runtime_mode = core.snapshot_mode(mode)
+        extra = {} if runtime_mode is None else {"mode": runtime_mode}
+        snapshot = _guard("sandbox", lambda: self.runtime.snapshot(name=name, **extra))
         return SnapshotInfo(snapshot_id=snapshot["id"], names=[snapshot["name"]] if snapshot.get("name") else [])
 
     @classmethod
@@ -989,10 +996,9 @@ def _run_as(sandbox: Any, user: Optional[str]) -> Optional[str]:
     return None if core.other_user(user) is None else sandbox._run_as(user)
 
 
-def _pause(runtime: Any, keep_memory: Optional[bool]) -> bool:
-    if keep_memory is False:
-        raise NotSupportedException("A files-only pause (keep_memory=False)",
-                                    "Runtime's pause keeps memory and files; leave keep_memory out.")
+def _pause(runtime: Any, keep_memory: Optional[bool], mode: Optional[str] = None) -> bool:
+    if core.snapshot_memory("mode", mode, keep_memory) is False:
+        raise core.files_only_pause()
     state = core.simple_state(runtime.state)
     if state == "paused":
         return False

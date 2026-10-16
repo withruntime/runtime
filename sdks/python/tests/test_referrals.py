@@ -53,6 +53,12 @@ class ReferralsTest(unittest.TestCase):
 
         self.assertEqual(asyncio.run(go())["code"], "k7m2q9xd")
 
+    def test_no_update(self):
+        # Marc, 10 October 2026: the link's page never names the company, so
+        # there is no switch to set.
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            self.assertFalse(hasattr(runtime.referrals, "update"))
+
 
 if __name__ == "__main__":
     unittest.main()

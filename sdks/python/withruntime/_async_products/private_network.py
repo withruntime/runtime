@@ -1,4 +1,4 @@
-"""``runtime.network.private``: your sandboxes reach each other by name.
+"""``runtime.networks.private``: your sandboxes reach each other by name.
 
 Paid accounts only, free, and off until you turn it on. When on, a program in
 any of your sandboxes connects to another at ``<name>.sandbox.internal:<port>``
@@ -6,7 +6,7 @@ any of your sandboxes connects to another at ``<name>.sandbox.internal:<port>``
 on any port but 10800, 10802 and 10853. Only your organization's sandboxes
 answer.
 
-    await runtime.network.private.set(enabled=True)
+    await runtime.networks.private.set(enabled=True)
     # in any of your sandboxes: psql -h db.sandbox.internal -p 5432
 """
 from typing import Any
@@ -22,10 +22,10 @@ class AsyncPrivateNetwork:
 
     async def get(self) -> dict[str, Any]:
         """``enabled``, ``allowed`` (paid accounts only) and, when not, ``why``."""
-        return await self._t.json("GET", "/v1/network/private")
+        return await self._t.json("GET", "/v1/networks/private")
 
     async def set(self, *, enabled: bool) -> dict[str, Any]:
         """``enabled=True`` lets your sandboxes reach each other by name;
         ``False`` stops it and cuts open connections between them within
         seconds."""
-        return await self._t.json("PUT", "/v1/network/private", body={"enabled": enabled})
+        return await self._t.json("PUT", "/v1/networks/private", body={"enabled": enabled})

@@ -166,3 +166,23 @@ test("a create's explicit deadline covers its wait for running, not just the cre
   ).rejects.toMatchObject({ code: "timeout" });
   expect(performance.now() - began).toBeLessThan(135);
 });
+
+test("a replayed create whose sandbox has since stopped says so, not that it failed to start", async () => {
+  for (const replayed of [true, false]) {
+    let calls = 0;
+    const transport = {
+      waitForCapacityMs: 0,
+      json: async () =>
+        ++calls === 1
+          ? { id: "fixture", state: "starting", ...(replayed ? { replayed: true } : {}) }
+          : { id: "fixture", state: "stopped" },
+    } as unknown as Transport;
+    const error = (await new Sandboxes(transport).create({}).catch((e: unknown) => e)) as Error;
+    expect((error as { code?: string }).code).toBe("start_failed");
+    if (replayed) {
+      expect(error.message).toContain("earlier call with this idempotency key");
+      expect(error.message).toContain("is stopped now");
+      expect(error.message).toContain("did not fail to start");
+    } else expect(error.message).toBe("Sandbox fixture is stopped, not running.");
+  }
+});

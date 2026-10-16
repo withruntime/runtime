@@ -25,7 +25,8 @@ public class RuntimeCloudException extends RuntimeException {
           "network_rules_unavailable",
           "secrets_unavailable",
           "identity_unavailable",
-          "env_unavailable");
+          "env_unavailable",
+          "resize_unavailable");
 
   /** Refusals that pass on their own: a host frees room, a sandbox of an account without credit stops. */
   static final Set<String> PASSING =

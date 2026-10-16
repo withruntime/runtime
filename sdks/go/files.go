@@ -35,8 +35,10 @@ type Files struct {
 func (f *Files) path(suffix string) string { return f.sandbox.path(suffix) }
 
 // Read returns a file's bytes, any size.
+// A body that ends short of the length the API promised, or differs from
+// its SHA-256, is read again, then download_incomplete: never returned short.
 func (f *Files) Read(ctx context.Context, name string) ([]byte, error) {
-	return f.c.bytes(ctx, &call{
+	return f.c.fileBytes(ctx, &call{
 		method: http.MethodGet,
 		path:   f.path("/files/content"),
 		query:  url.Values{"path": {name}},

@@ -25,6 +25,8 @@ public final class Sandbox implements AutoCloseable {
   private final SandboxProducts.Interpreter interpreter;
   private final SandboxProducts.Desktop desktop;
   private ScheduledExecutorService keepAlive;
+  /** Set by a create that made it without {@link CreateSandbox#keep()}: {@link #close} deletes it. */
+  boolean deleteOnClose;
 
   Sandbox(Transport transport, Map<String, Object> info) {
     this.t = transport;
@@ -450,10 +452,33 @@ public final class Sandbox implements AutoCloseable {
         this, t.object(new Transport.Call("GET", path("/processes/" + Transport.segment(id)))));
   }
 
-  /** Stops the sandbox unless it is stopped already. Never throws for a sandbox already gone. */
+  /**
+   * Deletes it for good: stops it if it runs or is paused, deletes its disk and paused memory,
+   * revokes its previews and ports, and removes it from lists. Its snapshots, usage and audit
+   * entries stay. Deleting it again answers the same.
+   */
+  public JsonObject delete() {
+    stopKeepAlive();
+    return new JsonObject(t.object(new Transport.Call("DELETE", path(""))));
+  }
+
+  /**
+   * The end of a try-with-resources block. A sandbox that {@code create} made there is deleted,
+   * unless it was created with {@link CreateSandbox#keep()}; one from {@code get}, or one {@code
+   * getOrCreate} found already there, is stopped and keeps its disk. Never throws for a sandbox
+   * already gone.
+   */
   @Override
   public void close() {
     stopKeepAlive();
+    if (deleteOnClose) {
+      try {
+        delete();
+      } catch (RuntimeCloudException.NotFound gone) {
+        // Nothing to delete.
+      }
+      return;
+    }
     if ("stopped".equals(state())) return;
     try {
       lifecycle("stop", null, false, null);

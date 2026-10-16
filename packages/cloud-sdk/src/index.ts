@@ -38,7 +38,14 @@ export type {
   UsageExportRow,
   UsageExportPage,
 } from "./products/observability.js";
-export type { JobSecret, Secret, SecretRule, SecretUse, SetSecret } from "./products/secrets.js";
+export type {
+  JobSecret,
+  Secret,
+  SecretRule,
+  SecretScope,
+  SecretUse,
+  SetSecret,
+} from "./products/secrets.js";
 export { SecretPartlyStoredError } from "./products/secrets.js";
 export type { McpCatalogEntry, McpGateway, McpServerRequest } from "./products/mcp.js";
 export type {
@@ -79,6 +86,7 @@ export type {
   UpstreamProxy,
 } from "./products/network-products.js";
 export type { PrivateNetwork } from "./products/private-network.js";
+export type { SignedRequests } from "./products/signed-requests.js";
 export {
   verifyWebhook,
   WebhookVerificationError,
@@ -161,4 +169,5 @@ export {
   type WalletOptions,
 } from "./wallet.js";
 export type { Topup } from "./products/billing.js";
+export type { NewKey, MadeKey, ListedKey, KeyUsage } from "./products/api-keys.js";
 export type { SsoConnection, SsoStatus } from "./products/sso.js";

@@ -11,7 +11,7 @@ from typing import Any, Optional
 # host_unavailable and busy pass, and are retried.
 DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previews_unavailable",
                         "network_unavailable", "network_rules_unavailable", "secrets_unavailable",
-                        "identity_unavailable", "env_unavailable"})
+                        "identity_unavailable", "env_unavailable", "resize_unavailable"})
 # Refusals that guarantee nothing ran: a sandbox running as many commands as it
 # can (guest_busy), and the API's own limits, which answer before any work
 # starts (busy, rate_limited). Sending such a call again is always safe, so the
@@ -22,7 +22,7 @@ NOTHING_RAN = frozenset({"guest_busy", "busy", "rate_limited"})
 # without credit stops.
 _PASSING = frozenset({"no_capacity", "no_credit_running_limit", "no_credit_total_limit"})
 # Refusals of a create that clear when a sandbox stops or pauses, or a host
-# frees room: an account without credit's eight at once and its total, an
+# frees room: an account without credit's four at once and its total, an
 # email domain's, the account's quota and the region's capacity. sandboxes.create waits them out, retrying
 # with the same key and input, for up to wait_for_capacity seconds.
 WAITS_FOR_ROOM = frozenset({"no_credit_running_limit", "no_credit_total_limit", "no_credit_domain_limit",
@@ -91,17 +91,29 @@ class ConnectionError(RuntimeError):  # noqa: A001
 
 
 class CommandError(RuntimeError):
-    """Raised by exec(check=True) when a command exits non-zero or times out."""
+    """Raised by exec(check=True) when a command exits non-zero or times out.
+    Its code is ``out_of_memory`` when the sandbox's out-of-memory killer
+    ended it, with the result's message and hint."""
 
     def __init__(self, result: dict[str, Any]) -> None:
         timed_out = bool(result.get("timedOut"))
         stderr = str(result.get("stderr") or "")
-        super().__init__(
-            "Command timed out." if timed_out else f"Command exited with {result.get('exitCode')}. {stderr.strip()[-500:]}".strip(),
-            code="command_timeout" if timed_out else "command_failed")
+        memory = result.get("outOfMemory") if not timed_out else None
+        if isinstance(memory, dict):
+            super().__init__(f"Command exited with {result.get('exitCode')}. {memory.get('message', '')}".strip(),
+                             code=str(memory.get("code") or "out_of_memory"), hint=memory.get("hint"))
+        else:
+            super().__init__(
+                "Command timed out." if timed_out else f"Command exited with {result.get('exitCode')}. {stderr.strip()[-500:]}".strip(),
+                code="command_timeout" if timed_out else "command_failed")
         self.exit_code = result.get("exitCode")
         self.stdout = str(result.get("stdout") or "")
         self.stderr = stderr
+
+    @property
+    def retryable(self) -> bool:
+        """The same command in the same sandbox runs out of memory again."""
+        return False if self.code == "out_of_memory" else super().retryable
 
 
 def error_for(status: int, body: Any, key: Optional[str]) -> RuntimeError:

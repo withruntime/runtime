@@ -45,7 +45,7 @@ module WithRuntime
     def get(id) = Record.new(@t.json("GET", path(id)))
     def list = @t.json("GET", path)["data"].map { |row| Record.new(row) }
     def stop(id) = Record.new(@t.json("POST", "#{path(id)}:stop", body: {}))
-    def download(id) = @t.bytes("GET", "#{path(id)}/video", accept: "video/mp4")
+    def download(id) = @t.file_bytes("#{path(id)}/video", accept: "video/mp4")
     def delete(id) = @t.json("DELETE", path(id)) && nil
   end
 end

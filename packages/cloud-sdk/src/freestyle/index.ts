@@ -1,6 +1,8 @@
 import type { Runtime } from "../client.js";
-import type { Sandbox } from "../sandbox.js";
+import { ConnectionError, RuntimeError } from "../errors.js";
+import type { Sandbox, Terminal } from "../sandbox.js";
 import type { Snapshot } from "../snapshots.js";
+import type { ProcessInfo } from "../types.js";
 import {
   all,
   client,
@@ -10,17 +12,265 @@ import {
   execOptions,
   lookup,
   only,
+  quote,
   ready,
+  refuse,
+  refused,
+  validateEnvironment,
   type ClientOptions,
+  type Refused,
+  type RefusedAsync,
 } from "../compat/core.js";
 import { GuestFiles } from "../compat/files.js";
 export { CompatibilityError };
 export type VmState = "starting" | "running" | "pausing" | "paused" | "stopped";
+
+// Errors ----------------------------------------------------------------------
+
+export interface FreestyleErrorBody {
+  code: string;
+  message: string;
+}
+/** What every failed Runtime call becomes, as Freestyle throws it for a
+ * non-2xx response: `code` is Runtime's error code in upper case
+ * (`NOT_FOUND`), `status` its HTTP status, and `cause` the RuntimeError. */
+export class FreestyleApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly path?: string;
+  constructor(status: number, body: FreestyleErrorBody, path?: string) {
+    super(body.message || `Freestyle API error: ${body.code}`);
+    this.name = "FreestyleApiError";
+    this.code = body.code;
+    this.status = status;
+    this.path = path;
+  }
+}
+export interface FreestyleConnectionError {
+  name?: string;
+  message?: string;
+  code?: string;
+  errno?: string | number;
+  syscall?: string;
+  address?: string;
+  port?: number;
+}
+/** What a call that got no answer from Runtime becomes, as Freestyle 0.2.17
+ * throws a failed fetch: a TypeError whose `cause` is the RuntimeError
+ * ConnectionError and whose `errors` carry it as one entry. */
+export class FreestyleTransportError extends TypeError {
+  readonly errors: FreestyleConnectionError[];
+  constructor(cause: unknown, errors: FreestyleConnectionError[]) {
+    super(
+      `${cause instanceof Error ? cause.message : "fetch failed"} (${errors.map((e) => e.code ?? e.name ?? "Error").join("; ")})`,
+      { cause },
+    );
+    this.name = "FreestyleTransportError";
+    this.errors = errors;
+  }
+  toJSON() {
+    return { name: this.name, message: this.message, errors: this.errors };
+  }
+}
+async function api<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof ConnectionError)
+      throw new FreestyleTransportError(error, [
+        { name: error.name, message: error.message, code: error.code },
+      ]);
+    if (!(error instanceof RuntimeError)) throw error;
+    const translated = new FreestyleApiError(error.status, {
+      code: error.code.toUpperCase(),
+      message: error.message,
+    });
+    Object.defineProperty(translated, "cause", { value: error });
+    throw translated;
+  }
+}
+const notFound = (what: string) =>
+  new FreestyleApiError(404, { code: "NOT_FOUND", message: `${what} not found` });
+export class FirewallRuleValidationError extends Error {
+  constructor(
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "FirewallRuleValidationError";
+  }
+}
+export class TlsRuleValidationError extends Error {
+  constructor(
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TlsRuleValidationError";
+  }
+}
+export class TlsForwardAuthValidationError extends Error {
+  constructor(
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TlsForwardAuthValidationError";
+  }
+}
+
+// Freestyle products Runtime does not sell as they are --------------------------
+
+const FIREWALL =
+  "give a VM's outbound rules at create (firewall.rules to public or CIDR destinations), or use sandbox.network";
+const TLS = "serve HTTPS from a sandbox with Runtime previews (sandbox.previews)";
+const TUNNELS = "reach a sandbox's ports with sandbox.tunnel()";
+const VPC =
+  "let sandboxes reach each other with Runtime private networks (runtime.networks.private)";
+export const FirewallNamespace: Refused = refused("Freestyle", "FirewallNamespace", FIREWALL);
+export const FirewallRulesNamespace: Refused = refused(
+  "Freestyle",
+  "FirewallRulesNamespace",
+  FIREWALL,
+);
+export const validateFirewallEndpoint: Refused = refused(
+  "Freestyle",
+  "validateFirewallEndpoint",
+  FIREWALL,
+);
+export const validateFirewallRule: Refused = refused("Freestyle", "validateFirewallRule", FIREWALL);
+export const validateFirewallSpec: Refused = refused("Freestyle", "validateFirewallSpec", FIREWALL);
+export const TlsNamespace: Refused = refused("Freestyle", "TlsNamespace", TLS);
+export const TlsRulesNamespace: Refused = refused("Freestyle", "TlsRulesNamespace", TLS);
+export const TlsForwardAuthNamespace: Refused = refused(
+  "Freestyle",
+  "TlsForwardAuthNamespace",
+  TLS,
+);
+export const hasTlsIdentity: Refused = refused("Freestyle", "hasTlsIdentity", TLS);
+export const resolveTlsProtocol: Refused = refused("Freestyle", "resolveTlsProtocol", TLS);
+export const validateTlsDomain: Refused = refused("Freestyle", "validateTlsDomain", TLS);
+export const validateTlsEndpoint: Refused = refused("Freestyle", "validateTlsEndpoint", TLS);
+export const validateTlsForwardAuth: Refused = refused("Freestyle", "validateTlsForwardAuth", TLS);
+export const validateTlsMailRoute: Refused = refused("Freestyle", "validateTlsMailRoute", TLS);
+export const validateTlsRule: Refused = refused("Freestyle", "validateTlsRule", TLS);
+export const validateTlsSpec: Refused = refused("Freestyle", "validateTlsSpec", TLS);
+export const TunnelsNamespace: Refused = refused("Freestyle", "TunnelsNamespace", TUNNELS);
+export const VpcNamespace: Refused = refused("Freestyle", "VpcNamespace", VPC);
+export const Vpc: Refused = refused("Freestyle", "Vpc", VPC);
+export const VpcTunnelNamespace: Refused = refused("Freestyle", "VpcTunnelNamespace", VPC);
+
+// Firewall rules a VM's network settings can carry -------------------------------
+
+export type FirewallProtocol = "tcp" | "udp" | "icmp";
+export interface FirewallEndpoint {
+  vmId?: string;
+  vpcId?: string;
+  tunnelId?: string;
+  cidr?: string;
+  public?: true;
+  port?: number;
+  protocol?: FirewallProtocol;
+}
 export interface FirewallRule {
   action: "allow";
-  source: Record<string, never>;
-  destination: { public: true };
+  source: FirewallEndpoint;
+  destination: FirewallEndpoint;
+  description?: string;
 }
+export interface FirewallRuleData {
+  id: string;
+  action: "allow";
+  source: FirewallEndpoint;
+  destination: FirewallEndpoint;
+  description?: string | null;
+  dependencies: { kind: string; id: string; slug?: string | null; displayName?: string | null }[];
+  createdAt: string;
+  updatedAt: string;
+}
+const ADDRESS = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/;
+/** An IPv4 address or CIDR, as Runtime's network allow list takes it. */
+function cidrOf(value: string): string | undefined {
+  const match = ADDRESS.exec(value);
+  if (!match || match.slice(1, 5).some((octet) => Number(octet) > 255)) return undefined;
+  if (match[5] !== undefined && Number(match[5]) > 32) return undefined;
+  return match[5] === undefined ? `${value}/32` : value;
+}
+/** The network settings for a VM's inline rules: every rule allows this VM
+ * outbound, to the public internet or to a CIDR, over the web ports Runtime
+ * opens (any, 80 or 443 over TCP). Runtime opens 80 and 443 together, so a
+ * destination named with one port alone refuses rather than gets the other.
+ * Anything else refuses before allocation. */
+function networkFor(rules: FirewallRule[]): { internet: boolean; allow?: string[] } {
+  const allow: string[] = [];
+  let open = false;
+  const ports = new Map<string, Set<number | undefined>>();
+  for (const [index, rule] of rules.entries()) {
+    only("Freestyle firewall rule", rule, ["action", "source", "destination", "description"]);
+    const { destination } = rule;
+    if (rule.action !== "allow" || Object.keys(rule.source ?? {}).length)
+      throw new CompatibilityError(
+        "Freestyle",
+        `firewall.rules[${index}]: rules other than this VM's outbound access`,
+      );
+    only("Freestyle firewall destination", destination ?? {}, [
+      "public",
+      "cidr",
+      "port",
+      "protocol",
+    ]);
+    if (
+      (destination.port !== undefined && destination.port !== 80 && destination.port !== 443) ||
+      (destination.protocol !== undefined && destination.protocol !== "tcp") ||
+      (destination.port !== undefined && destination.protocol === undefined)
+    )
+      throw new CompatibilityError(
+        "Freestyle",
+        `firewall.rules[${index}]: ports other than 80 and 443 over TCP; open host:port pairs with sandbox.network.set({ connect })`,
+      );
+    let target = "public";
+    if (destination.public === true && destination.cidr === undefined) open = true;
+    else if (destination.public === undefined && typeof destination.cidr === "string") {
+      const cidr = cidrOf(destination.cidr);
+      if (!cidr)
+        throw new FirewallRuleValidationError(
+          `firewall.rules[${index}].destination.cidr`,
+          `firewall.rules[${index}].destination.cidr \`${destination.cidr}\` is not an IPv4 CIDR`,
+        );
+      if (!allow.includes(cidr)) allow.push(cidr);
+      target = cidr;
+    } else
+      throw new CompatibilityError(
+        "Freestyle",
+        `firewall.rules[${index}]: destinations other than public or one CIDR`,
+      );
+    ports.set(target, (ports.get(target) ?? new Set()).add(destination.port));
+  }
+  for (const [target, named] of ports)
+    if (!named.has(undefined) && !(named.has(80) && named.has(443)))
+      throw new CompatibilityError(
+        "Freestyle",
+        `firewall rules opening ${target} on port ${[...named].join(" or ")} alone; Runtime opens 80 and 443 together`,
+      );
+  if (open) return { internet: true };
+  if (allow.length) return { internet: true, allow };
+  return { internet: false };
+}
+function ruleData(vmId: string, index: number, destination: FirewallEndpoint, at: string) {
+  return {
+    id: `runtime-network-${vmId}-${index}`,
+    action: "allow" as const,
+    source: { vmId },
+    destination,
+    description: null,
+    dependencies: [],
+    createdAt: at,
+    updatedAt: at,
+  } satisfies FirewallRuleData;
+}
+
+// VMs -------------------------------------------------------------------------
+
 export interface CreateVmOptions {
   snapshotId?: string | null;
   slug?: string | null;
@@ -41,6 +291,21 @@ function validateMetadata(metadata: Record<string, string> | undefined) {
     if (metadata !== undefined && Object.prototype.hasOwnProperty.call(metadata, key))
       throw new CompatibilityError("Freestyle", `metadata key ${key} reserved by this adapter`);
 }
+const LINUX_USER = /^[a-z_][a-z0-9_-]{0,31}$/;
+function validateLinuxUser(user: string): string {
+  if (typeof user !== "string" || !LINUX_USER.test(user))
+    throw new TypeError("linuxUser must be a Linux user name: lowercase letters, digits, _ and -");
+  return user;
+}
+/** Runs `command` as `user` through sudo. The environment travels in the
+ * exec's own environment and sudo keeps it by name: values never enter the
+ * command line, which the process list and Runtime's records show. */
+function asUser(user: string, command: string, env: Record<string, string> = {}) {
+  validateEnvironment(env);
+  const names = Object.keys(env);
+  const keep = names.length ? ` --preserve-env=${names.join(",")}` : "";
+  return `exec sudo -n -H${keep} -u ${quote(user)} -- bash -c ${quote(command)}`;
+}
 const data = (s: Sandbox) => ({
   id: s.id,
   state: s.state,
@@ -58,65 +323,72 @@ const data = (s: Sandbox) => ({
   createdAt: s.info.createdAt,
   updatedAt: s.info.createdAt,
 });
+/** Labels the snapshot API returns beside the typed fields. */
+const labelsOf = (s: Snapshot) =>
+  (s as Snapshot & { labels?: Record<string, string> }).labels ?? {};
 const snapshotData = (s: Snapshot) => ({
   id: s.id,
   sourceVmId: s.sourceSandboxId,
   slug: s.name,
-  displayName: (s.labels as Record<string, string> | undefined)?.["fs.displayName"] ?? null,
+  displayName: labelsOf(s)["fs.displayName"] ?? null,
   public: false,
   createdAt: s.createdAt,
   updatedAt: s.createdAt,
-  ttlSeconds: s.retentionDays * 86400,
+  ttlSeconds: s.retentionDays === null ? null : s.retentionDays * 86400,
 });
+/** Freestyle keeps a snapshot for a time in seconds; Runtime for whole days. */
+function retentionDays(ttlSeconds: number | undefined): number | undefined {
+  if (ttlSeconds === undefined) return undefined;
+  if (
+    !(ttlSeconds > 0) ||
+    ttlSeconds > 365 * 86400 ||
+    ttlSeconds % 86400 !== 0 ||
+    !Number.isFinite(ttlSeconds)
+  )
+    throw new CompatibilityError("Freestyle", "snapshot retention outside 1 to 365 whole days");
+  return ttlSeconds / 86400;
+}
+
+export interface FreestyleOptions extends ClientOptions {
+  teamId?: string;
+  stackAccessToken?: string;
+  identityAccessToken?: string;
+}
 export class Freestyle {
   readonly vms: VmsNamespace;
-  constructor(options: ClientOptions = {}) {
-    this.vms = new VmsNamespace(client(options));
+  declare readonly fetch: RefusedAsync;
+  constructor(options: FreestyleOptions = {}) {
+    const { teamId, stackAccessToken, identityAccessToken, ...rest } = options;
+    if (teamId !== undefined)
+      throw new CompatibilityError("Freestyle", "teamId; a Runtime API key is its organization's");
+    if (stackAccessToken !== undefined || identityAccessToken !== undefined)
+      throw new CompatibilityError(
+        "Freestyle",
+        "stackAccessToken and identityAccessToken; sign in with a Runtime API key",
+      );
+    this.vms = new VmsNamespace(client(rest));
+  }
+  get firewall(): never {
+    throw new CompatibilityError("Freestyle", `freestyle.firewall; ${FIREWALL}`);
+  }
+  get tls(): never {
+    throw new CompatibilityError("Freestyle", `freestyle.tls; ${TLS}`);
+  }
+  get tunnels(): never {
+    throw new CompatibilityError("Freestyle", `freestyle.tunnels; ${TUNNELS}`);
+  }
+  get vpc(): never {
+    throw new CompatibilityError("Freestyle", `freestyle.vpc; ${VPC}`);
   }
 }
-export class VmsNamespace {
-  readonly snapshots;
-  constructor(private readonly runtime: Runtime) {
-    this.snapshots = {
-      get: async (id: string) => snapshotData(await this.resolveSnapshot(id)),
-      delete: async (id: string) => runtime.snapshots.delete((await this.resolveSnapshot(id)).id),
-      list: async (options: { sourceVmId?: string; limit?: number; offset?: number } = {}) => {
-        only("Freestyle snapshot list", options, ["sourceVmId", "limit", "offset"]);
-        if (options.sourceVmId !== undefined && typeof options.sourceVmId !== "string")
-          throw new TypeError("sourceVmId must be a string");
-        if (
-          options.limit !== undefined &&
-          (!Number.isSafeInteger(options.limit) || options.limit <= 0)
-        )
-          throw new TypeError("limit must be a positive safe integer");
-        if (
-          options.offset !== undefined &&
-          (!Number.isSafeInteger(options.offset) || options.offset < 0)
-        )
-          throw new TypeError("offset must be a nonnegative safe integer");
-        const offset = options.offset ?? 0;
-        const snapshots: ReturnType<typeof snapshotData>[] = [];
-        let totalCount = 0;
-        // Count the filtered catalog across every native page without retaining
-        // snapshots outside the requested page or Page.toArray's default cap.
-        const page = await runtime.snapshots.list(
-          options.sourceVmId === undefined ? {} : { sandboxId: options.sourceVmId },
-        );
-        for await (const snapshot of page) {
-          if (options.sourceVmId !== undefined && snapshot.sourceSandboxId !== options.sourceVmId)
-            continue;
-          if (
-            totalCount >= offset &&
-            (options.limit === undefined || snapshots.length < options.limit)
-          )
-            snapshots.push(snapshotData(snapshot));
-          totalCount++;
-        }
-        return { snapshots, totalCount };
-      },
-    };
-  }
-  private async resolveSnapshot(id: string) {
+refuse("Freestyle", "Freestyle", Freestyle, {
+  fetch: "call Runtime's API with its own client (new Runtime())",
+});
+
+export class VmSnapshotsNamespace {
+  constructor(private readonly runtime: Runtime) {}
+  /** A snapshot by id or by its slug (Runtime's snapshot name). */
+  async resolve(id: string): Promise<Snapshot> {
     if (/^[a-f0-9-]{36}$/i.test(id)) return this.runtime.snapshots.get(id);
     const found = (await this.runtime.snapshots.list({ name: id })).data.find((s) => s.name === id);
     if (!found)
@@ -125,6 +397,77 @@ export class VmsNamespace {
         `snapshot ${id}; import the source environment into Runtime first`,
       );
     return found;
+  }
+  get(snapshotId: string) {
+    return api(async () => snapshotData(await this.resolve(snapshotId)));
+  }
+  delete(snapshotId: string) {
+    return api(async () => this.runtime.snapshots.delete((await this.resolve(snapshotId)).id));
+  }
+  async list(options: { sourceVmId?: string; limit?: number; offset?: number } = {}) {
+    only("Freestyle snapshot list", options, ["sourceVmId", "limit", "offset"]);
+    if (options.sourceVmId !== undefined && typeof options.sourceVmId !== "string")
+      throw new TypeError("sourceVmId must be a string");
+    if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0))
+      throw new TypeError("limit must be a positive safe integer");
+    if (
+      options.offset !== undefined &&
+      (!Number.isSafeInteger(options.offset) || options.offset < 0)
+    )
+      throw new TypeError("offset must be a nonnegative safe integer");
+    return api(async () => {
+      const offset = options.offset ?? 0;
+      const snapshots: ReturnType<typeof snapshotData>[] = [];
+      let totalCount = 0;
+      // Count the filtered catalog across every native page without retaining
+      // snapshots outside the requested page or Page.toArray's default cap.
+      const page = await this.runtime.snapshots.list(
+        options.sourceVmId === undefined ? {} : { sandboxId: options.sourceVmId },
+      );
+      for await (const snapshot of page) {
+        if (options.sourceVmId !== undefined && snapshot.sourceSandboxId !== options.sourceVmId)
+          continue;
+        if (
+          totalCount >= offset &&
+          (options.limit === undefined || snapshots.length < options.limit)
+        )
+          snapshots.push(snapshotData(snapshot));
+        totalCount++;
+      }
+      return { snapshots, totalCount };
+    });
+  }
+  /** Renames, relabels and re-times a snapshot: slug is its Runtime name,
+   * ttlSeconds whole days from now. */
+  async update(
+    snapshotId: string,
+    options: { slug?: string; displayName?: string; ttlSeconds?: number },
+  ) {
+    only("Freestyle snapshot update", options, ["slug", "displayName", "ttlSeconds"]);
+    const days = retentionDays(options.ttlSeconds);
+    if (options.slug !== undefined && (typeof options.slug !== "string" || !options.slug))
+      throw new TypeError("slug must be a nonempty string");
+    if (options.displayName !== undefined && typeof options.displayName !== "string")
+      throw new TypeError("displayName must be a string");
+    return api(async () => {
+      let snapshot = await this.resolve(snapshotId);
+      if (options.slug !== undefined || options.displayName !== undefined)
+        snapshot = await this.runtime.snapshots.update(snapshot.id, {
+          ...(options.slug === undefined ? {} : { name: options.slug }),
+          ...(options.displayName === undefined
+            ? {}
+            : { labels: { ...labelsOf(snapshot), "fs.displayName": options.displayName } }),
+        });
+      if (days !== undefined) snapshot = await this.runtime.snapshots.extend(snapshot.id, days);
+      return snapshotData(snapshot);
+    });
+  }
+}
+
+export class VmsNamespace {
+  readonly snapshots: VmSnapshotsNamespace;
+  constructor(private readonly runtime: Runtime) {
+    this.snapshots = new VmSnapshotsNamespace(runtime);
   }
   async create(options: CreateVmOptions) {
     only("Freestyle create", options, [
@@ -139,53 +482,41 @@ export class VmsNamespace {
     if (!options.firewall || !Array.isArray(options.firewall.rules))
       throw new TypeError("firewall.rules is required");
     only("Freestyle firewall", options.firewall, ["rules"]);
-    for (const r of options.firewall.rules) {
-      only("Freestyle firewall rule", r, ["action", "source", "destination"]);
-      if (
-        r.action !== "allow" ||
-        Object.keys(r.source).length ||
-        Object.keys(r.destination).length !== 1 ||
-        r.destination.public !== true
-      )
-        throw new CompatibilityError(
-          "Freestyle",
-          "firewall rules other than unrestricted outbound public access",
-        );
-    }
-    const snapshot = options.snapshotId
-      ? (await this.resolveSnapshot(options.snapshotId)).id
-      : undefined;
-    const s = await create(this.runtime, "freestyle", {
-      snapshot,
-      name: options.slug ?? undefined,
-      labels: { ...options.metadata, "fs.displayName": options.displayName ?? "" },
-      persistent: true,
-      idlePauseSeconds:
-        options.idleTimeoutSeconds === -1 || options.idleTimeoutSeconds == null
-          ? 0
-          : options.idleTimeoutSeconds,
-      network: { internet: options.firewall.rules.length > 0 },
+    const network = networkFor(options.firewall.rules);
+    return api(async () => {
+      const snapshot = options.snapshotId
+        ? (await this.snapshots.resolve(options.snapshotId)).id
+        : undefined;
+      const s = await create(this.runtime, "freestyle", {
+        snapshot,
+        name: options.slug ?? undefined,
+        labels: { ...options.metadata, "fs.displayName": options.displayName ?? "" },
+        persistent: true,
+        idlePauseSeconds:
+          options.idleTimeoutSeconds === -1 || options.idleTimeoutSeconds == null
+            ? 0
+            : options.idleTimeoutSeconds,
+        network,
+      });
+      return {
+        vm: new Vm(this.runtime, s.id),
+        vmId: s.id,
+        data: data(s),
+        firewallRules: options.firewall.rules.map((rule, index) =>
+          ruleData(s.id, index, rule.destination, s.info.createdAt),
+        ),
+        tlsRules: [],
+      };
     });
-    return {
-      vm: new Vm(this.runtime, s.id),
-      vmId: s.id,
-      data: data(s),
-      firewallRules: options.firewall.rules.map((rule) => ({
-        ...rule,
-        id: `runtime-network-${s.id}`,
-        source: { vmId: s.id },
-      })),
-      tlsRules: [],
-    };
   }
   ref(id: string) {
     return new Vm(this.runtime, id);
   }
-  async get(id: string) {
-    return data(await lookup(this.runtime, id));
+  get(id: string) {
+    return api(async () => data(await lookup(this.runtime, id)));
   }
-  async delete(id: string) {
-    await destroy(await lookup(this.runtime, id));
+  delete(id: string) {
+    return api(async () => destroy(await lookup(this.runtime, id)));
   }
   async list(
     options: {
@@ -202,7 +533,7 @@ export class VmsNamespace {
         const i = x.indexOf(":");
         return [x.slice(0, i), x.slice(i + 1)];
       }) ?? [];
-    const values = (await all(this.runtime, "freestyle")).filter(
+    const values = (await api(() => all(this.runtime, "freestyle"))).filter(
       (s) =>
         (!options.state || s.state === options.state) &&
         (!options.slug || s.info.name === options.slug) &&
@@ -221,6 +552,9 @@ export class VmsNamespace {
     };
   }
 }
+
+// Files -----------------------------------------------------------------------
+
 export interface ReadFileOptions {
   offset?: number;
   length?: number;
@@ -239,9 +573,8 @@ export class VmFilesystem {
     this.files = new GuestFiles(get, "/");
   }
   async readFile(path: string, options: ReadFileOptions = {}) {
-    return new Uint8Array(
-      await new Response(await this.readFileStream(path, options)).arrayBuffer(),
-    );
+    const stream = await this.readFileStream(path, options);
+    return api(async () => new Uint8Array(await new Response(stream).arrayBuffer()));
   }
   async readTextFile(path: string, options: ReadFileOptions = {}) {
     return new TextDecoder().decode(await this.readFile(path, options));
@@ -252,9 +585,9 @@ export class VmFilesystem {
       if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
         throw new TypeError("File range must contain nonnegative safe integers");
     options.signal?.throwIfAborted();
-    const source = await (
-      await this.get()
-    ).files.readStream(this.files.path(path), { signal: options.signal });
+    const source = await api(async () =>
+      (await this.get()).files.readStream(this.files.path(path), { signal: options.signal }),
+    );
     if (options.offset === undefined && options.length === undefined) return source;
     const reader = source.getReader();
     let skip = options.offset ?? 0,
@@ -314,67 +647,394 @@ export class VmFilesystem {
         : content instanceof Uint8Array
           ? content
           : new Uint8Array(await content.arrayBuffer());
-    let mode = options.mode;
-    if (mode === undefined)
-      mode = (await this.files.exists(path))
-        ? parseInt((await this.files.stat(path)).mode, 8)
-        : 0o600;
-    await this.files.writeFile(path, bytes, { mode, signal: options.signal });
+    await api(async () => {
+      let mode = options.mode;
+      if (mode === undefined)
+        mode = (await this.files.exists(path))
+          ? parseInt((await this.files.stat(path)).mode, 8)
+          : 0o600;
+      await this.files.writeFile(path, bytes, { mode, signal: options.signal });
+    });
     options.onProgress?.({ completedBytes: bytes.length, totalBytes: bytes.length });
   }
   writeTextFile(path: string, content: string, options: WriteFileOptions = {}) {
     return this.writeFile(path, content, options);
   }
   mkdir(path: string) {
-    return this.files.mkdir(path, true);
+    return api(() => this.files.mkdir(path, true));
   }
   remove(path: string) {
-    return this.files.remove(path, true);
+    return api(() => this.files.remove(path, true));
   }
   exists(path: string) {
-    return this.files.exists(path);
+    return api(() => this.files.exists(path));
   }
-  async readDir(path: string) {
-    return (await this.files.readdir(path)).map((e) => ({ name: e.name, kind: e.type }));
+  readDir(path: string) {
+    return api(async () =>
+      (await this.files.readdir(path)).map((e) => ({ name: e.name, kind: e.type })),
+    );
   }
-  async stat(path: string) {
-    const e = await this.files.stat(path);
-    const s = await this.get();
-    const r = await s.exec(["stat", "-c", "%U:%G", "--", this.files.path(path)], { check: true });
-    const [owner, group] = r.stdout.trim().split(":");
-    return {
-      size: e.size,
-      isFile: e.type === "file",
-      isDirectory: e.type === "directory",
-      isSymlink: e.type === "symlink",
-      permissions: e.mode,
-      owner: owner!,
-      group: group!,
-      modified: e.modifiedAt,
-    };
+  stat(path: string) {
+    return api(async () => {
+      const e = await this.files.stat(path);
+      const s = await this.get();
+      const r = await s.exec(["stat", "-c", "%U:%G", "--", this.files.path(path)], { check: true });
+      const [owner, group] = r.stdout.trim().split(":");
+      return {
+        size: e.size,
+        isFile: e.type === "file",
+        isDirectory: e.type === "directory",
+        isSymlink: e.type === "symlink",
+        permissions: e.mode,
+        owner: owner!,
+        group: group!,
+        modified: e.modifiedAt,
+      };
+    });
   }
 }
+
+// Terminals -------------------------------------------------------------------
+//
+// A Freestyle PTY session is a Runtime process started with a terminal. It
+// outlives the connection that opened it: detach() closes the connection and
+// the process runs on, as a native terminal attached by process id does. The
+// session's number, slug, user and size ride in the process's own command
+// line, so any client finds them with the process list and nothing is stored.
+
+export interface PtySessionInfo {
+  sessionId: number;
+  state: string;
+  createdUnix: number;
+  cols: number;
+  rows: number;
+  exitCode?: number | null;
+  linuxUser?: string | null;
+  slug?: string | null;
+}
+export interface PtyOpenOptions {
+  exec?: string;
+  cols?: number;
+  rows?: number;
+  linuxUser?: string;
+  slug?: string;
+}
+export type PtySessionSelector = number | string;
+export interface PtyAttachOptions {
+  session: PtySessionSelector;
+  linuxUser?: string;
+}
+export interface PtySessionEvents {
+  onData?: (data: Uint8Array) => void;
+  onExit?: (exitCode: number) => void;
+  onClose?: (info: { wasClean: boolean; code: number; reason: string }) => void;
+  onError?: (err: unknown) => void;
+}
+const PTY = /^: freestyle-pty slug=([a-z0-9-]*) user=([a-z0-9_-]*) cols=(\d+) rows=(\d+); /;
+const SLUG = /^(?=.*[a-z-])[a-z0-9-]{1,63}$/;
+/** A session's number: FNV-1a of its process id, 31 bits, never 0. */
+export function sessionNumber(processId: string): number {
+  let hash = 0x811c9dc5;
+  for (const char of processId) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
+  return hash >>> 1 || 1;
+}
+type Session = { info: PtySessionInfo; processId: string; running: boolean };
+function session(process: ProcessInfo): Session | undefined {
+  const mark = PTY.exec(process.command);
+  if (!process.pty || !mark) return undefined;
+  const running = process.state === "running";
+  return {
+    processId: process.id,
+    running,
+    info: {
+      sessionId: sessionNumber(process.id),
+      state: running ? "running" : "exited",
+      createdUnix: Math.floor(Date.parse(process.startedAt) / 1000),
+      cols: Number(mark[3]),
+      rows: Number(mark[4]),
+      ...(running ? {} : { exitCode: process.exitCode }),
+      linuxUser: mark[2] || null,
+      // A slug is released when its shell exits.
+      slug: running && mark[1] ? mark[1] : null,
+    },
+  };
+}
+const dimension = (value: number | undefined, fallback: number, name: string) => {
+  if (value === undefined) return fallback;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1000)
+    throw new TypeError(`${name} must be a whole number from 1 to 1000`);
+  return value;
+};
+
+const PTY_OPEN = [
+  "exec",
+  "cols",
+  "rows",
+  "linuxUser",
+  "slug",
+  "onData",
+  "onExit",
+  "onClose",
+  "onError",
+];
+
+export class PtySession {
+  #readyState = 1;
+  constructor(
+    private readonly terminal: Terminal,
+    private readonly sandbox: Sandbox,
+    private readonly processId: string,
+    readonly sessionId: number,
+    readonly slug: string | undefined,
+    readonly created: boolean,
+    events: PtySessionEvents,
+  ) {
+    void terminal.exited.then((exitCode) => {
+      this.#readyState = 3;
+      if (exitCode !== null) events.onExit?.(exitCode);
+      events.onClose?.({ wasClean: true, code: 1000, reason: "" });
+    });
+    this.onError = events.onError;
+  }
+  private readonly onError: ((err: unknown) => void) | undefined;
+  write(data: Uint8Array | string): void {
+    this.terminal.write(data);
+  }
+  resize(options: { cols: number; rows: number }): void {
+    this.terminal.resize(dimension(options.cols, 80, "cols"), dimension(options.rows, 24, "rows"));
+  }
+  signal(sig: "sigint" | "sigkill"): void {
+    if (sig !== "sigint" && sig !== "sigkill")
+      throw new TypeError('signal must be "sigint" or "sigkill"');
+    void (async () => {
+      const process = await this.sandbox.processes.get(this.processId);
+      await process.kill(sig === "sigint" ? "SIGINT" : "SIGKILL");
+    })().catch((error: unknown) => this.onError?.(error));
+  }
+  /** Closes the connection; the shell keeps running and attach() finds it. */
+  detach(): void {
+    this.#readyState = 2;
+    this.terminal.close();
+  }
+  get readyState(): number {
+    return this.#readyState;
+  }
+}
+
+export class VmPty {
+  constructor(private readonly get: () => Promise<Sandbox>) {}
+  private async sessions(sandbox: Sandbox): Promise<Session[]> {
+    return (await sandbox.processes.list()).flatMap((process) => session(process) ?? []);
+  }
+  private async find(sandbox: Sandbox, selector: PtySessionSelector, linuxUser?: string) {
+    if (typeof selector !== "number" && typeof selector !== "string")
+      throw new TypeError("session must be a session id or a slug");
+    const found = (await this.sessions(sandbox))
+      .filter((s) =>
+        typeof selector === "number" ? s.info.sessionId === selector : s.info.slug === selector,
+      )
+      .sort((a, b) => a.info.createdUnix - b.info.createdUnix)[0];
+    if (!found) throw notFound(`PTY session ${selector}`);
+    if (linuxUser !== undefined && found.info.linuxUser !== linuxUser)
+      throw notFound(`PTY session ${selector} of ${linuxUser}`);
+    return found;
+  }
+  private async connect(
+    sandbox: Sandbox,
+    found: Session,
+    created: boolean,
+    events: PtySessionEvents,
+  ) {
+    const terminal = await sandbox.terminal({ processId: found.processId, onData: events.onData });
+    return new PtySession(
+      terminal,
+      sandbox,
+      found.processId,
+      found.info.sessionId,
+      found.info.slug ?? undefined,
+      created,
+      events,
+    );
+  }
+  async open(options: PtyOpenOptions & PtySessionEvents = {}): Promise<PtySession> {
+    only("Freestyle pty open", options, PTY_OPEN);
+    const cols = dimension(options.cols, 80, "cols");
+    const rows = dimension(options.rows, 24, "rows");
+    const user = options.linuxUser === undefined ? "" : validateLinuxUser(options.linuxUser);
+    if (
+      options.slug !== undefined &&
+      (typeof options.slug !== "string" || !SLUG.test(options.slug))
+    )
+      throw new TypeError("slug must be lowercase letters, digits and hyphens, not all digits");
+    if (
+      options.exec !== undefined &&
+      (typeof options.exec !== "string" || options.exec.includes("\0"))
+    )
+      throw new TypeError("exec must be a command without NUL bytes");
+    return api(async () => {
+      const sandbox = await this.get();
+      if (options.slug !== undefined) {
+        const existing = (await this.sessions(sandbox)).find((s) => s.info.slug === options.slug);
+        // Get-or-create: a running session with the slug is handed back, exec unrun.
+        if (existing) return this.connect(sandbox, existing, false, options);
+      }
+      const shell =
+        options.exec === undefined
+          ? user
+            ? `exec sudo -n -H -u ${quote(user)} -- bash -l`
+            : "exec bash -l"
+          : user
+            ? `exec sudo -n -H -u ${quote(user)} -- bash -c ${quote(options.exec)}`
+            : options.exec;
+      const process = await sandbox.spawn(
+        `: freestyle-pty slug=${options.slug ?? ""} user=${user} cols=${cols} rows=${rows}; ${shell}`,
+        { pty: { cols, rows } },
+      );
+      const started = session(process.toJSON());
+      if (!started) throw new Error("The started PTY session has no session line");
+      return this.connect(sandbox, started, true, options);
+    });
+  }
+  async attach(options: PtyAttachOptions & PtySessionEvents): Promise<PtySession> {
+    only("Freestyle pty attach", options, [
+      "session",
+      "linuxUser",
+      "onData",
+      "onExit",
+      "onClose",
+      "onError",
+    ]);
+    if (options.linuxUser !== undefined) validateLinuxUser(options.linuxUser);
+    return api(async () => {
+      const sandbox = await this.get();
+      return this.connect(
+        sandbox,
+        await this.find(sandbox, options.session, options.linuxUser),
+        false,
+        options,
+      );
+    });
+  }
+  async list(options: { linuxUser?: string } = {}) {
+    only("Freestyle pty list", options, ["linuxUser"]);
+    if (options.linuxUser !== undefined) validateLinuxUser(options.linuxUser);
+    return api(async () => ({
+      sessions: (await this.sessions(await this.get()))
+        .filter((s) => options.linuxUser === undefined || s.info.linuxUser === options.linuxUser)
+        .map((s) => s.info),
+    }));
+  }
+  /** Ends a session's shell. An exited session stays in the list. */
+  async close(session: PtySessionSelector, options: { linuxUser?: string } = {}) {
+    only("Freestyle pty close", options, ["linuxUser"]);
+    if (options.linuxUser !== undefined) validateLinuxUser(options.linuxUser);
+    return api(async () => {
+      const sandbox = await this.get();
+      const found = await this.find(sandbox, session, options.linuxUser);
+      if (!found.running) return { sessionId: found.info.sessionId, exitCode: found.info.exitCode };
+      await (await sandbox.processes.get(found.processId)).kill("SIGKILL");
+      return { sessionId: found.info.sessionId };
+    });
+  }
+}
+export class VmLinuxUserPty {
+  constructor(
+    private readonly pty: VmPty,
+    private readonly linuxUser: string,
+  ) {}
+  async open(options: Omit<PtyOpenOptions, "linuxUser"> & PtySessionEvents = {}) {
+    only(
+      "Freestyle pty open",
+      options,
+      PTY_OPEN.filter((key) => key !== "linuxUser"),
+    );
+    return this.pty.open({ ...options, linuxUser: this.linuxUser });
+  }
+  attach(options: Omit<PtyAttachOptions, "linuxUser"> & PtySessionEvents) {
+    return this.pty.attach({ ...options, linuxUser: this.linuxUser });
+  }
+  list() {
+    return this.pty.list({ linuxUser: this.linuxUser });
+  }
+  close(session: PtySessionSelector) {
+    return this.pty.close(session, { linuxUser: this.linuxUser });
+  }
+}
+
+export class VmLinuxUser {
+  readonly pty: VmLinuxUserPty;
+  constructor(
+    private readonly vm: Vm,
+    private readonly linuxUser: string,
+  ) {
+    validateLinuxUser(linuxUser);
+    this.pty = new VmLinuxUserPty(vm.pty, linuxUser);
+  }
+  exec(options: string | Omit<ExecOptions, "linuxUser">) {
+    const request = typeof options === "string" ? { command: options } : options;
+    return this.vm.exec({ ...request, linuxUser: this.linuxUser });
+  }
+}
+
 export class Vm {
   readonly fs: VmFilesystem;
+  readonly pty: VmPty;
+  declare readonly resize: RefusedAsync;
   constructor(
     private readonly runtime: Runtime,
     readonly id: string,
   ) {
     this.fs = new VmFilesystem(() => lookup(runtime, id));
+    this.pty = new VmPty(() => lookup(runtime, id));
   }
-  async data() {
-    return data(await lookup(this.runtime, this.id));
+  data() {
+    return api(async () => data(await lookup(this.runtime, this.id)));
   }
-  async start() {
-    return data(await ready(await lookup(this.runtime, this.id)));
+  start() {
+    return api(async () => data(await ready(await lookup(this.runtime, this.id))));
   }
-  async pause() {
-    const s = await lookup(this.runtime, this.id);
-    await s.pause();
-    return data(s);
+  pause() {
+    return api(async () => {
+      const s = await lookup(this.runtime, this.id);
+      await s.pause();
+      return data(s);
+    });
   }
-  async delete() {
-    await destroy(await lookup(this.runtime, this.id));
+  delete() {
+    return api(async () => destroy(await lookup(this.runtime, this.id)));
+  }
+  /** The VM's outbound rules, read back from its network settings. */
+  firewallRules() {
+    return api(async () => {
+      const s = await lookup(this.runtime, this.id);
+      const policy = await s.network.get();
+      if (policy.deny.length || policy.connect.length)
+        throw new CompatibilityError(
+          "Freestyle",
+          "network rules that deny or open ports; read them with sandbox.network.get()",
+        );
+      const destinations: FirewallEndpoint[] = !policy.internet
+        ? []
+        : !policy.allow.length
+          ? [{ public: true }]
+          : policy.allow.map((entry) => {
+              const cidr = cidrOf(entry);
+              if (!cidr)
+                throw new CompatibilityError(
+                  "Freestyle",
+                  "network rules that name hosts; read them with sandbox.network.get()",
+                );
+              return { cidr };
+            });
+      const at = policy.updatedAt ?? s.info.createdAt;
+      const rules = destinations.map((destination, index) =>
+        ruleData(s.id, index, destination, at),
+      );
+      return { rules, totalCount: rules.length };
+    });
+  }
+  linuxUser(linuxUser: string) {
+    return new VmLinuxUser(this, linuxUser);
   }
   async update(options: {
     slug?: string;
@@ -384,26 +1044,27 @@ export class Vm {
   }) {
     only("Freestyle update", options, ["slug", "displayName", "idleTimeoutSeconds", "metadata"]);
     validateMetadata(options.metadata);
-    const s = await lookup(this.runtime, this.id);
-    await s.update({
-      name: options.slug,
-      idlePauseSeconds: options.idleTimeoutSeconds === -1 ? 0 : options.idleTimeoutSeconds,
-      labels: {
-        ...s.info.labels,
-        ...options.metadata,
-        ...(options.displayName === undefined ? {} : { "fs.displayName": options.displayName }),
-      },
+    return api(async () => {
+      const s = await lookup(this.runtime, this.id);
+      await s.update({
+        name: options.slug,
+        idlePauseSeconds: options.idleTimeoutSeconds === -1 ? 0 : options.idleTimeoutSeconds,
+        labels: {
+          ...s.info.labels,
+          ...options.metadata,
+          ...(options.displayName === undefined ? {} : { "fs.displayName": options.displayName }),
+        },
+      });
+      return data(s);
     });
-    return data(s);
   }
   async exec(options: string | ExecOptions) {
     const o = typeof options === "string" ? { command: options } : options;
     only("Freestyle exec", o, ["command", "linuxUser", "timeoutMs", "env", "stdin"]);
-    if (o.linuxUser) throw new CompatibilityError("Freestyle", "exec as a different Linux user");
-    const s = await lookup(this.runtime, this.id);
-    const r = await s.exec(
-      o.command,
-      await execOptions(s, {
+    const user = o.linuxUser === undefined ? undefined : validateLinuxUser(o.linuxUser);
+    return api(async () => {
+      const s = await lookup(this.runtime, this.id);
+      const native = await execOptions(s, {
         onStdout: () => undefined,
         onStderr: () => undefined,
         timeoutMs: o.timeoutMs,
@@ -412,26 +1073,29 @@ export class Vm {
           o.stdin === undefined
             ? undefined
             : Uint8Array.from(atob(o.stdin), (c) => c.charCodeAt(0)),
-      }),
-    );
-    return { stdout: r.stdout, stderr: r.stderr, statusCode: r.timedOut ? null : r.exitCode };
+      });
+      const r = user
+        ? await s.exec(asUser(user, o.command, native.env), native)
+        : await s.exec(o.command, native);
+      return { stdout: r.stdout, stderr: r.stderr, statusCode: r.timedOut ? null : r.exitCode };
+    });
   }
   async snapshot(options: { slug?: string; displayName?: string; ttlSeconds?: number } = {}) {
     only("Freestyle snapshot", options, ["slug", "displayName", "ttlSeconds"]);
-    if (
-      options.ttlSeconds !== undefined &&
-      (options.ttlSeconds <= 0 ||
-        options.ttlSeconds > 365 * 86400 ||
-        options.ttlSeconds % 86400 !== 0)
-    )
-      throw new CompatibilityError("Freestyle", "snapshot retention outside 1 to 365 whole days");
-    const s = await (
-      await lookup(this.runtime, this.id)
-    ).snapshot({
-      name: options.slug,
-      labels: options.displayName ? { "fs.displayName": options.displayName } : undefined,
-      retentionDays: options.ttlSeconds === undefined ? undefined : options.ttlSeconds / 86400,
+    const days = retentionDays(options.ttlSeconds);
+    return api(async () => {
+      const s = await (
+        await lookup(this.runtime, this.id)
+      ).snapshot({
+        name: options.slug,
+        labels: options.displayName ? { "fs.displayName": options.displayName } : undefined,
+        retentionDays: days,
+      });
+      return { snapshotId: s.id, sourceVmId: s.sourceSandboxId, snapshot: snapshotData(s) };
     });
-    return { snapshotId: s.id, sourceVmId: s.sourceSandboxId, snapshot: snapshotData(s) };
   }
 }
+refuse("Freestyle", "Vm", Vm, {
+  resize:
+    "Runtime resizes by restarting, which ends running processes: call sandbox.resize() on the native client",
+});

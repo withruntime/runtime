@@ -36,6 +36,47 @@ export class CompatibilityError extends Error {
     this.name = "CompatibilityError";
   }
 }
+/** The error for a vendor feature an adapter does not provide, naming
+ * Runtime's alternative. */
+export function refusal(provider: string, feature: string, alternative: string) {
+  const error = new CompatibilityError(provider, feature);
+  error.message = `${error.message.slice(0, -1)}; ${alternative}.`;
+  return error;
+}
+/** A vendor method an adapter does not provide: declare it on the class as
+ * `declare readonly name: Refused` (or `RefusedAsync` where the vendor's
+ * method returns a promise), and `refuse` installs it. A call fails with a
+ * CompatibilityError naming Runtime's alternative, never "is not a function". */
+export type Refused = (...args: unknown[]) => never;
+export type RefusedAsync = (...args: unknown[]) => Promise<never>;
+export function refuse(
+  provider: string,
+  owner: string,
+  target: { prototype: object },
+  members: Record<string, string>,
+  { sync = false }: { sync?: boolean } = {},
+): void {
+  for (const [member, alternative] of Object.entries(members)) {
+    const error = () => refusal(provider, `${owner}.${member}`, alternative);
+    Object.defineProperty(target.prototype, member, {
+      configurable: true,
+      writable: true,
+      value: sync
+        ? (): never => {
+            throw error();
+          }
+        : (): Promise<never> => Promise.reject(error()),
+    });
+  }
+}
+/** A vendor export (a function, or a class nobody can obtain here) that an
+ * adapter does not provide: `export const Name: Refused = refused(...)`.
+ * Calling it, or `new` on it, throws. */
+export function refused(provider: string, name: string, alternative: string): Refused {
+  return function refusedExport(): never {
+    throw refusal(provider, name, alternative);
+  };
+}
 export function only(provider: string, value: object, keys: readonly string[]): void {
   for (const [key, item] of Object.entries(value))
     if (item !== undefined && item !== null && !keys.includes(key))

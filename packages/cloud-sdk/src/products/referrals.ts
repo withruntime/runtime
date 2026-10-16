@@ -6,13 +6,16 @@ export type ReferralSummary = {
   code: string;
   /** Share this: https://withruntime.com/r/<code>. */
   link: string;
-  /** The least each side gets: a first top-up is matched, never below this. */
+  /** The least each side gets on the referred company's first qualifying
+   * payment: a smaller one is matched up to this. */
   rewardMicros: string;
-  /** The most each side gets: a first top-up is matched up to this. */
+  /** The most each side gets per referred company, all its matched payments
+   * together. */
   maxRewardMicros: string;
-  /** The smallest first top-up that pays a referral. */
+  /** The smallest payment a referral matches. */
   minPurchaseMicros: string;
-  /** The most referral credit you can earn in one calendar year (UTC). */
+  /** The most referral credit, matches and share together, you can earn in
+   * one calendar year (UTC). */
   yearlyCapMicros: string;
   enabled: boolean;
   year: number;
@@ -28,11 +31,22 @@ export type ReferralSummary = {
     status: "pending" | "paid" | "refused" | "reversed";
     creditMicros: string;
   } | null;
+  /** Referred companies with a matched payment still standing. */
+  payingCompanies: number;
+  /** Share credit you kept, all time. */
+  shareEarnedMicros: string;
+  /** Your share of what a referred company spends from credit it paid for,
+   * in basis points: 1000 is 10%. */
+  shareBasisPoints: number;
+  /** How long the share runs from a company's first matched payment. */
+  shareMonths: number;
+  /** How long after sign-up a referred company's payments are matched. */
+  windowDays: number;
 };
 
-/** `runtime.referrals.get()`: when a company that signs up with your link makes
- * its first top-up of at least $10, you and it each get credit equal to that
- * top-up, at least $25 and at most $500. */
+/** `runtime.referrals`: a company that signs up with your link has every
+ * payment in its first 30 days matched, up to $1,000, and you get the same;
+ * then for 12 months you earn 10% of what it spends from credit it paid for. */
 export function referrals(t: Transport) {
   return {
     get: (options?: RequestOptions) =>

@@ -105,15 +105,6 @@ class CustomerUsage(unittest.TestCase):
                     await runtime.usage_requests()
         asyncio.run(run())
 
-    def test_singular_product_alias_preserves_the_original_collection(self):
-        with Runtime(api_key="rk_usage_test", base_url=self.url) as runtime:
-            self.assertIs(runtime.sandbox, runtime.sandboxes)
-
-        async def run():
-            async with AsyncRuntime(api_key="rk_usage_test", base_url=self.url) as runtime:
-                self.assertIs(runtime.sandbox, runtime.sandboxes)
-        asyncio.run(run())
-
     def test_explicit_error_aliases_preserve_old_exception_identity(self):
         self.assertIs(withruntime.RuntimeAPIError, withruntime.RuntimeError)
         self.assertIs(withruntime.RuntimeConnectionError, withruntime.ConnectionError)

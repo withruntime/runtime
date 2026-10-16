@@ -124,3 +124,30 @@ test("`image build --disk-mib` sizes the build's scratch disk", async () => {
   const create = sent.find((s) => s.method === "POST" && s.path === "/v1/images");
   expect(create?.body?.build).toEqual({ diskMiB: 16384 });
 });
+
+test("`snapshots get` says a snapshot kept while the account has credit is, not 'null (null days)'", async () => {
+  const snapshot = {
+    id: "3f7c2d10-0000-4000-8000-000000000001",
+    kind: "snapshot",
+    status: "ready",
+    state: "ready",
+    name: null,
+    sourceSandboxId: SANDBOX,
+    shape: { vcpu: 1, memoryMiB: 512, diskMiB: 4096, memoryGuarantee: "none" },
+    retentionDays: null,
+    storedBytes: 1,
+    meteredBytes: 1,
+    backedUp: false,
+    durability: { state: "pending", durableAt: null, storedBytes: null },
+    labels: {},
+    error: null,
+    createdAt: "2026-09-25T18:30:00Z",
+    readyAt: null,
+    expiresAt: null,
+  };
+  const { text } = await cli(["snapshot", "get", snapshot.id], (_m, url) =>
+    url.pathname === `/v1/snapshots/${snapshot.id}` ? snapshot : undefined,
+  );
+  expect(text).toMatch(/^kept until\s+kept while you have credit$/m);
+  expect(text).not.toContain("null");
+});

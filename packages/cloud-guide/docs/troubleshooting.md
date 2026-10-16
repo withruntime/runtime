@@ -104,9 +104,9 @@ Node from nodejs.org reads no such file, so it starts either way.
 
 | Code                      | What it means                                                                               | What to do                                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `no_credit_running_limit` | Eight sandboxes without credit are already running; `details` names them                    | Stop or pause one, or retry once one ends                                        |
-| `no_credit_domain_limit`  | Your email domain's eight shared slots without credit are all running                       | Stop or pause one, or use paid credit                                            |
-| `included_usage_used_up`  | This month's included usage, or a product's share of it, is used                            | Add credit, or wait for the 1st (UTC)                                            |
+| `no_credit_running_limit` | Four sandboxes without credit are already running; `details` names them                     | Stop or pause one, or retry once one ends                                        |
+| `no_credit_domain_limit`  | Your email domain's eight shared slots without credit are all running                       | Stop or pause one, or add credit                                                 |
+| `included_usage_used_up`  | This month's free usage, or a product's share of it, is used                                | Add credit, or wait for the 1st (UTC)                                            |
 | `no_credit_size_limit`    | A sandbox without credit is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk              | Omit the size fields for the default                                             |
 | `invalid_request`         | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                 |
 | `invalid_region`          | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                 |
@@ -127,29 +127,31 @@ Node from nodejs.org reads no such file, so it starts either way.
 - Once the account holds prepaid credit, it runs more at once, with nothing
   to change.
 
-Once the included usage is used, an account with prepaid credit runs on it with nothing to change; one with neither is refused with `included_usage_used_up` until the 1st (UTC). See how much is left with
+Once the free usage is used, an account with prepaid credit runs on it with nothing to change; one with neither is refused with `included_usage_used_up` until the 1st (UTC). See how much is left with
 `npx withruntime usage`, or with `GET /v1/usage` or `GET /v1/limits`, whose
 `trial.availableMs` is what a new sandbox without credit can still use, in milliseconds, and `allowances` what each pool has left this month.
-See [included usage](./included-usage).
+See [free usage](./included-usage).
 
-## A sandbox's `env`, delete or image switch is refused
+## A sandbox's `env`, stop, delete or image switch is refused
 
-| Code                          | What it means                                                                                                                                                          | What to do                                                                                   |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `invalid_env`                 | A name is not a letter or underscore followed by letters, digits and underscores, or a value holds a NUL; `details.name` says which                                    | Rename the variable, or drop the byte                                                        |
-| `env_too_large`               | More than {{sandbox-env-vars}} variables or {{sandbox-env-size}} in the sandbox, or a command's own `env` and the sandbox's together are more than one command carries | Keep large settings in a file in `/workspace`, or pass fewer in the command                  |
-| `env_unavailable`             | This deployment cannot store an environment; nothing was created or changed                                                                                            | Pass `env` to each `exec` instead                                                            |
-| `env_unreadable`              | Its stored environment could not be opened, a fault on our side, so nothing ran                                                                                        | Set it again with `:update`, or contact support with the request id                          |
-| `sandbox_in_use`              | The sandbox runs a managed service                                                                                                                                     | Delete the service, which ends its sandbox                                                   |
-| `switch_keeps_workspace_only` | `keep` named something other than `"workspace"`: a switch of image keeps only `/workspace`; nothing changed                                                            | Leave `keep` out, or snapshot the sandbox first to keep everything                           |
-| `switch_undone`               | The switch did not finish and was undone: the sandbox is on its old image with its files as they were                                                                  | Retry; a `/workspace` that takes longer than {{switch-copy-time}} to copy cannot be switched |
-| `switch_needs_disk`           | A stopped sandbox that was not persistent kept no disk, so there is nothing to move                                                                                    | Create a new sandbox from the image                                                          |
-| `image_on_another_host`       | The image is stored on another server than the sandbox                                                                                                                 | Create a new sandbox from the image, or build it again                                       |
-| `delete_unavailable`          | Deleting cannot run here yet, a fault on our side that we are told of                                                                                                  | Stop it instead, and delete it later                                                         |
+| Code                          | What it means                                                                                                                                                          | What to do                                                                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_env`                 | A name is not a letter or underscore followed by letters, digits and underscores, or a value holds a NUL; `details.name` says which                                    | Rename the variable, or drop the byte                                                                                        |
+| `env_too_large`               | More than {{sandbox-env-vars}} variables or {{sandbox-env-size}} in the sandbox, or a command's own `env` and the sandbox's together are more than one command carries | Keep large settings in a file in `/workspace`, or pass fewer in the command                                                  |
+| `env_unavailable`             | This deployment cannot store an environment; nothing was created or changed                                                                                            | Pass `env` to each `exec` instead                                                                                            |
+| `resize_unavailable`          | Changing a running sandbox's size is not switched on here; nothing was changed                                                                                         | Create a new sandbox at the size you need                                                                                    |
+| `env_unreadable`              | Its stored environment could not be opened, a fault on our side, so nothing ran                                                                                        | Set it again with `:update`, or contact support with the request id                                                          |
+| `sandbox_in_use`              | The sandbox runs a managed service                                                                                                                                     | Delete the service, which ends its sandbox                                                                                   |
+| `snapshot_in_progress`        | A stop or delete came while a snapshot of the sandbox is still being taken, and would have lost it; nothing changed                                                    | Wait until the snapshot is `ready` (seconds; `GET /v1/snapshots/{id}`), then stop or delete it; or delete the snapshot first |
+| `switch_keeps_workspace_only` | `keep` named something other than `"workspace"`: a switch of image keeps only `/workspace`; nothing changed                                                            | Leave `keep` out, or snapshot the sandbox first to keep everything                                                           |
+| `switch_undone`               | The switch did not finish and was undone: the sandbox is on its old image with its files as they were                                                                  | Retry; a `/workspace` that takes longer than {{switch-copy-time}} to copy cannot be switched                                 |
+| `switch_needs_disk`           | A stopped sandbox that was not persistent kept no disk, so there is nothing to move                                                                                    | Create a new sandbox from the image                                                                                          |
+| `image_on_another_host`       | The image is stored on another server than the sandbox                                                                                                                 | Create a new sandbox from the image, or build it again                                                                       |
+| `delete_unavailable`          | Deleting cannot run here yet, a fault on our side that we are told of                                                                                                  | Stop it instead, and delete it later                                                                                         |
 
 ## Creation returns `starting`
 
-**The SDKs and `npx withruntime sandbox create` wait for `running` for you.**
+**The SDKs and `npx withruntime sandboxes create` wait for `running` for you.**
 Over raw HTTP, send `Prefer: wait=60`, or read the sandbox with
 `?waitFor=running`.
 
@@ -173,11 +175,12 @@ that reads `pause_failed` lost its memory and kept its files.
 | `paused_expired`     | It stayed paused past its `pausedExpiresAt` (seven days without credit, days you set, or seven days after credit ran out), so its memory and disk were deleted                                                                                             | Wake it before then, top up, set `:retention` to `null`, or take a snapshot                                                                      |
 | `insufficient_funds` | The credit ran out, or the account is blocked by a payment that is disputed or [under review](./pricing#when-a-payment-is-under-review)                                                                                                                    | Add credit at Usage & billing. When a dispute or review is the cause, a create answers `account_blocked` and says what clears it                 |
 | `pilot_hours_used`   | The pilot it ran on has used its sandbox hours, so it paused or stopped with its files kept. Credit does not run a pilot's sandbox                                                                                                                         | To extend the pilot or ask for more hours, the account's owner writes to support (support@withruntime.com, or a reply to the pilot's email)      |
-| `pilot_ended`        | The pilot it ran on, and the pilot's grace, are over. A pilot's sandbox runs only on its pilot, and is kept seven days, then deleted, with an email first                                                                                                  | To extend the pilot, the account's owner writes to support before then. New sandboxes run on included usage or credit                            |
+| `pilot_ended`        | The pilot it ran on, and the pilot's grace, are over. A pilot's sandbox runs only on its pilot, and is kept seven days, then deleted, with an email first                                                                                                  | To extend the pilot, the account's owner writes to support before then. New sandboxes run on free usage or credit                                |
 | `lifetime_cap`       | The sandbox reached its own `maxTotalCostMicros`                                                                                                                                                                                                           | Start a new sandbox if the work needs more                                                                                                       |
 | `spending_limit`     | An owner-set spending limit, usually this agent's daily one                                                                                                                                                                                                | See what is left with `GET /v1/limits` or `runtime limits`                                                                                       |
 | `authority_revoked`  | The key or agent that made it was revoked or removed                                                                                                                                                                                                       | Connect the agent again or make a new key, then create a new sandbox                                                                             |
 | `startup_failed`     | It stopped before it was ready to run commands                                                                                                                                                                                                             | If it starts from your image, check the image's start and ready commands; otherwise report the sandbox id                                        |
+| `account_busy_here`  | It can start only on the server that holds its snapshot or image, and your own sandboxes there were short of CPU, so it did not start. Nothing ran in it                                                                                                   | Start it again in a minute, or once some of your sandboxes there are done                                                                        |
 | `service_unready`    | A service on our side that it needs was unavailable, so it could not keep running                                                                                                                                                                          | Create a new one, and report the sandbox id if it happens again                                                                                  |
 | `pause_failed`       | Read on a paused sandbox: the pause could not keep its memory, so the programs that were running are gone, and its files are kept                                                                                                                          | Wake it: it starts fresh from its disk and reads `memoryRestored: false`. Report the sandbox id                                                  |
 | `host_stopped`       | Its machine ended it without a stop being asked for. While it was starting or waking that is our fault; once it was running it can also be a shutdown or crash inside the sandbox                                                                          | Check whether your program shut the machine down; otherwise create a new one and report the sandbox id                                           |
@@ -197,14 +200,14 @@ still unknown, inspect its files and `processes` before repeating a side effect.
 
 ## The service returns 401, 403, 409, 429 or 5xx
 
-| Response           | What to check                                                                               | Safe next step                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 401                | Missing, expired or revoked key; wrong API origin                                           | Check `npx withruntime whoami` or the secret-manager configuration         |
-| 403                | Owner approval, key scope, account suspension or resource ownership                         | Confirm the account and permitted action; do not work around a refusal     |
-| 409                | The resource's state: paused, stopped, not ready, or an account without credit at its limit | Resolve that state, then retry                                             |
-| 422                | The idempotency key was used before with a different body                                   | Same key, same body; or a new key for genuinely new work                   |
-| 429                | Request rate or concurrent work exceeded the server's bound                                 | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
-| 5xx or no response | The write may already have reached the server                                               | Retry identical input with the same idempotency key and inspect state      |
+| Response           | What to check                                                                                                                              | Safe next step                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 401                | Missing, expired or revoked key; wrong API origin                                                                                          | Check `npx withruntime whoami` or the secret-manager configuration         |
+| 403                | Owner approval, key scope, account suspension or resource ownership                                                                        | Confirm the account and permitted action; do not work around a refusal     |
+| 409                | The resource's state: paused (`sandbox_paused` with `autoWake` off says so), stopped, not ready, or an account without credit at its limit | Resolve that state (`wake`, or `autoWake: true`), then retry               |
+| 422                | The idempotency key was used before with a different body                                                                                  | Same key, same body; or a new key for genuinely new work                   |
+| 429                | Request rate or concurrent work exceeded the server's bound                                                                                | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
+| 5xx or no response | The write may already have reached the server                                                                                              | Retry identical input with the same idempotency key and inspect state      |
 
 A 5xx whose message says the fault is ours was reported to us when it happened,
 with its `requestId`. [API errors and retries](./api) describes the full
@@ -213,14 +216,19 @@ contract.
 **`time_limit_too_short` (409) means the command could outlast the sandbox's
 time.** A command is refused, and nothing runs, when the timeout you set is
 longer than the time left before the sandbox's time limit, or before the end of
-its funding once credit, included usage or a spending limit ran out; a paused
+its funding once credit, free usage or a spending limit ran out; a paused
 sandbox is refused before it is woken, so the wake costs nothing. For a time
-limit, raise it first (`runtime sandbox extend <id> 600`, `sbx.extend(600)`);
+limit, raise it first (`runtime sandboxes extend <id> 600`, `sbx.extend(600)`);
 for funding, add credit or raise the limit (`runtime limits`); or give the
 command a shorter timeout. `details.secondsLeft` says how long is left. A
 sandbox with no time limit and credit to run accepts a command of up to 24
 hours. A command with no timeout of yours is not refused: it runs until the
 sandbox's end, unless that is within about three seconds.
+
+At create or resize, `time_limit_too_short` means the time limit is too short
+to load the sandbox's memory back after a pause. The message names the least
+`timeoutSeconds` for that size (190 for 65,536 MiB); use it, leave the limit
+out, or ask for less memory.
 
 ## The command succeeded over HTTP but the task failed
 
@@ -240,11 +248,18 @@ File errors name the path and the reason: `file_not_found`, `is_a_directory`,
 `not_a_directory`, `permission_denied`. Paths are absolute; `/workspace` is home.
 Outside your own files, use `sudo` in a command.
 
+## A command or a write answers `no_space`
+
+The sandbox's disk is full. Commands still run on a full disk, so free space
+with one, such as `rm -rf /workspace/node_modules/.cache` or `du -sh
+/workspace/* | sort -h` to find what is large. A disk cannot be grown in
+place: for more room, create a sandbox with a larger `diskMiB`.
+
 ## Dependencies cannot reach a server
 
 **Check the sandbox's network rules and the destination port.**
 
-- `npx withruntime sandbox network <id>` shows the rules.
+- `npx withruntime sandboxes network <id>` shows the rules.
 - A sandbox without credit reaches ports 80 and 443 only; a paid sandbox of an account
   with a kept top-up reaches every port. `openPorts` in the rules says
   which. See [the sandbox environment](./sandbox-environment#the-network).
@@ -253,6 +268,38 @@ Outside your own files, use `sudo` in a command.
   September 2026: the image kept its own `/etc/resolv.conf`. Build it again;
   every image built since uses Runtime's resolver ([images](./images)).
 - Do not disable security protections to make a migration appear successful.
+
+## A secret's placeholder reaches the server unchanged
+
+**Read the sandbox's `sandbox.secret_not_applied` event first.** Runtime sends
+it when it sees a placeholder go out unreplaced, and its `reason` and
+`message` say why ([events](./observability#events)):
+`npx withruntime events --type sandbox.secret_not_applied`. With no event,
+check, in order, the four things that decide whether a request carries a
+[secret](./security#secrets-sandboxes-never-see).
+
+1. The host. `npx withruntime secrets ls` shows each secret's hosts. The URL's
+   host must be one of them by name: `*.example.com` covers
+   `api.example.com` but not `example.com`, and an IP address never matches.
+2. The request. Only HTTPS carries a secret, and only in its credential
+   header, never in the URL or the body. With `rules`, the method and path
+   must match a rule: `/ingest` does not match `/ingest/`, and a path that
+   could be read two ways (an encoded slash, a semicolon or a backslash) gets
+   no secret that has rules.
+3. The route. Inside the sandbox, run
+   `curl -sv https://<host>/ -o /dev/null 2>&1 | grep -i issuer`. For a secret's
+   host the answer is Runtime's egress certificate. The server's own issuer
+   means the request never reached the step that adds the secret: the client
+   went round the sandbox's proxy (raw sockets and some HTTP libraries ignore
+   `HTTPS_PROXY`), or the host is in its `NO_PROXY`. The sandbox's own
+   `NO_PROXY` lists only loopback and private addresses, so a secret's host is
+   there only if your code added it.
+4. Pinned certificates. A client with its own certificate list needs
+   `/usr/local/share/ca-certificates/runtime-egress.crt` added to it.
+
+If all four hold and the placeholder still arrives,
+write to support with the sandbox's id, the time of the request
+and the output of step 3.
 
 ## The bill differs from an estimate
 
@@ -279,6 +326,46 @@ snapshot. A full host can refuse restoration while preserving the saved state.
 - Keep important outputs outside a sandbox before relying on long retention.
 
 See [storage and retention terms](./pricing) and [isolation](./security).
+
+## A sandbox stays `resuming`, or its operation never finishes
+
+**A wake that is still `resuming` after a minute is stuck on our side.** A
+paused sandbox normally runs its next command {{wake}} after the wake, and one
+that boots from the disk because the memory could not be kept
+(`memoryRestored: false`) within seconds. While a sandbox is `resuming`, a command on it waits up to 30 seconds
+and then answers `sandbox_not_ready`.
+
+**An operation we cannot finish gives up within about a minute.** The
+sandbox then stays in the state it was moving from (`starting`, `resuming`,
+`pausing` or `stopping`), with its files kept and nothing charged, and its
+answer carries `operationFailed`: the action (`start`, `wake`, `pause`, `stop`
+or `delete`) and when it failed. Every command and wake on it answers
+`operation_failed` (503) at once instead of waiting, and our operators are
+alerted. Retrying the same call does not help; a stop or a delete does.
+
+| What you see                                   | What it means                                                                                                                                                                                       |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host_unknown` (5xx)                           | The sandbox's machine failed to carry out the request. The fault is ours, and it was reported when it happened                                                                                      |
+| `fence_conflict` in an operation's result      | The machine would not take the wake as asked, so the sandbox was put back to paused with its files                                                                                                  |
+| `pause_failed` with `memoryRestored: false`    | The programs that were running are gone; the files are kept, and the next wake starts fresh from the disk                                                                                           |
+| `resuming` or `pending` for more than a minute | An operation on the sandbox cannot finish, and calls on it wait behind it                                                                                                                           |
+| `operation_failed` (503), or `operationFailed` | The operation gave up. Stop the sandbox to keep its disk and restart it later, or delete it                                                                                                         |
+| `wake_refused` (503)                           | A wake or restart was refused at once by a fault of ours, before anything ran or was charged. The sandbox stays as it was with its files kept, and we were alerted. Retry the wake in a few minutes |
+
+- Your other sandboxes are not affected: a stuck operation holds one sandbox.
+- Do not delete the stuck sandbox as a retry step, and do not retry commands
+  on it in a loop. Its files are kept while it is stuck.
+- After `operation_failed`, stop it (`runtime sandboxes stop <id>`) to keep
+  its disk, then restart it, or delete it if you do not need its files. A
+  sandbox whose stop or delete gave up can only be deleted; write to support
+  to keep its disk.
+- After `wake_refused`, retry the same wake or restart in a few minutes; it
+  is safe to repeat, and nothing was queued. Its paused storage is not billed
+  from the first refused wake until it can wake. Write to support if it
+  still fails after an hour.
+- Continue in a new sandbox from the same image if the work cannot wait.
+- Write to support with the sandbox id and the time it got stuck. An operator
+  clears it and tells you whether its files can be brought back.
 
 ## Stop returned, but the sandbox is still stopping
 

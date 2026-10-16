@@ -221,7 +221,9 @@ class SyncStreamCleanupTest(unittest.TestCase):
                 pass
             def do_GET(self):
                 self.send_response(200)
-                self.send_header('Content-Length', str(len(body)))
+                # /unread promises a byte it never sends: a body the reader
+                # cannot have finished when its stream is closed.
+                self.send_header('Content-Length', str(len(body) + (self.path == '/unread')))
                 self.end_headers()
                 self.wfile.write(body)
                 self.wfile.flush()
@@ -240,7 +242,7 @@ class SyncStreamCleanupTest(unittest.TestCase):
         self.thread.join()
 
     def test_generator_close_closes_unread_response_without_pool_close(self):
-        stream = self.transport.events('GET', '/events')
+        stream = self.transport.events('GET', '/unread')
         self.assertEqual(next(stream), {'event': 1})
         stream.close()
         self.assertTrue(self.eof.wait(0.5), 'SDK did not close the peer before fixture cleanup')

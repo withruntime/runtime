@@ -54,6 +54,8 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer(RUN)
         if path.startswith("/v1/jobs"):
             return self.answer(JOB)
+        if Stub.mode == "keyed" and path.startswith("/v1/secrets"):
+            return self.keyed(path, body)
         if path == "/v1/secrets" and self.command == "GET":
             return self.answer(Stub.copies)
         if path.endswith(":reveal"):
@@ -63,6 +65,34 @@ class Stub(BaseHTTPRequestHandler):
         if path.startswith("/v1/egress-secrets"):
             return self.answer(EGRESS if self.command == "PUT" else {"name": "x", "deleted": True, "enforced": True})
         self.answer({"error": {"code": "not_found", "message": "no"}}, 404)
+
+    # Each Idempotency-Key kept with its request, as cloud_secret_mutate keeps
+    # it: the same request answers as it did, another is refused. `lose`
+    # drops the next write's answer.
+    keys: dict = {}
+    version = 0
+    lose = False
+    writes = 0
+
+    def keyed(self, path, body):
+        copy = {**COPY, "version": Stub.version}
+        if self.command == "GET":
+            return self.answer([copy] if Stub.version else [])
+        key = self.headers.get("idempotency-key")
+        asked = (path, json.dumps(body, sort_keys=True))
+        if key in Stub.keys:
+            if Stub.keys[key][0] != asked:
+                return self.answer({"error": {"code": "idempotency_conflict", "message": "Key used."}}, 409)
+            answer = Stub.keys[key][1]
+        else:
+            Stub.writes += 1
+            Stub.version = Stub.version + 1 if path.endswith(":rotate") else 1
+            answer = {**COPY, "version": Stub.version}
+            Stub.keys[key] = (asked, answer)
+        if Stub.lose:
+            Stub.lose = False
+            return self.answer({"error": {"code": "bad_gateway", "message": "lost"}}, 502)
+        return self.answer(answer)
 
     do_GET = do_POST = do_PUT = do_DELETE = handle_any
 
@@ -151,6 +181,32 @@ class JobsTest(unittest.TestCase):
             ("GET", "/v1/secrets"), ("DELETE", "/v1/egress-secrets/DB_PASSWORD"),
             ("POST", f"/v1/secrets/{SECRET_ID}:delete")])
         self.assertEqual(Stub.seen[3][2], {"value": "new", "expectedVersion": 2})
+
+    def test_a_keyed_set_or_rotate_whose_answer_was_lost_answers_again_without_a_second_rotation(self):
+        Stub.mode, Stub.keys, Stub.version, Stub.writes = "keyed", {}, 0, 0
+        fresh = lambda: Runtime(api_key="rk_test", base_url=self.url, max_retries=0)  # noqa: E731
+        Stub.lose = True
+        with fresh() as runtime, self.assertRaises(Exception):
+            runtime.secrets.set("DB_PASSWORD", value="a", jobs=True, idempotency_key="set-1")
+        with fresh() as runtime:
+            saved = runtime.secrets.set("DB_PASSWORD", value="a", jobs=True, idempotency_key="set-1")
+            self.assertEqual(saved["jobs"]["version"], 1)
+        Stub.lose = True
+        with fresh() as runtime, self.assertRaises(Exception):
+            runtime.secrets.rotate("DB_PASSWORD", "b", idempotency_key="rot-1")
+        with fresh() as runtime:
+            self.assertEqual(runtime.secrets.rotate("DB_PASSWORD", "b", idempotency_key="rot-1")["version"], 2)
+        Stub.lose = True
+        with fresh() as runtime, self.assertRaises(Exception):
+            runtime.secrets.set("DB_PASSWORD", value="c", jobs=True, idempotency_key="set-2")
+        with fresh() as runtime:
+            saved = runtime.secrets.set("DB_PASSWORD", value="c", jobs=True, idempotency_key="set-2")
+            self.assertEqual(saved["jobs"]["version"], 3)
+            self.assertEqual(Stub.writes, 3)
+            with self.assertRaises(Exception) as caught:
+                runtime.secrets.set("DB_PASSWORD", value="other", jobs=True, idempotency_key="set-2")
+            self.assertEqual(caught.exception.code, "idempotency_conflict")
+        self.assertEqual(Stub.writes, 3)
 
     def test_both_copies_report_a_partial_store_and_the_retry_finishes(self):
         Stub.mode = "jobs-off"

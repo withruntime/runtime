@@ -1,7 +1,7 @@
 import type { RequestOptions, Transport } from "../transport.js";
 
-/* Switching from a rival: what your sandboxes would have cost there, and the
- * switching credit. Money is integer microdollars in strings (1,000,000 = $1). */
+/* Switching from a rival: what your sandboxes would have cost there, the
+ * switch on record, and the welcome match. Money is integer microdollars in strings (1,000,000 = $1). */
 
 /** The rivals a comparison prices. `fly` is Sprites; `fly-machines` is
  * Machines, priced only at the size Fly publishes a rate for here. The server
@@ -25,7 +25,7 @@ export type SwitchProvider =
 export type SwitchingSummary = {
   /** False while the programme is paused. */
   enabled: boolean;
-  /** The most a first top-up is matched to. */
+  /** The most the organization's payments are matched to, in total. */
   maxMicros: string;
   providers: SwitchProvider[];
   /** Whether this organization can record a switch now: none recorded, and
@@ -33,14 +33,42 @@ export type SwitchingSummary = {
   eligible: boolean;
   switch: {
     provider: SwitchProvider;
-    /** superseded: a referral matched the first top-up instead, which is
+    /** superseded: a referral matches the payments instead, which is
      * never less. The two are never both paid. */
     status: "pending" | "paid" | "superseded" | "refused" | "reversed";
-    refusedReason: "program_off" | "suspended" | "same_card" | "fraud" | null;
+    refusedReason: "program_off" | "suspended" | "same_card" | "fraud" | "too_late" | null;
     recordedAt: string;
-    /** The switching credit this organization got and kept. */
+    /** The matches this organization got and kept. */
     creditMicros: string;
   } | null;
+  /** The welcome match: credit an organization adds within 30 days of
+   * signing up is matched, up to $1,000 in total. */
+  welcome: WelcomeMatch;
+};
+
+export type WelcomeMatch = {
+  /** False while the match is paused. */
+  enabled: boolean;
+  /** The most the organization's payments are matched to, in total. */
+  maxMicros: string;
+  /** When the offer ends: 30 days after the organization signed up. */
+  endsAt: string;
+  /** Whether credit added now would be matched: some is left, before endsAt. */
+  eligible: boolean;
+  /** Whether credit has been added. */
+  toppedUp: boolean;
+  /** Null until a payment is decided; paid while a match is kept.
+   * superseded: a referral matches the payments instead, which is never
+   * less. */
+  status: "pending" | "paid" | "superseded" | "refused" | "reversed" | null;
+  /** The matches this organization got and kept. */
+  creditMicros: string;
+  /** The part of maxMicros used so far. Absent from a server before
+   * 8 October 2026. */
+  usedMicros?: string;
+  /** What credit added now could still get; "0" once the offer ends. Absent
+   * from a server before 8 October 2026. */
+  leftMicros?: string;
 };
 
 export type UsageComparison = {
@@ -87,8 +115,9 @@ export type UsageComparison = {
 };
 
 /** `runtime.switching`: compare your usage with a rival's published rates,
- * and record the rival you are leaving so your first top-up is matched, up to
- * $100, once the payment settles. */
+ * record the rival you are leaving, and read the welcome match: credit added
+ * within 30 days of signing up is matched, up to $1,000 in total, as each
+ * payment settles. */
 export function switching(t: Transport) {
   return {
     /** Your settled sandbox usage over the last `days` (default 30, at most
@@ -100,7 +129,7 @@ export function switching(t: Transport) {
         query: { provider: input.provider, days: input.days },
         ...options,
       }),
-    /** Whether a switch can still be recorded, and what it paid. */
+    /** Whether a switch can still be recorded, and what the welcome match paid. */
     get: (options?: RequestOptions) =>
       t.json<SwitchingSummary>({ method: "GET", path: "/v1/switching", ...options }),
     /** Once per organization, before its first top-up. Recording the same

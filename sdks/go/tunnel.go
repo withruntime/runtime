@@ -28,7 +28,7 @@ type tunnelMessage struct {
 }
 
 // Tunnel multiplexes TCP connections over one authenticated sandbox WebSocket.
-// It is unrelated to Client.Tunnel, which manages an account's WireGuard network.
+// It is unrelated to Client.Networks.WireGuard, which manages an account's WireGuard network.
 type Tunnel struct {
 	socket         *websocket
 	ctx            context.Context

@@ -1,6 +1,8 @@
 import { PagePromise, DevboxViewsCursorIDPage } from "./pagination.js";
+export { RunloopSDK, Devbox, Execution, ExecutionResult, RunloopError } from "./sdk.js";
 import type { Runtime } from "../client.js";
 import { Sandbox } from "../sandbox.js";
+import { timeoutSignal } from "../transport.js";
 import type { CommandResult, SandboxInfo } from "../types.js";
 import {
   DiskSnapshots,
@@ -187,6 +189,42 @@ export interface DevboxListParams {
 }
 export class Runloop {
   readonly devboxes: Devboxes;
+  get secrets(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "duplicate-name secret rows and secret-ID handles; use the Runtime secrets API",
+    );
+  }
+  get objects(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "signed storage-object uploads; use Runtime sandbox files",
+    );
+  }
+  get axons(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "Axon registries and deleted event records; use the Runtime events API",
+    );
+  }
+  get gatewayConfigs(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "named gateway bindings; use the Runtime secrets API with direct service requests",
+    );
+  }
+  get mcpConfigs(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "named MCP grants; use the Runtime secrets API with your MCP client",
+    );
+  }
+  get networkPolicies(): never {
+    throw new CompatibilityError(
+      "Runloop",
+      "reusable named network-policy bindings; use Runtime sandbox egress settings",
+    );
+  }
   constructor(options: ClientOptions & { bearerToken?: string; baseURL?: string } = {}) {
     const { bearerToken, baseURL, ...rest } = options;
     this.devboxes = new Devboxes(
@@ -334,7 +372,7 @@ export class Devboxes {
     if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0))
       throw new Error("timeoutMs must be positive");
     if (options.signal?.aborted) throw new LongPollAbortError("Long poll aborted", undefined);
-    const deadline = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+    const deadline = timeoutMs === undefined ? undefined : timeoutSignal(timeoutMs);
     const signal =
       deadline && options.signal
         ? AbortSignal.any([deadline, options.signal])
@@ -708,20 +746,17 @@ export class Executions {
   async sendStdIn(
     id: string,
     execution: string,
-    body: { text?: string | null; signal?: "EOF" | "INTERRUPT" | null } | RequestOptions = {},
+    body: { text?: string | null; signal?: "EOF" | "INTERRUPT" | null },
     options: RequestOptions = {},
   ): Promise<{ devbox_id: string; execution_id: string; success: boolean }> {
-    if (
-      requestOptions(body) &&
-      (body.signal === undefined || (typeof body.signal === "object" && body.signal !== null))
-    )
-      return this.sendStdIn(id, execution, {}, body);
     options.signal?.throwIfAborted();
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new TypeError("Runloop stdin requires a body with nonempty text or a signal");
     only("Runloop stdin", body, ["text", "signal"]);
-    const text = "text" in body ? body.text : undefined;
+    const text = body.text;
     const bodySignal = body.signal;
-    if (text !== undefined && text !== null && typeof text !== "string")
-      throw new TypeError("Runloop stdin text must be a string");
+    if (text !== undefined && text !== null && (typeof text !== "string" || text.length === 0))
+      throw new TypeError("Runloop stdin text must be a nonempty string");
     if (
       bodySignal !== undefined &&
       bodySignal !== null &&
@@ -729,6 +764,8 @@ export class Executions {
       bodySignal !== "INTERRUPT"
     )
       throw new TypeError("Runloop stdin signal must be EOF or INTERRUPT");
+    if ((text != null) === (bodySignal != null))
+      throw new TypeError("Runloop stdin requires exactly one of nonempty text or a signal");
     if (options.idempotencyKey !== undefined && (text || bodySignal === "EOF"))
       throw new CompatibilityError(
         "Runloop",

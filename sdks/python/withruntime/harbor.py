@@ -8,8 +8,7 @@ or its ``docker_image``, with no Harbor change::
 
 Install with ``pip install "withruntime[harbor]"``. The key comes from
 RUNTIME_API_KEY or the machine's ``runtime login``, as for ``AsyncRuntime``.
-Options arrive as ``--ek name=value``: ``funding`` ("trial" or "paid"),
-``region``, ``image`` (an existing Runtime image to use as it is), ``build``
+Options arrive as ``--ek name=value``: ``region``, ``image`` (an existing Runtime image to use as it is), ``build``
 (build limits such as ``{"disk_mib": 16384}``), ``labels`` and ``base_url``.
 
 How it maps Harbor onto Runtime:
@@ -70,9 +69,7 @@ class RuntimeEnvironment(BaseEnvironment):
                  image: Optional[str] = None, build: Optional[dict[str, Any]] = None,
                  labels: Optional[dict[str, str]] = None, base_url: Optional[str] = None,
                  runtime: Optional[AsyncRuntime] = None, **kwargs: Any) -> None:
-        if funding not in (None, "trial", "paid"):
-            raise ValueError(f'funding must be "trial" or "paid", not {funding!r}')
-        self._funding = funding
+        # funding is accepted and ignored: the account decides, free usage first, then credit.
         self._region = region
         self._image = image
         self._build = build
@@ -145,7 +142,7 @@ class RuntimeEnvironment(BaseEnvironment):
         source, key = self._image_source(force_build)
         tag = image_tag(key)
         build = dict(self._build or {})
-        build.setdefault("timeout_seconds", max(60, min(3600, int(self.task_env_config.build_timeout_sec))))
+        build.setdefault("timeout_seconds", max(60, min(86400, int(self.task_env_config.build_timeout_sec))))
         try:
             return await ensure_image(
                 self._client(), image_name("harbor", self.environment_name), tag, source, rebuild=force_build,
@@ -165,19 +162,16 @@ class RuntimeEnvironment(BaseEnvironment):
         return {"internet": True}
 
     def _create_fields(self, image: str) -> dict[str, Any]:
-        sizes, notes = _sizes(self._effective_cpus, self._effective_memory_mb, self._effective_storage_mb,
-                              self._funding == "trial")
+        sizes, notes = _sizes(self._effective_cpus, self._effective_memory_mb, self._effective_storage_mb, False)
         for note in notes:
             self.logger.warning("Runtime: %s.", note)
         fields: dict[str, Any] = {"image": image, "idle_pause_seconds": 0, **sizes,
                                   "labels": {"created_by": "harbor", "harbor_task": self.environment_name[:256],
                                              "harbor_session": self.session_id[:256], **self._labels}}
-        if self._cpu_resource_mode in (ResourceMode.REQUEST, ResourceMode.GUARANTEE) and self._funding != "trial":
+        if self._cpu_resource_mode in (ResourceMode.REQUEST, ResourceMode.GUARANTEE):
             fields["cpu"] = "reserved"  # CPU without credit is always shared.
         if self.network_policy.network_mode != NetworkMode.PUBLIC:
             fields["network"] = self._network(self.network_policy)
-        if self._funding:
-            fields["funding"] = self._funding
         if self._region:
             fields["region"] = self._region
         return fields
@@ -187,12 +181,12 @@ class RuntimeEnvironment(BaseEnvironment):
         try:
             return await self._client().sandboxes.create(**fields)
         except RuntimeCloudError as error:
-            if error.code != "no_credit_size_limit" or self._funding is not None:
+            if error.code != "no_credit_size_limit":
                 raise
-            # No funding named, and the account is on its trial: run at the trial's largest size.
+            # The account has no credit: run at the largest size without credit.
             sizes, notes = _sizes(self._effective_cpus, self._effective_memory_mb, self._effective_storage_mb, True)
-            self.logger.warning("Runtime: this account runs on its trial, so %s. Pass --ek funding=paid for "
-                                "the size the task asks.", "; ".join(notes) or "the size was cut")
+            self.logger.warning("Runtime: this account has no credit, so %s. Add credit for the size the task "
+                                "asks.", "; ".join(notes) or "the size was cut")
             fields.update(sizes)
             fields.pop("cpu", None)
             return await self._client().sandboxes.create(**fields)

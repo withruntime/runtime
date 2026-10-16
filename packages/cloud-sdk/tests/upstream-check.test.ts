@@ -504,7 +504,6 @@ test("malformed reviewed HTTP200 metadata is fatal review, never an outer offlin
         await checkUpstreams(validateLock(oneReviewLock(pin)), async () => new Response(body))
       )[0]!;
       expect(finding.status).toBe("review");
-      // scripts/check.ts network() refuses [review], while [unavailable] may warn offline.
       expect(`[${finding.status}] example / ${pin.name}: ${finding.message}`).toContain("[review]");
     }
   }
@@ -590,4 +589,42 @@ test("npm latest is authoritative when an older mistaken major release remains p
   expect(compareLatestReview(reviewNpm, document).status).toBe("current");
   document["dist-tags"].latest = "3.0.5";
   expect(compareLatestReview(reviewNpm, document).status).toBe("review");
+});
+
+test("a Python release published during a review stays watched once recorded as reviewed between", () => {
+  const between = "c".repeat(64);
+  const pin = structuredClone(reviewPy);
+  pin.latestReview!.version = "1.2.5";
+  const document = () => ({
+    ...pyRelease("1.2.5", "new.whl", "a".repeat(64)),
+    releases: {
+      "1.2.3": pyRelease("1.2.3", "old.whl", "b".repeat(64)).urls,
+      "1.2.4": pyRelease("1.2.4", "mid.whl", between).urls,
+      "1.2.5": pyRelease("1.2.5", "new.whl", "a".repeat(64)).urls,
+    },
+  });
+  expect(compareLatestReview(pin, document(), pinnedPyDocument()).status).toBe("review");
+  pin.latestReview!.between = { "1.2.4": { "mid.whl": `sha256-${between}` } };
+  expect(validateLock(oneReviewLock(pin)).providers.length).toBe(1);
+  expect(compareLatestReview(pin, document(), pinnedPyDocument()).status).toBe("current");
+  const replaced = document();
+  replaced.releases["1.2.4"][0]!.digests.sha256 = "d".repeat(64);
+  expect(compareLatestReview(pin, replaced, pinnedPyDocument()).status).toBe("review");
+  const yanked = document();
+  yanked.releases["1.2.4"][0]!.yanked = true;
+  expect(compareLatestReview(pin, yanked, pinnedPyDocument()).status).toBe("review");
+  const bads: Record<string, Record<string, string>>[] = [
+    { "1.2.3": { "mid.whl": `sha256-${between}` } },
+    { "1.2.5": { "mid.whl": `sha256-${between}` } },
+    { "1.2.4": { "mid.whl": "sha512-notsha256" } },
+    { "1.2.4": {} },
+  ];
+  for (const bad of bads) {
+    const invalid = structuredClone(pin);
+    invalid.latestReview!.between = bad;
+    expect(() => validateLock(oneReviewLock(invalid))).toThrow();
+  }
+  const npmBetween = structuredClone(reviewNpm);
+  npmBetween.latestReview!.between = { "1.2.4": { "1.2.4": `sha256-${between}` } };
+  expect(() => validateLock(oneReviewLock(npmBetween))).toThrow();
 });

@@ -95,15 +95,15 @@ covers both.
 The agent sees every tool of Runtime's [MCP server](./mcp#tools), named
 `runtime_<product>_<verb>`. The ones a builder uses most:
 
-| Tool                          | What the agent does with it                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| `runtime_sandbox_create`      | Start a sandbox of the size it needs, from Runtime's base image or yours       |
-| `runtime_sandbox_exec`        | Run a command and read its exit code and output, or start it in the background |
-| `runtime_sandbox_files_write` | Write the files it generated                                                   |
-| `runtime_sandbox_previews`    | Share a port at a private HTTPS address under `runtimehost.com`                |
-| `runtime_sandbox_manage`      | Pause, wake, extend or stop                                                    |
-| `runtime_sandbox_fork`        | Copy a running sandbox, memory included, to try two approaches at once         |
-| `runtime_image_build`         | Build an image from a Dockerfile once, so later sandboxes start ready          |
+| Tool                            | What the agent does with it                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------ |
+| `runtime_sandboxes_create`      | Start a sandbox of the size it needs, from Runtime's base image or yours       |
+| `runtime_sandboxes_exec`        | Run a command and read its exit code and output, or start it in the background |
+| `runtime_sandboxes_files_write` | Write the files it generated                                                   |
+| `runtime_sandboxes_previews`    | Share a port at a private HTTPS address under `runtimehost.com`                |
+| `runtime_sandboxes_manage`      | Pause, wake, extend or stop                                                    |
+| `runtime_sandboxes_fork`        | Copy a running sandbox, memory included, to try two approaches at once         |
+| `runtime_images_build`          | Build an image from a Dockerfile once, so later sandboxes start ready          |
 
 A pattern that uses both machines: the agent writes and tests code in its
 session container, then deploys the result to a named Runtime sandbox with a
@@ -129,8 +129,7 @@ wakes it, and carries on.
 CPU is billed as used, {{cpu-rate}} per vCPU-hour with a floor of {{cpu-floor}}, and
 reserved memory at {{memory-rate}} per GiB-hour. A 2 vCPU, 4 GiB sandbox costs {{busy-hour}} an
 hour with both CPUs busy and {{idle-hour}} an hour while it waits. A paused sandbox
-pays only storage ([pricing](./pricing)). Every account gets {{included-machine}} included
-every month, no card.
+pays only storage ([pricing](./pricing)). Every account gets {{included-machine}} every month, no card.
 
 ## What was verified
 

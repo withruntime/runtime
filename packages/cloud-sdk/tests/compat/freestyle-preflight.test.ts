@@ -65,7 +65,7 @@ test("Freestyle snapshot listing preserves source filters, pagination and totalC
       },
     },
   } as unknown as Runtime;
-  // freestyle 0.2.16 ListSnapshotsOptions and ListSnapshotsResult expose all
+  // freestyle 0.2.17 ListSnapshotsOptions and ListSnapshotsResult expose all
   // three options and the filtered totalCount, independently of the page.
   const result = await new VmsNamespace(runtime).snapshots.list({
     sourceVmId: "vm-a",

@@ -2,6 +2,7 @@
 
 These tests establish adapter mappings. They do not claim provider/platform parity.
 """
+import builtins
 import asyncio
 import json
 import os
@@ -207,6 +208,10 @@ class SpritesTests(Base):
         self.assertEqual(error.exception.exit_code(), 4)
         self.world.exec = lambda *args: Result(exit_code=None, timed_out=True)
         with self.assertRaises(SpriteTimeoutError):
+            sprite.run("sleep", "10", timeout=1, capture_output=True)
+        # sprites-py 0.7.2: a Sprites timeout is also Python's own, so
+        # `except TimeoutError` written for the standard library catches it.
+        with self.assertRaises(builtins.TimeoutError):
             sprite.run("sleep", "10", timeout=1, capture_output=True)
 
 
@@ -485,11 +490,12 @@ class ReviewedContracts(Base):
 
     def test_prime_wait_options_are_not_silently_dropped(self):
         sdk = SandboxClient(self.client)
-        for params in ({"image_build_timeout_seconds": 20}, {"stability_checks": 2}):
-            with self.assertRaises(CompatibilityError):
+        with self.assertRaises(CompatibilityError):
+            sdk.wait_for_creation("not-looked-up", stability_checks=2)
+        # create builds the image before it answers: the build deadline is checked, then has nothing to wait for.
+        for params in ({"max_attempts": 0}, {"image_build_timeout_seconds": 0}):
+            with self.assertRaises(ValueError):
                 sdk.wait_for_creation("not-looked-up", **params)
-        with self.assertRaises(ValueError):
-            sdk.wait_for_creation("not-looked-up", max_attempts=0)
 
     def test_modal_image_list_arguments_and_empty_noop(self):
         image = Image.debian_slim()

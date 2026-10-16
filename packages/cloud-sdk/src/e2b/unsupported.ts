@@ -28,7 +28,7 @@ export function unsupportedExport(name: string, alternative: string): Unsupporte
 }
 
 const TEMPLATES =
-  "Build a Runtime image instead: `npx withruntime image build --dockerfile e2b.Dockerfile --name <template>` or runtime.images.build({ name, dockerfile | recipe }), then Sandbox.create('<template>').";
+  "Build a Runtime image instead: `npx withruntime images build --dockerfile e2b.Dockerfile --name <template>` or runtime.images.build({ name, dockerfile | recipe }), then Sandbox.create('<template>').";
 
 export const Template = unsupportedExport("Template builder", TEMPLATES);
 export const TemplateBase = unsupportedExport("TemplateBase", TEMPLATES);

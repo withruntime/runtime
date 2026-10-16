@@ -6,9 +6,9 @@
 #     # set domain["records"] at your DNS provider, then
 #     await runtime.domains.verify("app.example.com")
 #     db = await runtime.ports.open(sandbox_id=sbx.id, port=5432)   # db["connect"]
-#     ip = await runtime.addresses.reserve()                         # ip["address"]
-#     await runtime.tunnel.create()
-#     office = await runtime.tunnel.add_peer("office", routes=["10.0.0.0/16"])
+#     ip = await runtime.ips.reserve()                         # ip["address"]
+#     await runtime.networks.wireguard.create()
+#     office = await runtime.networks.wireguard.add_peer("office", routes=["10.0.0.0/16"])
 #     # office["config"] is a wg-quick file: sudo wg-quick up ./runtime.conf
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from typing import Any, Optional, TypedDict, Literal
 from urllib.parse import quote
 
 from .private_network import AsyncPrivateNetwork
+from .signed_requests import AsyncSignedRequests
 
 
 class NetworkFunding(TypedDict):
@@ -104,37 +105,37 @@ class AsyncPorts:
 
 
 class AsyncAddresses:
-    """``runtime.addresses``: a dedicated outbound address every sandbox of the
+    """``runtime.ips``: a dedicated outbound address every sandbox of the
     account sends from, for allow-lists."""
 
     def __init__(self, t: Any) -> None:
         self._t = t
 
     async def reserve(self, *, family: int = 4) -> AddressResult:
-        return await self._t.json("POST", "/v1/addresses", body={"family": family})
+        return await self._t.json("POST", "/v1/ips", body={"family": family})
 
     async def list(self) -> list[AddressResult]:
-        return (await self._t.json("GET", "/v1/addresses"))["data"]
+        return (await self._t.json("GET", "/v1/ips"))["data"]
 
     async def release(self, address_id: str) -> dict[str, Any]:
-        return await self._t.json("DELETE", f"/v1/addresses/{quote(address_id, safe='')}")
+        return await self._t.json("DELETE", f"/v1/ips/{quote(address_id, safe='')}")
 
 
 class AsyncTunnel:
-    """``runtime.tunnel``: a WireGuard tunnel from your own network into your sandboxes."""
+    """``runtime.networks.wireguard``: a WireGuard tunnel from your own network into your sandboxes."""
 
     def __init__(self, t: Any) -> None:
         self._t = t
 
     async def get(self) -> TunnelResult:
-        return await self._t.json("GET", "/v1/tunnel")
+        return await self._t.json("GET", "/v1/networks/wireguard")
 
     async def create(self, *, subnet: Optional[str] = None) -> TunnelResult:
         """Idempotent: returns the tunnel you have."""
-        return await self._t.json("POST", "/v1/tunnel", body={} if subnet is None else {"subnet": subnet})
+        return await self._t.json("POST", "/v1/networks/wireguard", body={} if subnet is None else {"subnet": subnet})
 
     async def delete(self) -> dict[str, Any]:
-        return await self._t.json("DELETE", "/v1/tunnel")
+        return await self._t.json("DELETE", "/v1/networks/wireguard")
 
     async def add_peer(self, name: str, *, public_key: Optional[str] = None,
                        routes: Optional[list[str]] = None) -> TunnelPeerResult:
@@ -145,26 +146,26 @@ class AsyncTunnel:
         body: dict[str, Any] = {"name": name, "routes": routes or []}
         if public_key is not None:
             body["publicKey"] = public_key
-        return await self._t.json("POST", "/v1/tunnel/peers", body=body)
+        return await self._t.json("POST", "/v1/networks/wireguard/peers", body=body)
 
     async def rotate_peer(self, peer_id: str, *, public_key: Optional[str] = None) -> TunnelPeerResult:
         """A new key; the old one stops working within seconds."""
-        return await self._t.json("POST", f"/v1/tunnel/peers/{quote(peer_id, safe='')}:rotate",
+        return await self._t.json("POST", f"/v1/networks/wireguard/peers/{quote(peer_id, safe='')}:rotate",
                                   body={} if public_key is None else {"publicKey": public_key})
 
     async def remove_peer(self, peer_id: str) -> TunnelResult:
-        return await self._t.json("DELETE", f"/v1/tunnel/peers/{quote(peer_id, safe='')}")
+        return await self._t.json("DELETE", f"/v1/networks/wireguard/peers/{quote(peer_id, safe='')}")
 
 
 class AsyncUpstreamProxy:
-    """``runtime.network.upstream_proxy``: send your sandboxes' outbound
+    """``runtime.networks.upstream_proxy``: send your sandboxes' outbound
     connections through your own HTTP or HTTPS proxy. After Runtime's own rules
     allow a connection, the host reaches it with CONNECT through your proxy, so
     your proxy's controls and logs apply. A proxy that refuses or cannot be
     reached fails the connection (upstream-proxy-failed); nothing goes around
     it. Paid accounts only.
 
-        await runtime.network.upstream_proxy.set("http://proxy.example.com:3128")
+        await runtime.networks.upstream_proxy.set("http://proxy.example.com:3128")
     """
 
     def __init__(self, t: Any) -> None:
@@ -182,22 +183,25 @@ class AsyncUpstreamProxy:
             body["secret"] = secret
         if hosts is not None:
             body["hosts"] = hosts
-        return await self._t.json("PUT", "/v1/network/upstream-proxy", body=body)
+        return await self._t.json("PUT", "/v1/networks/upstream-proxy", body=body)
 
     async def get(self) -> dict[str, Any]:
         """The proxy in use. Raises ``NotFoundError`` when none is set."""
-        return await self._t.json("GET", "/v1/network/upstream-proxy")
+        return await self._t.json("GET", "/v1/networks/upstream-proxy")
 
     async def remove(self) -> dict[str, Any]:
         """Connections leave directly again, within seconds. Raises
         ``NotFoundError`` when none is set."""
-        return await self._t.json("DELETE", "/v1/network/upstream-proxy")
+        return await self._t.json("DELETE", "/v1/networks/upstream-proxy")
 
 
 class AsyncAccountNetwork:
-    """``runtime.network``: the network settings of the whole account. A
+    """``runtime.networks``: the networks of the whole account: the WireGuard
+    tunnel in, your sandboxes reaching each other, and the proxy out. A
     sandbox's own rules are ``sandbox.network``."""
 
     def __init__(self, t: Any) -> None:
+        self.wireguard = AsyncTunnel(t)
         self.upstream_proxy = AsyncUpstreamProxy(t)
         self.private = AsyncPrivateNetwork(t)
+        self.signed_requests = AsyncSignedRequests(t)

@@ -10,11 +10,11 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.1.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.2.0")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
@@ -43,11 +43,13 @@ public class Hello {
 }
 ```
 
-`create` returns once the sandbox is running, and closing it stops it. With no
-options you get the included usage while it lasts, the default region, and 2 vCPU,
+`create` returns once the sandbox is running, and closing it deletes it;
+`new CreateSandbox().keep()` makes closing stop it instead and keep its disk,
+and `delete()` deletes one at any time. With no
+options you get the free usage while it lasts, the default region, and 2 vCPU,
 4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
 when idle, with no time limit (`timeoutSeconds(seconds)` sets one, 60 to
-86,400). The included usage is spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
+86,400). The free usage is spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
 
 ```java
 import com.withruntime.*;
@@ -336,7 +338,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `retryable()` says whether trying the same call again may work.
 
-**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
+**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes().create` waits and sends the same request again,
 for up to two minutes. Set `waitForCapacity` on the client builder, or on one
@@ -398,11 +400,11 @@ public class NetworkProductsExample {
     RuntimeClient runtime = RuntimeClient.create();
     JsonObject domain = runtime.domains().add("app.example.org", args[0], 8080);
     System.out.println(domain.getObjects("records")); // Publish these DNS records, then verify.
-    JsonObject address = runtime.addresses().reserve(4);
+    JsonObject address = runtime.ips().reserve(4);
     System.out.println(address.getString("address"));
     System.out.println(address.getLong("rateMicros"));
-    runtime.tunnel().create("10.66.0.0/24");
-    JsonObject peer = runtime.tunnel().addPeer("laptop", null, List.of());
+    runtime.networks().wireguard().create("10.66.0.0/24");
+    JsonObject peer = runtime.networks().wireguard().addPeer("laptop", null, List.of());
     // Save peer.getString("config") privately, even when configReady is false.
     // Its private key is shown once; generated-key calls are not automatically retried.
     System.out.println(peer.getBoolean("configReady"));

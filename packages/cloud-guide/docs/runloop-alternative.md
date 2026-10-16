@@ -32,11 +32,11 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
   processes, and try several things from exactly that point.
 - **No plan fee.** Runloop's Pro plan is {{term:runloop:pro}} a month plus usage. Runtime is
-  prepaid credit from {{topup-min}}, with {{included-machine}} included every month.
+  prepaid credit from {{topup-min}}, with {{included-machine}} every month.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -94,7 +94,7 @@ terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Runloop calls on a branch, tests them on the included usage, and tells
+replaces the Runloop calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 

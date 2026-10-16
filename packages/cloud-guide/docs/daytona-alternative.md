@@ -35,8 +35,7 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   the sandbox runs or not. Runtime's disk is part of a running sandbox.
 - **A one-line switch.** `withruntime/daytona` runs code written for Daytona's
   SDK, in JavaScript and Python: sessions, files, git, snapshots built from
-  Daytona's `Image`, and the code interpreter. Run `runtime switch --from daytona` before your
-  first top-up and it is matched, up to {{switching-max}}.
+  Daytona's `Image`, and the code interpreter. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)). Daytona's single sign-on is OIDC,
@@ -45,7 +44,7 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   hostname, with HTTPS, from one command ([custom domains](./networking#custom-domains)).
   On Daytona, a preview under your own domain needs a preview proxy you deploy
   and run yourself.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -102,7 +101,7 @@ Daytona  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:daytona:cpu}} = {{part:dayt
 
 Disk, network, taxes and free credits are left out of both.
 `runtime compare --from daytona` prices your own usage the same way, with
-sandboxes the included usage paid for at the standard rates, so included usage never
+sandboxes the free usage paid for at the standard rates, so free usage never
 counts as a saving. On Runtime, inbound traffic is free, and each account's
 first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
@@ -110,7 +109,7 @@ for Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Daytona calls on a branch, tests them on the included usage, and tells
+replaces the Daytona calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -129,7 +128,7 @@ from withruntime.daytona import Daytona  # was: from daytona import Daytona
 
 Sandboxes get Daytona's defaults: 1 vCPU, 1 GiB of memory and a 3 GiB disk,
 pausing after 15 minutes without calls. `stop()` pauses a sandbox with its
-files and its memory, and `start()` carries on. They use the included usage first, then prepaid credit.
+files and its memory, and `start()` carries on. They use the free usage first, then prepaid credit.
 
 PTY sessions, computer use, a `user` from your image, an `autoStopInterval`
 over an hour (or `0`), and list filters and sorting work as on Daytona. A call

@@ -423,7 +423,7 @@ describe("commands.run", () => {
     expect(world.called("sandbox.execStream").at(-1)![1]).toMatchObject({ timeoutMs: 86_400_000 });
   });
 
-  test("a command whose sandbox is killed under it fails with E2B's TimeoutError", async () => {
+  test("a command whose sandbox is killed under it fails with E2B's SandboxNotRunningError", async () => {
     // 5 October 2026, E2B's own suite: it was a SandboxNotFoundError.
     const sbx = await create();
     world.outputError = notFound("not_found", "No sandbox with that id.");
@@ -433,6 +433,7 @@ describe("commands.run", () => {
     expect((error as Error).message).toMatch(
       /ended before the stream completed|sandbox was killed/,
     );
+    expect((error as Error).name).toBe("SandboxNotRunningError");
     expect((error as Error).cause).toBeInstanceOf(SandboxNotFoundError);
   });
 

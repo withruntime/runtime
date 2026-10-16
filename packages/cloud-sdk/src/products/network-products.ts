@@ -1,5 +1,6 @@
 import type { RequestOptions, Transport } from "../transport.js";
 import { privateNetwork } from "./private-network.js";
+import { signedRequests } from "./signed-requests.js";
 
 /* Custom domains, public TCP ports, dedicated outbound addresses and the
  * WireGuard tunnel into your sandboxes. A dedicated address needs credit on the
@@ -12,9 +13,9 @@ import { privateNetwork } from "./private-network.js";
  *   // set domain.records at your DNS provider, then
  *   await runtime.domains.verify("app.example.com");
  *   const db = await runtime.ports.open({ sandboxId, port: 5432 }); // db.connect: "203.0.113.10:23456"
- *   const ip = await runtime.addresses.reserve();                    // ip.address: every sandbox sends from it
- *   await runtime.tunnel.create();
- *   const office = await runtime.tunnel.addPeer({ name: "office", routes: ["10.0.0.0/16"] });
+ *   const ip = await runtime.ips.reserve();                          // ip.address: every sandbox sends from it
+ *   await runtime.networks.wireguard.create();
+ *   const office = await runtime.networks.wireguard.addPeer({ name: "office", routes: ["10.0.0.0/16"] });
  *   // office.config is a wg-quick file: sudo wg-quick up ./runtime.conf
  */
 
@@ -162,34 +163,37 @@ export function ports(t: Transport) {
   };
 }
 
-/** `runtime.addresses`: a dedicated outbound address every sandbox of the
+/** `runtime.ips`: a dedicated outbound address every sandbox of the
  * account sends from, for allow-lists. */
-export function addresses(t: Transport) {
+export function ips(t: Transport) {
   return {
     reserve: (input: { family?: 4 | 6 } = {}, options?: RequestOptions) =>
-      t.json<EgressAddress>({ method: "POST", path: "/v1/addresses", body: input, ...options }),
+      t.json<EgressAddress>({ method: "POST", path: "/v1/ips", body: input, ...options }),
     list: async (options?: RequestOptions) =>
-      (await t.json<Listed<EgressAddress>>({ method: "GET", path: "/v1/addresses", ...options }))
-        .data,
+      (await t.json<Listed<EgressAddress>>({ method: "GET", path: "/v1/ips", ...options })).data,
     release: (addressId: string, options?: RequestOptions) =>
       t.json<{ id: string; address: string; deleted: true }>({
         method: "DELETE",
-        path: `/v1/addresses/${enc(addressId)}`,
+        path: `/v1/ips/${enc(addressId)}`,
         ...options,
       }),
   };
 }
 
-/** `runtime.tunnel`: a WireGuard tunnel from your own network into your sandboxes. */
-export function tunnel(t: Transport) {
+/** `runtime.networks.wireguard`: a WireGuard tunnel from your own network into your sandboxes. */
+export function wireguard(t: Transport) {
   return {
     get: (options?: RequestOptions) =>
-      t.json<Tunnel>({ method: "GET", path: "/v1/tunnel", ...options }),
+      t.json<Tunnel>({ method: "GET", path: "/v1/networks/wireguard", ...options }),
     /** Idempotent: returns the tunnel you have. */
     create: (input: { subnet?: string } = {}, options?: RequestOptions) =>
-      t.json<Tunnel>({ method: "POST", path: "/v1/tunnel", body: input, ...options }),
+      t.json<Tunnel>({ method: "POST", path: "/v1/networks/wireguard", body: input, ...options }),
     delete: (options?: RequestOptions) =>
-      t.json<{ id: string; deleted: true }>({ method: "DELETE", path: "/v1/tunnel", ...options }),
+      t.json<{ id: string; deleted: true }>({
+        method: "DELETE",
+        path: "/v1/networks/wireguard",
+        ...options,
+      }),
     /** Leave publicKey out and Runtime generates the pair; the private key is
      * then in `config`, shown once. */
     addPeer: (
@@ -198,19 +202,23 @@ export function tunnel(t: Transport) {
     ) =>
       t.json<TunnelPeerCreated>({
         method: "POST",
-        path: "/v1/tunnel/peers",
+        path: "/v1/networks/wireguard/peers",
         body: input,
         ...options,
       }),
     rotatePeer: (peerId: string, input: { publicKey?: string } = {}, options?: RequestOptions) =>
       t.json<TunnelPeerCreated>({
         method: "POST",
-        path: `/v1/tunnel/peers/${enc(peerId)}:rotate`,
+        path: `/v1/networks/wireguard/peers/${enc(peerId)}:rotate`,
         body: input,
         ...options,
       }),
     removePeer: (peerId: string, options?: RequestOptions) =>
-      t.json<Tunnel>({ method: "DELETE", path: `/v1/tunnel/peers/${enc(peerId)}`, ...options }),
+      t.json<Tunnel>({
+        method: "DELETE",
+        path: `/v1/networks/wireguard/peers/${enc(peerId)}`,
+        ...options,
+      }),
   };
 }
 
@@ -236,19 +244,24 @@ export type SetUpstreamProxy = {
   hosts?: string[];
 };
 
-/** `runtime.network`: the network settings of the whole account.
+/** `runtime.networks`: the networks of the whole account: the WireGuard
+ * tunnel in, your sandboxes reaching each other, and the proxy out.
  *
- *   await runtime.network.upstreamProxy.set({ url: "http://proxy.example.com:3128" });
+ *   await runtime.networks.upstreamProxy.set({ url: "http://proxy.example.com:3128" });
  *
  * `upstreamProxy`: after Runtime's own rules allow a connection, the host
  * reaches it with CONNECT through your proxy, so your proxy's controls and
  * logs apply. A proxy that refuses or cannot be reached fails the connection
  * (upstream-proxy-failed); nothing goes around it. Needs a kept top-up. */
-export function network(t: Transport) {
-  const path = "/v1/network/upstream-proxy";
+export function networks(t: Transport) {
+  const path = "/v1/networks/upstream-proxy";
   return {
+    /** The WireGuard tunnel from your own network into your sandboxes. */
+    wireguard: wireguard(t),
     /** Your sandboxes reaching each other by name (`private-network.ts`). */
     private: privateNetwork(t),
+    /** Your sandboxes' requests signed as Runtime's agents (`signed-requests.ts`). */
+    signedRequests: signedRequests(t),
     upstreamProxy: {
       /** Send outbound connections through your proxy, replacing any set before. */
       set: (input: SetUpstreamProxy, options?: RequestOptions) =>

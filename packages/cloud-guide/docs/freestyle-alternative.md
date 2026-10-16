@@ -38,7 +38,7 @@ Weighing more than two? [Freestyle alternatives](/compare/freestyle-alternatives
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -103,7 +103,7 @@ terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Freestyle calls on a branch, tests them on the included usage, and
+replaces the Freestyle calls on a branch, tests them on the free usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge.
 
@@ -115,7 +115,7 @@ for a fixed number of days:
 ```ts check
 import { Sandbox } from "withruntime";
 
-const box = await Sandbox.create({ funding: "paid", timeoutSeconds: 3600 });
+const box = await Sandbox.create({ timeoutSeconds: 3600 });
 await box.exec("pip install --quiet requests");
 await box.pause(); // memory, processes and files are kept
 await box.setRetention(90); // a fixed 90 days instead

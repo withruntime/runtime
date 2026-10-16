@@ -5,7 +5,7 @@ import { sandboxDesktop } from "./desktop.js";
 import { sandboxBrowser } from "./browser.js";
 import { sandboxInterpreter } from "./interpreter.js";
 import { sandboxNetwork } from "./network.js";
-import { addresses, domains, network, ports, tunnel } from "./network-products.js";
+import { domains, ips, networks, ports } from "./network-products.js";
 import { sandboxPreviews } from "./previews.js";
 import { referrals } from "./referrals.js";
 import { billing } from "./billing.js";
@@ -13,6 +13,7 @@ import { audit } from "./audit.js";
 import { sso } from "./sso.js";
 import { switching } from "./switching.js";
 import { limits } from "./limits.js";
+import { keys } from "./api-keys.js";
 import { volumes } from "./volumes.js";
 import { jobs } from "./jobs.js";
 import { sandboxMounts } from "./mounts.js";
@@ -43,6 +44,7 @@ export const clientExtensions = {
   referrals,
   billing,
   limits,
+  keys,
   switching,
   secrets,
   webhooks,
@@ -53,21 +55,9 @@ export const clientExtensions = {
   sso,
   domains,
   ports,
-  addresses,
-  tunnel,
-  network,
+  ips,
+  networks,
 } satisfies Record<string, (t: Transport) => unknown>;
-
-/** Canonical CLI product names share the existing factory instance. Account
- * commands such as secrets, events and billing retain their current names. */
-export const clientProductAliases = {
-  image: "images",
-  volume: "volumes",
-  job: "jobs",
-  domain: "domains",
-  port: "ports",
-  address: "addresses",
-} as const satisfies Record<string, keyof typeof clientExtensions>;
 
 export const sandboxExtensions = {
   interpreter: sandboxInterpreter,
@@ -83,10 +73,6 @@ export const sandboxExtensions = {
 
 export type ClientExtensions = {
   readonly [K in keyof typeof clientExtensions]: ReturnType<(typeof clientExtensions)[K]>;
-} & {
-  readonly [K in keyof typeof clientProductAliases]: ReturnType<
-    (typeof clientExtensions)[(typeof clientProductAliases)[K]]
-  >;
 };
 export type SandboxExtensions = {
   readonly [K in keyof typeof sandboxExtensions]: ReturnType<(typeof sandboxExtensions)[K]>;

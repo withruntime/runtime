@@ -9,9 +9,8 @@ SDK, `withruntime`.
 
 ## Install
 
-ComputeSDK publishes its providers to npm itself, from its own repository. The
-Runtime provider is written for that repository; this command works once
-ComputeSDK has merged and published it:
+ComputeSDK publishes its providers to npm itself, from its own repository,
+the Runtime provider among them (`@computesdk/runtime` since 28 September 2026):
 
 ```bash no-run
 npm install computesdk @computesdk/runtime
@@ -90,5 +89,6 @@ tests passed with the Runtime SDK mocked; ComputeSDK's shared provider suite
 passed against ComputeSDK's own mock sandbox; and both builds loaded
 `withruntime` and called a local stand-in for Runtime's API.
 
-With `RUNTIME_API_KEY` set, ComputeSDK's shared suite and the create,
-reconnect, list and destroy test run against Runtime itself.
+On 11 October 2026 the published `@computesdk/runtime` 0.1.4 ran against
+Runtime's API: create, a command, streamed output, a file written and read, a
+timeout's exit code 124, a background command, `list`, `getById` and `destroy`.

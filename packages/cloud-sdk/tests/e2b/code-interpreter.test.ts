@@ -9,6 +9,7 @@ import {
   TimeoutError,
 } from "../../src/e2b/code-interpreter";
 import { FakeWorld } from "./fake";
+import { Runtime } from "../../src/client";
 
 let world: FakeWorld;
 const create = (envs?: Record<string, string>) =>
@@ -178,4 +179,125 @@ describe("code contexts", () => {
     await create();
     expect(world.called("sandboxes.create")[0]![0]).not.toHaveProperty("image");
   });
+});
+
+// Use the real native HTTP/NDJSON reader under the drop-in, not FakeWorld's
+// already-decoded strings. The fixture never contacts a server.
+function httpInterpreter(reply: () => Response) {
+  const calls: string[] = [];
+  const client = new Runtime({
+    apiKey: "rtcloud_fixture",
+    baseUrl: "https://fixture.invalid",
+    maxRetries: 0,
+    fetch: (async (input, init) => {
+      const request = new Request(input, init);
+      const path = new URL(request.url).pathname;
+      calls.push(path);
+      if (path === "/v1/sandboxes")
+        return Response.json({
+          id: "unicode",
+          kind: "sandbox",
+          state: "running",
+          status: "active",
+          labels: {},
+          expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        });
+      if (path === "/v1/sandboxes/unicode/interpreter:run") return reply();
+      throw new Error(`Unexpected fixture request ${path}`);
+    }) as typeof fetch,
+  });
+  return { client, calls };
+}
+
+test("runCode preserves split UTF-8 in callbacks and final results, including the last unterminated line", async () => {
+  const text = "café 東京 🦊\n";
+  const result = { main: true, data: { "text/plain": text }, refs: {} };
+  const execution = {
+    id: "e1",
+    contextId: "python",
+    language: "python",
+    executionCount: 1,
+    status: "ok",
+    stdout: text,
+    stderr: text,
+    results: [result],
+    error: null,
+    overflow: [],
+    durationMs: 1,
+    contextStarted: false,
+    lostBytes: 0,
+  };
+  const bytes = new TextEncoder().encode(
+    [
+      { k: "stdout", text },
+      { k: "stderr", text },
+      { k: "result", ...result },
+      { k: "execution", execution },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n"),
+  );
+  const { client, calls } = httpInterpreter(
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+            controller.close();
+          },
+        }),
+      ),
+  );
+  const sandbox = await Sandbox.create({ runtime: { client } });
+  const stdout: string[] = [],
+    stderr: string[] = [],
+    results: string[] = [];
+  const answer = await sandbox.runCode("print(text)", {
+    onStdout: (output) => stdout.push(output.line),
+    onStderr: (output) => stderr.push(output.line),
+    onResult: (output) => results.push(output.text!),
+  });
+  expect(stdout).toEqual([text]);
+  expect(stderr).toEqual([text]);
+  expect(results).toEqual([text]);
+  expect(answer.logs).toEqual({ stdout: [text], stderr: [text] });
+  expect(answer.text).toBe(text);
+  expect(calls).toHaveLength(2);
+});
+
+test("runCode preserves Runtime error details and classifies explicit sandbox failures without replay", async () => {
+  for (const [code, status, name] of [
+    ["sandbox_stopped", 409, "SandboxNotRunningError"],
+    ["sandbox_paused", 409, "SandboxNotRunningError"],
+    ["sandbox_not_running", 409, "SandboxNotRunningError"],
+    ["sandbox_not_ready", 409, "SandboxUnreachableError"],
+    ["host_unavailable", 503, "SandboxUnreachableError"],
+    ["interpreter_failed", 500, "SandboxError"],
+  ] as const) {
+    const { client, calls } = httpInterpreter(() =>
+      Response.json(
+        {
+          error: {
+            code,
+            message: "Kernel unavailable: détail",
+            hint: "Try a new context",
+            requestId: "req-2",
+          },
+        },
+        { status },
+      ),
+    );
+    const sandbox = await Sandbox.create({ runtime: { client } });
+    const error = await sandbox.runCode("mutate()").catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      name,
+      code,
+      statusCode: status,
+      requestId: "req-2",
+      hint: "Try a new context",
+      message: "Kernel unavailable: détail\nHint: Try a new context\nRequest: req-2",
+    });
+    expect((error as Error).cause).toMatchObject({ code, status });
+    expect(calls).toHaveLength(2);
+  }
 });

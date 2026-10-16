@@ -103,7 +103,7 @@ public final class SandboxParity {
     }
 
     public byte[] download(String id) {
-      return s.t.bytes(new Transport.Call("GET", path(id) + "/video").accept("video/mp4"));
+      return s.t.fileBytes(new Transport.Call("GET", path(id) + "/video").accept("video/mp4"));
     }
 
     public void delete(String id) {

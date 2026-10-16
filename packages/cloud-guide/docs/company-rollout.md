@@ -28,12 +28,11 @@ Everyone in the account spends the same prepaid balance.
   and each purchase links to its Stripe receipt.
 - Give whoever pays the bills the **billing** role. They add credit and see
   payments, and cannot start anything or make keys.
-- The first top-up lifts the account from the [included usage](./included-usage) to the paid
+- The first top-up lifts the account from the [free usage](./included-usage) to the paid
   limits and, while it is not refunded, opens every outbound port,
   custom domains, TCP ports, public previews and private networks
   ([pricing](./pricing#how-many-at-once)).
-- Moving from another provider? Your first top-up is matched
-  ([switching credit](./pricing#switching-credit)).
+- Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total ([welcome match](./pricing#welcome-match)).
 
 ## 3. Connect your identity provider
 

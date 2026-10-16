@@ -25,7 +25,13 @@ export type OpenedWalletAccount = Topup & {
 
 export type WalletClaim =
   | { status: "paid"; orgId: string; apiKey: string }
-  | { status: Exclude<Topup["status"], "paid">; orgId: string; topup: Topup | null };
+  | {
+      status: Exclude<Topup["status"], "paid">;
+      orgId: string;
+      topup: Topup | null;
+      /** What to do now, such as sending the top-up again when it has no address. */
+      next?: string;
+    };
 
 function origin(options: WalletOptions): string {
   const env = typeof process === "undefined" ? {} : process.env;
@@ -61,7 +67,8 @@ async function post<T>(options: WalletOptions, path: string, body: unknown): Pro
   return [response.status, answer];
 }
 
-/** Opens an account and a stablecoin top-up of `usd` dollars ($10 to $10,000).
+/** Opens an account and a stablecoin top-up of `usd` dollars ($10 to $500,
+ *  a new account's first week).
  *  `acceptTerms` must be true: opening one means agreeing to
  *  https://withruntime.com/legal/terms, so ask the person you work for first. */
 export async function openWalletAccount(

@@ -316,7 +316,6 @@ const runtime = new Runtime({ maxRetries: 0, waitForCapacityMs: 0, timeoutMs: 60
 const run = randomUUID();
 const at = new Date().toISOString();
 const shape = {
-  funding: "trial" as const,
   vcpu: 2,
   memoryMiB: 4096,
   diskMiB: 4096,

@@ -50,7 +50,7 @@ def _post(auth_url: Optional[str], path: str, body: dict[str, Any], timeout: flo
 def open_wallet_account(usd: float, *, accept_terms: bool, auth_url: Optional[str] = None,
                         timeout: float = 30.0) -> dict[str, Any]:
     """Opens an account and a stablecoin top-up of ``usd`` dollars ($10 to
-    $10,000). Returns ``claimCode``, ``amount`` (the exact token amount, to six
+    $500: it is a new account's first week). Returns ``claimCode``, ``amount`` (the exact token amount, to six
     decimals), ``networks`` (an ``address`` on each and its ``tokens``) and
     ``payBy``."""
     return _post(auth_url, "/api/wallet/topups", {"usd": usd, "acceptTerms": accept_terms}, timeout)

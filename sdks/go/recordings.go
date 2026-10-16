@@ -50,7 +50,7 @@ func (s *RecordingService) List(ctx context.Context) ([]DesktopRecording, error)
 	return productList[DesktopRecording](ctx, s.sandbox.c, s.path(""), nil)
 }
 func (s *RecordingService) Download(ctx context.Context, id string) ([]byte, error) {
-	return s.sandbox.c.bytes(ctx, &call{method: http.MethodGet, path: s.path(id) + "/video", accept: "video/mp4"})
+	return s.sandbox.c.fileBytes(ctx, &call{method: http.MethodGet, path: s.path(id) + "/video", accept: "video/mp4"})
 }
 func (s *RecordingService) Delete(ctx context.Context, id string) error {
 	return s.sandbox.c.do(ctx, &call{method: http.MethodDelete, path: s.path(id)}, nil)

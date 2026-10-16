@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Runtime } from "../src/client";
 import { PermissionDeniedError } from "../src/errors";
 
-test("the singular sandbox product aliases the existing client and transport", async () => {
+test("the sandbox product shares the client and its transport", async () => {
   const seen: Array<{ method: string; path: string; headers: Headers }> = [];
   const runtime = new Runtime({
     apiKey: "rk_alias_test",
@@ -17,8 +17,7 @@ test("the singular sandbox product aliases the existing client and transport", a
       return Response.json({ id: "sandbox-alias", state: "running" });
     }) as typeof fetch,
   });
-  expect(runtime.sandbox).toBe(runtime.sandboxes);
-  expect((await runtime.sandbox.create({ wait: false })).id).toBe("sandbox-alias");
+  expect((await runtime.sandboxes.create({ wait: false })).id).toBe("sandbox-alias");
   expect((await runtime.sandboxes.get("sandbox-alias")).id).toBe("sandbox-alias");
   expect(seen.map(({ method, path }) => ({ method, path }))).toEqual([
     { method: "POST", path: "/v1/sandboxes" },

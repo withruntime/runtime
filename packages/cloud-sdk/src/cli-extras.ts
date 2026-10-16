@@ -31,7 +31,7 @@ export async function recordCommand(
         ...(integer(args, "max-mib") ? { maxMiB: integer(args, "max-mib")! } : {}),
       });
       print(
-        `Recording ${rec.id}. Stop it: ${me} sandbox desktop ${sbx.id} record stop ${rec.id}`,
+        `Recording ${rec.id}. Stop it: ${me} sandboxes desktop ${sbx.id} record stop ${rec.id}`,
         rec,
       );
       return 0;
@@ -39,7 +39,7 @@ export async function recordCommand(
     case "stop": {
       const rec = await r.stop(need(rest[0], "the recording id"));
       print(
-        `Stopped ${rec.id}: ${(rec.bytes / 1_048_576).toFixed(1)} MiB (${rec.reason ?? "stopped"}). Fetch it: ${me} sandbox desktop ${sbx.id} record fetch ${rec.id}`,
+        `Stopped ${rec.id}: ${(rec.bytes / 1_048_576).toFixed(1)} MiB (${rec.reason ?? "stopped"}). Fetch it: ${me} sandboxes desktop ${sbx.id} record fetch ${rec.id}`,
         rec,
       );
       return 0;
@@ -73,7 +73,7 @@ export async function recordCommand(
       print("Deleted.", await r.delete(need(rest[0], "the recording id")));
       return 0;
   }
-  throw usage(`${me} sandbox desktop <id> record start|stop|ls|fetch|rm`);
+  throw usage(`${me} sandboxes desktop <id> record start|stop|ls|fetch|rm`);
 }
 
 export async function watchCommand(
@@ -160,7 +160,7 @@ export async function mcpCommand(
     case "start": {
       const args = parse(rest, ["replace"], ["secret", "env", "option", "port"]);
       if (!args.positional.length)
-        throw usage("Name the servers: runtime sandbox mcp <id> start github fetch");
+        throw usage("Name the servers: runtime sandboxes mcp <id> start github fetch");
       const scoped = (name: string) => {
         const found: Record<string, Record<string, string>> = {};
         for (const [key, value] of Object.entries(pairs(args, name))) {
@@ -184,7 +184,7 @@ export async function mcpCommand(
         ...(has(args, "replace") ? { replace: true } : {}),
       });
       print(
-        `${show(gw)}\nServers are installing; \`${me} sandbox mcp ${sbx.id}\` shows when they are ready.`,
+        `${show(gw)}\nServers are installing; \`${me} sandboxes mcp ${sbx.id}\` shows when they are ready.`,
         gw,
       );
       return 0;
@@ -198,7 +198,7 @@ export async function mcpCommand(
       print("Stopped.", await sbx.mcp.stop());
       return 0;
   }
-  throw usage(`${me} sandbox mcp <id> start|status|stop, or ${me} sandbox mcp catalog`);
+  throw usage(`${me} sandboxes mcp <id> start|status|stop, or ${me} sandboxes mcp catalog`);
 }
 
 /** Standard input when it is piped or redirected from a file, read whole, up
@@ -238,7 +238,7 @@ export async function pipedStdin(
           undefined,
           Object.assign(
             new Error(
-              `Standard input is over ${limit / 1_048_576} MiB. Copy the file in with \`${me} sandbox cp\` and read it there.`,
+              `Standard input is over ${limit / 1_048_576} MiB. Copy the file in with \`${me} sandboxes cp\` and read it there.`,
             ),
             { code: "usage" },
           ),
@@ -261,12 +261,12 @@ export function lostOutput(
   id: string,
 ) {
   if (!result.stdoutTruncated && !result.stderrTruncated) return undefined;
-  return `runtime: some of the command's output was lost: it wrote faster than it was read, and the sandbox keeps the latest 1 MiB. Write it to a file and copy it out: ${me} sandbox cp ${id}:/workspace/out.txt .`;
+  return `runtime: some of the command's output was lost: it wrote faster than it was read, and the sandbox keeps the latest 1 MiB. Write it to a file and copy it out: ${me} sandboxes cp ${id}:/workspace/out.txt .`;
 }
 
-/** Feeds `runtime sandbox shell` from standard input. When piped input ends,
+/** Feeds `runtime sandboxes shell` from standard input. When piped input ends,
  * the shell is told so the way a terminal says it, Ctrl-D, after a newline
- * if the last line had none: `echo ls | runtime sandbox shell <id>` runs `ls`
+ * if the last line had none: `echo ls | runtime sandboxes shell <id>` runs `ls`
  * and exits, as ssh does, where it used to wait forever (25 September 2026).
  * A keyboard never ends, so a terminal's input is left alone. Returns the
  * function that unhooks it. */
@@ -292,7 +292,7 @@ export function pipeShellInput(
   };
 }
 
-/** `runtime snapshot get`, as `runtime sandbox get` reads: one fact a line.
+/** `runtime snapshots get`, as `runtime sandboxes get` reads: one fact a line.
  * It printed raw JSON until 25 September 2026; `--json` still does. */
 export function describeSnapshot(s: Snapshot, table: (rows: string[][]) => string): string {
   const mib = (bytes: number | null) =>
@@ -313,7 +313,12 @@ export function describeSnapshot(s: Snapshot, table: (rows: string[][]) => strin
         : s.durability.state,
     ],
     ["created", s.createdAt],
-    ["kept until", `${s.expiresAt} (${s.retentionDays} days)`],
+    [
+      "kept until",
+      s.expiresAt === null
+        ? "kept while you have credit"
+        : `${s.expiresAt} (${s.retentionDays} days)`,
+    ],
     [
       "labels",
       Object.entries(labels)

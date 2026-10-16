@@ -235,7 +235,7 @@ class FakeSandboxes:
 
     async def create(self, **fields):
         self.world.calls.append(("create", fields))
-        if self.world.trial and fields.get("funding") is None and (
+        if self.world.trial and (
                 fields.get("vcpu", 2) > 2 or fields.get("memory_mib", 4096) > 4096 or
                 fields.get("disk_mib", 4096) > 10240):
             raise InvalidRequestError("A trial sandbox is at most 2 vCPU and 4 GiB.", code="no_credit_size_limit",
@@ -510,19 +510,22 @@ class HarborEnvironmentTest(unittest.TestCase):
         self.assertEqual(len(self.world.of("stop")), 1)
         self.assertEqual(self.world.closed, 0, "a runtime the caller passed is not closed")
 
-    def test_trial_sizes_are_cut_to_the_trial(self):
+    def test_funding_is_accepted_and_ignored(self):
         self.needs_root()
+        self.world.trial = True
 
         async def body():
-            env = self.make(funding="trial", cpus=4, memory_mb=8192, storage_mb=20480)
+            env = self.make(funding="paid", cpus=4, memory_mb=8192, storage_mb=20480)
             await env.start(force_build=False)
             await env.stop(delete=True)
-        run(body())
-        fields = self.world.of("create")[0][1]
-        self.assertEqual((fields["vcpu"], fields["memory_mib"], fields["disk_mib"], fields["funding"]),
-                         (2, 4096, 10240, "trial"))
+        with self.assertLogs(level="WARNING") as logs:
+            run(body())
+        creates = [call[1] for call in self.world.of("create")]
+        self.assertEqual([("funding" in fields) for fields in creates], [False, False])
+        self.assertEqual((creates[1]["vcpu"], creates[1]["memory_mib"], creates[1]["disk_mib"]), (2, 4096, 10240))
+        self.assertIn("Add credit for the size the task asks", "\n".join(logs.output))
 
-    def test_no_funding_on_a_trial_account_retries_at_the_trial_size(self):
+    def test_an_account_without_credit_retries_at_the_size_without_credit(self):
         self.needs_root()
         self.world.trial = True
 
@@ -586,8 +589,7 @@ class HarborEnvironmentTest(unittest.TestCase):
         env = EnvironmentFactory.create_environment_from_import_path(
             "withruntime.harbor:RuntimeEnvironment", environment_dir=self.env_dir, environment_name="t",
             session_id="t__x__env", trial_paths=paths, task_env_config=EnvironmentConfig(), funding="trial")
-        self.assertEqual(env.type(), "runtime")
-        self.assertEqual(env._funding, "trial")
+        self.assertEqual(env.type(), "runtime")  # funding, from older commands, is still accepted.
 
 
 class DockerfileWorkdirTest(unittest.TestCase):

@@ -35,7 +35,7 @@ function client() {
     fetch: (async (input, init) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
       const value =
-        url.pathname === "/v1/tunnel"
+        url.pathname === "/v1/networks/wireguard"
           ? tunnel
           : init?.method === "POST"
             ? address
@@ -46,13 +46,13 @@ function client() {
 }
 test("SDK retains network funding fields and CLI never calls an unfunded reservation active", async () => {
   const runtime = client();
-  expect(await runtime.addresses.reserve()).toEqual(address);
-  expect((await runtime.addresses.list())[0]).toEqual(address);
-  expect(await runtime.tunnel.get()).toEqual(tunnel);
+  expect(await runtime.ips.reserve()).toEqual(address);
+  expect((await runtime.ips.list())[0]).toEqual(address);
+  expect(await runtime.networks.wireguard.get()).toEqual(tunnel);
   for (const [product, verb] of [
-    ["address", "ls"],
-    ["address", "reserve"],
-    ["tunnel", "get"],
+    ["ips", "ls"],
+    ["ips", "reserve"],
+    ["wireguard", "get"],
   ] as const) {
     const output: string[] = [];
     await networkProductCommand(
@@ -71,7 +71,7 @@ test("SDK retains network funding fields and CLI never calls an unfunded reserva
 test("CLI JSON returns the funding and quote without changing it", async () => {
   const output: string[] = [];
   await networkProductCommand(
-    "tunnel",
+    "wireguard",
     ["get"],
     { positional: ["get"], flags: new Map() },
     { json: true, write: (t) => output.push(t), error: () => {} },

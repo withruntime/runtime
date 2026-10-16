@@ -69,11 +69,11 @@ runtime.volumes.set_backup_policy(volume["id"], daily=True, retention_days=14)
 ```
 
 ```bash no-run
-runtime volume backup "${vol}" --retention-days 30   # prints the backup id
-runtime volume backups "${vol}"                      # newest first
-runtime volume restore "${backup}" --name data-restored
-runtime volume backup-policy "${vol}" --daily on --retention-days 14
-runtime volume backup-rm "${backup}"
+runtime volumes backup "${vol}" --retention-days 30   # prints the backup id
+runtime volumes backups "${vol}"                      # newest first
+runtime volumes restore "${backup}" --name data-restored
+runtime volumes backup-policy "${vol}" --daily on --retention-days 14
+runtime volumes backup-rm "${backup}"
 ```
 
 - **Daily:** every volume is backed up once a day, starting an hour after it is
@@ -81,6 +81,10 @@ runtime volume backup-rm "${backup}"
   volume's `retentionDays`, 7 unless you set 1 to 365.
 - **On request:** `backup` makes one now and waits up to a minute for it to be
   ready. A backup can be kept for 1 to 365 days.
+- **The newest ready backup is kept** past its retention for as long as the
+  volume exists, so a run of failed backups never leaves a volume with none.
+  It goes once a newer one is ready, when you delete it, or at its retention's
+  end once the volume is deleted. While kept, it is billed as any backup.
 - **Restoring:** a restore is a new volume, the size of the backup, in the same
   region, on whichever server has room. It is ready once every byte has been
   downloaded and checked; `restoredFrom` names the backup. The original volume
@@ -96,6 +100,8 @@ runtime volume backup-rm "${backup}"
   sandbox whose time limit or credit runs out does the same: its programs are
   frozen just before its end, and what they wrote to its volumes, and to a
   persistent sandbox's own disk, is written out after that at no charge.
+- **Pausing a sandbox with volumes** does not copy the paused sandbox off its
+  server; the nightly backup keeps it, and each volume has its own backups above.
 
 ## Snapshots survive their server
 
@@ -125,6 +131,37 @@ says it is waiting; it is restored as soon as one does. A snapshot whose server
 was lost before it was copied is deleted, its `error` says why, and it is not
 charged after the server's last sign of life.
 
+## Randomness in copies
+
+A fork, or a sandbox created from a memory snapshot, resumes every program
+that was running when the copy was taken. It also copies each program's
+random-number state. Linux itself gets fresh randomness in every copy, but a
+program that keeps its own generator in memory gives the same "random" bytes
+in every copy until it reseeds. Two copies can then make the same key, token,
+session ID or UUID.
+
+Make keys, tokens and IDs after the copy, from the system's randomness:
+`/dev/urandom`, `getrandom`, Python's `os.urandom` or `secrets`, Go's
+`crypto/rand`, or a program started after the copy. A pause and wake makes no
+copy, and a disk snapshot boots its programs fresh, so neither is affected.
+
+Measured on 6 October 2026 in a long-running process, three copies of one
+memory snapshot:
+
+| Fresh in every copy                                     | Same in every copy until the program restarts                                 |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `/dev/urandom` and `getrandom`                          | Node.js: `crypto.randomBytes`, `getRandomValues`, `randomUUID`, new key pairs |
+| Python `os.urandom` and `secrets`                       | Node.js and Bun: the random bytes in a new TLS connection                     |
+| Go `crypto/rand`                                        | Bun: `crypto.randomBytes`, `getRandomValues`, `randomUUID`, new key pairs     |
+| Java `new SecureRandom()` (NativePRNG, Linux's default) | Chromium pages: `crypto.getRandomValues` and `crypto.randomUUID`              |
+| Rust `getrandom`                                        | Python `ssl.RAND_bytes`                                                       |
+| Chromium: the random bytes in a new TLS connection      | Java `SecureRandom.getInstance("DRBG")` and `"SHA1PRNG"`                      |
+|                                                         | Rust `rand::thread_rng()`                                                     |
+
+Generators that are not for secrets (`Math.random`, Python's `random`, Go's
+`math/rand`) also repeat. If a program must keep running across the copy,
+restart it, or reseed its generator from `/dev/urandom` after the copy.
+
 ## Updating the default image
 
 An existing paused sandbox or snapshot keeps the filesystem saved with its
@@ -146,9 +183,9 @@ for the bucket's endpoint.
 ```bash no-run
 printf %s "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" | runtime secrets set DATA_BUCKET \
   --host s3.eu-west-1.amazonaws.com --header Authorization --format 'AWS4-HMAC-SHA256 {value}'
-runtime sandbox mount "${id}" s3://my-data/datasets /data --secret DATA_BUCKET --region eu-west-1
-runtime sandbox mounts "${id}"
-runtime sandbox unmount "${id}" /data
+runtime sandboxes mount "${id}" s3://my-data/datasets /data --secret DATA_BUCKET --region eu-west-1
+runtime sandboxes mounts "${id}"
+runtime sandboxes unmount "${id}" /data
 ```
 
 ```ts check
@@ -200,6 +237,15 @@ await sbx.exec("ls /data");
 - Backups and restores run at a lower priority than your sandboxes. A backup is
   `pending` until it is copied and checked, and a restored volume is `creating`
   until every byte is downloaded and checked.
+- A backup's `copyStartedAt` says when its copy off the volume's server began.
+  While it is `null` the backup is waiting its turn behind other copies on that
+  server; it still starts, and nothing needs doing. (A backup whose copy began
+  before this field existed shows `null` too.)
+- A backup that cannot start because no copy is being made from its server for
+  15 minutes fails with `errorCode` `backup_stalled`, rather than staying
+  `pending`. The volume is unchanged; back it up again.
 - Snapshot copies are part of the snapshot and its [price](./pricing).
-- Volume backups cost {{backup-rate}} per GB (10⁹ bytes) per 30-day month, charged on
+- Volume backups cost {{backup-rate}} per GB (10⁹ bytes) per 30-day month (a
+  backup made before this price keeps {{backup-rate-before}} until
+  {{backup-raise-date}}), charged on
   `storedBytes` once the copy is ready. See [pricing](./pricing).

@@ -113,13 +113,13 @@ func (s *AddressService) Reserve(ctx context.Context, family int) (*EgressAddres
 		body["family"] = family
 	}
 	var out EgressAddress
-	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/addresses", body: body}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/ips", body: body}, &out)
 }
 func (s *AddressService) List(ctx context.Context) ([]EgressAddress, error) {
-	return productList[EgressAddress](ctx, s.c, "/v1/addresses", nil)
+	return productList[EgressAddress](ctx, s.c, "/v1/ips", nil)
 }
 func (s *AddressService) Release(ctx context.Context, id string) error {
-	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/addresses/" + url.PathEscape(id)}, nil)
+	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/ips/" + url.PathEscape(id)}, nil)
 }
 
 type TunnelPeer struct {
@@ -168,7 +168,7 @@ type PrivateTunnelService struct{ c *Client }
 
 func (s *PrivateTunnelService) Get(ctx context.Context) (*PrivateTunnel, error) {
 	var out PrivateTunnel
-	return &out, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/tunnel"}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/networks/wireguard"}, &out)
 }
 func (s *PrivateTunnelService) Create(ctx context.Context, subnet string) (*PrivateTunnel, error) {
 	body := map[string]any{}
@@ -176,16 +176,16 @@ func (s *PrivateTunnelService) Create(ctx context.Context, subnet string) (*Priv
 		body["subnet"] = subnet
 	}
 	var out PrivateTunnel
-	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/tunnel", body: body}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/networks/wireguard", body: body}, &out)
 }
 func (s *PrivateTunnelService) Delete(ctx context.Context) error {
-	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/tunnel"}, nil)
+	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/networks/wireguard"}, nil)
 }
 
 // AddPeer shows the generated private key once, in Config. Keep even a draft config when ConfigReady is false.
 func (s *PrivateTunnelService) AddPeer(ctx context.Context, input AddTunnelPeerOptions) (*TunnelPeerCreated, error) {
 	var out TunnelPeerCreated
-	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/tunnel/peers", body: input, key: input.IdempotencyKey, noRetry: input.PublicKey == ""}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/networks/wireguard/peers", body: input, key: input.IdempotencyKey, noRetry: input.PublicKey == ""}, &out)
 }
 
 // RotatePeer rotates a peer. Supplying a public key keeps its private half on your machine.
@@ -195,11 +195,11 @@ func (s *PrivateTunnelService) RotatePeer(ctx context.Context, id, publicKey str
 		body["publicKey"] = publicKey
 	}
 	var out TunnelPeerCreated
-	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/tunnel/peers/" + url.PathEscape(id) + ":rotate", body: body, noRetry: publicKey == ""}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/networks/wireguard/peers/" + url.PathEscape(id) + ":rotate", body: body, noRetry: publicKey == ""}, &out)
 }
 func (s *PrivateTunnelService) RemovePeer(ctx context.Context, id string) (*PrivateTunnel, error) {
 	var out PrivateTunnel
-	return &out, s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/tunnel/peers/" + url.PathEscape(id)}, &out)
+	return &out, s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/networks/wireguard/peers/" + url.PathEscape(id)}, &out)
 }
 
 func productList[T any](ctx context.Context, c *Client, path string, query url.Values) ([]T, error) {

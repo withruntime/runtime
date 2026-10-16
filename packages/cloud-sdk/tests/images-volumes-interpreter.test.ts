@@ -28,11 +28,19 @@ function stub(routes: (request: Request, body: unknown) => Response | Promise<Re
 const json = (value: unknown) => Response.json(value);
 
 test("an interpreter cell without a deadline preserves zero and can still be cancelled", async () => {
+  /* The first cell answers at once; each after it is answered only when the
+     client gives up on it, not after a sleep that a 5 ms deadline has to
+     beat, which a loaded machine's timers can lose (13 October 2026). */
+  let cells = 0;
   const { runtime } = stub(async (request, body) => {
     if (request.method === "GET")
       return json({ id: SANDBOX, kind: "sandbox", state: "running", status: "active" });
     expect(body).toMatchObject({ timeoutMs: 0 });
-    await Bun.sleep(30);
+    if (cells++ > 0)
+      await new Promise((resolve) => {
+        request.signal.addEventListener("abort", resolve, { once: true });
+        if (request.signal.aborted) resolve(undefined);
+      });
     request.signal.throwIfAborted();
     return json({ status: "ok" });
   });

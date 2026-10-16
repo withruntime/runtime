@@ -88,7 +88,7 @@ export {
   type ScreenshotResponse,
   type WindowInfo,
 } from "./computer-use.js";
-export { Image } from "./image.js";
+export { Image, type PipInstallOptions } from "./image.js";
 export { resolvePath } from "./context.js";
 export type { DaytonaConfig, WithRuntime } from "./client.js";
 export * from "./errors.js";

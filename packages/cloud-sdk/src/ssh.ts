@@ -9,7 +9,7 @@ import type { Sandbox } from "./sandbox.js";
 import type { PortForward } from "./tunnel.js";
 import { VERSION } from "./transport.js";
 
-/* `runtime sandbox ssh` and `runtime sandbox port-forward`: SSH logins and TCP ports of a
+/* `runtime sandboxes ssh` and `runtime sandboxes port-forward`: SSH logins and TCP ports of a
    sandbox, carried over the API's authenticated tunnel (sandbox.tunnel()).
    Nothing listens on the internet for either. */
 
@@ -18,12 +18,12 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 export const SSH_HELP = (
   me: string,
-) => `${me} sandbox ssh <id|name> [-- <command...>]   Log in over SSH (an interactive shell, or run the command)
-${me} sandbox ssh config [--install]          The ssh config for \`ssh <id|name>.runtime\`, also from
+) => `${me} sandboxes ssh <id|name> [-- <command...>]   Log in over SSH (an interactive shell, or run the command)
+${me} sandboxes ssh config [--install]          The ssh config for \`ssh <id|name>.runtime\`, also from
                                       VS Code Remote-SSH and JetBrains Gateway; --install adds
                                       it to ~/.ssh/config
-${me} sandbox ssh proxy <id|name>[.runtime]   ProxyCommand mode: SSH on stdin and stdout
-${me} sandbox port-forward <id|name> <port|local:remote>... [--address 127.0.0.1]
+${me} sandboxes ssh proxy <id|name>[.runtime]   ProxyCommand mode: SSH on stdin and stdout
+${me} sandboxes port-forward <id|name> <port|local:remote>... [--address 127.0.0.1]
                                       Forward local ports to ports in the sandbox, until Ctrl-C
 
 SSH and port forwarding go through Runtime's API with your key: the sandbox opens
@@ -78,7 +78,7 @@ export async function resolveSandbox(runtime: Runtime, target: string): Promise<
       : `No live sandbox is named ${name}.`,
     code: page.data.length ? "ambiguous_name" : "sandbox_not_found",
     status: 0,
-    hint: "Use its id: runtime sandbox ls",
+    hint: "Use its id: runtime sandboxes ls",
   });
 }
 
@@ -226,7 +226,7 @@ export async function sshCommand(
     return 0;
   }
   if (first === "proxy") {
-    if (!second) throw usageError(`Give the host: ${me} sandbox ssh proxy <id>.runtime`, me);
+    if (!second) throw usageError(`Give the host: ${me} sandboxes ssh proxy <id>.runtime`, me);
     return proxy(await connect(), second, await publicKey());
   }
   const runtime = await connect();
@@ -258,7 +258,7 @@ export async function sshCommand(
           message: `Could not run ssh: ${error.message}`,
           code: "ssh_missing",
           status: 0,
-          hint: "Install OpenSSH, or use `runtime sandbox shell <id>`, which needs nothing.",
+          hint: "Install OpenSSH, or use `runtime sandboxes shell <id>`, which needs nothing.",
         }),
       ),
     );
@@ -271,11 +271,11 @@ function usageError(message: string, me: string) {
     message,
     code: "usage",
     status: 0,
-    hint: `Run \`${me} sandbox ssh help\`.`,
+    hint: `Run \`${me} sandboxes ssh help\`.`,
   });
 }
 
-/** `runtime sandbox port-forward <id> 5432 8080:3000 ...` */
+/** `runtime sandboxes port-forward <id> 5432 8080:3000 ...` */
 export async function portForwardCommand(
   argv: string[],
   out: Out,
@@ -290,10 +290,10 @@ export async function portForwardCommand(
   const [target, ...specs] = positional;
   if (!target || !specs.length || !address)
     throw new RuntimeError({
-      message: `Give a sandbox and at least one port: ${me} sandbox port-forward <id> 5432 8080:3000`,
+      message: `Give a sandbox and at least one port: ${me} sandboxes port-forward <id> 5432 8080:3000`,
       code: "usage",
       status: 0,
-      hint: `Run \`${me} sandbox ssh help\`.`,
+      hint: `Run \`${me} sandboxes ssh help\`.`,
     });
   const ports = specs.map((spec) => {
     const match = /^(?:(\d{1,5}):)?(\d{1,5})$/.exec(spec);

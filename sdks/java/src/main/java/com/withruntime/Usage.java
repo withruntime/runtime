@@ -52,7 +52,7 @@ public final class Usage extends JsonObject {
   }
 
   /**
-   * This month's included usage, one object per product: pool, unit, quantity, used, reserved,
+   * This month's free usage, one object per product: pool, unit, quantity, used, reserved,
    * left, month and renewsAt. Empty from an API older than 5 October 2026.
    */
   public List<JsonObject> allowances() {

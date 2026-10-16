@@ -46,10 +46,9 @@ Weighing more than two? [Modal Sandbox alternatives](/compare/modal-alternatives
 - **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
   placeholder and Runtime's proxy adds the value only to HTTPS requests to the
   hosts you name, so a prompt injection has nothing to leak ([security](./security)).
-- **Switching credit.** Run `runtime switch --from modal` before your first
-  top-up and that top-up is matched, up to {{switching-max}}
-  ([switching credit](./pricing#switching-credit)).
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your credit matched.** Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+  ([welcome match](./pricing#welcome-match)).
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -106,7 +105,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Modal calls on a branch, tests them on the included usage, and tells
+replaces the Modal calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 

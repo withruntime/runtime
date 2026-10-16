@@ -1,7 +1,7 @@
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { Readable } from "node:stream";
 import type { FileEntry } from "../types.js";
-import type { RequestOptions } from "../transport.js";
+import { timeoutSignal, type RequestOptions } from "../transport.js";
 import { resolvePath, WHOLE_OUTPUT, type SandboxContext } from "./context.js";
 import { DaytonaError, DaytonaFileNotFoundError, guard } from "./errors.js";
 
@@ -58,7 +58,7 @@ function downloadRequest(timeout: number, signal?: AbortSignal): RequestOptions 
   if (!Number.isFinite(timeout) || timeout < 0)
     throw new DaytonaError("Download timeout must be a nonnegative finite number.");
   signal?.throwIfAborted();
-  const deadline = timeout > 0 ? AbortSignal.timeout(Math.ceil(timeout * 1000)) : undefined;
+  const deadline = timeout > 0 ? timeoutSignal(timeout * 1000) : undefined;
   return {
     timeoutMs: 0,
     ...(deadline || signal

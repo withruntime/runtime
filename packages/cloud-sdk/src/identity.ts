@@ -75,3 +75,29 @@ export async function identityToken(input: {
     });
   return body;
 }
+
+/** The header and audience the website keys its per-network limits on
+ * (apps/cloud-web/src/lib/limit-key.ts): inside a sandbox, Runtime's own
+ * sign-in calls count against this sandbox, not the address every sandbox on
+ * its host shares. */
+const LIMIT_HEADER = "x-runtime-sandbox-identity";
+const LIMIT_AUDIENCE = "https://withruntime.com/limits";
+let limitToken: { token: string; until: number } | undefined;
+
+/** Headers for a call to the website's connect API: this sandbox's identity
+ * token, or none outside a sandbox or when one cannot be had. Never throws. */
+export async function sandboxIdentityHeaders(): Promise<Record<string, string>> {
+  if (limitToken && Date.now() < limitToken.until) return { [LIMIT_HEADER]: limitToken.token };
+  if (!(await requestCredentials())) return {};
+  try {
+    const issued = await identityToken({
+      audience: LIMIT_AUDIENCE,
+      signal: AbortSignal.timeout(3_000),
+    });
+    // Renewed a minute before it lapses, so a slow call never carries a dead one.
+    limitToken = { token: issued.token, until: Date.parse(issued.expiresAt) - 60_000 };
+    return { [LIMIT_HEADER]: issued.token };
+  } catch {
+    return {};
+  }
+}

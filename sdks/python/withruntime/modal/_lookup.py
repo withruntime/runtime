@@ -16,8 +16,3 @@ def validate_tags(value):
         raise InvalidError("Tags must be a mapping of strings to strings")
     return value
 
-
-def validate_environment(environment_name):
-    if environment_name is not None:
-        from .._compat import CompatibilityError
-        raise CompatibilityError("Modal environment namespaces are not Runtime account namespaces")

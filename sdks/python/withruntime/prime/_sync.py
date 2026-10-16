@@ -12,15 +12,70 @@ from .. import Runtime
 from .._errors import RuntimeError as SDKError
 from .._compat import runtime_key, CompatibilityError, Model, ENV_PATH, dockerfile, environment, positive, reject, values
 from .models import (CreateSandboxRequest, Sandbox, SandboxListResponse, CommandResponse, FileUploadResponse, ReadFileResponse, BackgroundJob, BackgroundJobStatus, BackgroundJobStatusSnapshot, SandboxStatusSnapshot, SandboxStatusLookupError,
-    BatchSandboxStatusResponse, BulkDeleteSandboxResponse)
+    BatchSandboxStatusResponse, BulkDeleteSandboxResponse, EgressPolicyStatus, SandboxEgressPolicy, _validate_egress_lists)
 
-from .exceptions import CommandTimeoutError
+from .exceptions import CommandTimeoutError, DownloadTimeoutError, UploadTimeoutError
+from contextlib import contextmanager
+from .._request_scope import request_scope
 
 def _validate_guest_user(user):
     if user == "":
         raise ValueError("user must be a non-empty guest username")
     if user is not None:
         raise CompatibilityError("Prime named guest users are not yet supported on Runtime")
+
+#: Where the start command's output goes, for get_logs.
+START_LOG = "/tmp/.prime-start.log"
+
+
+@contextmanager
+def _deadline(error, sandbox_id, file_path, timeout):
+    """A transfer's ``timeout`` in seconds: past it the request ends and Prime's
+    error is raised. An upload past it writes nothing (Runtime writes whole
+    files or aborts the upload); a download leaves no partial local file."""
+    if timeout is None:
+        yield
+        return
+    positive(timeout, "timeout")
+    try:
+        with request_scope(timeout):
+            yield
+    except (TimeoutError, asyncio.TimeoutError) as cause:
+        raise error(sandbox_id, file_path, timeout) from cause
+
+
+def _network_rules(allow, deny):
+    """Prime's set_network lists as Runtime's network rules: one list, "*" alone
+    for every destination. Runtime opens the public web on ports 80 and 443."""
+    if (allow is None) == (deny is None):
+        raise ValueError("exactly one of allow or deny must be provided")
+    entries = list(allow if allow is not None else deny)
+    if not entries:
+        raise ValueError("allow or deny must contain at least one destination")
+    if "*" in entries:
+        if entries != ["*"]:
+            raise ValueError("'*' must be the only destination")
+        return {"internet": allow is not None}
+    _validate_egress_lists(entries if allow is not None else None, entries if deny is not None else None)
+    return {"internet": True, "allow" if allow is not None else "deny": entries}
+
+
+def _egress_status(policy):
+    """Runtime's network rules as Prime's policy. Runtime applies a change at
+    once, so the policy read is the policy applied."""
+    if policy.get("connect") or (policy.get("allow") and policy.get("deny")):
+        raise CompatibilityError("Prime network policies hold one list; read open ports and mixed lists "
+                                 "with sandbox.network.get() on the native client")
+    if not policy.get("internet"):
+        rules = SandboxEgressPolicy(allowlist=[], denylist=None)
+    elif policy.get("allow"):
+        rules = SandboxEgressPolicy(allowlist=list(policy["allow"]), denylist=None)
+    else:
+        rules = SandboxEgressPolicy(allowlist=None, denylist=list(policy.get("deny") or []))
+    updated = policy.get("updatedAt")
+    generation = int(datetime.fromisoformat(updated.replace("Z", "+00:00")).timestamp() * 1000) if updated else 0
+    return EgressPolicyStatus(policy=rules, generation=generation, applied_generation=generation, applied=True)
+
 
 def _validate_background_output_limits(concurrency, queue_size, cache_bytes):
     if concurrency <= 0:
@@ -71,7 +126,9 @@ class SandboxClient:
         try:
             sb.files.write(ENV_PATH, json.dumps(env), mode=0o600)
             if start:
-                sb.spawn([start["executable"], *start.get("args", [])], env=env)
+                # The output is kept for get_logs, as Prime keeps the container's.
+                sb.spawn(["bash", "-c", 'exec "$@" >> "$0" 2>&1', START_LOG,
+                                start["executable"], *start.get("args", [])], env=env)
         except BaseException as original:
             try:
                 sb.stop()
@@ -116,8 +173,8 @@ class SandboxClient:
     def wait_for_creation(self, sandbox_id, max_attempts=60, stability_checks=1, image_build_timeout_seconds=3000):
         if stability_checks != 1:
             raise CompatibilityError("Repeated reachability probes are not yet implemented")
-        if image_build_timeout_seconds != 3000:
-            raise CompatibilityError("Separate image build waiting deadlines are not yet supported")
+        # create builds the image before it answers, so no build is left to wait for.
+        positive(image_build_timeout_seconds, "image_build_timeout_seconds")
         positive(max_attempts, "max_attempts", integral=True)
         sb = self._runtime.sandboxes.get(sandbox_id)
         if sb.state != "running":
@@ -125,6 +182,44 @@ class SandboxClient:
         if sb.state != "running":
             raise TimeoutError(f"Sandbox {sandbox_id} is {sb.state}")
         return None
+
+    def bulk_wait_for_creation(self, sandbox_ids, max_attempts=60, image_build_timeout_seconds=3000):
+        if not sandbox_ids or len(sandbox_ids) > 100 or len(set(sandbox_ids)) != len(sandbox_ids):
+            raise ValueError("sandbox_ids must contain between 1 and 100 unique IDs")
+        for sandbox_id in sandbox_ids:
+            self.wait_for_creation(sandbox_id, max_attempts=max_attempts,
+                                         image_build_timeout_seconds=image_build_timeout_seconds)
+        return {sandbox_id: "RUNNING" for sandbox_id in sandbox_ids}
+
+    def clear_auth_cache(self):
+        """Runtime authenticates every call with the API key: no per-sandbox token is cached."""
+        return None
+
+    def get_network(self, sandbox_id):
+        sb = self._runtime.sandboxes.get(sandbox_id)
+        return _egress_status(sb.network.get())
+
+    def set_network(self, sandbox_id, *, allow=None, deny=None):
+        rules = _network_rules(allow, deny)
+        sb = self._runtime.sandboxes.get(sandbox_id)
+        return _egress_status(sb.network.set(**rules))
+
+    def get_logs(self, sandbox_id):
+        sb = self._runtime.sandboxes.get(sandbox_id)
+        try:
+            return (sb.files.read(START_LOG)).decode("utf-8", errors="replace")
+        except SDKError as error:
+            if error.status != 404:
+                raise
+            return ""
+
+    def create_ssh_session(self, sandbox_id, public_key, ttl_seconds=None):
+        raise CompatibilityError("Prime SSH sessions on a public host and port are not supported; "
+                                 "open a shell with `runtime sandboxes ssh <id>`")
+
+    def close_ssh_session(self, sandbox_id, session_id):
+        raise CompatibilityError("Prime SSH sessions on a public host and port are not supported; "
+                                 "open a shell with `runtime sandboxes ssh <id>`")
 
     def _environment(self, sb, extra=None):
         try:
@@ -147,28 +242,25 @@ class SandboxClient:
         return CommandResponse(stdout=result.stdout, stderr=result.stderr, exit_code=result.exit_code)
 
     def upload_bytes(self, sandbox_id, file_path, file_bytes, filename, timeout=None):
-        if timeout is not None:
-            raise CompatibilityError("Per-file transfer deadlines are not yet supported")
-        sb = self._runtime.sandboxes.get(sandbox_id)
-        sb.files.write(file_path, file_bytes)
+        with _deadline(UploadTimeoutError, sandbox_id, file_path, timeout):
+            sb = self._runtime.sandboxes.get(sandbox_id)
+            sb.files.write(file_path, file_bytes)
         return FileUploadResponse(success=True, path=file_path, size=len(file_bytes), timestamp=datetime.now(timezone.utc))
 
     def upload_file(self, sandbox_id, file_path, local_file_path, timeout=None):
         return self.upload_bytes(sandbox_id, file_path, Path(local_file_path).read_bytes(), Path(local_file_path).name, timeout)
 
     def download_file(self, sandbox_id, file_path, local_file_path, timeout=None):
-        if timeout is not None:
-            raise CompatibilityError("Per-file transfer deadlines are not yet supported")
-        sb = self._runtime.sandboxes.get(sandbox_id)
-        sb.files.download(file_path, local_file_path)
+        with _deadline(DownloadTimeoutError, sandbox_id, file_path, timeout):
+            sb = self._runtime.sandboxes.get(sandbox_id)
+            sb.files.download(file_path, local_file_path)
 
     def read_file(self, sandbox_id, file_path, timeout=None, offset=None, length=None):
-        if timeout is not None:
-            raise CompatibilityError("Per-file transfer deadlines are not yet supported")
         if length is not None and length < 0:
             raise ValueError("length must not be negative")
-        sb = self._runtime.sandboxes.get(sandbox_id)
-        data = sb.files.read(file_path)
+        with _deadline(DownloadTimeoutError, sandbox_id, file_path, timeout):
+            sb = self._runtime.sandboxes.get(sandbox_id)
+            data = sb.files.read(file_path)
         start = max(0, len(data) + offset) if offset is not None and offset < 0 else (offset or 0)
         part = data[start:None if length is None else start + length]
         return ReadFileResponse(content=part.decode(), size=len(part), total_size=len(data), offset=start,
@@ -317,5 +409,6 @@ from .exceptions import translate
 for _name in ("create", "get", "list", "delete", "wait_for_creation", "execute_command", "upload_bytes",
               "upload_file", "download_file", "read_file", "start_background_job", "get_background_job_status",
               "get_background_job", "get_background_job_statuses", "get_background_jobs", "run_background_job",
-              "get_sandbox_statuses", "bulk_delete"):
+              "get_sandbox_statuses", "bulk_delete", "bulk_wait_for_creation", "get_network", "set_network",
+              "get_logs"):
     setattr(SandboxClient, _name, translate(getattr(SandboxClient, _name)))

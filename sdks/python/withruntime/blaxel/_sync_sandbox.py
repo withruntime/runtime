@@ -1421,11 +1421,20 @@ class SandboxInstance:
 
     @classmethod
     def create(cls, sandbox: Any = None, safe: bool = False, create_if_not_exist: bool = False, *,
+                     timeout: Optional[int] = None,
                      runtime_create: Optional[Dict[str, Any]] = None) -> "SandboxInstance":
         """Creates a sandbox with Blaxel's defaults (blaxel/base-image, 4096 MB,
         kept until deleted), ready when this answers. Funding is left to
-        Runtime: the included usage first, then prepaid credit. ``runtime_create`` passes Runtime's own create fields
-        (snake_case), for example ``{"funding": "trial"}``."""
+        Runtime: the free usage first, then prepaid credit. ``runtime_create`` passes Runtime's own create fields
+        (snake_case), for example ``{"idle_pause_seconds": 0}``.
+
+        ``timeout`` (1 to 50 whole seconds, as blaxel 0.4.13's) bounds the wait
+        for room and for running; a sandbox not running by then is deleted and
+        SandboxCreationTimeoutError raised. ``safe`` lists / once it runs, and
+        stops it when that fails."""
+        if timeout is not None:
+            core.check_creation_timeout(timeout)
+        deadline = time.monotonic() + (timeout or 0)
         config = core.config_of(sandbox)
         core.check_create(config)
         client = _client()
@@ -1454,11 +1463,19 @@ class SandboxInstance:
             fields["volumes"] = mounts
         if create_if_not_exist:
             fields["get_or_create"] = True
+        if timeout is not None:
+            fields.update(wait=False, wait_for_capacity=timeout)
         fields.update(runtime_create or {})
         runtime = _name_free(client, lambda: client.sandboxes.create(**fields))
         if runtime.info.get("reused"):
+            # The sandbox the name already had: never deleted for a timeout.
             return cls(_runtime=runtime)
-        return cls._adopt(runtime, envs, retention_days=plan.retention_days)
+        if timeout is not None:
+            _running_by(runtime, config.name or runtime.id, timeout, deadline)
+        box = cls._adopt(runtime, envs, retention_days=plan.retention_days)
+        if safe:
+            _settle(runtime, [lambda: box.fs.ls("/")])
+        return box
 
     @classmethod
     def _adopt(cls, runtime: Any, envs: Dict[str, str], retention_days: int) -> "SandboxInstance":
@@ -1492,11 +1509,12 @@ class SandboxInstance:
         return cls(_runtime=runtime)
 
     @classmethod
-    def create_if_not_exists(cls, sandbox: Any, *,
+    def create_if_not_exists(cls, sandbox: Any, *, timeout: Optional[int] = None,
                                    runtime_create: Optional[Dict[str, Any]] = None) -> "SandboxInstance":
         """The sandbox with this name, as it is (woken if in standby), or a new
-        one. Two calls at once get the same sandbox."""
-        return cls.create(sandbox, create_if_not_exist=True, runtime_create=runtime_create)
+        one. Two calls at once get the same sandbox. ``timeout`` bounds only a
+        new one's start."""
+        return cls.create(sandbox, create_if_not_exist=True, timeout=timeout, runtime_create=runtime_create)
 
     @classmethod
     def get(cls, sandbox_name: str) -> "SandboxInstance":
@@ -1612,6 +1630,36 @@ def _settle(runtime: Any, works: List[Callable[[], Any]]) -> None:
         raise
 
 
+def _running_by(runtime: Any, name: str, timeout: int, deadline: float) -> None:
+    """Waits until a new sandbox runs, up to create's ``timeout``. One not
+    running by then is deleted: still starting raises
+    SandboxCreationTimeoutError, as Blaxel's does; stopped is a failed start."""
+    try:
+        if runtime.state != "running":
+            left = max(1, min(timeout, math.ceil(deadline - time.monotonic())))
+            _guard("sandbox", lambda: runtime.wait_for("running", left))
+    except BaseException as error:
+        _discard(runtime)
+        if isinstance(error, Exception) and time.monotonic() >= deadline:
+            raise core.SandboxCreationTimeoutError(name, timeout, runtime.state) from error
+        raise
+    state = runtime.state
+    if state == "running":
+        return
+    _discard(runtime)
+    if state in ("stopping", "stopped", "failed", "error"):
+        raise SandboxAPIError(f"Sandbox {name} is not running: it was {state} while starting.", None, "not_running")
+    raise core.SandboxCreationTimeoutError(name, timeout, state)
+
+
+def _discard(runtime: Any) -> None:
+    """Deletes a sandbox create gave up on; the reason is what the caller hears."""
+    try:
+        runtime.delete()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _name_free(client: Runtime, work: Callable[[], Any], subject: str = "sandbox") -> Any:
     """Runs a create or fork that names a sandbox. When the name is still held
     by one that is stopping (deleted a moment ago), waits up to 30 seconds for
@@ -1637,7 +1685,7 @@ def _volumes(client: Runtime, volumes: List[Any]) -> List[Dict[str, str]]:
         if not listing.data:
             raise NotSupportedError(f"The volume {volume.name}, which is not a Runtime volume",
                                     f'Create it first: runtime.volumes.create(10240, name="{volume.name}"), or '
-                                    f"`npx withruntime volume create --name {volume.name}`.")
+                                    f"`npx withruntime volumes create --name {volume.name}`.")
         out.append({"volume_id": listing.data[0]["id"], "path": core.to_runtime_path(volume.mount_path)})
     return out
 
@@ -1695,14 +1743,15 @@ class CodeInterpreter(SandboxInstance):
 
     @classmethod
     def create(cls, sandbox: Any = None, safe: bool = True, create_if_not_exist: bool = False, *,
+                     timeout: Optional[int] = None,
                      runtime_create: Optional[Dict[str, Any]] = None) -> "CodeInterpreter":
         payload: Dict[str, Any] = {"image": cls.DEFAULT_IMAGE, "lifecycle": cls.DEFAULT_LIFECYCLE}
         config = core.config_of(sandbox)
         for key in ("name", "envs", "memory", "region", "labels"):
             if getattr(config, key, None):
                 payload[key] = getattr(config, key)
-        return super().create(payload, create_if_not_exist=create_if_not_exist,  # type: ignore[return-value]
-                                    runtime_create=runtime_create)
+        return super().create(payload, safe, create_if_not_exist,  # type: ignore[return-value]
+                                    timeout=timeout, runtime_create=runtime_create)
 
     def run_code(self, code: str, language: Optional[str] = None, context: Any = None,
                        on_stdout: Any = None, on_stderr: Any = None, on_result: Any = None, on_error: Any = None,

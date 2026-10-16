@@ -8,10 +8,23 @@ import { switchedOff } from "./jobs.js";
  * `..` segments, no `;` or `\`, no encoded slash. A request whose path could be
  * read two ways gets no secret that has rules. Needs credit on the account. */
 export type SecretRule = { methods?: string[]; paths: string[] };
+/** Which sandboxes get a secret: those whose labels hold every pair of any one
+ * selector in `labels` (including sandboxes created or labelled later), and
+ * those named in `sandboxes`. Any other sandbox of the organization sees no
+ * placeholder, and its requests never carry the value. Absent on a secret:
+ * every sandbox of the organization. */
+export type SecretScope = {
+  /** 1 to 8 selectors of 1 to 8 key/value pairs: `[{ role: "hub" }]`. */
+  labels?: Array<Record<string, string>>;
+  /** 1 to 100 sandbox ids of the organization. */
+  sandboxes?: string[];
+};
 /** A secret your sandboxes use without seeing it. Every sandbox of your
  * organization has an environment variable of the secret's name holding
- * `placeholder`; the egress proxy puts the value into HTTPS requests to
- * `hosts` (in the URL and headers), or sets `header` on every such request.
+ * `placeholder`; the egress proxy sets `header` on every HTTPS request to
+ * `hosts`, or, without `header`, replaces the placeholder in a credential
+ * header (Authorization, x-api-key, x-goog-api-key, api-key, xi-api-key,
+ * x-subscription-token, private-token). Never in the URL or another header.
  * The value is never returned. */
 export type Secret = {
   name: string;
@@ -19,6 +32,8 @@ export type Secret = {
   header?: string;
   format?: string;
   rules?: SecretRule[];
+  /** Absent: every sandbox of the organization. */
+  only?: SecretScope;
   placeholder: string;
   valueBytes: number;
   createdAt: string;
@@ -32,7 +47,9 @@ export type SetSecret = {
   /** Where the value may go: `api.openai.com`, `*.github.com`. 1 to 16.
    * Required unless `jobs` is true. */
   hosts?: string[];
-  /** Set this header on every request to the hosts, replacing the sandbox's own. */
+  /** Set this header on every request to the hosts, replacing the sandbox's
+   * own; the value then goes nowhere else. Needed when the API reads its key
+   * from a header that is not a credential header (see `Secret`). */
   header?: string;
   /** With `header`: its value, `{value}` where the secret goes. Default `{value}`. */
   format?: string;
@@ -40,6 +57,10 @@ export type SetSecret = {
    * Absent: every request to the hosts; replacing a secret without rules
    * clears them. */
   rules?: SecretRule[];
+  /** Only these sandboxes get it. Absent when replacing a secret: the scope it
+   * has stays, so a new value never widens who gets it. `{}`: every sandbox of
+   * the organization again. */
+  only?: SecretScope;
   /** Also keep a copy for scheduled jobs, which a job puts into its run's
    * environment (`jobs.create({ secrets: [...] })`). Unlike the sandboxes'
    * copy, the jobs copy is yours rather than the account's, versioned, and can
@@ -105,16 +126,49 @@ export function secrets(t: Transport) {
     options?.idempotencyKey
       ? { ...options, idempotencyKey: `${options.idempotencyKey}:${part}`.slice(0, 128) }
       : options;
+  const create = (name: string, value: string, options?: RequestOptions) =>
+    store<JobSecret>({ method: "POST", path: "/v1/secrets", body: { name, value }, ...options });
+  const rotate = (live: JobSecret, value: string, version: number, options?: RequestOptions) =>
+    store<JobSecret>({
+      method: "POST",
+      path: `${jobPath(live.id)}:rotate`,
+      body: { value, expectedVersion: version },
+      ...options,
+    });
+  /** Rotates the jobs copy from the version it has now. A key used before,
+   * by this same call whose answer was lost, is answered by the identical
+   * request again, with no second rotation: the rotate from the version
+   * before, or one of `earlier` (a set's create). Until 10 October 2026 the
+   * retry read the copy as it is now, changed its request, and was refused
+   * as a conflict. */
+  async function rotateOrReplay(
+    live: JobSecret,
+    value: string,
+    options?: RequestOptions,
+    earlier: (() => Promise<JobSecret>)[] = [],
+  ) {
+    try {
+      return await rotate(live, value, live.version, options);
+    } catch (error) {
+      if (!(error instanceof RuntimeError) || error.code !== "idempotency_conflict") throw error;
+      const replays = [
+        ...earlier,
+        ...(live.version > 1 ? [() => rotate(live, value, live.version - 1, options)] : []),
+      ];
+      for (const replay of replays) {
+        const answer = await replay().catch((again: unknown) => {
+          if (again instanceof RuntimeError && again.status === 409) return undefined;
+          throw again;
+        });
+        if (answer) return answer;
+      }
+      throw error;
+    }
+  }
   async function setJobCopy(name: string, value: string, options?: RequestOptions) {
     const copies = await jobCopies(options);
     const live = copies.find((s) => s.name === name && s.deletedAt === null);
-    if (live)
-      return store<JobSecret>({
-        method: "POST",
-        path: `${jobPath(live.id)}:rotate`,
-        body: { value, expectedVersion: live.version },
-        ...options,
-      });
+    if (live) return rotateOrReplay(live, value, options, [() => create(name, value, options)]);
     if (copies.some((s) => s.name === name))
       throw new RuntimeError({
         message: `A jobs secret named ${name} was deleted, and a deleted name cannot be used again.`,
@@ -123,12 +177,7 @@ export function secrets(t: Transport) {
         hint: "Store it under another name.",
         details: { field: "name" },
       });
-    return store<JobSecret>({
-      method: "POST",
-      path: "/v1/secrets",
-      body: { name, value },
-      ...options,
-    });
+    return create(name, value, options);
   }
   async function all(options?: RequestOptions): Promise<SecretUse[]> {
     const [forSandboxes, forJobs] = await Promise.all([
@@ -202,6 +251,15 @@ export function secrets(t: Transport) {
      * at once store both; if only the first lands, `SecretPartlyStoredError`
      * says so and the same call again finishes it. */
     set,
+    /** Changes which sandboxes get a secret, without its value: `{}` is every
+     * sandbox of the organization again. */
+    scope: (name: string, only: SecretScope, options?: RequestOptions) =>
+      t.json<Secret & { enforced: boolean }>({
+        method: "PUT",
+        path: `${path(name)}/sandboxes`,
+        body: only,
+        ...options,
+      }),
     /** The sandboxes' secrets: names, hosts and placeholders. Never values.
      * `all()` includes the jobs copies. */
     list,
@@ -231,12 +289,7 @@ export function secrets(t: Transport) {
           status: 404,
           hint: "Store one with set(name, { value, jobs: true }). The sandboxes' copy is replaced by set, not rotated.",
         });
-      return store<JobSecret>({
-        method: "POST",
-        path: `${jobPath(live.id)}:rotate`,
-        body: { value, expectedVersion: live.version },
-        ...options,
-      });
+      return rotateOrReplay(live, value, options);
     },
     /** Read the jobs copy's value back (needs the key's secrets_reveal
      * permission). The sandboxes' copy can never be read back. */

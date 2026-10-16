@@ -11,6 +11,15 @@ function statusOf(state: RuntimeSnapshot["state"]): Status {
   return "created";
 }
 
+/** Vercel's snapshots always expire. Runtime's has no end date while it is kept
+ * for as long as the account has credit; it is then taken at the longest a
+ * snapshot is kept, a year from when it was made. */
+function expiresAtOf(snapshot: RuntimeSnapshot): number {
+  return snapshot.expiresAt === null
+    ? Date.parse(snapshot.createdAt) + 365 * 86_400_000
+    : Date.parse(snapshot.expiresAt);
+}
+
 function metadataOf(snapshot: RuntimeSnapshot) {
   return {
     id: snapshot.id,
@@ -21,7 +30,7 @@ function metadataOf(snapshot: RuntimeSnapshot) {
     sizeBytes: snapshot.storedBytes ?? 0,
     createdAt: Date.parse(snapshot.createdAt),
     updatedAt: Date.parse(snapshot.readyAt ?? snapshot.createdAt),
-    expiresAt: Date.parse(snapshot.expiresAt),
+    expiresAt: expiresAtOf(snapshot),
   };
 }
 
@@ -57,7 +66,7 @@ export class Snapshot {
     return new Date(this.#snapshot.readyAt ?? this.#snapshot.createdAt);
   }
   get expiresAt(): Date {
-    return new Date(this.#snapshot.expiresAt);
+    return new Date(expiresAtOf(this.#snapshot));
   }
 
   static async get(

@@ -51,9 +51,13 @@ func (s *SandboxService) Create(ctx context.Context, opts *CreateOptions) (*Sand
 			return sbx, err
 		}
 		if sbx.State() != "running" {
+			message := fmt.Sprintf("Sandbox %s is %s, not running.", info.ID, sbx.State())
+			if info.Replayed {
+				message = fmt.Sprintf("Sandbox %s was made by an earlier call with this idempotency key and is %s now. It did not fail to start; create again with a new key.", info.ID, sbx.State())
+			}
 			return sbx, &Error{
 				Code:    "start_failed",
-				Message: fmt.Sprintf("Sandbox %s is %s, not running.", info.ID, sbx.State()),
+				Message: message,
 				Hint:    "Read it with client.Sandboxes.Get(ctx, id); StopReason says why.",
 			}
 		}
@@ -474,8 +478,8 @@ type ForkOptions struct {
 	// KeepSnapshot keeps the snapshot the fork takes (it is billed as
 	// storage); otherwise it is deleted when the fork ends.
 	KeepSnapshot bool `json:"keepSnapshot,omitempty"`
-	// Funding is what the copies run on, as for a create. Omitted, they keep
-	// the source's.
+	// Deprecated: Funding is accepted and ignored: copies run on the free
+	// usage first, then prepaid credit.
 	Funding        string `json:"funding,omitempty"`
 	IdempotencyKey string `json:"-"`
 }

@@ -183,7 +183,8 @@ export class Sandbox {
   readonly git: Git;
   readonly codeInterpreter: CodeInterpreter;
   env: Record<string, string>;
-  readonly public: boolean;
+  /** Whether its previews are public; setPublic changes it. */
+  public: boolean;
   readonly snapshot: string | undefined;
   #rt: RuntimeSandbox;
   readonly #client: Runtime;
@@ -472,8 +473,22 @@ export class Sandbox {
     await guard("sandbox", () => runtime.network.set(rules ?? { internet: true }));
   }
 
+  /** Makes every port it shares public, or private with a token, and the
+   * ports getPreviewLink shares from now on. A port already shared changes
+   * at once, keeping its address, as on Daytona. Without credit, public is
+   * refused (public_preview_not_allowed) and nothing changes. */
+  async setPublic(isPublic: boolean): Promise<void> {
+    const visibility = isPublic ? "public" : "private";
+    const runtime = await this.#live();
+    const shared = await guard("sandbox", () => runtime.previews.list());
+    for (const preview of shared)
+      if (preview.visibility !== visibility)
+        await guard("sandbox", () => runtime.previews.create(preview.port, { visibility }));
+    this.public = isPublic;
+  }
+
   /** A preview address for `port`: public when the sandbox was created with
-   * `public: true`, else private with a token. */
+   * `public: true` or setPublic(true) since, else private with a token. */
   async getPreviewLink(port: number): Promise<PortPreviewUrl> {
     const runtime = await this.#live();
     const preview = await guard("sandbox", () =>
@@ -600,7 +615,7 @@ export class Sandbox {
   createSshAccess(): Promise<never> {
     return refusal(
       "SSH access",
-      "Use `npx withruntime sandbox ssh <id>` (also VS Code and JetBrains) or sandbox.withruntime.terminal().",
+      "Use `npx withruntime sandboxes ssh <id>` (also VS Code and JetBrains) or sandbox.withruntime.terminal().",
     );
   }
   revokeSshAccess(): Promise<never> {

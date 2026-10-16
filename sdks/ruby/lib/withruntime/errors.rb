@@ -10,6 +10,7 @@ module WithRuntime
     DELIBERATE = %w[
       unavailable unsupported fork_unavailable previews_unavailable
       network_unavailable network_rules_unavailable secrets_unavailable identity_unavailable env_unavailable
+      resize_unavailable
     ].freeze
     # Refusals that pass on their own: a host frees room, a sandbox of an
     # account without credit stops.

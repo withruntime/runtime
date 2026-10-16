@@ -15,17 +15,18 @@ from ._async_sandbox import (AsyncCodeInterpreter, AsyncPaginatedList, AsyncSand
                              AsyncSandboxPreview, AsyncSandboxPreviews, AsyncSandboxPreviewToken,
                              AsyncSandboxPreviewTokens, AsyncSandboxProcess, AsyncSandboxSessions, AsyncSandboxSnapshots,
                              AsyncSnapshot)
-from ._core import (ApplicationAPIError, AsyncStreamHandle, AsyncWatchHandle, ContentSearchMatch,
-                    ContentSearchResponse, Context, CopyResponse, Directory, DriveAPIError, Env, Execution,
-                    ExecutionError, ExpirationPolicy, File, FindMatch, FindResponse, Logs, Metadata, NotSupportedError,
-                    OutputMessage, PaginationMeta, Port, Preview, PreviewMetadata, PreviewSpec, PreviewToken, PreviewTokenMetadata,
-                    PreviewTokenSpec, ProcessRequest, ProcessRequestWithLog, ProcessResponse, ProcessResponseStatus,
-                    ProcessResponseWithLog, ResponseError, Result, Sandbox, SandboxAPIError, SandboxConfiguration,
-                    SandboxCreateConfiguration, SandboxFilesystemFile, SandboxForkResponse, SandboxLifecycle,
-                    SandboxNetwork, SandboxRuntime, SandboxSnapshot, SandboxSnapshotRequest, SandboxSpec, SandboxState,
-                    SandboxUpdateMetadata, SandboxUpdateNetwork, SessionCreateOptions, SessionWithToken,
-                    SnapshotAPIError, Status, StreamHandle, Subdirectory, SuccessResponse, VolumeAttachment,
-                    VolumeBinding, WatchEvent, WatchHandle)
+from ._core import (MAX_CREATION_TIMEOUT_SECONDS, ApplicationAPIError, AsyncStreamHandle, AsyncWatchHandle,
+                    ContentSearchMatch, ContentSearchResponse, Context, CopyResponse, Directory, DriveAPIError, Env,
+                    Execution, ExecutionError, ExpirationPolicy, File, FindMatch, FindResponse, Logs, Metadata,
+                    NotSupportedError, OutputMessage, PaginationMeta, Port, Preview, PreviewMetadata, PreviewSpec,
+                    PreviewToken, PreviewTokenMetadata, PreviewTokenSpec, ProcessRequest, ProcessRequestWithLog,
+                    ProcessResponse, ProcessResponseStatus, ProcessResponseWithLog, ResponseError, Result, Sandbox,
+                    SandboxAPIError, SandboxConfiguration, SandboxCreateConfiguration, SandboxCreationTimeoutError,
+                    SandboxFilesystemFile, SandboxForkResponse, SandboxLifecycle, SandboxNetwork, SandboxRuntime,
+                    SandboxSnapshot, SandboxSnapshotRequest, SandboxSpec, SandboxState, SandboxUpdateMetadata,
+                    SandboxUpdateNetwork, SessionCreateOptions, SessionWithToken, SnapshotAPIError, Status,
+                    StreamHandle, Subdirectory, SuccessResponse, VolumeAttachment, VolumeBinding, WatchEvent,
+                    WatchHandle, is_creation_timeout_error)
 from ._core import unsupported_export as _unsupported_export
 
 SandboxInstance = AsyncSandboxInstance
@@ -76,7 +77,7 @@ _MODELS = "Call your model provider's SDK directly; run the agent's tools in a R
 _AUTH = "Runtime uses RUNTIME_API_KEY, or the key `npx withruntime login` saved."
 _VOLUMES = ("Use a Runtime volume: runtime.volumes.create(10240, name=...), mounted at create with the Runtime "
             "SDK's create(volumes=[{'volume_id': ..., 'path': ...}]).")
-_IMAGES = "Build a Runtime image: `npx withruntime image build --dockerfile Dockerfile --name <name>`."
+_IMAGES = "Build a Runtime image: `npx withruntime images build --dockerfile Dockerfile --name <name>`."
 BlAgent = bl_agent = _Unsupported("agents", _MODELS)
 BLModel = bl_model = _Unsupported("models", _MODELS)
 BlTools = bl_tools = convert_mcp_tool_to_blaxel_tool = _Unsupported("tools", _MODELS)
@@ -113,7 +114,8 @@ __all__ = [
     "SandboxFilesystemFile", "CopyResponse", "WatchEvent", "StreamHandle", "AsyncStreamHandle", "WatchHandle",
     "AsyncWatchHandle", "Preview", "PreviewMetadata", "PreviewSpec", "PreviewToken", "PreviewTokenMetadata",
     "PreviewTokenSpec", "SandboxSnapshot", "SandboxSnapshotRequest", "SandboxForkResponse", "OutputMessage", "Result",
-    "ExecutionError", "Logs", "Execution", "Context", "SandboxAPIError", "SnapshotAPIError", "ResponseError",
+    "ExecutionError", "Logs", "Execution", "Context", "SandboxAPIError", "SandboxCreationTimeoutError",
+    "is_creation_timeout_error", "MAX_CREATION_TIMEOUT_SECONDS", "SnapshotAPIError", "ResponseError",
     "DriveAPIError", "ApplicationAPIError", "NotSupportedError", "use_client", "autoload", "BlAgent", "bl_agent",
     "BLModel", "bl_model", "BlTools", "bl_tools", "convert_mcp_tool_to_blaxel_tool", "BlaxelMcpServerTransport",
     "websocket_client", "BlJobWrapper", "BlaxelAuth", "auth", "get_credentials", "client", "settings", "env",

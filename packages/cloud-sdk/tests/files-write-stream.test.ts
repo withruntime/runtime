@@ -1,5 +1,6 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,21 @@ import { Files } from "../src/sandbox";
 import type { Call, Transport } from "../src/transport";
 
 const CHUNK = 1_048_576;
+/* The staging folders are counted in a temporary folder of this file's own.
+   In the shared one, other test files uploading at the same time made and
+   removed their own runtime-upload- folders between two counts: three tests
+   here failed 15 runs in 15 beside a process doing that (10 October 2026). */
+const sharedTmp = process.env.TMPDIR;
+let ownTmp: string | undefined;
+beforeAll(() => {
+  ownTmp = mkdtempSync(join(tmpdir(), "runtime-staging-test-"));
+  process.env.TMPDIR = ownTmp;
+});
+afterAll(() => {
+  if (ownTmp) rmSync(ownTmp, { recursive: true, force: true });
+  if (sharedTmp === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = sharedTmp;
+});
 const staging = async () =>
   (await readdir(tmpdir())).filter((name) => name.startsWith("runtime-upload-"));
 const unlimited = { check() {}, wait: <T>(pending: Promise<T>) => pending };

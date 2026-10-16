@@ -15,6 +15,7 @@ export const DELIBERATE: ReadonlySet<string> = new Set([
   "secrets_unavailable",
   "identity_unavailable",
   "env_unavailable",
+  "resize_unavailable",
 ]);
 /** Refusals that guarantee nothing ran: a sandbox running as many commands
  * as it can (`guest_busy`), and the API's own limits, which answer before any
@@ -26,7 +27,7 @@ export const NOTHING_RAN: ReadonlySet<string> = new Set(["guest_busy", "busy", "
  * account without credit stops. */
 const PASSING = new Set(["no_capacity", "no_credit_running_limit", "no_credit_total_limit"]);
 /** Refusals of a create that clear when a sandbox stops or pauses, or a host
- * frees room: an account without credit's eight at once and its total, an
+ * frees room: an account without credit's four at once and its total, an
  * email domain's, the account's quota and the region's capacity. `sandboxes.create` waits them out, retrying
  * with the same key and input, for up to `waitForCapacityMs`. */
 export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
@@ -36,7 +37,8 @@ export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
   "no_credit_capacity_full",
   "quota_exceeded",
   "no_capacity",
-  // A volume whose last sandbox is stopping: free within seconds.
+  // A volume whose last sandbox is stopping: free once the stop lets go of
+  // its disk, up to about a minute (measured 50 to 60 s, 6 October 2026).
   "volume_releasing",
 ]);
 
@@ -99,7 +101,9 @@ export class AccountBlockedError extends RuntimeError {}
 /** No answer arrived. A write may or may not have happened; retrying with the
  * same idempotencyKey (the SDK does, automatically) settles it safely. */
 export class ConnectionError extends RuntimeError {}
-/** Raised by exec({ check: true }) when a command exits non-zero. */
+/** Raised by exec({ check: true }) when a command exits non-zero. Its code
+ * is `out_of_memory` when the sandbox's out-of-memory killer ended it, with
+ * the result's message and hint. */
 export class CommandError extends RuntimeError {
   readonly exitCode: number | null;
   readonly stdout: string;
@@ -109,17 +113,26 @@ export class CommandError extends RuntimeError {
     stdout: string;
     stderr: string;
     timedOut?: boolean;
+    outOfMemory?: { code: string; message: string; hint: string };
   }) {
+    const memory = result.outOfMemory;
     super({
       message: result.timedOut
         ? "Command timed out."
-        : `Command exited with ${result.exitCode}.${result.stderr ? ` ${result.stderr.trim().slice(-500)}` : ""}`,
-      code: result.timedOut ? "command_timeout" : "command_failed",
+        : memory
+          ? `Command exited with ${result.exitCode}. ${memory.message}`
+          : `Command exited with ${result.exitCode}.${result.stderr ? ` ${result.stderr.trim().slice(-500)}` : ""}`,
+      code: result.timedOut ? "command_timeout" : memory ? memory.code : "command_failed",
       status: 0,
+      ...(memory && !result.timedOut ? { hint: memory.hint } : {}),
     });
     this.exitCode = result.exitCode;
     this.stdout = result.stdout;
     this.stderr = result.stderr;
+  }
+  /** The same command in the same sandbox runs out of memory again. */
+  override get retryable(): boolean {
+    return this.code === "out_of_memory" ? false : super.retryable;
   }
 }
 

@@ -258,6 +258,51 @@ describe("computer use", () => {
     ]);
   });
 
+  test("0.223.0's held buttons, sideways scrolls and click counts map; held keys are refused first", async () => {
+    const sandbox = await daytona.create();
+    const { calls } = fakeDesktop(fake(sandbox));
+    const mouse = sandbox.computerUse.mouse;
+    expect(await mouse.down(10, 20)).toEqual({ x: 10, y: 20 });
+    expect(await mouse.up(30, 40, "right")).toEqual({ x: 30, y: 40 });
+    expect(await mouse.down()).toEqual({ x: 3, y: 4 });
+    expect(await mouse.scroll(5, 6, "right", 2)).toBe(true);
+    await mouse.scroll(5, 6, "left");
+    await mouse.click(1, 2, "left", true, 1, []);
+    await mouse.click(1, 2, "left", false, 2);
+    expect(calls).toEqual([
+      ["move", 10, 20],
+      ["mouseDown", "left"],
+      ["move", 30, 40],
+      ["mouseUp", "right"],
+      ["mouseDown", "left"],
+      ["cursor"],
+      ["scroll", 0, { dx: 2, x: 5, y: 6 }],
+      ["scroll", 0, { dx: -1, x: 5, y: 6 }],
+      ["click", 1, 2, { button: "left", double: false }],
+      ["click", 1, 2, { button: "left", double: true }],
+    ]);
+    calls.length = 0;
+    for (const refuse of [
+      () => mouse.click(1, 2, "left", false, 3),
+      () => mouse.click(1, 2, "left", false, undefined, ["ctrl"]),
+      () => mouse.drag(1, 2, 3, 4, "left", ["shift"]),
+      () => mouse.scroll(1, 2, "up", 1, ["ctrl"]),
+      () => sandbox.computerUse.keyboard.down("shift"),
+      () => sandbox.computerUse.keyboard.up("shift"),
+    ]) {
+      const error = await refuse().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(NotSupportedError);
+      expect((error as NotSupportedError).alternative.length).toBeGreaterThan(0);
+    }
+    for (const wrong of [
+      () => mouse.click(1, 2, "left", false, 0),
+      () => mouse.click(1, 2, "left", false, 11),
+      () => mouse.scroll(1, 2, "sideways" as "up"),
+    ])
+      expect(await wrong().catch((e: unknown) => e)).toBeInstanceOf(RangeError);
+    expect(calls).toEqual([]);
+  });
+
   test("screenshots, display, windows, status and recordings", async () => {
     const sandbox = await daytona.create();
     const png = pngOf(1280, 800);

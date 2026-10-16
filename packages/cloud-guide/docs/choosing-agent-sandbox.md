@@ -62,7 +62,7 @@ to keep, expected duration and acceptable failure rate.
 | Reliability             | A published uptime figure, and what you get when it is missed | {{uptime-promise}} a month for paid accounts, {{uptime-credit}} back automatically; a status page checked from outside                                          |
 
 For exact terms, read [security](./security), [pricing](./pricing),
-[included usage](./included-usage), and the [API reference](./api).
+[free usage](./included-usage), and the [API reference](./api).
 
 ## Measure completed jobs
 
@@ -135,10 +135,10 @@ time, Northflank's allocated rate is lower than Runtime's.
 ## Switch with one prompt
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the old provider's calls on a branch, tests them on the included usage, and
+replaces the old provider's calls on a branch, tests them on the free usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge. Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after
-changing one import. Moving from E2B, Daytona, Vercel Sandbox, Modal,
-Cloudflare, Fly or Blaxel, your first top-up is matched, up to {{switching-max}}
-([switching credit](./pricing#switching-credit)). For a new project, start with
+changing one import. Whichever you
+are moving from, credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+([welcome match](./pricing#welcome-match)). For a new project, start with
 [getting started](./start).

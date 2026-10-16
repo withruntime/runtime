@@ -1,4 +1,4 @@
-"""Runloop sandbox APIs pinned to runloop-api-client 1.32.0."""
+"""Runloop sandbox APIs pinned to runloop-api-client 2.0.0."""
 from __future__ import annotations
 import json
 import asyncio
@@ -13,6 +13,7 @@ from .._compat_lifecycle import LifecycleLock
 from ._exceptions import RunloopError
 from .lib.polling import PollingConfig, PollingTimeout
 from . import _snapshots
+from ._v2 import stdin_body, UnsupportedServices
 from .._request_scope import request_scope
 
 _SUSPENDED = "compat.runloop.suspended"
@@ -81,6 +82,18 @@ class Execution:
 
     def kill(self):
         self._process.kill("SIGKILL")
+
+    def send_std_in(self, text, *, timeout=None, idempotency_key=None, **options):
+        reject(options, "Runloop stdin; use Runtime process input for other request options")
+        stdin_body(text, None, idempotency_key)
+        with request_scope(timeout):
+            self._process.write(text, eof=False)
+
+    def close_std_in(self, *, timeout=None, idempotency_key=None, **options):
+        reject(options, "Runloop stdin; use Runtime process input for other request options")
+        stdin_body(None, "EOF", idempotency_key)
+        with request_scope(timeout):
+            self._process.write("", eof=True)
 
 
 class CommandInterface:
@@ -435,7 +448,7 @@ class SnapshotOps:
         return [self.from_id(item.id) for item in page.snapshots]
 
 
-class RunloopSDK:
+class RunloopSDK(UnsupportedServices):
     def __init__(self, *, bearer_token=None, base_url=None, timeout=300, max_retries=5, runtime=None, **options):
         reject(options, "Runloop client")
         self._runtime = runtime or Runtime(api_key=runtime_key(bearer_token), timeout=timeout, max_retries=max_retries)
@@ -482,6 +495,18 @@ class DevboxesPage:
 class ExecutionsAPI:
     def __init__(self, runtime):
         self._runtime = runtime
+
+    def send_std_in(self, execution_id, *, devbox_id, text=None, signal=None,
+                       timeout=None, idempotency_key=None, **options):
+        reject(options, "Runloop stdin; use Runtime process input for other request options")
+        stdin_body(text, signal, idempotency_key)
+        with request_scope(timeout):
+            process = self._process(execution_id, devbox_id)
+            if signal == "INTERRUPT":
+                process.kill("SIGINT")
+            else:
+                process.write(text or "", eof=signal == "EOF")
+        return Model(devbox_id=devbox_id, execution_id=execution_id, success=True)
 
     def _process(self, execution_id, devbox_id):
         sb = self._runtime.sandboxes.get(devbox_id)
@@ -646,7 +671,7 @@ class DevboxesAPI:
         return self._ops.from_id(id).snapshot_disk_async(**params)
 
 
-class Runloop:
+class Runloop(UnsupportedServices):
     """Runloop's generated REST-client sandbox namespace."""
     def __init__(self, *, bearer_token=None, base_url=None, timeout=300, max_retries=5, runtime=None, **options):
         reject(options, "Runloop client")

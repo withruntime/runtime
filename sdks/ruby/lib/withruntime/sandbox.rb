@@ -13,12 +13,12 @@ module WithRuntime
     end
 
     # Creates a sandbox and, unless +wait: false+, waits until it is running.
-    # Every field is optional: with none you get the included usage while it lasts,
+    # Every field is optional: with none you get the free usage while it lasts,
     # the default region and a 2 vCPU / 4 GiB machine for up to 30 minutes.
     # When every slot without credit or the account's quota is taken, it waits for one to
     # free, up to +wait_for_capacity+ seconds (the client's, two minutes by default).
     #
-    #   runtime.sandboxes.create(funding: "trial", labels: { team: "search" }, timeout_seconds: 900)
+    #   runtime.sandboxes.create(labels: { team: "search" }, timeout_seconds: 900)
     def create(wait: true, idempotency_key: nil, wait_for_capacity: nil, **fields)
       room = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
       info = @t.json("POST", "/v1/sandboxes", body: Fields.body(fields), wait: wait ? 60 : 0,
@@ -27,8 +27,14 @@ module WithRuntime
       if wait && sandbox.state != "running"
         sandbox.wait_for("running", timeout: ApiDefaults::WAIT_FOR_TIMEOUT_SECONDS)
         unless sandbox.state == "running"
-          raise Error.new("Sandbox #{sandbox.id} is #{sandbox.state}, not running.", code: "start_failed",
-                                                                                       hint: "Read it with runtime.sandboxes.get(id); stop_reason says why.")
+          message = if info["replayed"]
+                      "Sandbox #{sandbox.id} was made by an earlier call with this idempotency key and is #{sandbox.state} now. " \
+                        "It did not fail to start; create again with a new key."
+                    else
+                      "Sandbox #{sandbox.id} is #{sandbox.state}, not running."
+                    end
+          raise Error.new(message, code: "start_failed",
+                                   hint: "Read it with runtime.sandboxes.get(id); stop_reason says why.")
         end
       end
       sandbox
@@ -188,8 +194,9 @@ module WithRuntime
     # processes), each its own sandbox, on the same server, answered once they
     # run. One copy without +count+; an array with it. If a copy fails, the
     # error's +details["startedSandboxIds"]+ names the copies that did start.
+    # +funding+ is accepted and ignored: copies run on free usage first, then credit.
     def fork(count: nil, name: nil, labels: nil, keep_snapshot: nil, funding: nil, idempotency_key: nil)
-      body = Fields.body(count: count, name: name, labels: labels, keep_snapshot: keep_snapshot, funding: funding)
+      body = Fields.body(count: count, name: name, labels: labels, keep_snapshot: keep_snapshot)
       reply = @t.json("POST", path(":fork"), body: body, wait: 60, key: idempotency_key)
       copies = reply["sandboxes"].map { |info| Sandbox.new(@t, info) }
       count.nil? ? copies.first : copies
@@ -333,7 +340,7 @@ module WithRuntime
         if idle > 3
           raise ConnectionError.new("The output stream of process #{process_id} keeps closing before it ends.",
                                     code: "connection_error",
-                                    hint: "Read what it printed so far: runtime sandbox logs #{id} #{process_id}")
+                                    hint: "Read what it printed so far: runtime sandboxes logs #{id} #{process_id}")
         end
         sleep([0.05 * (2**idle), 2].min) if cut
       end
@@ -481,7 +488,7 @@ module WithRuntime
     end
 
     # A file's bytes (a binary String), any size.
-    def read(path) = t.bytes("GET", @sandbox.path("/files/content"), query: { "path" => path }, accept: "application/octet-stream")
+    def read(path) = t.file_bytes(@sandbox.path("/files/content"), query: { "path" => path })
 
     def read_text(path) = read(path).force_encoding(Encoding::UTF_8)
 

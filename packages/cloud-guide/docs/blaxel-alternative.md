@@ -32,8 +32,7 @@ Weighing more than two? [Blaxel alternatives](/compare/blaxel-alternatives) rank
   standby snapshots cost {{term:blaxel:snapshot}} per GB a month.
 - **A one-line switch.** `withruntime/blaxel` runs code written for Blaxel's
   sandbox SDK, in JavaScript and Python: processes, files, previews, snapshots,
-  forks and the code interpreter, with no Blaxel key. A switch from Blaxel gets
-  your first top-up matched, up to {{switching-max}}.
+  forks and the code interpreter, with no Blaxel key. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 - **Single sign-on at no extra charge.** SAML or OIDC sign-in, SCIM, roles
   and an audit log come with every Runtime account
   ([single sign-on](./single-sign-on)). Blaxel lists SAML among the enterprise
@@ -42,7 +41,7 @@ Weighing more than two? [Blaxel alternatives](/compare/blaxel-alternatives) rank
   own network to its sandboxes over WireGuard, for {{address-month}} a month
   ([private networks](./networking#private-networks)). Blaxel lists private
   network connectivity on its Custom plan.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -99,7 +98,7 @@ is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) f
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Blaxel calls on a branch, tests them on the included usage, and tells
+replaces the Blaxel calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -120,7 +119,7 @@ Sandboxes get Blaxel's default of 4096 MB, with one vCPU for every 2048 MB. A
 sandbox pauses after {{idle-pause}} with nothing happening in it, keeping its
 memory, files and processes, and wakes by itself on the next command, file call or preview visit.
 Envs, processes by name, files, previews, snapshots, forks, volumes and the code
-interpreter carry over. Sandboxes use the included usage first, then prepaid credit, with nothing to choose.
+interpreter carry over. Sandboxes use the free usage first, then prepaid credit, with nothing to choose.
 
 Four things to know before the first run:
 
@@ -135,7 +134,7 @@ Four things to know before the first run:
 - **Custom images are Runtime images.** Blaxel's own templates, such as
   `blaxel/base-image`, start Runtime's stock image. Any other image must be a
   ready Runtime image of the same name: build it once with
-  `npx withruntime image build --dockerfile Dockerfile --name <name>`.
+  `npx withruntime images build --dockerfile Dockerfile --name <name>`.
 - **Private preview tokens work as they did.** Blaxel's
   `X-Blaxel-Preview-Token` header and `?bl_preview_token=` parameter are
   accepted, as are Runtime's own, and the token never reaches your server.
@@ -185,9 +184,7 @@ try {
 }
 ```
 
-Moving from Blaxel? Run `npx withruntime switch --from blaxel` before your first
-top-up, and that top-up is matched with credit, up to {{switching-max}}
-([switching credit](./pricing#switching-credit)).
+Moving from Blaxel? Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total ([welcome match](./pricing#welcome-match)).
 
 ## When Blaxel may fit better
 

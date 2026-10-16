@@ -76,6 +76,14 @@ def request_scope(timeout=None, idle_timeout=_UNSET, *, connect_timeout=_UNSET, 
         _limits.reset(token)
 
 
+@contextmanager
+def cleanup_scope(seconds=10):
+    """A fresh scope for cleanup after a failure: the caller's deadline may
+    have passed, but the cleanup still gets ``seconds`` of its own."""
+    with request_scope(captured=Limits(time.monotonic() + seconds, True)) as scope:
+        yield scope
+
+
 def connection_timeout(default):
     value = current().connect_timeout
     if value is _UNSET or value is None:

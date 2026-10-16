@@ -37,7 +37,7 @@ command, `runtime_read_file` and `runtime_write_file` move text, and
 `runtime_list_files` lists a directory. Relative paths are under `/workspace`,
 and output is capped so one noisy command cannot flood the model's context.
 
-- Your application creates the sandbox, binds the tools to it and stops it when
+- Your application creates the sandbox, binds the tools to it and deletes it when
   the work ends. The model chooses commands and paths, never the sandbox or the
   account.
 - A framework's own local shell and file tools keep running on your machine;

@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.11.2",
+  "version": "0.14.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -9,6 +9,51 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./sandboxes": {
+      "types": "./dist/sandboxes/index.d.ts",
+      "import": "./dist/sandboxes/index.js",
+      "default": "./dist/sandboxes/index.js"
+    },
+    "./snapshots": {
+      "types": "./dist/snapshots/index.d.ts",
+      "import": "./dist/snapshots/index.js",
+      "default": "./dist/snapshots/index.js"
+    },
+    "./images": {
+      "types": "./dist/images/index.d.ts",
+      "import": "./dist/images/index.js",
+      "default": "./dist/images/index.js"
+    },
+    "./volumes": {
+      "types": "./dist/volumes/index.d.ts",
+      "import": "./dist/volumes/index.js",
+      "default": "./dist/volumes/index.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs/index.d.ts",
+      "import": "./dist/jobs/index.js",
+      "default": "./dist/jobs/index.js"
+    },
+    "./domains": {
+      "types": "./dist/domains/index.d.ts",
+      "import": "./dist/domains/index.js",
+      "default": "./dist/domains/index.js"
+    },
+    "./ports": {
+      "types": "./dist/ports/index.d.ts",
+      "import": "./dist/ports/index.js",
+      "default": "./dist/ports/index.js"
+    },
+    "./ips": {
+      "types": "./dist/ips/index.d.ts",
+      "import": "./dist/ips/index.js",
+      "default": "./dist/ips/index.js"
+    },
+    "./networks": {
+      "types": "./dist/networks/index.d.ts",
+      "import": "./dist/networks/index.js",
+      "default": "./dist/networks/index.js"
     },
     "./e2b": {
       "types": "./dist/e2b/index.d.ts",
@@ -128,12 +173,10 @@
     "@google/genai": "2.24.0",
     "@mastra/core": "1.71.0",
     "@mistralai/mistralai": "2.7.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@openai/agents": "0.18.0",
     "@openai/agents-core": "0.18.0",
     "@openrouter/sdk": "1.3.27",
-    "@runtime/cloud": "workspace:*",
-    "@runtime/cloud-guide": "workspace:*",
     "@runtime/eslint-config": "workspace:*",
     "@runtime/typescript-config": "workspace:*",
     "@types/bun": "^1.4.0",

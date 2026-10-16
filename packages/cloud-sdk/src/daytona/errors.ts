@@ -39,7 +39,16 @@ export class DaytonaBadRequestError extends DaytonaError {}
 export class DaytonaAuthenticationError extends DaytonaError {}
 export class DaytonaForbiddenError extends DaytonaError {}
 export class DaytonaNotFoundError extends DaytonaError {}
-export class DaytonaTimeoutError extends DaytonaError {}
+/** A 408 or 504. As in Daytona, `instanceof DaytonaTimeoutError` also
+ * matches a DaytonaConnectionTimeoutError, the class a call's own deadline
+ * raises, though that one sits under DaytonaConnectionError. */
+export class DaytonaTimeoutError extends DaytonaError {
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    // Only the base class widens; its subclasses keep the prototype chain.
+    if (this === DaytonaTimeoutError && value instanceof DaytonaConnectionTimeoutError) return true;
+    return Function.prototype[Symbol.hasInstance].call(this, value);
+  }
+}
 export class DaytonaConflictError extends DaytonaError {}
 export class DaytonaGoneError extends DaytonaError {}
 export class DaytonaUnprocessableEntityError extends DaytonaError {}
@@ -52,6 +61,11 @@ export class DaytonaAuthorizationError extends DaytonaForbiddenError {}
 export class DaytonaInvalidArgumentError extends DaytonaValidationError {}
 export class DaytonaConnectionError extends DaytonaError {}
 export class DaytonaConnectionTimeoutError extends DaytonaConnectionError {}
+/** The create waited its queueTimeout for room and none came. */
+export class DaytonaQueueTimeoutError extends DaytonaTimeoutError {}
+/** Daytona's spot preemption; Runtime has no spot sandboxes, so it never
+ * comes, and exists for code that names it. */
+export class DaytonaSpotEvictedError extends DaytonaError {}
 export class DaytonaGitAuthFailedError extends DaytonaAuthenticationError {}
 export class DaytonaGitRepoNotFoundError extends DaytonaNotFoundError {}
 export class DaytonaGitBranchNotFoundError extends DaytonaNotFoundError {}
@@ -132,6 +146,8 @@ export function translate(error: unknown, subject: Subject = "other"): unknown {
   else if (error.status === 404 && subject === "process")
     out = new DaytonaProcessNotFoundError(message);
   else if (error.code === "command_timeout") out = new DaytonaProcessExecutionTimeoutError(message);
+  else if (error.status === 0 && error.code === "timeout")
+    out = new DaytonaConnectionTimeoutError(message);
   else if (error.status === 0) out = new DaytonaConnectionError(message);
   else out = new (BY_STATUS[error.status] ?? DaytonaError)(message);
   if (error.status) out.statusCode = error.status;

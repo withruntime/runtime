@@ -11,7 +11,7 @@ it too. It works like GitHub Actions' OIDC tokens, and it is free.
 Inside a sandbox, with no API key:
 
 ```bash no-run
-runtime sandbox identity-token --audience sts.amazonaws.com
+runtime sandboxes identity-token --audience sts.amazonaws.com
 ```
 
 ```ts check
@@ -43,10 +43,14 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
   name.
 - A token lasts 10 minutes. Ask for 60 to 3600 seconds with `lifetimeSeconds`
   (`--lifetime` in the CLI). Get a fresh one when it runs out.
+- The options can also go in a JSON body (`Content-Type: application/json`)
+  of at most 4 KiB. A body that has not arrived within 5 seconds is answered
+  408 `request_timeout`; nothing was issued, so send it again.
 - `RUNTIME_ID_TOKEN_REQUEST_TOKEN` is the sandbox's own proof of who it is. It
   can get tokens only for this sandbox, only while it is running, and stops
   when the sandbox stops or pauses. Treat it like a password anyway: anyone who
   copies it can get tokens as this sandbox until then.
+- A fork's programs keep the source's request token: read it again after a copy.
 - Use the supplied `RUNTIME_ID_TOKEN_REQUEST_URL`. It points to Runtime's
   internal token relay, which accepts only this sandbox's current request
   token. You do not need to allow access to the host's public address.
@@ -107,7 +111,7 @@ so a verifier that caches the keys never misses one.
 3. In the sandbox, let the AWS CLI and SDKs pick it up:
 
 ```bash no-run
-runtime sandbox identity-token --audience sts.amazonaws.com --lifetime 3600 > /tmp/aws-token
+runtime sandboxes identity-token --audience sts.amazonaws.com --lifetime 3600 > /tmp/aws-token
 export AWS_ROLE_ARN=arn:aws:iam::123456789012:role/runtime-sandbox
 export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/aws-token
 aws sts get-caller-identity

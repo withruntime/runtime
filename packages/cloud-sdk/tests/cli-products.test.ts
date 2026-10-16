@@ -411,7 +411,7 @@ test("the desktop from the sandbox command saves a screenshot", async () => {
 
 test("a mistyped command names the one that was meant, and points at its product's help", async () => {
   await expect(run(["sandboxs", "ls"], env, out([]))).rejects.toMatchObject({
-    message: "Unknown command sandboxs. Did you mean sandbox?",
+    message: "Unknown command sandboxs. Did you mean sandboxes?",
     hint: "Run `runtime help`.",
   });
   await expect(run(["image", "biuld"], env, out([]))).rejects.toMatchObject({
@@ -425,7 +425,7 @@ test("a mistyped command names the one that was meant, and points at its product
     message: "Unknown command audt. Did you mean audit?",
   });
   await expect(run(["sandbox", "exec", SANDBOX], env, out([]))).rejects.toMatchObject({
-    message: "Give the command after --: runtime sandbox exec <id> -- ls -la",
+    message: "Give the command after --: runtime sandboxes exec <id> -- ls -la",
   });
 });
 
@@ -446,7 +446,7 @@ test("run surfaces failed cleanup instead of returning success", async () => {
         await run(["sandbox", "run", "--json", "--", "echo", "42"], env, out(lines, true)),
       ).toBe(1);
       expect(lines.join("\n")).toContain("cleanup_failed");
-      expect(lines.join("\n")).toContain(`sandbox stop ${SANDBOX}`);
+      expect(lines.join("\n")).toContain(`sandboxes stop ${SANDBOX}`);
     },
   );
 });

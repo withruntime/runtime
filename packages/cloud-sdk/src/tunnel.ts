@@ -253,7 +253,7 @@ export class Tunnel {
                   message: `Nothing is listening on port ${port} in the sandbox.`,
                   code: "port_closed",
                   status: 0,
-                  hint: "Start the server with spawn (`runtime sandbox spawn <id> -- <command>`, sbx.spawn()), which keeps it running: a process started by exec ends with its command. Let it listen on 127.0.0.1, ::1 or every address.",
+                  hint: "Start the server with spawn (`runtime sandboxes spawn <id> -- <command>`, sbx.spawn()), which keeps it running: a process started by exec ends with its command. Let it listen on 127.0.0.1, ::1 or every address.",
                 })
               : error.message === "reserved"
                 ? new RuntimeError({

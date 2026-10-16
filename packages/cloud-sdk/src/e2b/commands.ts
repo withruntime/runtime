@@ -1,6 +1,6 @@
 import type { Process } from "../sandbox.js";
 import type { OutputEvent, ProcessInfo as RuntimeProcessInfo } from "../types.js";
-import type { RequestOptions } from "../transport.js";
+import { timeoutSignal, type RequestOptions } from "../transport.js";
 import type { RuntimeSandbox } from "./client.js";
 import {
   CommandExitError,
@@ -8,6 +8,7 @@ import {
   InvalidArgumentError,
   SandboxError,
   SandboxNotFoundError,
+  SandboxNotRunningError,
   TimeoutError,
   translate,
   type CommandResult,
@@ -93,7 +94,7 @@ export function commandRequest(
 ): RequestOptions {
   opts.signal?.throwIfAborted();
   const timeoutMs = timeoutFor(opts.requestTimeoutMs ?? defaultTimeoutMs);
-  const deadline = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const deadline = timeoutMs > 0 ? timeoutSignal(timeoutMs) : undefined;
   const signal =
     opts.signal && deadline ? AbortSignal.any([opts.signal, deadline]) : (opts.signal ?? deadline);
   return { timeoutMs: 0, ...(signal ? { signal } : {}) };
@@ -173,7 +174,7 @@ function toResult(result: {
 export function connectionRequest(opts: CommandConnectOpts, defaultTimeoutMs?: number) {
   const timeoutMs = timeoutFor(opts.timeoutMs);
   const deadline = timeoutMs > 0 ? performance.now() + timeoutMs : undefined;
-  const connectionTimeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const connectionTimeout = timeoutMs > 0 ? timeoutSignal(timeoutMs) : undefined;
   const signal =
     connectionTimeout && opts.signal
       ? AbortSignal.any([connectionTimeout, opts.signal])
@@ -381,11 +382,9 @@ function describe(info: RuntimeProcessInfo): ProcessInfo {
   };
 }
 
-/** A command whose sandbox went away under it, as E2B says it: a
- * TimeoutError, which code written for E2B catches (5 October 2026: it was a
- * SandboxNotFoundError). */
-function sandboxEnded(cause: SandboxNotFoundError): TimeoutError {
-  const error = new TimeoutError(
+/** E2B 2.53's confirmed sandbox loss remains catchable as TimeoutError. */
+function sandboxEnded(cause: SandboxNotFoundError): SandboxNotRunningError {
+  const error = new SandboxNotRunningError(
     "The command ended before the stream completed: the sandbox was killed or reached its end of life.",
   );
   error.cause = cause;

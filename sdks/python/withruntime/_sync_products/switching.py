@@ -6,9 +6,11 @@ from typing import Any, Optional
 
 class Switching:
     """``runtime.switching``. What your sandboxes would have cost at a rival,
-    and the switching credit: record the rival you are leaving before your
-    first top-up, and that top-up is matched, up to $100, once the payment
-    settles. Money is integer microdollars in strings."""
+    the rival you are leaving, recorded before your first top-up, and the
+    welcome match: credit added within 30 days of signing up is matched, up
+    to $1,000 in total, as each payment settles (``welcome``: ``usedMicros``
+    and ``leftMicros`` say how much is used and left). Money is integer
+    microdollars in strings."""
 
     def __init__(self, t: Any) -> None:
         self._t = t

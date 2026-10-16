@@ -78,15 +78,29 @@ public final class NetworkProducts {
 
     /** Reserve family 4 or 6. Funding and integer rateMicros remain in the answer. */
     public JsonObject reserve(int family) {
-      return object(t, "POST", "/v1/addresses", Map.of("family", family));
+      return object(t, "POST", "/v1/ips", Map.of("family", family));
     }
 
     public List<JsonObject> list() {
-      return NetworkProducts.list(t, new Transport.Call("GET", "/v1/addresses"));
+      return NetworkProducts.list(t, new Transport.Call("GET", "/v1/ips"));
     }
 
     public void release(String id) {
-      object(t, "DELETE", "/v1/addresses/" + Transport.segment(id), null);
+      object(t, "DELETE", "/v1/ips/" + Transport.segment(id), null);
+    }
+  }
+
+  /** The account's networks. */
+  public static final class Networks {
+    private final Transport t;
+
+    Networks(Transport t) {
+      this.t = t;
+    }
+
+    /** A WireGuard tunnel from your own network into your sandboxes. */
+    public PrivateTunnel wireguard() {
+      return new PrivateTunnel(t);
     }
   }
 
@@ -99,15 +113,15 @@ public final class NetworkProducts {
     }
 
     public JsonObject get() {
-      return object(t, "GET", "/v1/tunnel", null);
+      return object(t, "GET", "/v1/networks/wireguard", null);
     }
 
     public JsonObject create(String subnet) {
-      return object(t, "POST", "/v1/tunnel", subnet == null ? Map.of() : Map.of("subnet", subnet));
+      return object(t, "POST", "/v1/networks/wireguard", subnet == null ? Map.of() : Map.of("subnet", subnet));
     }
 
     public void delete() {
-      object(t, "DELETE", "/v1/tunnel", null);
+      object(t, "DELETE", "/v1/networks/wireguard", null);
     }
 
     /** Save config even when configReady is false: its private key is shown once. */
@@ -116,14 +130,14 @@ public final class NetworkProducts {
       body.put("name", name);
       if (publicKey != null && !publicKey.isEmpty()) body.put("publicKey", publicKey);
       if (routes != null) body.put("routes", routes);
-      Transport.Call call = new Transport.Call("POST", "/v1/tunnel/peers").body(body);
+      Transport.Call call = new Transport.Call("POST", "/v1/networks/wireguard/peers").body(body);
       if (publicKey == null || publicKey.isEmpty()) call.noRetry();
       return new JsonObject(t.object(call));
     }
 
     public JsonObject rotatePeer(String id, String publicKey) {
       Transport.Call call =
-          new Transport.Call("POST", "/v1/tunnel/peers/" + Transport.segment(id) + ":rotate")
+          new Transport.Call("POST", "/v1/networks/wireguard/peers/" + Transport.segment(id) + ":rotate")
               .body(
                   publicKey == null || publicKey.isEmpty()
                       ? Map.of()
@@ -133,7 +147,7 @@ public final class NetworkProducts {
     }
 
     public JsonObject removePeer(String id) {
-      return object(t, "DELETE", "/v1/tunnel/peers/" + Transport.segment(id), null);
+      return object(t, "DELETE", "/v1/networks/wireguard/peers/" + Transport.segment(id), null);
     }
   }
 }

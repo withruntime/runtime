@@ -102,8 +102,11 @@ For ChatGPT, use `https://api.withruntime.com/mcp?profile=chatgpt`. Its tools
 keep persistent credentials out of the conversation. Starting or reading a
 sandbox MCP server returns safe state and scoped preview links; retrieve its
 gateway token or authorization headers through the website or a local CLI
-when another client needs them. The ordinary MCP connection keeps its usual
-credential behavior.
+when another client needs them. It also leaves out what a ChatGPT request does
+not need: the audit log, referrals, single sign-on settings and the price
+comparison are not listed, and `runtime_account` returns usage and limits
+without names, internal identifiers or card details. The ordinary MCP
+connection keeps its usual credential behavior.
 
 ## Tools
 
@@ -114,55 +117,55 @@ assuming a completed tool call means the workload succeeded.
 The tools describe the interface, but a listed tool is not a promise that its
 capability is enabled. Check the [products page](./products) for availability.
 
-| Tool                                                                                                                               | What it does                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtime_sandbox_create`                                                                                                           | Create a sandbox and wait for readiness; inspect its returned state. `env` sets variables for every command, terminal and SSH session in it                                                                                                                                                                      |
-| `runtime_sandbox_list`                                                                                                             | List by state, name or label, or read one by id                                                                                                                                                                                                                                                                  |
-| `runtime_sandbox_manage`                                                                                                           | Stop, which keeps its disk, pause, wake, extend; retention, persist, restart a stopped one; update (name, labels, `env`); delete, which stops it, deletes its disk and memory and removes it for good; `switch-image`, which moves it to another image keeping `/workspace`                                      |
-| `runtime_sandbox_inspect`                                                                                                          | A sandbox's storage, paused storage, lifetime or recovery point                                                                                                                                                                                                                                                  |
-| `runtime_sandbox_exec`                                                                                                             | Run a command and get its exit code and output, or start it in the background                                                                                                                                                                                                                                    |
-| `runtime_sandbox_process`                                                                                                          | Read, feed, signal or list background processes                                                                                                                                                                                                                                                                  |
-| `runtime_sandbox_files_read`, `runtime_sandbox_files_write`                                                                        | Read (whole or by line range) and write files                                                                                                                                                                                                                                                                    |
-| `runtime_sandbox_files_list`, `runtime_sandbox_files_manage`                                                                       | List and glob; stat, make, move and remove                                                                                                                                                                                                                                                                       |
-| `runtime_sandbox_interpreter_run`, `runtime_sandbox_interpreter_contexts`                                                          | A notebook-style session in Python, JavaScript, TypeScript, R, Java, Bash or Go; charts as images, data frames as tables                                                                                                                                                                                         |
-| `runtime_sandbox_files_watch`                                                                                                      | Watch a directory for file changes: start, read events after a cursor, list, stop                                                                                                                                                                                                                                |
-| `runtime_image_build`, `runtime_image_registries`                                                                                  | Custom images from a recipe, any public or private image, or a Dockerfile, with versions and tags; registry credentials                                                                                                                                                                                          |
-| `runtime_image`                                                                                                                    | `list`, `get`, `tag` and `delete` image versions                                                                                                                                                                                                                                                                 |
-| `runtime_volume`                                                                                                                   | Persistent disks: `create` (with `fromBackup` to restore a backup), `list`, `get`, `delete`; `attach` and `detach` require shared-volume availability, and `resize` requires volume growth to be enabled                                                                                                         |
-| `runtime_volume_backup`                                                                                                            | Back a volume up off its server: `create`, `list`, `get`, `policy` for daily backups, `delete`                                                                                                                                                                                                                   |
-| `runtime_sandbox_fork`                                                                                                             | Copies of a sandbox as it is now, with its memory and processes; on the source's server                                                                                                                                                                                                                          |
-| `runtime_snapshot`                                                                                                                 | `create` keeps a running or paused sandbox (a running one is paused for the moment it takes and woken again), copied off its server (not with volumes), with `mode: "memory"` or `"disk"`; `list`, `get`, `update` (name, labels), `delete`                                                                      |
-| `runtime_sandbox_mounts`                                                                                                           | Your S3, R2 or Google Cloud Storage bucket as a directory: `mount`, `list`, `unmount`; the proxy signs, the sandbox never holds the key                                                                                                                                                                          |
-| `runtime_sandbox_previews`                                                                                                         | Share a port at `runtimehost.com`, private by default: `create`, `list`, `rotate`, `delete`; browser access to one sandbox: `session_create`, `session_list`, `session_revoke`                                                                                                                                   |
-| `runtime_sandbox_tailscale`                                                                                                        | Join a paid sandbox to your tailnet: `up`, `status`, `down`                                                                                                                                                                                                                                                      |
-| `runtime_sandbox_network`                                                                                                          | `get` or `set` a sandbox's network rules                                                                                                                                                                                                                                                                         |
-| `runtime_sandbox_desktop_act`, `runtime_sandbox_desktop_screenshot`                                                                | Drive a desktop in the sandbox                                                                                                                                                                                                                                                                                   |
-| `runtime_sandbox_desktop_record`                                                                                                   | Record the desktop to MP4: start, stop, list, delete                                                                                                                                                                                                                                                             |
-| `runtime_sandbox_mcp`                                                                                                              | Browse the MCP catalog with `action: "catalog"`, no sandbox id needed; `start`, `get`, `stop` run its servers in a sandbox at URLs your agent connects to                                                                                                                                                        |
-| `runtime_sandbox_metrics`, `runtime_events_list`                                                                                   | A sandbox's CPU and memory over time; lifecycle events                                                                                                                                                                                                                                                           |
-| `runtime_webhooks_manage`, `runtime_otel_manage`                                                                                   | Webhooks for lifecycle events, and OpenTelemetry export                                                                                                                                                                                                                                                          |
-| `runtime_domain`, `runtime_port`, `runtime_address`, `runtime_tunnel`, `runtime_network_upstream_proxy`, `runtime_network_private` | Custom domains, public TCP ports, dedicated outbound addresses, the WireGuard tunnel, your own upstream proxy and reaching your sandboxes by name; see below                                                                                                                                                     |
-| `runtime_account`                                                                                                                  | `get` the account, its included usage and credit; `limits` for this key's access and daily spending limit; `referrals` for your link and its credit (you both get up to {{referral-max}}); `sso` for single sign-on and SCIM; `compare` for what your sandboxes would cost at a rival, and what you save a month |
-| `runtime_switching_record`                                                                                                         | Record the provider you are leaving, so your first top-up is matched, up to {{switching-max}}                                                                                                                                                                                                                    |
-| `runtime_audit_list`                                                                                                               | The account's audit log: members, keys, credit and security changes, with who and from where                                                                                                                                                                                                                     |
-| `runtime_secrets`                                                                                                                  | Secrets sandboxes use without seeing, a placeholder inside and the value added by the proxy: `set`, `list`, `delete`; and `jobs_put`, `jobs_list`, `jobs_get`, `jobs_rotate`, `jobs_reveal`, `jobs_delete` for the copy a scheduled job puts in its environment                                                  |
-| `runtime_job`                                                                                                                      | [Scheduled jobs](./jobs): a command in a fresh sandbox, once or on a cron schedule: `create`, `list`, `get`, `runs`, `run`, `logs`, `pause`, `resume`, `cancel`                                                                                                                                                  |
-| `runtime_feedback`                                                                                                                 | `submit` a problem or a missing feature; `list` what happened to it                                                                                                                                                                                                                                              |
-| `runtime_support`                                                                                                                  | Ask Runtime support: `message`, then `read` the reply                                                                                                                                                                                                                                                            |
-| `runtime_notices`                                                                                                                  | Account notices: pause expiry, unpaid storage and deletion deadlines                                                                                                                                                                                                                                             |
-| `runtime_docs_read`                                                                                                                | Read any page of these docs                                                                                                                                                                                                                                                                                      |
+| Tool                                                                                                                                                                               | What it does                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runtime_sandboxes_create`                                                                                                                                                         | Create a sandbox and wait for readiness; inspect its returned state. `env` sets variables for every command, terminal and SSH session in it                                                                                                                                                                  |
+| `runtime_sandboxes_list`                                                                                                                                                           | List by state, name or label, or read one by id                                                                                                                                                                                                                                                              |
+| `runtime_sandboxes_manage`                                                                                                                                                         | Stop, which keeps its disk, pause, wake, extend; retention, persist, restart a stopped one; update (name, labels, `env`); delete, which stops it, deletes its disk and memory and removes it for good; `switch-image`, which moves it to another image keeping `/workspace`                                  |
+| `runtime_sandboxes_inspect`                                                                                                                                                        | A sandbox's storage, paused storage, lifetime or recovery point                                                                                                                                                                                                                                              |
+| `runtime_sandboxes_exec`                                                                                                                                                           | Run a command and get its exit code and output, or start it in the background                                                                                                                                                                                                                                |
+| `runtime_sandboxes_process`                                                                                                                                                        | Read, feed, signal or list background processes                                                                                                                                                                                                                                                              |
+| `runtime_sandboxes_files_read`, `runtime_sandboxes_files_write`                                                                                                                    | Read (whole or by line range) and write files                                                                                                                                                                                                                                                                |
+| `runtime_sandboxes_files_list`, `runtime_sandboxes_files_manage`                                                                                                                   | List and glob; stat, make, move and remove                                                                                                                                                                                                                                                                   |
+| `runtime_sandboxes_interpreter_run`, `runtime_sandboxes_interpreter_contexts`                                                                                                      | A notebook-style session in Python, JavaScript, TypeScript, R, Java, Bash or Go; charts as images, data frames as tables                                                                                                                                                                                     |
+| `runtime_sandboxes_files_watch`                                                                                                                                                    | Watch a directory for file changes: start, read events after a cursor, list, stop                                                                                                                                                                                                                            |
+| `runtime_images_build`, `runtime_images_registries`                                                                                                                                | Custom images from a recipe, any public or private image, or a Dockerfile, with versions and tags; registry credentials                                                                                                                                                                                      |
+| `runtime_images`                                                                                                                                                                   | `list`, `get`, `tag` and `delete` image versions                                                                                                                                                                                                                                                             |
+| `runtime_volumes`                                                                                                                                                                  | Persistent disks: `create` (with `fromBackup` to restore a backup), `list`, `get`, `delete`; `attach` and `detach` require shared-volume availability, and `resize` requires volume growth to be enabled                                                                                                     |
+| `runtime_volumes_backup`                                                                                                                                                           | Back a volume up off its server: `create`, `list`, `get`, `policy` for daily backups, `delete`                                                                                                                                                                                                               |
+| `runtime_sandboxes_fork`                                                                                                                                                           | Copies of a sandbox as it is now, with its memory and processes; on the source's server                                                                                                                                                                                                                      |
+| `runtime_snapshots`                                                                                                                                                                | `create` keeps a running or paused sandbox (a running one is paused for the moment it takes and woken again), copied off its server (not with volumes), with `mode: "memory"` or `"disk"`; `list`, `get`, `update` (name, labels), `delete`                                                                  |
+| `runtime_sandboxes_mounts`                                                                                                                                                         | Your S3, R2 or Google Cloud Storage bucket as a directory: `mount`, `list`, `unmount`; the proxy signs, the sandbox never holds the key                                                                                                                                                                      |
+| `runtime_sandboxes_previews`                                                                                                                                                       | Share a port at `runtimehost.com`, private by default: `create`, `list`, `rotate`, `delete`; browser access to one sandbox: `session_create`, `session_list`, `session_revoke`                                                                                                                               |
+| `runtime_sandboxes_tailscale`                                                                                                                                                      | Join a paid sandbox to your tailnet: `up`, `status`, `down`                                                                                                                                                                                                                                                  |
+| `runtime_sandboxes_network`                                                                                                                                                        | `get` or `set` a sandbox's network rules                                                                                                                                                                                                                                                                     |
+| `runtime_sandboxes_desktop_act`, `runtime_sandboxes_desktop_screenshot`                                                                                                            | Drive a desktop in the sandbox                                                                                                                                                                                                                                                                               |
+| `runtime_sandboxes_desktop_record`                                                                                                                                                 | Record the desktop to MP4: start, stop, list, delete                                                                                                                                                                                                                                                         |
+| `runtime_sandboxes_mcp`                                                                                                                                                            | Browse the MCP catalog with `action: "catalog"`, no sandbox id needed; `start`, `get`, `stop` run its servers in a sandbox at URLs your agent connects to                                                                                                                                                    |
+| `runtime_sandboxes_metrics`, `runtime_events_list`                                                                                                                                 | A sandbox's CPU and memory over time; lifecycle events                                                                                                                                                                                                                                                       |
+| `runtime_webhooks_manage`, `runtime_otel_manage`                                                                                                                                   | Webhooks for lifecycle events, and OpenTelemetry export                                                                                                                                                                                                                                                      |
+| `runtime_domains`, `runtime_ports`, `runtime_ips`, `runtime_networks_wireguard`, `runtime_networks_upstream_proxy`, `runtime_networks_private`, `runtime_networks_signed_requests` | Custom domains, public TCP ports, dedicated outbound addresses, the WireGuard tunnel, your own upstream proxy, reaching your sandboxes by name and signing requests as Runtime's; see below                                                                                                                  |
+| `runtime_account`                                                                                                                                                                  | `get` the account, its free usage and credit; `limits` for this key's access and daily spending limit; `referrals` for your link and its credit (you both get up to {{referral-max}}); `sso` for single sign-on and SCIM; `compare` for what your sandboxes would cost at a rival, and what you save a month |
+| `runtime_switching_record`                                                                                                                                                         | Record the provider you are leaving, before you first add credit; credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total                                                                                                                                         |
+| `runtime_audit_list`                                                                                                                                                               | The account's audit log: members, keys, credit and security changes, with who and from where                                                                                                                                                                                                                 |
+| `runtime_secrets`                                                                                                                                                                  | Secrets sandboxes use without seeing, a placeholder inside and the value added by the proxy: `set`, `list`, `delete`; and `jobs_put`, `jobs_list`, `jobs_get`, `jobs_rotate`, `jobs_reveal`, `jobs_delete` for the copy a scheduled job puts in its environment                                              |
+| `runtime_jobs`                                                                                                                                                                     | [Scheduled jobs](./jobs): a command in a fresh sandbox, once or on a cron schedule: `create`, `list`, `get`, `runs`, `run`, `logs`, `pause`, `resume`, `cancel`                                                                                                                                              |
+| `runtime_feedback`                                                                                                                                                                 | `submit` a problem or a missing feature; `list` what happened to it                                                                                                                                                                                                                                          |
+| `runtime_support`                                                                                                                                                                  | Ask Runtime support: `message`, then `read` the reply                                                                                                                                                                                                                                                        |
+| `runtime_notices`                                                                                                                                                                  | Account notices: pause expiry, unpaid storage and deletion deadlines                                                                                                                                                                                                                                         |
+| `runtime_docs_read`                                                                                                                                                                | Read any page of these docs                                                                                                                                                                                                                                                                                  |
 
 Tool names read `runtime_<product>_<verb>`, or `runtime_<product>` for a tool
 that takes an `action`, the product spelled as the CLI spells it. The verbs an
 agent needs in its first session each have a tool of their own; a product's
-rarer verbs share one, and its `action` names the verb: `runtime_volume` with
+rarer verbs share one, and its `action` names the verb: `runtime_volumes` with
 `"action": "get"` reads a volume. Everything that
-acts on one sandbox is `runtime_sandbox_*` and takes the sandbox as `id`
-(the MCP catalog needs none); `runtime_sandbox_mcp` with `action: "catalog"`
+acts on one sandbox is `runtime_sandboxes_*` and takes the sandbox as `id`
+(the MCP catalog needs none); `runtime_sandboxes_mcp` with `action: "catalog"`
 needs no `id`, while `start`, `get` and `stop` require it and name the missing
 field in an `invalid_request` error;
-images, volumes and snapshots are `runtime_image*`, `runtime_volume*` and
-`runtime_snapshot`; what spans products, such as the account, usage, secrets,
+images, volumes and snapshots are `runtime_images*`, `runtime_volumes*` and
+`runtime_snapshots`; what spans products, such as the account, usage, secrets,
 events, feedback and docs, names no product. Results come back as both text and
 `structuredContent`. An error is a tool result with `isError`, a code, a hint
 and a `requestId`.
@@ -173,47 +176,48 @@ On 26 September 2026, 52 tools became 16 that take an `action`, which cut what
 the tool list costs an agent's context by nearly a quarter. The old names now
 fail with `not_found`, before any operation runs, and the hint names the grouped
 tool and its `action`. Change any permission rule, prompt or script that names
-one, then refresh the tool list. `runtime_sandbox_mounts` and
-`runtime_volume_backup` keep their grouped names and require an `action`; an
+one, then refresh the tool list. `runtime_sandboxes_mounts` and
+`runtime_volumes_backup` keep their grouped names and require an `action`; an
 old call that omits it is refused.
 
-| Before                                                                                          | Now                                                              |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `runtime_domain_add`, `_verify`, `_list`, `_remove`                                             | `runtime_domain` with `add`, `verify`, `list`, `remove`          |
-| `runtime_port_open`, `_list`, `_close`                                                          | `runtime_port` with `open`, `list`, `close`                      |
-| `runtime_address_list`, `_reserve`, `_release`                                                  | `runtime_address` with `list`, `reserve`, `release`              |
-| `runtime_tunnel_create`, `_get`, `_add_peer`, `_rotate_peer`, `_remove_peer`                    | `runtime_tunnel` with the same verbs                             |
-| `runtime_network_upstream_proxy_get`, `_set`, `_remove`                                         | `runtime_network_upstream_proxy` with `get`, `set`, `remove`     |
-| `runtime_network_private_get`, `_set`                                                           | `runtime_network_private` with `get`, `set`                      |
-| `runtime_sandbox_network_get`, `_set`                                                           | `runtime_sandbox_network` with `get`, `set`                      |
-| `runtime_sandbox_previews_create`, `_list`, `_rotate`, `_delete`                                | `runtime_sandbox_previews` with the same verbs                   |
-| `runtime_sandbox_mount`, `runtime_sandbox_mounts`, `runtime_sandbox_unmount`                    | `runtime_sandbox_mounts` with `mount`, `list`, `unmount`         |
-| `runtime_image_get`, `_tag`, `_delete`                                                          | `runtime_image` with `get`, `tag`, `delete`                      |
-| `runtime_volume_create`, `_get`, `_delete`                                                      | `runtime_volume` with `create`, `get`, `delete`                  |
-| `runtime_volume_backup`, `_backup_get`, `_backup_policy`, `_backup_delete`                      | `runtime_volume_backup` with `create`, `get`, `policy`, `delete` |
-| `runtime_snapshot_create`, `_get`, `_delete`                                                    | `runtime_snapshot` with `create`, `get`, `delete`                |
-| `runtime_secrets_set`, `_list`, `_delete`                                                       | `runtime_secrets` with `set`, `list`, `delete`                   |
-| `runtime_account_get`, `runtime_limits_get`, `runtime_referrals_get`, `runtime_account_sso_get` | `runtime_account` with `get`, `limits`, `referrals`, `sso`       |
-| `runtime_usage_compare`                                                                         | `runtime_account` with `compare`                                 |
-| `runtime_support_message`, `_read`                                                              | `runtime_support` with `message`, `read`                         |
-| `runtime_feedback_submit`, `_list`                                                              | `runtime_feedback` with `submit`, `list`                         |
+| Before                                                                                          | Now                                                               |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `runtime_domains_add`, `_verify`, `_list`, `_remove`                                            | `runtime_domains` with `add`, `verify`, `list`, `remove`          |
+| `runtime_ports_open`, `_list`, `_close`                                                         | `runtime_ports` with `open`, `list`, `close`                      |
+| `runtime_ips_list`, `_reserve`, `_release`                                                      | `runtime_ips` with `list`, `reserve`, `release`                   |
+| `runtime_networks_wireguard_create`, `_get`, `_add_peer`, `_rotate_peer`, `_remove_peer`        | `runtime_networks_wireguard` with the same verbs                  |
+| `runtime_networks_upstream_proxy_get`, `_set`, `_remove`                                        | `runtime_networks_upstream_proxy` with `get`, `set`, `remove`     |
+| `runtime_networks_private_get`, `_set`                                                          | `runtime_networks_private` with `get`, `set`                      |
+| `runtime_networks_signed_requests_get`, `_set`                                                  | `runtime_networks_signed_requests` with `get`, `set`              |
+| `runtime_sandboxes_network_get`, `_set`                                                         | `runtime_sandboxes_network` with `get`, `set`                     |
+| `runtime_sandboxes_previews_create`, `_list`, `_rotate`, `_delete`                              | `runtime_sandboxes_previews` with the same verbs                  |
+| `runtime_sandboxes_mount`, `runtime_sandboxes_mounts`, `runtime_sandboxes_unmount`              | `runtime_sandboxes_mounts` with `mount`, `list`, `unmount`        |
+| `runtime_images_get`, `_tag`, `_delete`                                                         | `runtime_images` with `get`, `tag`, `delete`                      |
+| `runtime_volumes_create`, `_get`, `_delete`                                                     | `runtime_volumes` with `create`, `get`, `delete`                  |
+| `runtime_volumes_backup`, `_backup_get`, `_backup_policy`, `_backup_delete`                     | `runtime_volumes_backup` with `create`, `get`, `policy`, `delete` |
+| `runtime_snapshots_create`, `_get`, `_delete`                                                   | `runtime_snapshots` with `create`, `get`, `delete`                |
+| `runtime_secrets_set`, `_list`, `_delete`                                                       | `runtime_secrets` with `set`, `list`, `delete`                    |
+| `runtime_account_get`, `runtime_limits_get`, `runtime_referrals_get`, `runtime_account_sso_get` | `runtime_account` with `get`, `limits`, `referrals`, `sso`        |
+| `runtime_usage_compare`                                                                         | `runtime_account` with `compare`                                  |
+| `runtime_support_message`, `_read`                                                              | `runtime_support` with `message`, `read`                          |
+| `runtime_feedback_submit`, `_list`                                                              | `runtime_feedback` with `submit`, `list`                          |
 
 On 24 September 2026 every tool took its product's name, as the CLI spells it,
-with no aliases: `runtime_exec` became `runtime_sandbox_exec`,
-`runtime_sandboxes_create` became `runtime_sandbox_create`, and so on. A call to
+with no aliases: `runtime_exec` became `runtime_sandboxes_exec`,
+`runtime_sandboxes_create` became `runtime_sandboxes_create`, and so on. A call to
 one of those names fails, and its error names the call that replaces it.
 
 ## A typical session
 
 1. Choose a unique `idempotencyKey` before creating. Call
-   `runtime_sandbox_create` with that key. Check that the returned state is
-   `running` before executing anything. The included usage is spent first, then prepaid credit.
-2. `runtime_sandbox_files_write`, then `runtime_sandbox_exec` with `{"id": "<sandbox id>", "command": "python3 main.py"}`
+   `runtime_sandboxes_create` with that key. Check that the returned state is
+   `running` before executing anything. The free usage is spent first, then prepaid credit.
+2. `runtime_sandboxes_files_write`, then `runtime_sandboxes_exec` with `{"id": "<sandbox id>", "command": "python3 main.py"}`
    (or `"command": ["python3", "main.py"]` to run it without a shell).
    Give each write that accepts `idempotencyKey` its own key; do not add
    unsupported fields to other tools. Check `exitCode`, `timedOut`, output and
    truncation flags; tool or HTTP success alone does not prove program success.
-   `runtime_sandbox_exec` returns at most 64 KiB of `stdout` and of `stderr` for a
+   `runtime_sandboxes_exec` returns at most 64 KiB of `stdout` and of `stderr` for a
    command up to 60 seconds, 1 MiB for a longer one; `stdoutTruncated` or
    `stderrTruncated` is `true` when more was dropped. Over MCP, output over
    16,000 characters in all keeps each stream's beginning and end within its
@@ -221,16 +225,17 @@ one of those names fails, and its error names the call that replaces it.
    Quotes, backslashes and control characters can shorten it further, because
    escaped output must also fit the complete serialized response budget.
    `outputCut` says how many characters of each were cut. When the result
-   includes `processId`, read the existing process with `runtime_sandbox_process`
+   includes `processId`, read the existing process with `runtime_sandboxes_process`
    and `"action": "read"`, using its output cursors. For a future command whose
    full output you need, save it to a file and read it in parts with
-   `runtime_sandbox_files_read`. Do not run a command again just to recover
+   `runtime_sandboxes_files_read`. Do not run a command again just to recover
    output: its changes may already have happened.
-3. For a server or a long job, `runtime_sandbox_exec` with `"background": true`, then
-   `runtime_sandbox_process` with `"action": "read"` to follow its output.
-4. `runtime_sandbox_manage` with `"action": "stop"` when done, even if a step
-   failed. Confirm `stopped` before reporting cleanup complete. Export needed
-   outputs before stopping.
+3. For a server or a long job, `runtime_sandboxes_exec` with `"background": true`, then
+   `runtime_sandboxes_process` with `"action": "read"` to follow its output.
+4. `runtime_sandboxes_manage` with `"action": "delete"` when done, even if a step
+   failed. A stop keeps the disk, billed until it is deleted; delete unless the
+   owner's task needs the sandbox again. Confirm it is gone before reporting
+   cleanup complete. Export needed outputs before deleting.
 
 **Retries.** When a tool accepts `idempotencyKey`, choose and record a unique
 key **before the first call** and pass it explicitly. After a lost reply, reuse
@@ -254,7 +259,7 @@ calls.
 
 ## Pause and wake
 
-`runtime_sandbox_manage` with `"action": "pause"` saves files and memory, and
+`runtime_sandboxes_manage` with `"action": "pause"` saves files and memory, and
 `"wake"` restores them. Each sandbox keeps only its latest
 state, not a history of billed snapshots.
 
@@ -263,29 +268,32 @@ it. A full host can also refuse a wake; the paused data remains and no compute
 is charged for the failed attempt. See [pricing](./pricing) for paused storage
 and retention.
 
-A paused sandbox also wakes by itself when `runtime_sandbox_exec`, a file or terminal
+A paused sandbox also wakes by itself when `runtime_sandboxes_exec`, a file or terminal
 tool, or a visit to a shared port reaches it, unless it was created with
 `autoWake: false`. A sandbox pauses itself after {{idle-pause}} with nothing
 happening in it. `"action": "update"` changes `autoWake`, `idlePauseSeconds`
 ({{idle-pause-min}} to {{idle-pause-max}} seconds; 0 is never), `name` and
 `labels`; `"persist"` keeps a paid sandbox running while credit lasts.
-`runtime_sandbox_create` with `name` and `getOrCreate: true` returns the
+`runtime_sandboxes_create` with `name` and `getOrCreate: true` returns the
 sandbox that already has the name, woken if paused, instead of `name_taken`.
 
 ## Domains, TCP ports, addresses and the tunnel
 
 They need a kept top-up, and a dedicated address credit; see [networking](./networking).
 
-- `runtime_domain` (`add`, `verify`, `list`, `remove`): serve a sandbox's port
+- `runtime_domains` (`add`, `verify`, `list`, `remove`): serve a sandbox's port
   at your own hostname.
-- `runtime_port` (`open`, `list`, `close`): a public TCP port to a sandbox.
-- `runtime_address` (`reserve`, `list`, `release`): a dedicated outbound
+- `runtime_ports` (`open`, `list`, `close`): a public TCP port to a sandbox.
+- `runtime_ips` (`reserve`, `list`, `release`): a dedicated outbound
   address.
-- `runtime_tunnel` (`create`, `get`, `add_peer`, `rotate_peer`,
+- `runtime_networks_wireguard` (`create`, `get`, `add_peer`, `rotate_peer`,
   `remove_peer`): the WireGuard tunnel. `add_peer` without `publicKey`
   generates the key pair and returns the private key once, in `config`.
-- `runtime_network_upstream_proxy` (`get`, `set`, `remove`): send the
+- `runtime_networks_upstream_proxy` (`get`, `set`, `remove`): send the
   sandboxes' outbound connections through your own proxy.
-- `runtime_network_private` (`get`, `set`): with `enabled: true`, your
+- `runtime_networks_private` (`get`, `set`): with `enabled: true`, your
   sandboxes reach each other at `<name>.sandbox.internal:<port>` over TCP.
   Needs a kept top-up; free.
+- `runtime_networks_signed_requests` (`get`, `set`): with `enabled: true`,
+  your sandboxes can sign their HTTP requests as Runtime's agents with Web Bot
+  Auth ([how](./networking#signed-requests)). Needs credit; free.

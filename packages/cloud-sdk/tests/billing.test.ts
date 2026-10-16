@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { billingCommand } from "../src/billing-cli";
 import { run } from "../src/cli";
 import { Runtime } from "../src/client";
-import type { Topup } from "../src/products/billing";
+import type { AutoTopUp, Topup } from "../src/products/billing";
 
 /* runtime.billing and `runtime billing` against a stub API. */
 
@@ -208,4 +208,125 @@ test("claim without --wait says it is not paid yet", async () => {
   ).toBe(0);
   expect(lines.join("\n")).toContain("Not paid yet (open)");
   expect(stub.saved).toHaveLength(0);
+});
+
+test("claim --wait stops at once when the top-up has no address, and says to send it again", async () => {
+  const next =
+    "This top-up has no address to pay to yet. Send the same POST /api/wallet/topups again with this claimCode to get one; no second account opens.";
+  const topup = {
+    purchaseId: "p_1",
+    status: "open" as const,
+    amountUsd: "20.00",
+    amount: "20.000000",
+    payBy: null,
+    networks: [],
+  };
+  const stub = walletStub([{ status: "open", orgId: "org_1", topup, next }]);
+  const { lines, out } = capture();
+  expect(
+    await billingCommand(
+      ["claim", "rtclaim_code"],
+      { positional: ["claim", "rtclaim_code"], flags: flags("wait") },
+      out,
+      noClient,
+      undefined,
+      stub.deps,
+    ),
+  ).toBe(1);
+  expect(lines.join("\n")).toBe(next);
+  expect(stub.saved).toHaveLength(0);
+});
+
+const AUTO: AutoTopUp = {
+  enabled: true,
+  waitingForCard: false,
+  below: 5,
+  amount: 20,
+  monthlyLimit: 100,
+  thisMonth: 20,
+  card: true,
+  offReason: null,
+  offAt: null,
+  saveCardAt: null,
+};
+
+test("billing.autoTopUp reads, sets and turns off, each to its own route", async () => {
+  await withStub([AUTO as unknown as Topup], async (seen) => {
+    const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+    expect(await runtime.billing.autoTopUp.get()).toEqual(AUTO);
+    const input = { enabled: true, below: 5, amount: 20, monthlyLimit: 100 };
+    await runtime.billing.autoTopUp.set(input, { idempotencyKey: "k2" });
+    await runtime.billing.autoTopUp.off();
+    expect(seen.map((s) => s.line)).toEqual([
+      "GET /v1/billing/auto-top-up",
+      "PUT /v1/billing/auto-top-up",
+      "DELETE /v1/billing/auto-top-up",
+    ]);
+    expect(seen[1]!.body).toEqual(input);
+    expect(seen[1]!.key).toBe("k2");
+  });
+});
+
+test("`runtime billing auto-top-up on` sends the three figures; show and off say where it stands", async () => {
+  const waiting = {
+    ...AUTO,
+    enabled: false,
+    waitingForCard: true,
+    card: false,
+    saveCardAt: "https://withruntime.com/account/billing#auto-top-up",
+  };
+  await withStub([waiting as unknown as Topup], async (seen) => {
+    const { lines, out } = capture();
+    expect(
+      await run(
+        ["billing", "auto-top-up", "on", "--below", "15", "--amount", "$20", "--monthly", "100"],
+        env,
+        out,
+      ),
+    ).toBe(0);
+    expect(seen[0]).toMatchObject({
+      line: "PUT /v1/billing/auto-top-up",
+      body: { enabled: true, below: 15, amount: 20, monthlyLimit: 100 },
+    });
+    expect(lines.join("\n")).toContain("turns on once a card is saved");
+    expect(lines.join("\n")).toContain("withruntime.com/account/billing");
+  });
+  // Figures not given are left out: the server keeps the saved ones, or its defaults.
+  await withStub([waiting as unknown as Topup], async (seen) => {
+    const { out } = capture();
+    expect(await run(["billing", "auto-top-up", "on"], env, out)).toBe(0);
+    expect(seen[0]!.body).toEqual({ enabled: true });
+  });
+  await withStub([waiting as unknown as Topup], async (seen) => {
+    const { out } = capture();
+    expect(await run(["billing", "auto-top-up", "on", "--amount", "50"], env, out)).toBe(0);
+    expect(seen[0]!.body).toEqual({ enabled: true, amount: 50 });
+  });
+  const off = { ...AUTO, enabled: false, offReason: "declined" as const };
+  await withStub([off as unknown as Topup], async (seen) => {
+    const { lines, out } = capture();
+    expect(await run(["billing", "auto-top-up", "off"], env, out)).toBe(0);
+    expect(seen[0]!.line).toBe("DELETE /v1/billing/auto-top-up");
+    expect(lines.join("\n")).toContain("the bank declined the last charge");
+  });
+  await withStub([AUTO as unknown as Topup], async (seen) => {
+    const { lines, out } = capture(true);
+    expect(await run(["billing", "auto-top-up"], env, out)).toBe(0);
+    expect(seen[0]!.line).toBe("GET /v1/billing/auto-top-up");
+    expect(JSON.parse(lines[0]!)).toEqual(AUTO);
+  });
+});
+
+test("`runtime billing auto-top-up` refuses a figure that is not dollars, an unknown verb, and figures elsewhere", async () => {
+  const { out } = capture();
+  for (const bad of ["ten", "0", "$"])
+    await expect(
+      run(["billing", "auto-top-up", "on", "--below", "10", "--monthly", bad], env, out),
+    ).rejects.toThrow("--monthly");
+  await expect(run(["billing", "auto-top-up", "maybe"], env, out)).rejects.toThrow(
+    "show, on or off",
+  );
+  await expect(run(["billing", "topup", "20", "--below", "5"], env, out)).rejects.toThrow(
+    "billing auto-top-up on",
+  );
 });

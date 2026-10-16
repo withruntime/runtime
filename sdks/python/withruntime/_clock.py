@@ -49,8 +49,13 @@ async def async_parallel(fn: Callable[[T], Awaitable[Any]], items: Iterable[T], 
 
 def sync_parallel(fn: Callable[[T], Any], items: Iterable[T], limit: int) -> None:
     from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+    # A worker thread starts with no context: without a copy, the caller's
+    # absolute deadline (a ContextVar) is dropped and each chunk runs unbounded.
+    # Each task takes its own copy, as one Context cannot be entered twice at once.
+    work = [(copy_context(), item) for item in items]
     with ThreadPoolExecutor(max_workers=limit) as pool:
-        for _ in pool.map(fn, list(items)):
+        for _ in pool.map(lambda task: task[0].run(fn, task[1]), work):
             pass
 
 

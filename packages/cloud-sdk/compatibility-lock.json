@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-10-05",
+  "checkedAt": "2026-10-11",
   "providers": [
     {
       "id": "e2b",
@@ -9,35 +9,35 @@
         {
           "registry": "npm",
           "name": "e2b",
-          "version": "2.52.1",
+          "version": "2.55.0",
           "artifacts": {
-            "2.52.1": "sha512-qbX0s6qV2gfN4/+NBTIli1hkztfH/1kL4AEAYTaP4wjx7dp2m2wnXcN35iz+8Gug0q4TPN9w4xbdw/TGJr/Bpw=="
+            "2.55.0": "sha512-viC7GLHMPqzilndlKgNXWN0ebMV8fpbI1IfDlPd+GHuNcJIcUCXKyr5HAxjcC5sDMym3rrbyUyUQ+zQVAU9oGA=="
           }
         },
         {
           "registry": "npm",
           "name": "@e2b/code-interpreter",
-          "version": "2.8.0",
+          "version": "2.8.3",
           "artifacts": {
-            "2.8.0": "sha512-tWFi8IJYV3V6jOVfQ8V5PkzockrYP+ndWB/jKiJvRATTmNAy8+S/7S+iSh2Lb2Hrul869G2adRiN2xW8peJTig=="
+            "2.8.3": "sha512-xrSwGtyEoYFZJTtOI8UzYzsNmi4SL/fsH4jxRjJYJDtIHYHLD+sFR6gxGYs5xRYLGxi56ptVMTayX/26ZzJlEA=="
           }
         },
         {
           "registry": "pypi",
           "name": "e2b",
-          "version": "2.52.1",
+          "version": "2.55.1",
           "artifacts": {
-            "e2b-2.52.1-py3-none-any.whl": "sha256-708583a37c9b797b0044bd92fa407c21aec65f101f2fd4c4a0ccd842dbe33de1",
-            "e2b-2.52.1.tar.gz": "sha256-3af5c037b971ebc89a1ef0e5ced0e1c9ecbf3d65f2c23df5db7ad9faef8f68fa"
+            "e2b-2.55.1-py3-none-any.whl": "sha256-30aec382a7cac5401e0aa0efb156422459f586101809c3e9f34a6fcf797097db",
+            "e2b-2.55.1.tar.gz": "sha256-5255f9a01dc484c343f750d13d3a9c857ef3511222a240572ddce2563dd301d9"
           }
         },
         {
           "registry": "pypi",
           "name": "e2b-code-interpreter",
-          "version": "2.10.1",
+          "version": "2.10.5",
           "artifacts": {
-            "e2b_code_interpreter-2.10.1-py3-none-any.whl": "sha256-f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d",
-            "e2b_code_interpreter-2.10.1.tar.gz": "sha256-94e504667788c6cbb175e5deaf1f68e8df474b670343fe1d72e2496b49d5a666"
+            "e2b_code_interpreter-2.10.5-py3-none-any.whl": "sha256-ac98cd29335ae4f035b70a4eb5f6ca89dc5728d48de79cfb7d90a08d57a652b5",
+            "e2b_code_interpreter-2.10.5.tar.gz": "sha256-ea478929289d0f9936e236cf9e36b914f4df7ef58ca2e5b1e851c1f3b13bf5ca"
           }
         }
       ]
@@ -49,42 +49,42 @@
         {
           "registry": "npm",
           "name": "@daytona/sdk",
-          "version": "0.222.0",
+          "version": "0.223.1",
           "artifacts": {
-            "0.222.0": "sha512-N0hjbprttUcAQE3eBegzRNIhQTzbPOGAuS2LJvl4a6bLp3rjCY1R7G9HbE9STepiBQDAs5B08Vv1rpRTXw9PaA=="
+            "0.223.1": "sha512-Ja6bacvUBuODjKcWGczZn6k9w+7veIces4k2tdizPUndj3pjgnHrphq/TbdIvJfKtz91yQ+S4mKoKaeuKQLc7g=="
           }
         },
         {
           "registry": "pypi",
           "name": "daytona",
-          "version": "0.220.0",
+          "version": "0.223.1",
           "artifacts": {
-            "daytona-0.220.0-py3-none-any.whl": "sha256-5f71299eaf3a446e6569ada69919fc49997c1b2c587845057394aab886f113c8",
-            "daytona-0.220.0.tar.gz": "sha256-eda82eac9b3601e757b1dbe3ec2d966b46a9e3038b69ce44a0d90e01dac8417a"
+            "daytona-0.223.1-py3-none-any.whl": "sha256-768564fbbe45a91eb0ba6e5e0f36a743e17cc14b7a3a2108aae931ae820a15c1",
+            "daytona-0.223.1.tar.gz": "sha256-72a4a7a795f44aa678daad52d74bd69d11eeacd894f310895a313200ea8fec1f"
           }
         },
         {
           "registry": "npm",
           "name": "@daytona/api-client",
-          "version": "0.222.0",
+          "version": "0.223.1",
           "artifacts": {
-            "0.222.0": "sha512-KvD+k6LMaqauQBedbMPTZG3UK3oITwmI5onfqbQJOdEG3xD6Occ3dJRphPlXqfF7tdtmDiXv3yrbyyOusqjvdA=="
+            "0.223.1": "sha512-p/NaCr3NbKUKPwqDBJBHHvToUMqh7QIyHT5rENzJYSrs9RCMfsifbtTpe0nHyOokfZhIceHWFcOtT2JwJYmSKQ=="
           }
         },
         {
           "registry": "npm",
           "name": "@daytona/toolbox-api-client",
-          "version": "0.222.0",
+          "version": "0.223.1",
           "artifacts": {
-            "0.222.0": "sha512-crdx4Zoxjtd7sGoURS3Dwd0xEQ+6lW6e+tu45TgUx85BpDAoTEr0z7i13HgXcEfAYMIcj8o70FOlI5JlkEJ5dw=="
+            "0.223.1": "sha512-Sl91T6kLIfilU5njZWGzU8KAeHtOfv6pw6iPO1JmX8UhjqfriOy6exPyCxSiBpmyZsQy0eL80IecdbTZPvnmcQ=="
           }
         },
         {
           "registry": "npm",
           "name": "@daytona/analytics-api-client",
-          "version": "0.222.0",
+          "version": "0.223.1",
           "artifacts": {
-            "0.222.0": "sha512-KNIk2b21pLzKMdKPnz+7cOXE9Qjvlfe9hwfiIdAatxa9jYbwJQTmbxs7BpdDB7I9GtdUionpdskxJWL+rVcWvA=="
+            "0.223.1": "sha512-LntjeNKKHpjzpCwgGbfYRvQ733b7SLfGpeM5ZTA12YK82YfvssGPDRkfo7xi88ndsbYteE+L9TpqYx3aH3WncA=="
           }
         }
       ]
@@ -96,27 +96,27 @@
         {
           "registry": "npm",
           "name": "@vercel/sandbox",
-          "version": "3.5.1",
+          "version": "3.6.1",
           "artifacts": {
-            "3.5.1": "sha512-VHItQtcv4FkSXET29b088p87MNPAIhRscF3ifrup2KkC8ix4hy4NpgCO9F3GI4yOsztgGtuV7bDx29Iufun2hQ=="
+            "3.6.1": "sha512-U6dwyadp2SmW/M96W2Bb3UjIql6TOOYwu9McUIwob209pj0A3ks/wKrMv7lCE7INx50J5zOpqLhMOnFa+Yodlg=="
           }
         },
         {
           "registry": "pypi",
           "name": "vercel",
-          "version": "0.11.4",
+          "version": "0.11.6",
           "artifacts": {
-            "vercel-0.11.4-py3-none-any.whl": "sha256-3ba3a0de2276a2b3daf590263082f6a82850dc77b35cf68f86a1e5bc9e83b6f1",
-            "vercel-0.11.4.tar.gz": "sha256-80038906615bf4182787af8354bce71b57d9fd5471a35ebca457d34ab5f50b2e"
+            "vercel-0.11.6-py3-none-any.whl": "sha256-3dfad0bfc6a6ba380246acec7346ed89020247e16e4294d88f3d9a296d2d5f43",
+            "vercel-0.11.6.tar.gz": "sha256-af96132f898e0bc8421e5ae16a0d16fd973aaebaf3f0852d3ffef076af7a22ed"
           }
         },
         {
           "registry": "pypi",
           "name": "vercel-sandbox",
-          "version": "0.7.0",
+          "version": "0.9.0",
           "artifacts": {
-            "vercel_sandbox-0.7.0-py3-none-any.whl": "sha256-f7eb897a1a5092fe8c38319ce803033b1a9ced8f414564a43a668432f91ffcd9",
-            "vercel_sandbox-0.7.0.tar.gz": "sha256-07d703790d0141dc75e0962baf35d666a6961bc1de913749137267a2550c81e2"
+            "vercel_sandbox-0.9.0-py3-none-any.whl": "sha256-eebc4ecd430ff3845f4f5a36c18d7ba80405f459533bb0d206caed9b2a3ed5ab",
+            "vercel_sandbox-0.9.0.tar.gz": "sha256-5b75e3aead43f9b9dea6c74d5fabdf5539b874c6d9e65cb6570ee0ac077848fb"
           }
         }
       ]
@@ -151,18 +151,18 @@
         {
           "registry": "npm",
           "name": "@runloop/api-client",
-          "version": "1.32.0",
+          "version": "2.0.0",
           "artifacts": {
-            "1.32.0": "sha512-aCNKjlGzLVEAFl8WA42LmgiYkdIkaocOlFK/cMGppijsM0AGS+1hkw/RxroQxyHlkIhjyRaqLv7m5ZNMGhks7Q=="
+            "2.0.0": "sha512-1npSvS5rVTUrNbtjGYoMXOb7r4OL7XhRJGPo1buu1iED5rxOXzU7+nDT0Spe+TFwDz9PL+X5frikTEYJ312PEA=="
           }
         },
         {
           "registry": "pypi",
           "name": "runloop-api-client",
-          "version": "1.32.0",
+          "version": "2.0.0",
           "artifacts": {
-            "runloop_api_client-1.32.0-py3-none-any.whl": "sha256-23c36910de7423f73aef91d4a963abea80a6b2f5b2df5bb8e439d788d5486cc7",
-            "runloop_api_client-1.32.0.tar.gz": "sha256-1f2077fb5a99b5ef30dbc1d96d47c1ca1d3f77895b9e186d985e47365fe85634"
+            "runloop_api_client-2.0.0-py3-none-any.whl": "sha256-85e22da5b7cc67dc6c4c126523800976794677ee42fa2c36ef9dd7be099f009a",
+            "runloop_api_client-2.0.0.tar.gz": "sha256-9ac246ac8003e87d616857e54965cc4b526d2fa4a815016583d74f3d2c59e390"
           }
         }
       ]
@@ -196,10 +196,10 @@
         {
           "registry": "pypi",
           "name": "sprites-py",
-          "version": "0.7.1",
+          "version": "0.7.2",
           "artifacts": {
-            "sprites_py-0.7.1-py3-none-any.whl": "sha256-23774f8111c9a4fbb7007f8e305677734eb7616bebb6c668c394788399ff38a8",
-            "sprites_py-0.7.1.tar.gz": "sha256-c45596f3994376eb25dd7c4f988b3a6893dd8218502bacd7eedf2b20888d8456"
+            "sprites_py-0.7.2-py3-none-any.whl": "sha256-b9015928cf2cab8c99f31f7fa245b088f9f26f37ce047721bcdf9c63e1f2f502",
+            "sprites_py-0.7.2.tar.gz": "sha256-bebc5aec3c1a2a7a5090b8a1efd4b0cb2ed2c10baf72c8b85ea050d59c054c8c"
           }
         }
       ]
@@ -211,9 +211,9 @@
         {
           "registry": "npm",
           "name": "freestyle",
-          "version": "0.2.16",
+          "version": "0.2.17",
           "artifacts": {
-            "0.2.16": "sha512-8pC7lh/R2PDanbs9Noc1Q7YlPl8Be8hHaQA/rpwFmELrcLTUAuCuxpoZ1Xm+7fuxqhJqJzO83bTTeLcSUoJ9SA=="
+            "0.2.17": "sha512-SQRRJAP+y56/nIDwmqJG5Y5IqqKYAmABqv/gjyzANy0wUe3cqnV1iD14nU9lQAYWtQ5UCl+lnE38nXZFKO0J9Q=="
           }
         }
       ]
@@ -231,31 +231,40 @@
             "prime_sandboxes-0.4.1.tar.gz": "sha256-53f7577dc9070e3b8e30db360f9e3cce3bcc35f8765b26f24f64dbc3c7763b06"
           },
           "latestReview": {
-            "version": "0.4.2",
+            "version": "0.4.3",
             "artifacts": {
-              "prime_sandboxes-0.4.2-py3-none-any.whl": "sha256-ed59f001c7575339d6c903166c5468f783eda0997586ec6476fd8b35f65746f9",
-              "prime_sandboxes-0.4.2.tar.gz": "sha256-4990a724cac0a662fde6e12e7eccfee092a78679cc568653b8ef52008dfa28e4"
+              "prime_sandboxes-0.4.3-py3-none-any.whl": "sha256-dd26007838c25b5d38a8b7af0514c07027b783406c0ea5b9fcf0eb74a45139bd",
+              "prime_sandboxes-0.4.3.tar.gz": "sha256-a2169182f74307485c73f897e224c978eba3276133ddb40715be4d346594c487"
             },
-            "reviewedAt": "2026-10-02",
+            "reviewedAt": "2026-10-08",
             "disposition": "held-for-sdk-qualification",
             "evidence": {
               "sourceUrls": [
-                "https://pypi.org/pypi/prime-sandboxes/0.4.2/json",
-                "https://files.pythonhosted.org/packages/3f/4d/a379cdf82d6f06c970bd4f0333c2360c08aba65c809d7492f49aece84c66/prime_sandboxes-0.4.2.tar.gz",
-                "https://files.pythonhosted.org/packages/da/b5/6a9fe6ae1342872c1c0cc45072cc0c58a5fa2783c4c45770e585f2535c8f/prime_sandboxes-0.4.2-py3-none-any.whl",
+                "https://pypi.org/pypi/prime-sandboxes/0.4.3/json",
+                "https://files.pythonhosted.org/packages/d8/1b/01e02c9d2346956f5ed77d269f836905a017ad796a4b4c719debd8942dc4/prime_sandboxes-0.4.3.tar.gz",
+                "https://files.pythonhosted.org/packages/e1/5f/d0b5cd1dabdb6e5cb1ab5d84c8ba9a96e2a9a0be8913ec9db9177c9645fb/prime_sandboxes-0.4.3-py3-none-any.whl",
                 "https://github.com/PrimeIntellect-ai/prime/tree/main/packages/prime-sandboxes"
               ],
               "artifactSha256": {
-                "prime_sandboxes-0.4.2-py3-none-any.whl": "ed59f001c7575339d6c903166c5468f783eda0997586ec6476fd8b35f65746f9",
-                "prime_sandboxes-0.4.2.tar.gz": "4990a724cac0a662fde6e12e7eccfee092a78679cc568653b8ef52008dfa28e4"
+                "prime_sandboxes-0.4.3-py3-none-any.whl": "dd26007838c25b5d38a8b7af0514c07027b783406c0ea5b9fcf0eb74a45139bd",
+                "prime_sandboxes-0.4.3.tar.gz": "a2169182f74307485c73f897e224c978eba3276133ddb40715be4d346594c487"
               },
               "changes": [
                 "Source diff of the 0.4.1 and 0.4.2 sdists, downloaded and hashed on the Mac, nothing installed or run: README, __init__, models.py, sandbox.py, one test changed; tests/test_checkpoints.py added.",
                 "Adds filesystem checkpoints: SandboxCheckpoint, CheckpointLookupError and BatchCheckpointResponse models; checkpoint, get_checkpoint, get_checkpoints (batch of up to 100 ids), wait_for_checkpoint and list_checkpoints on the sync and async clients; CreateSandboxRequest takes checkpoint_id with a validate_restore_source check.",
                 "CreateSandboxRequest.docker_image becomes Optional (None when restoring from a checkpoint) and disk_size_gb's default 5.0 becomes None.",
                 "Background job launch: the working_dir prefix is 'cd DIR || exit 1;' instead of 'cd DIR &&', and the launch cwd is / for an absolute working_dir.",
+                "Source diff of the 0.4.2 and 0.4.3 sdists, downloaded and hashed on the Mac, nothing installed or run; the wheel's package source matched the sdist's: __init__, core/client.py, models.py, sandbox.py and tests/test_checkpoints.py changed.",
+                "Adds checkpoint deletion: delete_checkpoint (DELETE /sandbox/checkpoints/{id}, 409 while pending or the active tip) and delete_sandbox_checkpoints (DELETE /sandbox/{id}/checkpoints) on the sync and async clients, with DeleteSandboxCheckpointsResponse and CheckpointDeleteError (NOT_FOUND or CONFLICT) models exported.",
+                "The core client returns {} for an HTTP 204 instead of parsing an empty body.",
                 "No existing method was removed or renamed. Installed consumer qualification against withruntime/prime is not run; the supported pin stays 0.4.1."
               ]
+            },
+            "between": {
+              "0.4.2": {
+                "prime_sandboxes-0.4.2-py3-none-any.whl": "sha256-ed59f001c7575339d6c903166c5468f783eda0997586ec6476fd8b35f65746f9",
+                "prime_sandboxes-0.4.2.tar.gz": "sha256-4990a724cac0a662fde6e12e7eccfee092a78679cc568653b8ef52008dfa28e4"
+              }
             }
           }
         }

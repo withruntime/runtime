@@ -11,7 +11,7 @@ public final class Sandboxes {
     this.t = transport;
   }
 
-  /** Creates a sandbox on the included usage (while it lasts) and waits until it runs. */
+  /** Creates a sandbox on the free usage (while it lasts) and waits until it runs. */
   public Sandbox create() {
     return create(new CreateSandbox());
   }
@@ -30,11 +30,19 @@ public final class Sandboxes {
                 .key(options.idempotencyKey)
                 .room(room.isNegative() ? Duration.ZERO : room));
     Sandbox sandbox = new Sandbox(t, info);
+    sandbox.deleteOnClose = !options.keep && !sandbox.info().reused();
+    boolean replayed = sandbox.info().replayed();
     if (!options.noWait && !"running".equals(sandbox.state())) {
       sandbox.waitFor("running", Duration.ofSeconds(ApiDefaults.WAIT_FOR_TIMEOUT_SECONDS));
       if (!"running".equals(sandbox.state()))
         throw new RuntimeCloudException(
-            "Sandbox " + sandbox.id() + " is " + sandbox.state() + ", not running.",
+            replayed
+                ? "Sandbox "
+                    + sandbox.id()
+                    + " was made by an earlier call with this idempotency key and is "
+                    + sandbox.state()
+                    + " now. It did not fail to start; create again with a new key."
+                : "Sandbox " + sandbox.id() + " is " + sandbox.state() + ", not running.",
             "start_failed",
             "Read it with runtime.sandboxes().get(id); stopReason says why.");
     }

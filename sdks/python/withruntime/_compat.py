@@ -17,6 +17,33 @@ def reject(options: dict[str, Any], context: str) -> None:
         raise CompatibilityError(f"{context} cannot preserve these options: {', '.join(sorted(options))}")
 
 
+class _Refused:
+    """An export an adapter cannot keep: calling it, reading from it or
+    subclassing it raises, so code that uses it stops at that line."""
+
+    def __init__(self, message: str) -> None:
+        object.__setattr__(self, "_message", message)
+
+    def _refuse(self, *_: Any, **__: Any) -> Any:
+        raise CompatibilityError(object.__getattribute__(self, "_message"))
+
+    __call__ = _refuse
+    __getitem__ = _refuse
+    __iter__ = _refuse
+    __mro_entries__ = _refuse
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._refuse()
+
+
+def refused(provider: str, name: str, alternative: str) -> Any:
+    """``Name = refused("Prime", "Name", "use ...")`` in an adapter's package:
+    the compatibility inventory counts the export, and all under it, refused."""
+    return _Refused(f"{provider}: {name} is not supported by this Runtime compatibility adapter; {alternative}.")
+
+
 def positive(value: float, name: str, *, integral: bool = False) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a finite positive number")

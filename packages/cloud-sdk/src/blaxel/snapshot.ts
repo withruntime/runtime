@@ -125,12 +125,27 @@ export async function startFromSnapshot(
   return runtime;
 }
 
-function refuseApplication(options: { targetType?: string } = {}) {
+function refuseApplication(
+  options: {
+    targetType?: string;
+    port?: number;
+    traffic?: number;
+    customDomain?: string;
+    prefix?: string;
+  } = {},
+) {
   if (options.targetType === "application")
     throw new NotSupportedError(
       "Forking into an application",
       "Fork into a sandbox and share its port with sandbox.previews.create.",
     );
+  // Blaxel's application-fork routing: a sandbox fork has no use for them.
+  for (const key of ["port", "traffic", "customDomain", "prefix"] as const)
+    if (options[key] !== undefined)
+      throw new NotSupportedError(
+        `A fork's ${key}`,
+        "Fork without it, then share a port of the copy with sandbox.previews.create({ metadata: { name }, spec: { port } }).",
+      );
 }
 
 /** A snapshot, as Blaxel's Snapshot class. */

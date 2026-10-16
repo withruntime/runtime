@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -55,14 +55,30 @@ type Client struct {
 	// Feedback tells the Runtime team something.
 	Feedback *FeedbackService
 	// Support asks Runtime support.
-	Support   *SupportService
-	Domains   *DomainService
-	Ports     *PortService
+	Support *SupportService
+	Domains *DomainService
+	Ports   *PortService
+	// IPs reserves dedicated outbound addresses.
+	IPs *AddressService
+	// Networks holds the account's networks: WireGuard into your sandboxes.
+	Networks *NetworkService
+	SSO      *SSOService
+	MCP      *MCPService
+
+	// Deprecated: renamed IPs on 6 October 2026 (one plural word per
+	// product); the old name is the same service until a release after its
+	// 30 days of overlap removes it.
 	Addresses *AddressService
-	// Tunnel manages the account's WireGuard network.
+	// Deprecated: renamed Networks.WireGuard on 6 October 2026; the old name
+	// is the same service until a release after its 30 days of overlap
+	// removes it.
 	Tunnel *PrivateTunnelService
-	SSO    *SSOService
-	MCP    *MCPService
+}
+
+// NetworkService is the account's networks.
+type NetworkService struct {
+	// WireGuard is a tunnel from your own network into your sandboxes.
+	WireGuard *PrivateTunnelService
 }
 
 // Option configures a Client.
@@ -214,8 +230,10 @@ func New(options ...Option) (*Client, error) {
 	c.Support = &SupportService{c: c}
 	c.Domains = &DomainService{c: c}
 	c.Ports = &PortService{c: c}
-	c.Addresses = &AddressService{c: c}
-	c.Tunnel = &PrivateTunnelService{c: c}
+	c.IPs = &AddressService{c: c}
+	c.Networks = &NetworkService{WireGuard: &PrivateTunnelService{c: c}}
+	c.Addresses = c.IPs
+	c.Tunnel = c.Networks.WireGuard
 	c.SSO = &SSOService{c: c}
 	c.MCP = &MCPService{c: c}
 	return c, nil

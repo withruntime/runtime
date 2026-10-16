@@ -20,24 +20,24 @@ module WithRuntime
   end
 
   class Addresses < Product
-    def reserve(family: 4) = Record.new(@t.json("POST", "/v1/addresses", body: { "family" => family }))
-    def list = @t.json("GET", "/v1/addresses")["data"].map { |row| Record.new(row) }
-    def release(id) = @t.json("DELETE", "/v1/addresses/#{seg(id)}") && nil
+    def reserve(family: 4) = Record.new(@t.json("POST", "/v1/ips", body: { "family" => family }))
+    def list = @t.json("GET", "/v1/ips")["data"].map { |row| Record.new(row) }
+    def release(id) = @t.json("DELETE", "/v1/ips/#{seg(id)}") && nil
   end
 
   # Account WireGuard networking, distinct from Sandbox#open_tunnel.
   class PrivateTunnel < Product
-    def get = Record.new(@t.json("GET", "/v1/tunnel"))
-    def create(subnet: nil) = Record.new(@t.json("POST", "/v1/tunnel", body: { "subnet" => subnet }.compact))
-    def delete = @t.json("DELETE", "/v1/tunnel") && nil
+    def get = Record.new(@t.json("GET", "/v1/networks/wireguard"))
+    def create(subnet: nil) = Record.new(@t.json("POST", "/v1/networks/wireguard", body: { "subnet" => subnet }.compact))
+    def delete = @t.json("DELETE", "/v1/networks/wireguard") && nil
     # Save config even when config_ready is false: its private key is shown once.
     def add_peer(name:, public_key: nil, routes: nil, idempotency_key: nil)
-      Record.new(@t.json("POST", "/v1/tunnel/peers", body: Fields.body(name: name, public_key: public_key, routes: routes), key: idempotency_key, no_retry: public_key.to_s.empty?))
+      Record.new(@t.json("POST", "/v1/networks/wireguard/peers", body: Fields.body(name: name, public_key: public_key, routes: routes), key: idempotency_key, no_retry: public_key.to_s.empty?))
     end
     def rotate_peer(id, public_key: nil)
-      Record.new(@t.json("POST", "/v1/tunnel/peers/#{seg(id)}:rotate", body: { "publicKey" => public_key }.compact, no_retry: public_key.to_s.empty?))
+      Record.new(@t.json("POST", "/v1/networks/wireguard/peers/#{seg(id)}:rotate", body: { "publicKey" => public_key }.compact, no_retry: public_key.to_s.empty?))
     end
-    def remove_peer(id) = Record.new(@t.json("DELETE", "/v1/tunnel/peers/#{seg(id)}"))
+    def remove_peer(id) = Record.new(@t.json("DELETE", "/v1/networks/wireguard/peers/#{seg(id)}"))
   end
 
   class SSO < Product

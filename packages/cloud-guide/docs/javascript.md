@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.11.2. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.14.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -24,19 +24,34 @@ On a server, put a key from https://withruntime.com/account/keys in
 a browser bundle or a command-line argument. With no key anywhere, the first
 call fails with `missing_api_key` and says how to get one.
 
-The singular product names match the CLI. Each pair below uses the same
-product client, connections and defaults; existing plural calls keep working.
+One plural word names each product, as in the CLI, the API and MCP. A
+name renamed on 6 October 2026 keeps working for 30 days after the rename
+ships, each use printing the new name once on stderr, and then fails with
+`name_retired` and a hint naming the new one.
 
-| Preferred product  | Existing alias      |
-| ------------------ | ------------------- |
-| `runtime.sandbox`  | `runtime.sandboxes` |
-| `runtime.snapshot` | `runtime.snapshots` |
-| `runtime.image`    | `runtime.images`    |
-| `runtime.volume`   | `runtime.volumes`   |
-| `runtime.job`      | `runtime.jobs`      |
-| `runtime.domain`   | `runtime.domains`   |
-| `runtime.port`     | `runtime.ports`     |
-| `runtime.address`  | `runtime.addresses` |
+| Product                      | Old name                               |
+| ---------------------------- | -------------------------------------- |
+| `runtime.sandboxes`          | `runtime.sandbox`                      |
+| `runtime.snapshots`          | `runtime.snapshot`                     |
+| `runtime.images`             | `runtime.image`                        |
+| `runtime.volumes`            | `runtime.volume`                       |
+| `runtime.jobs`               | `runtime.job`                          |
+| `runtime.domains`            | `runtime.domain`                       |
+| `runtime.ports`              | `runtime.port`                         |
+| `runtime.ips`                | `runtime.address`, `runtime.addresses` |
+| `runtime.networks`           | `runtime.network`                      |
+| `runtime.networks.wireguard` | `runtime.tunnel`                       |
+
+Each product can also be imported alone, by the same word, from
+`withruntime/<product>`: `sandboxes`, `snapshots`, `images`, `volumes`, `jobs`,
+`domains`, `ports`, `ips` and `networks`. Its one function takes the client's
+options and returns that product, finding the key the same way.
+
+```ts no-run
+import { volumes } from "withruntime/volumes";
+
+const volume = await volumes().create({ sizeMiB: 10_240, name: "cache" });
+```
 
 ## Hello, sandbox
 
@@ -52,17 +67,18 @@ console.log(result.exitCode, result.stdout); // 0, "750\n"
 ```
 
 `Sandbox.create()` takes no required arguments and returns once the sandbox is
-running. `await using` stops it when the block ends, even after an error. It
-needs Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
-`const sbx = ...` and call `await sbx.stop()` in a `finally` block.
+running. `await using` deletes it when the block ends, even after an error;
+create it with `keep: true` to stop it instead and keep its disk. It needs
+Node 24, Bun, Deno or TypeScript; in plain JavaScript on Node 22, write
+`const sbx = ...` and call `await sbx.delete()` in a `finally` block.
 
-With no arguments you get the included usage while it lasts, the default region, and
+With no arguments you get the free usage while it lasts, the default region, and
 2 vCPU, 4 GiB of memory and a 4 GiB disk, running while it works and pausing
 itself when idle, with no time limit. A paid sandbox
 can have up to {{max-vcpu}} vCPUs and {{max-memory}}; one without credit, 2 vCPU and
 4 GiB.
 
-The included usage is spent first, then prepaid credit, with nothing to
+The free usage is spent first, then prepaid credit, with nothing to
 choose; `funding` is accepted and ignored.
 Every field is optional:
 
@@ -85,7 +101,7 @@ await sbx.stop();
 ```
 
 A sandbox needs no time limit: it runs while it works and pauses itself when
-idle, until you stop it or credit or the [included usage](./included-usage) runs out.
+idle, until you stop it or credit or the [free usage](./included-usage) runs out.
 `timeoutSeconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: at the
 end it pauses (the default) or stops, as `onLeaseEnd` says, busy or not.
 `sbx.info.endsAt` is when it will stop or pause by itself, or `null` when it
@@ -143,6 +159,11 @@ if (run.exitCode !== 0) console.error(run.stderr);
   never refused for the time limit. A timeout
   is a result (`timedOut: true`, with the output so far), not an exception.
 - `check: true` throws `CommandError` on a non-zero exit, with the result on it.
+- A command the sandbox's out-of-memory killer ended has `outOfMemory` on its
+  result and its process (code, processes killed, the sandbox's size, a message
+  and a hint), and `check: true` throws `CommandError` with the code
+  `out_of_memory`
+  ([when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory)).
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
   `stderr`. The rest is dropped, and `stdoutTruncated` or `stderrTruncated` is
   `true`; when nothing was dropped, both are `false`. For more output, pass
@@ -246,7 +267,7 @@ term.write("exit\n");
 console.log("exit code", await term.exited);
 ```
 
-`npx withruntime sandbox shell <id>` does the same from your own terminal.
+`npx withruntime sandboxes shell <id>` does the same from your own terminal.
 
 ## Files
 
@@ -508,7 +529,6 @@ import { Sandbox } from "withruntime";
 
 // Runs while credit lasts; restart() brings it back after a stop.
 const server = await Sandbox.create({
-  funding: "paid",
   persistent: true,
   maxTotalCostMicros: 50_000_000, // at most $50 over its life
 });
@@ -524,7 +544,8 @@ await worker.stop();
 ## Sandboxes by name
 
 A name is unique in the account while its sandbox can still run: running,
-paused, or stopped and persistent. `Sandbox.getOrCreate(name)` answers that
+paused, or stopped and persistent. A key in a
+[compartment](./security#compartments) has its compartment's own names. `Sandbox.getOrCreate(name)` answers that
 sandbox, woken if it is paused and restarted if it is stopped and persistent,
 or creates one with the options you pass. `sbx.info.reused` is `true` when it
 found one.
@@ -562,7 +583,9 @@ only when you pass `includeStopped: true`.
 `await runtime.sandboxes.stopAll({ labels: { team: "search" } })` stops every
 live sandbox with all those labels, eight at a time, and returns
 `{ stopped, failed }`: one failure does not stop the rest. It needs at least
-one label.
+one label. `await runtime.sandboxes.deleteAll({ labels: { team: "search" } })`
+deletes for good every sandbox with all those labels, stopped ones too, the
+same way, and returns `{ deleted, failed }`.
 
 ## Delete a sandbox
 
@@ -624,7 +647,7 @@ same key; streamed output is never replayed after it reaches your code.
 reading the response and automatic retries. `timeoutMs: 0` disables that
 deadline; an `AbortSignal` you pass still cancels the call.
 
-**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
+**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
@@ -1041,6 +1064,9 @@ recording stops before the sandbox's disk fills, and a sandbox keeps at most
 8 GiB of recordings. They are files on the sandbox's own disk, counted with it;
 nothing is stored or charged apart from it.
 
+A recording started before the desktop is refused at once with 409
+`desktop_not_running`; nothing is installed or written.
+
 ## A browser over CDP
 
 `sbx.browser.start()` runs Chromium in the sandbox and returns `cdpUrl`, the
@@ -1051,10 +1077,18 @@ rules.
 ```ts check
 import { Sandbox } from "withruntime";
 
-await using sbx = await Sandbox.create();
+await using sbx = await Sandbox.create({ memoryMiB: 2048 });
 const { cdpUrl, version } = await sbx.browser.start();
 console.log(version, cdpUrl);
 ```
+
+Give a browser 2 GiB. Chromium takes what the sandbox has, and heavy apps
+need it: of 100 visits to ten heavy pages, from news sites to Google Sheets,
+YouTube and StackBlitz, none crashed at 2 GiB, 20 crashed for memory at
+1.5 GiB and 56 at 1 GiB (measured 6 October 2026). 1 GiB suits light pages
+and scraping, at half the memory charge. Under 2 GiB, `start` returns a `hint`
+saying so, beside `memoryMiB`, the sandbox's size; the browser starts either
+way.
 
 Hand `cdpUrl` to the tool as it is: `chromium.connectOverCDP(cdpUrl)` in
 Playwright, `puppeteer.connect({ browserWSEndpoint: cdpUrl })` in Puppeteer.
@@ -1064,14 +1098,15 @@ Playwright, `puppeteer.connect({ browserWSEndpoint: cdpUrl })` in Puppeteer.
 browser, so keep it to yourself. Code inside the sandbox finds the same
 browser at `http://127.0.0.1:9222`. `start({ headless: false })` shows it on
 the sandbox's [desktop](#a-desktop) and returns the live view as `streamUrl`.
-`sbx.browser.stop()` ends it. The first start in a sandbox installs Chromium,
-about a minute, once; `start` waits for it. Called directly, the API answers
+`sbx.browser.stop()` ends it, and `get()` then answers `running: false`. The
+first start in a sandbox installs Chromium, about a minute, once; `start` waits
+for it. Called directly, the API answers
 409 `browser_installing` until the install is done: call again after
 `retryAfterMs`. A browser that cannot start or install answers 409
 `browser_failed` with the sandbox's own words.
 
-The CLI is `runtime sandbox browser <id> start`, and agents use the MCP tool
-`runtime_sandbox_browser`.
+The CLI is `runtime sandboxes browser <id> start`, and agents use the MCP tool
+`runtime_sandboxes_browser`.
 
 ## MCP servers in a sandbox
 
@@ -1122,21 +1157,21 @@ const domain = await runtime.domains.add({
 console.log(domain.records); // the TXT and CNAME to set; then runtime.domains.verify("app.example.com")
 const db = await runtime.ports.open({ sandboxId: sbx.id, port: 5432 });
 console.log(db.connect); // "203.0.113.10:23456"
-const ip = await runtime.addresses.reserve(); // ip.address
-await runtime.tunnel.create();
-const office = await runtime.tunnel.addPeer({
+const ip = await runtime.ips.reserve(); // ip.address
+await runtime.networks.wireguard.create();
+const office = await runtime.networks.wireguard.addPeer({
   name: "office",
   routes: ["10.0.0.0/16"],
 });
 console.log(office.config); // a wg-quick file
-await runtime.network.upstreamProxy.set({
+await runtime.networks.upstreamProxy.set({
   url: "http://proxy.example.com:3128",
   secret: "PROXY_AUTH",
 });
 ```
 
-`runtime.network.upstreamProxy`, from `withruntime` 0.7.0,
-sends every sandbox's outbound connections through your own proxy; `get()` and
+`runtime.networks.upstreamProxy`, from `withruntime` 0.12.0
+(`runtime.network.upstreamProxy` from 0.7.0), sends every sandbox's outbound connections through your own proxy; `get()` and
 `remove()` read and undo it. See
 [your own proxy](./security#your-own-proxy).
 

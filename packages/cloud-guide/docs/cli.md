@@ -10,9 +10,9 @@ agent that runs many commands saves that by installing:
 
 ```bash no-run
 printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-npx withruntime sandbox run -- python3 - < invoice.py   # without installing
+npx withruntime sandboxes run -- python3 - < invoice.py   # without installing
 npm install --global withruntime                   # then the command is runtime
-runtime sandbox run -- python3 - < invoice.py
+runtime sandboxes run -- python3 - < invoice.py
 ```
 
 The examples below use `runtime`, the installed command; without installing,
@@ -20,12 +20,21 @@ write `npx withruntime` in its place. Commands read `runtime <product> <command>
 with account commands at the top. `runtime` on its own says whether this machine
 is connected and what to run first.
 
+Each product is one plural word, the same in the CLI, the API, the SDKs and
+MCP: `runtime sandboxes`, `runtime images`, `runtime ips`, `runtime networks`.
+The singular is a typing shortcut for the same product (`runtime sandbox ls`).
+The words renamed on 6 October 2026, `runtime address` (now `runtime ips`),
+`runtime network` (now `runtime networks`) and `runtime tunnel` (now
+`runtime networks wireguard`), keep working for 30 days after the rename
+ships, each use printing the new command, and then fail with `name_retired` and
+a hint naming it.
+
 ## One command in a fresh sandbox
 
 ```bash
 printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-runtime sandbox run -- python3 - < invoice.py
-runtime sandbox run --keep --vcpu 2 -- nproc   # keeps it, and prints how to run more
+runtime sandboxes run -- python3 - < invoice.py
+runtime sandboxes run --keep --vcpu 2 -- nproc   # keeps it, and prints how to run more
 ```
 
 `run` creates a sandbox, runs the command, prints its output, stops the sandbox
@@ -65,56 +74,65 @@ approval.
 
 ## Keys for CI
 
-A CI runner has no browser, so it runs on a key. Make one from your own terminal:
+A CI runner has no browser, so it runs on a key. With a key already on this
+machine (saved by `login`, or `RUNTIME_API_KEY`), `runtime keys create` uses it
+to make the new one at once, with no browser. `--browser` asks for browser
+approval instead.
 
 ```bash no-run
 runtime keys create --name ci                    # full access, until revoked
 runtime keys create --name ci --daily-limit 25   # at most $25 in any 24 hours
 runtime keys create --name monitor --read-only   # sees everything, changes nothing
 runtime keys create --name web --account-wide    # uses every sandbox in the account
-runtime keys create --name ci | gh secret set RUNTIME_API_KEY   # straight into GitHub
+runtime keys create --name ci --daily-limit 25 --browser | gh secret set RUNTIME_API_KEY
 ```
 
-It prints a link and a code, like `login`. An owner, admin or developer of the
-account opens the link, checks the code, sees the key's name, access and limit,
-and chooses **Create key**.
+With `--browser` it prints a link and a code, like `login`. An owner, admin or
+developer of the account opens the link, checks the code, sees the key's name,
+access and limit, and chooses **Create key**. Without it, the key that is on the
+machine must be a full-access key made by an owner or admin, and the new key
+never has more than that key ([run a swarm](./teams#run-a-swarm)).
 
-The key is then printed once, alone on standard output, with everything else on
+The key is printed once, alone on standard output, with everything else on
 standard error, so it pipes straight into a secret store. `--json` prints it as
 one JSON object instead. Store it now: Runtime keeps only a hash of it. Give it
 to your jobs as `RUNTIME_API_KEY`.
 
-- The command waits up to 15 minutes for the approval. Stopping it cancels the
-  request, and a key approved but not yet received is revoked.
+- With `--browser`, the command waits up to 15 minutes for the approval.
+  Stopping it cancels the request, and a key approved but not yet received is
+  revoked.
 - These are the keys page's own options, and there are no others. A key lasts
-  until revoked.
-- Change a key's daily limit, list keys and revoke them at
-  [API keys](https://withruntime.com/account/keys). No key can create, list or
-  revoke keys; see [security](./security).
+  until revoked. Daily limits are in dollars.
+- `runtime keys ls` lists this key and the keys it made, with what each spent in
+  the last 24 hours. `runtime keys usage <keyId>` shows one key's spend, held
+  money and running sandboxes. `runtime keys revoke <keyId>` revokes a key this
+  key made.
+- Change a key's daily limit, list every key and revoke them at
+  [API keys](https://withruntime.com/account/keys).
 
 ## Sandboxes
 
 ```bash
-id=$(runtime sandbox create --name demo --label team=search)
-runtime sandbox exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
-runtime sandbox exec "${id}" --cwd /workspace --env API_TOKEN="${API_TOKEN}" -- env
-runtime sandbox ls
-runtime sandbox ls --state running --label team=search
-runtime sandbox get "${id}"
-runtime sandbox stop "${id}"
+id=$(runtime sandboxes create --name demo --label team=search)
+runtime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
+runtime sandboxes exec "${id}" --cwd /workspace --env API_TOKEN="${API_TOKEN}" -- env
+runtime sandboxes ls
+runtime sandboxes ls --state running --label team=search
+runtime sandboxes get "${id}"
+runtime sandboxes stop "${id}"
 ```
 
 `create` prints only the id, so it composes with `$(...)`, and waits until the
 sandbox is running (`--no-wait` returns at once). Its options:
 
 - `--vcpu`, `--memory` and `--disk` in MiB; `--timeout <seconds>` (60 to 86,400,
-  24 hours) sets a time limit, and `--on-timeout pause|stop` what it does. Without
+  24 hours) sets a time limit, and `--on-timeout pause|stop|delete` what it does. Without
   `--timeout` a sandbox has none: it runs while it works and pauses when idle
 - from withruntime 0.7.0: `--cpu-floor <thousandths>` for guaranteed CPU, and
   `--cpu reserved` for the highest floor, every vCPU; `--max-total-cost <usd>`
   caps its whole life
 - `--name`, `--label k=v` (repeatable); `--trial` and `--paid` are accepted
-  and ignored, since the included usage is spent first, then credit
+  and ignored, since the free usage is spent first, then credit
 - `--env K=V` (repeatable) sets a variable for every command, terminal and SSH
   session in it, for its whole life; values are never shown again
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
@@ -151,7 +169,7 @@ exit code (124 when it timed out), so `set -e` scripts behave. Without
 starts, `nohup … &` included, ends when the command returns; start a server with
 `spawn` (below) instead. Pass secrets with
 `--env` from a variable, never written into the command. Piped input reaches
-the command, up to 1 MiB: `echo 'print(1)' | runtime sandbox exec "${id}" -- python3 -`.
+the command, up to 1 MiB: `echo 'print(1)' | runtime sandboxes exec "${id}" -- python3 -`.
 A program is found on the sandbox's own `PATH`, so `python` in an image from
 `python:3.12-slim` runs as it does there.
 
@@ -167,29 +185,34 @@ With `--json`, `exec` answers one result instead. It holds at most 64 KiB of
 `stdout` and 64 KiB of `stderr` for a command with a `--timeout` of 60 seconds
 or less; `stdoutTruncated` and `stderrTruncated` say whether anything was
 dropped. For more, drop `--json`, or write the output to a file and read it with
-`runtime sandbox cat`.
+`runtime sandboxes cat`.
 
 Background work, logs and a terminal. `logs` prints what a process has written
-so far and returns, even while it runs; `-f` follows it until it exits:
+so far and returns, even while it runs; `-f` follows it until it exits. On a
+terminal, `sandbox logs`, `job logs` and `image logs` show control characters
+as `\u001b` and the like, so an escape sequence in a log cannot clear the
+screen or rewrite what you read; `--raw`, a pipe or a file gets them as written:
 
 ```bash
-id=$(runtime sandbox create)
-pid=$(runtime sandbox spawn "${id}" -- python3 -m http.server 8000)
-runtime sandbox ps "${id}"
-runtime sandbox logs "${id}" "${pid}"
-runtime sandbox kill "${id}" "${pid}"
-runtime sandbox stop "${id}"
+id=$(runtime sandboxes create)
+pid=$(runtime sandboxes spawn "${id}" -- python3 -m http.server 8000)
+runtime sandboxes ps "${id}"
+runtime sandboxes logs "${id}" "${pid}"
+runtime sandboxes kill "${id}" "${pid}"
+runtime sandboxes stop "${id}"
 ```
 
-`runtime sandbox stop --label team=search` stops every live sandbox with all
+`runtime sandboxes stop --label team=search` stops every live sandbox with all
 the labels given, and exits 1 if any of them failed to stop.
+`runtime sandboxes rm --label team=search` deletes for good every sandbox with
+all the labels given, stopped ones too, and exits 1 if any of them failed.
 
 ```bash no-run
-runtime sandbox shell "${id}"               # an interactive terminal, like ssh
-runtime sandbox shell "${id}" --command zsh # another program than the default bash -l
-echo "ls" | runtime sandbox shell "${id}"   # piped input runs, then the shell exits
-runtime sandbox spawn "${id}" --pty -- htop # in a terminal, for programs that need one
-runtime sandbox logs "${id}" "${pid}" -f      # follow until the process exits
+runtime sandboxes shell "${id}"               # an interactive terminal, like ssh
+runtime sandboxes shell "${id}" --command zsh # another program than the default bash -l
+echo "ls" | runtime sandboxes shell "${id}"   # piped input runs, then the shell exits
+runtime sandboxes spawn "${id}" --pty -- htop # in a terminal, for programs that need one
+runtime sandboxes logs "${id}" "${pid}" -f      # follow until the process exits
 ```
 
 Files. Name a sandbox path as `<id>:/path`; directories copy whole, and a
@@ -198,13 +221,13 @@ directory `d` and a symbolic link `l`, one level deep unless `--depth` says
 more:
 
 ```bash
-id=$(runtime sandbox create)
+id=$(runtime sandboxes create)
 mkdir -p project && echo "print('hi')" > project/main.py
-runtime sandbox cp ./project "${id}:/workspace/project"
-runtime sandbox files "${id}" /workspace --depth 2
-runtime sandbox cat "${id}" /workspace/project/main.py
-runtime sandbox cp "${id}:/workspace/project" ./project-copy
-runtime sandbox stop "${id}"
+runtime sandboxes cp ./project "${id}:/workspace/project"
+runtime sandboxes files "${id}" /workspace --depth 2
+runtime sandboxes cat "${id}" /workspace/project/main.py
+runtime sandboxes cp "${id}:/workspace/project" ./project-copy
+runtime sandboxes stop "${id}"
 ```
 
 `cp` and `cat` stream, so a file of any size copies without filling memory,
@@ -212,7 +235,7 @@ and both check every byte against the file's length: a copy that arrives short
 is tried again, then fails with `download_incomplete` and exit 1, and never
 leaves a short file under the name you gave.
 
-A sandbox's name works wherever its id does, in every `runtime sandbox` command
+A sandbox's name works wherever its id does, in every `runtime sandboxes` command
 and in `--sandbox` filters, when one live sandbox has it.
 
 Lifecycle: `pause`, `wake` (a sandbox already awake is left as it is), `restart`, `extend <id> <seconds>` (it moves a
@@ -223,27 +246,27 @@ to a shared port reaches it, billed as any wake from the moment it runs.
 A sandbox you come back to, by name, that pauses when idle and wakes when used:
 
 ```bash no-run
-id=$(runtime sandbox create --name dev --get-or-create --idle-pause 900)
-runtime sandbox exec "${id}" -- git -C /workspace/app pull
+id=$(runtime sandboxes create --name dev --get-or-create --idle-pause 900)
+runtime sandboxes exec "${id}" -- git -C /workspace/app pull
 ```
 
 `update` changes a sandbox's settings after it is made; what you leave out
 stays as it is:
 
 ```bash no-run
-runtime sandbox update "${id}" --idle-pause 0 --auto-wake off
-runtime sandbox update "${id}" --persistent on --max-total-cost 50   # dollars
-runtime sandbox update "${id}" --name dev-2 --label team=search
-runtime sandbox update "${id}" --env MODE=drain --unset-env QUEUE_URL
+runtime sandboxes update "${id}" --idle-pause 0 --auto-wake off
+runtime sandboxes update "${id}" --persistent on --max-total-cost 50   # dollars
+runtime sandboxes update "${id}" --name dev-2 --label team=search
+runtime sandboxes update "${id}" --env MODE=drain --unset-env QUEUE_URL
 ```
 
-`runtime sandbox switch-image <id> web:v2 --keep-workspace` moves a sandbox to
+`runtime sandboxes switch-image <id> web:v2 --keep-workspace` moves a sandbox to
 another image, keeping its id, `/workspace` (your home), volumes, environment
 and previews. Its processes restart and the rest of its old disk is lost, so
 the flag is required; snapshot it first to keep everything
 ([images](./images#move-a-sandbox-to-a-new-version)).
 
-`runtime sandbox rm <id>` (or `delete`) removes a sandbox for good, in any
+`runtime sandboxes rm <id>` (or `delete`) removes a sandbox for good, in any
 state: it stops it, deletes its disk and paused memory, revokes its previews
 and ports, and takes it out of every list. Its snapshots stay. Running it again
 prints the same.
@@ -251,7 +274,7 @@ prints the same.
 `--persistent on` keeps it running until you stop it, idle or not, while credit
 lasts, up to `--max-total-cost`, its disk billed as any sandbox's. Any stopped
 sandbox keeps its disk, so `restart` starts it again, and stays in `runtime ls`
-and `runtime sandbox ls`; `rm` deletes it. `--persistent off` makes it an ordinary sandbox
+and `runtime sandboxes ls`; `rm` deletes it. `--persistent off` makes it an ordinary sandbox
 again; `rm` removes it for good. `get` shows the automatic wake,
 idle pause and persistence settings.
 
@@ -259,38 +282,38 @@ Watch a directory. `watch` prints each change as it happens (create, write,
 remove, rename, chmod) until Ctrl-C:
 
 ```bash no-run
-runtime sandbox watch "${id}" /workspace --recursive --exclude node_modules --exclude '.git/**'
-runtime sandbox watch "${id}" /workspace/src --events create,write --include '**/*.py'
+runtime sandboxes watch "${id}" /workspace --recursive --exclude node_modules --exclude '.git/**'
+runtime sandboxes watch "${id}" /workspace/src --events create,write --include '**/*.py'
 ```
 
 ## Code, previews, network rules and the desktop
 
 ```bash no-run
-runtime sandbox run-code "${id}" analysis.py --out-dir charts   # a notebook cell; charts saved as PNG
-runtime sandbox run-code "${id}" model.R                        # R, by the file's extension
-runtime sandbox run-code "${id}" - --lang go < main.go          # Python, JavaScript, TypeScript, R, Java, Bash or Go
-runtime sandbox run-code "${id}" step2.py --context "${ctx}"   # a context you made, not the language's default
-runtime sandbox preview "${id}" 3000                           # an HTTPS address for a port, private with a token
-runtime sandbox preview "${id}" 3000 --public                  # public, no token: paid sandboxes only
-runtime sandbox previews "${id}"
-runtime sandbox preview rotate "${id}" 3000                   # withruntime 0.7.0: refuse every token so far
-runtime sandbox unshare "${id}" 3000
-runtime sandbox session create "${id}" --origin https://app.example.com --ttl 900   # a token a web page uses; printed once
-runtime sandbox session ls "${id}"
-runtime sandbox session revoke "${id}" "${session}"
-runtime sandbox network "${id}"                                # show its rules
-runtime sandbox network "${id}" --allow pypi.org --allow '*.pythonhosted.org'
-runtime sandbox network "${id}" --no-internet
-runtime sandbox network "${id}" --internet                     # the internet back on
-runtime sandbox desktop "${id}" start                          # prints a link to watch it
-runtime sandbox desktop "${id}" open https://example.com
-runtime sandbox desktop "${id}" screenshot screen.png
-runtime sandbox desktop "${id}" record start --fps 10 --max-mib 256 --max-seconds 600   # prints the recording id
-runtime sandbox desktop "${id}" record stop "${rec}"
-runtime sandbox desktop "${id}" record fetch "${rec}" demo.mp4
-runtime sandbox browser "${id}" start                          # Chromium; prints its private CDP address
-runtime sandbox browser "${id}" start --headed --width 1280 --height 800   # on the desktop, to watch
-runtime sandbox browser "${id}" stop
+runtime sandboxes run-code "${id}" analysis.py --out-dir charts   # a notebook cell; charts saved as PNG
+runtime sandboxes run-code "${id}" model.R                        # R, by the file's extension
+runtime sandboxes run-code "${id}" - --lang go < main.go          # Python, JavaScript, TypeScript, R, Java, Bash or Go
+runtime sandboxes run-code "${id}" step2.py --context "${ctx}"   # a context you made, not the language's default
+runtime sandboxes preview "${id}" 3000                           # an HTTPS address for a port, private with a token
+runtime sandboxes preview "${id}" 3000 --public                  # public, no token: paid sandboxes only
+runtime sandboxes previews "${id}"
+runtime sandboxes preview rotate "${id}" 3000                   # withruntime 0.7.0: refuse every token so far
+runtime sandboxes unshare "${id}" 3000
+runtime sandboxes session create "${id}" --origin https://app.example.com --ttl 900   # a token a web page uses; printed once
+runtime sandboxes session ls "${id}"
+runtime sandboxes session revoke "${id}" "${session}"
+runtime sandboxes network "${id}"                                # show its rules
+runtime sandboxes network "${id}" --allow pypi.org --allow '*.pythonhosted.org'
+runtime sandboxes network "${id}" --no-internet
+runtime sandboxes network "${id}" --internet                     # the internet back on
+runtime sandboxes desktop "${id}" start                          # prints a link to watch it
+runtime sandboxes desktop "${id}" open https://example.com
+runtime sandboxes desktop "${id}" screenshot screen.png
+runtime sandboxes desktop "${id}" record start --fps 10 --max-mib 256 --max-seconds 600   # prints the recording id
+runtime sandboxes desktop "${id}" record stop "${rec}"
+runtime sandboxes desktop "${id}" record fetch "${rec}" demo.mp4
+runtime sandboxes browser "${id}" start                          # Chromium; prints its private CDP address. Heavy apps need a sandbox made with --memory 2048
+runtime sandboxes browser "${id}" start --headed --width 1280 --height 800   # on the desktop, to watch
+runtime sandboxes browser "${id}" stop
 ```
 
 A session lets your own web page reach one sandbox's commands, files and
@@ -312,13 +335,13 @@ Secret settings name a [Runtime secret](#secrets), so the server never holds
 the value:
 
 ```bash no-run
-runtime sandbox mcp catalog                                       # what can run: licence, settings, hosts
+runtime sandboxes mcp catalog                                       # what can run: licence, settings, hosts
 runtime secrets set GITHUB_TOKEN --host api.github.com < token.txt
-runtime sandbox mcp "${id}" start github fetch --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
-runtime sandbox mcp "${id}" start github --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN \
+runtime sandboxes mcp "${id}" start github fetch --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
+runtime sandboxes mcp "${id}" start github --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN \
   --option github.toolsets=repos,issues --replace                 # a catalog option; --replace stops the running set first
-runtime sandbox mcp "${id}"                                       # state, URLs and the header to send
-runtime sandbox mcp "${id}" stop
+runtime sandboxes mcp "${id}"                                       # state, URLs and the header to send
+runtime sandboxes mcp "${id}" stop
 ```
 
 `start` prints each server's URL, the `Authorization` header every request
@@ -334,6 +357,10 @@ sandboxes serve, kept apart from Runtime's own site.
 printf %s "$OPENAI_API_KEY" | runtime secrets set OPENAI_API_KEY --host api.openai.com
 runtime secrets set GITHUB_TOKEN --host api.github.com --header Authorization --format 'token {value}' < token.txt
 runtime secrets set GITHUB_TOKEN --host api.github.com --allow 'GET,HEAD /repos/acme/*' < token.txt
+runtime secrets set SLACK_APP_TOKEN --host slack.com --only-label role=hub < token.txt   # only sandboxes labelled role=hub
+runtime secrets set DEPLOY_KEY --host api.example.com --only-sandbox "${id}" < key.txt     # only that sandbox
+runtime secrets set SLACK_APP_TOKEN --host slack.com --all-sandboxes < token.txt           # every sandbox again
+runtime secrets scope SLACK_APP_TOKEN --only-label role=hub                                  # change who gets it, no value
 printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
 runtime secrets ls
 runtime secrets rotate DB_PASSWORD < new-password.txt
@@ -347,11 +374,13 @@ has `OPENAI_API_KEY` set to a placeholder, and the proxy swaps in the value on
 HTTPS requests to the hosts you named. On accounts with credit, from `withruntime`
 0.7.0, `--allow` narrows that to some methods and paths, once
 per rule: `--allow /v1/chat/completions` for every method,
-`--allow 'GET,HEAD /repos/acme/*'` for two. `ls` shows names, hosts,
-placeholders and rules, never values. See [Security](./security#secrets-sandboxes-never-see).
+`--allow 'GET,HEAD /repos/acme/*'` for two. `--only-label key=value` (once per
+selector) and `--only-sandbox <id>` give it to those sandboxes alone; a new
+value keeps that scope until `--all-sandboxes`. `ls` shows names, hosts,
+placeholders, rules and which sandboxes get each, never values. See [Security](./security#secrets-sandboxes-never-see).
 
 `--jobs` keeps a copy that [scheduled jobs](./jobs#secrets-in-a-job) put into
-their run's environment, bound with `runtime job create --secret NAME`; give
+their run's environment, bound with `runtime jobs create --secret NAME`; give
 `--host` too and the secret goes to both. Only the jobs copy has versions
 (`rotate`) and can be read back (`reveal`, with a key allowed to reveal); the
 sandboxes' copy is never readable. `rm` deletes every copy.
@@ -359,12 +388,14 @@ sandboxes' copy is never readable. `rm` deletes every copy.
 ## Scheduled jobs
 
 ```bash no-run
-runtime job create nightly --cron "0 3 * * *" --timezone Europe/Berlin -- python3 /workspace/report.py
-runtime job create once --at 2026-10-01T03:00:00Z --timeout 600 --attempts 3 -- bash -lc 'make report'
-runtime job ls
-runtime job runs "${job}"
-runtime job logs "${job}" -f
-runtime job pause "${job}"; runtime job resume "${job}"; runtime job cancel "${job}"
+runtime jobs create nightly --cron "0 3 * * *" --timezone Europe/Berlin -- python3 /workspace/report.py
+runtime jobs create once --at 2026-10-01T03:00:00Z --timeout 600 --attempts 3 -- bash -lc 'make report'
+runtime jobs ls
+runtime jobs runs "${job}"
+runtime jobs logs "${job}" -f
+runtime jobs trigger "${job}"
+runtime jobs reschedule "${job}" --cron "30 4 * * 1-5" --timezone Europe/Berlin
+runtime jobs pause "${job}"; runtime jobs resume "${job}"; runtime jobs cancel "${job}"
 ```
 
 A job runs its command in a fresh sandbox each time, once (`--at`, an ISO time
@@ -380,11 +411,11 @@ paid sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
 ## SSH and port forwarding
 
 ```bash no-run
-runtime sandbox ssh "${id}"                          # a shell, as the sandbox user
-runtime sandbox ssh "${id}" -- make test             # one command; exits with its code
-runtime sandbox ssh config --install                 # `ssh <id>.runtime` from ssh, VS Code or JetBrains
-runtime sandbox port-forward "${id}" 5432            # localhost:5432 here is port 5432 in the sandbox
-runtime sandbox port-forward "${id}" 3000 15432:5432 # several at once, local:remote
+runtime sandboxes ssh "${id}"                          # a shell, as the sandbox user
+runtime sandboxes ssh "${id}" -- make test             # one command; exits with its code
+runtime sandboxes ssh config --install                 # `ssh <id>.runtime` from ssh, VS Code or JetBrains
+runtime sandboxes port-forward "${id}" 5432            # localhost:5432 here is port 5432 in the sandbox
+runtime sandboxes port-forward "${id}" 3000 15432:5432 # several at once, local:remote
 ```
 
 Both go through Runtime's API with your key, so the sandbox opens no port to
@@ -399,44 +430,44 @@ with its command. When nothing listens on the port, `port-forward` says so. See
 
 Away from your terminal, the **Terminal** tab on a sandbox's page at
 withruntime.com opens a shell in the browser, and **Connect** on Home and
-Sandboxes copies `runtime sandbox ssh` with the sandbox's name. The page's
+Sandboxes copies `runtime sandboxes ssh` with the sandbox's name. The page's
 **Pause**, **Wake**, **Snapshot**, **Fork** and **Stop** do what
-`runtime sandbox pause`, `wake`, `snapshot`, `fork` and `stop` do.
+`runtime sandboxes pause`, `wake`, `snapshot`, `fork` and `stop` do.
 
 ## Images, volumes and snapshots
 
 ```bash no-run
-img=$(runtime image build --pip pandas --apt jq --name data)   # or a folder: runtime image build . -t app:v1, or --from python:3.12-slim
-vol=$(runtime volume create --size-mib 10240 --name cache)
-id=$(runtime sandbox create --image "${img}" --volume "${vol}:/data")
-base=$(runtime sandbox create --image "${img}")
-runtime sandbox fork "${base}" --count 3              # three running copies of it
-snap=$(runtime sandbox snapshot "${base}" --name ready)
-runtime sandbox create --snapshot "${snap}"           # a copy, any time later
-runtime image ls; runtime volume ls; runtime snapshot ls
-runtime image get data; runtime volume get "${vol}"; runtime snapshot get "${snap}"
-runtime snapshot extend "${snap}" <days>              # keep it longer
-runtime snapshot rm "${snap}"; runtime volume rm "${vol}"; runtime image rm data
+img=$(runtime images build --pip pandas --apt jq --name data)   # or a folder: runtime images build . -t app:v1, or --from python:3.12-slim
+vol=$(runtime volumes create --size-mib 10240 --name cache)
+id=$(runtime sandboxes create --image "${img}" --volume "${vol}:/data")
+base=$(runtime sandboxes create --image "${img}")
+runtime sandboxes fork "${base}" --count 3              # three running copies of it
+snap=$(runtime sandboxes snapshot "${base}" --name ready)
+runtime sandboxes create --snapshot "${snap}"           # a copy, any time later
+runtime images ls; runtime volumes ls; runtime snapshots ls
+runtime images get data; runtime volumes get "${vol}"; runtime snapshots get "${snap}"
+runtime snapshots extend "${snap}" <days>              # keep it longer
+runtime snapshots rm "${snap}"; runtime volumes rm "${vol}"; runtime images rm data
 ```
 
-`runtime image build <folder>` builds the folder's Dockerfile (or `-f <file>`)
+`runtime images build <folder>` builds the folder's Dockerfile (or `-f <file>`)
 with the folder as its context, as `docker build` does: its `.dockerignore`
 applies, the context may be 100 MiB compressed, and a rebuild uploads only what
 changed. `-t app:v2` names it and tags it (each build of a name is its next
 version, tagged `latest` when no tag is given), `--target`, `--build-arg K=V`
 and `--no-cache` work as in Docker, and `--start <command>` with
 `--ready-port <port>` (or `--ready-command <command>`, which must exit 0) sets
-what a sandbox from it runs and when its create answers. `runtime image versions <name>`, `tag`, `untag`, `logs --follow` and
+what a sandbox from it runs and when its create answers. `runtime images versions <name>`, `tag`, `untag`, `logs --follow` and
 `rm` take an id, `name`, `name:tag` or `name@version`, and so does
-`sandbox create --image`. `runtime image registry set <registry> --username <u>`
+`sandbox create --image`. `runtime images registry set <registry> --username <u>`
 reads a token from standard input and stores it for private images. See
 [custom images](./images). Images, volumes and kept snapshots are charged as
 storage ([pricing](./pricing#snapshots-images-and-volumes)). A volume lives on
 one server. It is backed up off that server every day and whenever you
-ask, and a backup restores as a new volume ([storage and backups](./storage)). `runtime sandbox stop` has the sandbox
+ask, and a backup restores as a new volume ([storage and backups](./storage)). `runtime sandboxes stop` has the sandbox
 write out what it wrote to its volumes first, and so does a time limit or
 credit that runs out: the sandbox's programs are frozen just before its end,
-and the write after that is not charged. `runtime sandbox mount <id>
+and the write after that is not charged. `runtime sandboxes mount <id>
 s3://bucket/prefix /data --secret NAME`, `mounts` and `unmount` mount your own
 S3, R2 or Google Cloud Storage bucket without the sandbox holding its key
 (`--account-id` names an R2 bucket's Cloudflare account, `--endpoint` any other
@@ -462,7 +493,7 @@ Forks and snapshots:
 - If a copy fails, the error names the copies that did start; they keep running
   until stopped. A retry with the same idempotency key answers the same error.
 - If a fork stops partway and left its source paused, the source stays paused
-  and an account notice says so; wake it with `runtime sandbox wake`.
+  and an account notice says so; wake it with `runtime sandboxes wake`.
 - A snapshot is kept as long as you have credit, up to a year from when it was
   taken (7 days without credit), unless `--retention` gives 1 to 365 days.
 
@@ -473,13 +504,13 @@ Every command takes `--json` and prints one JSON value. Errors become
 non-zero exit.
 
 ```bash
-id=$(runtime sandbox create)
-runtime sandbox get "${id}" --json
-runtime sandbox exec "${id}" --json -- uname -a
-runtime sandbox stop "${id}" --json
+id=$(runtime sandboxes create)
+runtime sandboxes get "${id}" --json
+runtime sandboxes exec "${id}" --json -- uname -a
+runtime sandboxes stop "${id}" --json
 ```
 
-`runtime sandbox get --json` answers the sandbox as the API does:
+`runtime sandboxes get --json` answers the sandbox as the API does:
 
 ```json
 {
@@ -489,7 +520,6 @@ runtime sandbox stop "${id}" --json
   "labels": {},
   "state": "running",
   "region": "us-east",
-  "funding": "trial",
   "vcpu": 2,
   "memoryMiB": 4096,
   "diskMiB": 4096,
@@ -509,7 +539,7 @@ runtime usage
 runtime ls
 ```
 
-- `runtime usage` prints the balance, the included usage left and what each
+- `runtime usage` prints the balance, the free usage left and what each
   kind of resource was charged, in dollars; `--json` gives every figure in
   integer microdollars, with each resource's rates and CPU time. From 0.7.0,
   `--csv` exports one row per resource for a spreadsheet: its name, kind, state,
@@ -525,7 +555,7 @@ runtime ls
   [export settled usage](./api#export-settled-usage).
 - `runtime limits` says whether this machine's key is read-only and what its
   daily spending limit is, with what was used in the last 24 hours and what is
-  left (0.3.1 and later), and, in versions after 0.8.4, the included usage left, as `runtime usage` does. The member who made the key, or an owner or admin,
+  left (0.3.1 and later), and, in versions after 0.8.4, the free usage left, as `runtime usage` does. The member who made the key, or an owner or admin,
   sets or changes the limit at [API keys](https://withruntime.com/account/keys);
   see [security](./security).
 - On an account with a pilot, `runtime usage` shows its sandbox hours left,
@@ -538,15 +568,14 @@ runtime ls
   and running time at its published rates, and what you save a month
   (`--days` up to 90). When your first sandbox in the window is more recent
   than the window, the month is projected from the days since, and the output
-  says so. Sandboxes the included usage paid for are priced at the standard
+  says so. Sandboxes the free usage paid for are priced at the standard
   rates, and the output says how many there were. The providers are `e2b`, `daytona`, `vercel`, `modal`,
   `cloudflare`, `fly` (Sprites), `fly-machines` and the others in the
   [rate comparison](./pricing#published-rate-comparison). With no sandboxes
   yet, it prices an example and says so.
-- `runtime switch --from <provider>` records the provider you are leaving. Do it
-  before your first top-up: that top-up is then matched, up to {{switching-max}} of credit
-  ([switching credit](./pricing#switching-credit)). `runtime switch` on its own
-  shows where it stands. From withruntime 0.8.3, for E2B, Daytona, Vercel
+- `runtime switch --from <provider>` records the provider you are leaving, before
+  you first add credit. `runtime switch` on its own shows the welcome match: credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
+  ([welcome match](./pricing#welcome-match)), how much of it is used and left, and how long is left. From withruntime 0.8.3, for E2B, Daytona, Vercel
   Sandbox and Blaxel, both commands also print the one import that runs your existing code on Runtime.
 - `runtime account` lists the accounts this machine is connected to and marks
   the one in use; `runtime account switch <name>` uses another for every command
@@ -561,10 +590,10 @@ runtime ls
 - `runtime sso` shows the account's single sign-on: each identity provider,
   its domain and whether it is verified, and SCIM directory sync. An owner
   changes it on the website. See [single sign-on](./single-sign-on).
-- `runtime sandbox identity-token --audience sts.amazonaws.com [--lifetime 600]`,
+- `runtime sandboxes identity-token --audience sts.amazonaws.com [--lifetime 600]`,
   inside a sandbox, prints an OIDC token naming it, for AWS, Google Cloud or
   your own API. It needs no API key. See [identity tokens](./identity-tokens).
-- `runtime sandbox metrics <id> [--range 1h]` shows a sandbox's CPU, memory,
+- `runtime sandboxes metrics <id> [--range 1h]` shows a sandbox's CPU, memory,
   CPU wait and memory stalls now and over the range (`15m`, `1h`, `6h`, `24h`,
   `7d`, `30d`). Unmeasured waiting is named rather than shown as zero.
 - `runtime events [--sandbox <id>] [--type sandbox.stopped]` lists lifecycle
@@ -584,7 +613,7 @@ When something is broken, missing or confusing, say so; it goes straight to the
 people building Runtime:
 
 ```bash no-run
-runtime feedback "exec output lost its colours" --kind bug --detail "runtime sandbox exec ... -- ls --color"
+runtime feedback "exec output lost its colours" --kind bug --detail "runtime sandboxes exec ... -- ls --color"
 ```
 
 ```bash no-run
@@ -606,27 +635,30 @@ runtime logout
 Paid accounts only; see [networking](./networking).
 
 ```bash no-run
-runtime domain add app.example.com <sandbox> 3000   # prints the DNS records to set
-runtime domain verify app.example.com               # live once the TXT record matches
-runtime port open <sandbox> 5432                    # prints address:port
-runtime address reserve                             # every sandbox sends from it
-runtime tunnel create
-runtime tunnel peer add office --route 10.0.0.0/16  # writes runtime.conf
+runtime domains add app.example.com <sandbox> 3000   # prints the DNS records to set
+runtime domains verify app.example.com               # live once the TXT record matches
+runtime ports open <sandbox> 5432                    # prints address:port
+runtime ips reserve                             # every sandbox sends from it
+runtime networks wireguard create
+runtime networks wireguard peer add office --route 10.0.0.0/16  # writes runtime.conf
 sudo wg-quick up ./runtime.conf
-runtime network upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
-runtime network private on                          # your sandboxes reach each other as <name>.sandbox.internal
-runtime domain ls; runtime domain get app.example.com; runtime address ls
-runtime tunnel get                                  # its peers and each sandbox's address
-runtime tunnel rm                                   # the tunnel and every peer
+runtime networks upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
+runtime networks private on                          # your sandboxes reach each other as <name>.sandbox.internal
+runtime networks signed-requests on                  # your sandboxes can sign requests as Runtime's agents
+runtime domains ls; runtime domains get app.example.com; runtime ips ls
+runtime networks wireguard get                                  # its peers and each sandbox's address
+runtime networks wireguard rm                                   # the tunnel and every peer
 ```
 
-`runtime network upstream-proxy` arrived in 0.7.0. `runtime network private on|off|status` lets
-your sandboxes reach each other by name, for an account with a kept top-up. Each has
-its own help: `runtime domain help`, `runtime port help`,
-`runtime address help`, `runtime tunnel help`, `runtime network help`.
+`runtime networks upstream-proxy` arrived in 0.7.0. `runtime networks private on|off|status` lets
+your sandboxes reach each other by name, for an account with a kept top-up.
+`runtime networks signed-requests on|off|status` lets them sign their HTTP
+requests as Runtime's agents, for an account with credit. Each has
+its own help: `runtime domains help`, `runtime ports help`,
+`runtime ips help`, `runtime networks wireguard help`, `runtime networks help`.
 
 The WireGuard configuration contains a private key. The CLI writes it with
 owner-only permissions and replaces an existing regular file atomically.
 It refuses a symbolic link or a directory as the output path. If publishing
 the configuration fails, the error names the protected draft to recover;
-inspect the peer with `runtime tunnel get` before creating another one.
+inspect the peer with `runtime networks wireguard get` before creating another one.

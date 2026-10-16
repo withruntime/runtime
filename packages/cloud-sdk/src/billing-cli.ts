@@ -1,13 +1,14 @@
 import type { Runtime } from "./client.js";
 import { RuntimeError } from "./errors.js";
 import { named } from "./cli-name.js";
-import type { Topup } from "./products/billing.js";
+import type { AutoTopUp, Topup } from "./products/billing.js";
 import type { claimWalletAccount, openWalletAccount } from "./wallet.js";
 
 /* `runtime billing`: add credit without a browser, in stablecoins.
  *
  *   runtime billing topup <usd> [--wait]   where to send, and the exact amount
  *   runtime billing status <id> [--wait]   whether the payment arrived
+ *   runtime billing auto-top-up [on|off]   credit added by card when it runs low
  *
  * Billing is the account's, so it is top-level, like usage and limits. */
 
@@ -21,6 +22,16 @@ export const BILLING_HELP = `runtime billing <command>
                             Send exactly that, from any wallet, before the time shown.
                             --wait keeps checking until the credit lands.
   status <id> [--wait]      Whether a top-up's payment has arrived
+
+  auto-top-up               Show auto top-up: the card is charged when credit runs low
+  auto-top-up on [--below <usd>] [--amount <usd>] [--monthly <usd>]
+                            Charge <amount> plus tax when credit falls below <below>,
+                            at most <monthly> a month: $10, $20 and $500 unless given,
+                            or as last set. At least $10, $20 and $100. 5% more as
+                            credit each time, and 200 sandboxes at once while on.
+                            A person saves the card at
+                            https://withruntime.com/account/billing
+  auto-top-up off           Turn it off. Running sandboxes are never stopped.
 
   No account yet? An agent can open one with a wallet alone:
   topup <usd> --new-account --accept-terms [--wait]
@@ -75,7 +86,7 @@ export type WalletDeps = {
   save: (key: string, orgId: string) => Promise<void>;
 };
 
-const FLAGS = new Set(["wait", "new-account", "accept-terms"]);
+const FLAGS = new Set(["wait", "new-account", "accept-terms", "below", "amount", "monthly"]);
 
 export async function billingCommand(
   argv: string[],
@@ -98,6 +109,9 @@ export async function billingCommand(
     if (!wallet) throw usage("Wallet accounts are not available here.");
     return walletCommand(verb, value, has("accept-terms"), wait, out, sleep, wallet);
   }
+  if (verb === "auto-top-up") return autoTopUpCommand(value, args, out, client);
+  for (const name of ["below", "amount", "monthly"])
+    if (args.flags.has(name)) throw usage(`--${name} is for \`billing auto-top-up on\`.`);
   const api = (await client()).billing;
   let topup: Topup;
   if (verb === "topup") {
@@ -128,6 +142,73 @@ export async function billingCommand(
   return topup.status === "paid" ? 0 : 1;
 }
 
+const OFF_REASONS: Record<NonNullable<AutoTopUp["offReason"]>, string> = {
+  declined: "the bank declined the last charge",
+  authentication_required: "the bank asked its holder to confirm the last charge",
+  card_removed: "the card was removed",
+  no_address: "Stripe had no billing address to work out tax",
+  blocked: "a payment on this account is under review",
+  failed: "the last charge did not go through",
+};
+
+function describeAuto(auto: AutoTopUp): string {
+  const figures =
+    auto.below !== null && auto.amount !== null && auto.monthlyLimit !== null
+      ? `adds $${auto.amount} when credit falls below $${auto.below}, up to $${auto.monthlyLimit} a month`
+      : null;
+  const lines = [
+    auto.enabled
+      ? `Auto top-up is on: it ${figures}. $${auto.thisMonth} added this month.`
+      : auto.waitingForCard
+        ? `Auto top-up turns on once a card is saved: it will ${figures}.`
+        : auto.offReason
+          ? `Auto top-up is off: ${OFF_REASONS[auto.offReason]}.`
+          : "Auto top-up is off.",
+  ];
+  if (auto.saveCardAt) lines.push(`A person saves the card at ${auto.saveCardAt}`);
+  return lines.join("\n");
+}
+
+/** `billing auto-top-up [on|off]`. */
+async function autoTopUpCommand(
+  verb: string | undefined,
+  args: Args,
+  out: Out,
+  client: () => Promise<Runtime>,
+): Promise<number> {
+  const flag = (name: string) => args.flags.get(name)?.at(-1);
+  const api = (await client()).billing.autoTopUp;
+  const options = { idempotencyKey: crypto.randomUUID() };
+  let auto: AutoTopUp;
+  if (!verb || verb === "show") auto = await api.get();
+  else if (verb === "off") auto = await api.off(options);
+  else if (verb === "on") {
+    // A figure not given keeps the one saved, or takes its default.
+    const figure = (name: string) => {
+      const value = flag(name);
+      if (value === undefined) return undefined;
+      const usd = Number(value.replace(/^\$/, ""));
+      if (!value || !Number.isFinite(usd) || usd <= 0)
+        throw usage(`Give --${name} in dollars, such as --${name} 20.`);
+      return usd;
+    };
+    const below = figure("below");
+    const amount = figure("amount");
+    const monthlyLimit = figure("monthly");
+    auto = await api.set(
+      {
+        enabled: true,
+        ...(below === undefined ? {} : { below }),
+        ...(amount === undefined ? {} : { amount }),
+        ...(monthlyLimit === undefined ? {} : { monthlyLimit }),
+      },
+      options,
+    );
+  } else throw usage(`Unknown auto-top-up command ${verb}: show, on or off.`);
+  out.write(out.json ? JSON.stringify(auto) : describeAuto(auto));
+  return 0;
+}
+
 function dollarsOf(value: string | undefined): number {
   const usd = Number(value?.replace(/^\$/, ""));
   if (!value || !Number.isFinite(usd) || usd <= 0)
@@ -151,7 +232,7 @@ async function walletCommand(
   if (verb === "topup") {
     if (!acceptTerms)
       throw usage(
-        "Opening an account means agreeing to https://withruntime.com/legal/terms. Add --accept-terms once the person you work for agrees.",
+        "Opening an account means agreeing to https://withruntime.com/legal/terms. Add --accept-terms to agree to them for whoever you act for.",
       );
     const opened = await wallet.open({ usd: dollarsOf(value), acceptTerms: true });
     code = opened.claimCode;
@@ -193,13 +274,17 @@ async function walletCommand(
       );
       return 1;
     }
-    if (!wait || Date.now() >= until) {
+    // A top-up that never reached Stripe has no address: waiting cannot help.
+    const noAddress = claim.topup?.status === "open" && !claim.topup.networks.length;
+    if (noAddress || !wait || Date.now() >= until) {
       out.write(
         out.json
           ? JSON.stringify(claim)
-          : `Not paid yet (${claim.status}). Run \`${me} billing claim ${code}\` again once the transfer has gone through.`,
+          : noAddress
+            ? (claim.next ?? "This top-up has no address to pay to yet.")
+            : `Not paid yet (${claim.status}). Run \`${me} billing claim ${code}\` again once the transfer has gone through.`,
       );
-      return wait ? 1 : 0;
+      return noAddress || wait ? 1 : 0;
     }
   }
 }

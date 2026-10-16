@@ -115,6 +115,7 @@ const OFF_CODES = [
   "secrets_unavailable",
   "identity_unavailable",
   "env_unavailable",
+  "resize_unavailable",
 ];
 test("a product switched off answers at once and is not retryable, for every code the API uses for it", async () => {
   for (const code of OFF_CODES) {

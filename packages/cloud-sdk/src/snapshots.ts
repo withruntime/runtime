@@ -13,7 +13,8 @@ export type Snapshot = {
   name: string | null;
   sourceSandboxId: string;
   shape: { vcpu: number; memoryMiB: number; diskMiB: number; memoryGuarantee: string };
-  retentionDays: number;
+  /** Null: kept while your account has credit, up to a year from when it was taken. */
+  retentionDays: number | null;
   /** True while raw fork memory awaits verified compression. The snapshot
    * remains ready for starts on its current host, with no storage charge or
    * off-host copy until final publication. Absent on older servers. */
@@ -35,7 +36,8 @@ export type Snapshot = {
   error: string | null;
   createdAt: string;
   readyAt: string | null;
-  expiresAt: string;
+  /** Null while it is kept as long as your account has credit. */
+  expiresAt: string | null;
   [key: string]: unknown;
 };
 export type SnapshotOptions = {
@@ -43,7 +45,8 @@ export type SnapshotOptions = {
   mode?: "memory" | "disk";
   name?: string;
   labels?: Record<string, string>;
-  retentionDays?: number;
+  /** Days, or null to keep it while your account has credit. */
+  retentionDays?: number | null;
 };
 
 const enc = encodeURIComponent;
@@ -118,7 +121,11 @@ export class Snapshots {
       ...options,
     });
   }
-  extend(id: string, retentionDays: number, options: RequestOptions = {}): Promise<Snapshot> {
+  extend(
+    id: string,
+    retentionDays: number | null,
+    options: RequestOptions = {},
+  ): Promise<Snapshot> {
     return this.t.json({
       method: "POST",
       path: `/v1/snapshots/${enc(id)}:extend`,

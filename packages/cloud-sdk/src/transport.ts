@@ -7,8 +7,9 @@ import {
   WAITS_FOR_ROOM,
 } from "./errors.js";
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
+import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.11.2";
+export const VERSION = "0.14.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -16,6 +17,9 @@ export const DEFAULT_BASE_URL = "https://api.withruntime.com";
  * because the hop never leaves the machine: it goes from the program to the
  * guest's own proxy and over the sandbox's private channel to its host. */
 export const SANDBOX_BASE_URL = "http://runtime.internal";
+/** How a Runtime secret's placeholder starts, the value a sandbox sees in its
+ * place (packages/cloud-guide/docs/security.md). */
+export const PLACEHOLDER = "rtsec_";
 /** Every Runtime sandbox has this file; guest-net.py keeps it current. Tests
  * move it, so the machine running them does not decide what they see. */
 export const sandboxMarker = { path: "/run/runtime/environment.json" };
@@ -242,6 +246,16 @@ const KEPT_FOR_CALLS = 8;
  * served, and wait rather than fail. Streams (a command's output, a download,
  * a watch) take at most `maxConnections` less KEPT_FOR_CALLS of them. A
  * terminal or tunnel's WebSocket is not counted. */
+
+/** AbortSignal.timeout in whole milliseconds, rounded up, never under 1.
+ * Node throws ERR_OUT_OF_RANGE on a fraction (Bun accepts one), so a
+ * customer's timeoutMs of 1500.5 would be a RangeError instead of a request;
+ * the live promise probe broke this way on 9 October 2026 (d3cd4bfbd). Every
+ * deadline the SDK makes from a customer's or a computed value goes through
+ * this. */
+export function timeoutSignal(ms: number): AbortSignal {
+  return AbortSignal.timeout(Math.max(1, Math.ceil(ms)));
+}
 export class Transport {
   readonly baseUrl: string;
   #apiKey: string | undefined;
@@ -279,7 +293,13 @@ export class Transport {
     if (typeof options.apiKey === "function") this.#findKey = options.apiKey;
     else if (!options.apiKey || /\s/.test(options.apiKey)) throw missingKey();
     else this.#apiKey = options.apiKey;
-    this.baseUrl = apiOrigin(options.baseUrl ? reachable(options.baseUrl) : defaultBaseUrl());
+    // A secret's placeholder becomes the key only on its way out through the
+    // sandbox's proxy; runtime.internal goes to the host without it, so the
+    // API sees the placeholder and answers 401 (land-lander, 11 October 2026:
+    // every worker's `check --remote`). Such a key's calls take the public API.
+    const placeholder = this.#apiKey?.startsWith(PLACEHOLDER) === true;
+    const origin = options.baseUrl || processEnv().RUNTIME_API_URL || DEFAULT_BASE_URL;
+    this.baseUrl = apiOrigin(placeholder ? origin : reachable(origin));
     // The environment's proxy (HTTPS_PROXY, NO_PROXY) on Node and Bun alike;
     // a fetch passed in is used as it is.
     this.#fetch = options.fetch ?? envFetch;
@@ -333,7 +353,7 @@ export class Transport {
   #prepare(call: Call): Call {
     const timeoutMs = call.timeoutMs ?? this.#timeoutMs;
     const roomMs = Math.max(0, call.waitForCapacityMs ?? 0);
-    const deadline = timeoutMs === 0 ? undefined : AbortSignal.timeout(timeoutMs + roomMs);
+    const deadline = timeoutMs === 0 ? undefined : timeoutSignal(timeoutMs + roomMs);
     const signal = deadline
       ? call.signal
         ? AbortSignal.any([call.signal, deadline])
@@ -383,6 +403,24 @@ export class Transport {
     await gate?.take();
   }
 
+  /** Wait before sending a refused call again. When the call's deadline
+   * ends the wait, the refusal stands: on a loaded machine bun can fire
+   * AbortSignal.timeout before a shorter setTimeout, and the call then
+   * failed as a timeout although the transport had judged the wait to fit
+   * (11 October 2026). A caller's own cancel still ends it as a cancel. */
+  async #retryAfter(
+    refusal: RuntimeError,
+    ms: number,
+    signal: AbortSignal | undefined,
+    gate?: Gate,
+  ) {
+    await this.#rest(ms, signal, gate).catch((cause: unknown) => {
+      throw (signal?.reason as { name?: unknown } | undefined)?.name === "TimeoutError"
+        ? refusal
+        : cause;
+    });
+  }
+
   async #send<T>(call: Call, consume: (response: Response) => Promise<T>, gate?: Gate): Promise<T> {
     let apiKey: string;
     try {
@@ -404,6 +442,8 @@ export class Transport {
     // An answer that ran nothing is sent again until the call's deadline.
     const idleUntil = call.deadlineAt ?? performance.now() + NOTHING_RAN_MS;
     let idleAttempt = 0;
+    // The last try never left, and was sent again at once.
+    let resentAtOnce = false;
     for (;;) {
       let response: Response | undefined;
       let inCallback = false;
@@ -438,6 +478,7 @@ export class Transport {
           await response.body?.cancel().catch(() => {});
           throw new TypeError(`fetch failed: Runtime answered a redirect (${response.status}).`);
         }
+        sayRenamed(response.headers.get("warning"));
         /* An answer that took longer than the API holds its headers (90 s)
          comes as a 200 sent early, and then its JSON: the answer, or
          {"error": ...} when the work failed after the status went
@@ -493,7 +534,7 @@ export class Transport {
           inCallback = true;
           call.onCapacityWait?.(error, pause);
           inCallback = false;
-          await this.#rest(pause, signal, gate);
+          await this.#retryAfter(error, pause, signal, gate);
           continue;
         }
         // Nothing ran: safe to send again for any call, past maxRetries,
@@ -512,7 +553,7 @@ export class Transport {
           const pause =
             Math.min(30_000, base * 2 ** Math.min(idleAttempt++, 3)) * (0.9 + Math.random() * 0.2);
           if (pause >= idleUntil - performance.now()) throw error;
-          await this.#rest(pause, signal, gate);
+          await this.#retryAfter(error, pause, signal, gate);
           continue;
         }
         const retryable = [429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code);
@@ -533,9 +574,18 @@ export class Transport {
         if (cause instanceof RuntimeError) throw cause;
         if (signal?.aborted || !retry || attempt >= this.#maxRetries)
           throw this.#connectionError(call, cause);
-        await this.#rest(backoff(attempt), signal, gate).catch((cause: unknown) => {
-          throw cause instanceof RuntimeError ? cause : this.#connectionError(call, cause);
-        });
+        // A connection that never opened sent no byte of the request, so
+        // the next try, which may reach another server, goes at once; once
+        // in a row, so an API that is down is not hammered. Anything that
+        // may have reached a server (a reset, a timeout, a cut answer)
+        // keeps the backoff and its key's rules.
+        const atOnce: boolean = response === undefined && neverSent(cause) && !resentAtOnce;
+        resentAtOnce = atOnce;
+        await this.#rest(atOnce ? Math.random() * 50 : backoff(attempt), signal, gate).catch(
+          (cause: unknown) => {
+            throw cause instanceof RuntimeError ? cause : this.#connectionError(call, cause);
+          },
+        );
       }
       attempt++;
     }
@@ -720,6 +770,20 @@ export class Transport {
 
 /** The status a late answer's body failed with, or undefined when it is an
  * answer. The body is the error the API would have sent as its status. */
+const said = new Set<string>();
+/** CLOUD.md section 4: a call under a renamed product word is answered with a
+ * Warning naming the new word. It is printed once per process, to stderr, so
+ * a loop does not drown its own output and stdout stays the caller's. */
+export function sayRenamed(
+  header: string | null,
+  say: (line: string) => void = console.warn,
+): void {
+  const text = warningText(header);
+  if (text === undefined || said.has(text)) return;
+  said.add(text);
+  say(`Runtime: ${text}`);
+}
+
 function lateFailure(text: string): number | undefined {
   let body: unknown;
   try {
@@ -781,6 +845,29 @@ export function missingKey(): RuntimeError {
     status: 0,
     hint: "Run `npx -y withruntime login` (a browser approval; nothing to copy), set RUNTIME_API_KEY to a key from https://withruntime.com/account/keys, or pass { apiKey }.",
   });
+}
+
+/** Error codes of a connection that never opened (Node's and Bun's), so no
+ * byte of the request left this machine. */
+const NEVER_OPENED = new Set([
+  "ECONNREFUSED",
+  "ENOENT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EADDRNOTAVAIL",
+  "ConnectionRefused",
+  "FailedToOpenSocket",
+]);
+
+/** Whether a fetch failure is a connection that never opened: its code, or
+ * one of its causes', says so. A timeout or a reset never counts. */
+export function neverSent(cause: unknown): boolean {
+  for (let at = cause, depth = 0; at && depth < 5; depth++) {
+    const code = (at as { code?: unknown }).code;
+    if (typeof code === "string" && NEVER_OPENED.has(code)) return true;
+    at = (at as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function backoff(attempt: number): number {

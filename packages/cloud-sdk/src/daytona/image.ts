@@ -1,10 +1,29 @@
 import { createHash } from "node:crypto";
-import { NotSupportedError } from "./errors.js";
+import { DaytonaInvalidArgumentError, NotSupportedError } from "./errors.js";
 
 /** A file of the build context, as Runtime's image builds take it. */
 export type ContextFile = { path: string; content: string; encoding: "base64"; mode?: number };
 
 const PYTHON = ["3.9", "3.10", "3.11", "3.12", "3.13"] as const;
+
+/** Daytona's pip options, as pip flags. */
+export type PipInstallOptions = {
+  indexUrl?: string;
+  extraIndexUrls?: string[];
+  findLinks?: string[];
+  pre?: boolean;
+  extraOptions?: string;
+};
+
+function pipFlags(options: PipInstallOptions): string {
+  return [
+    ...(options.indexUrl ? [`--index-url ${options.indexUrl}`] : []),
+    ...(options.extraIndexUrls ?? []).map((url) => `--extra-index-url ${url}`),
+    ...(options.findLinks ?? []).map((url) => `--find-links ${url}`),
+    ...(options.pre ? ["--pre"] : []),
+    ...(options.extraOptions ? [options.extraOptions] : []),
+  ].join(" ");
+}
 
 /** Daytona's declarative image, kept as the Dockerfile it stands for and
  * built as a Runtime image (`runtime.images.build`) when a sandbox or a
@@ -47,35 +66,22 @@ export class Image {
     return image;
   }
 
-  pipInstall(
-    packages: string | string[],
-    options: {
-      indexUrl?: string;
-      extraIndexUrls?: string[];
-      findLinks?: string[];
-      pre?: boolean;
-      extraOptions?: string;
-    } = {},
-  ): Image {
+  pipInstall(packages: string | string[], options: PipInstallOptions = {}): Image {
     const list = [packages].flat();
     if (!list.length) return this;
-    const flags = [
-      ...(options.indexUrl ? [`--index-url ${options.indexUrl}`] : []),
-      ...(options.extraIndexUrls ?? []).map((url) => `--extra-index-url ${url}`),
-      ...(options.findLinks ?? []).map((url) => `--find-links ${url}`),
-      ...(options.pre ? ["--pre"] : []),
-      ...(options.extraOptions ? [options.extraOptions] : []),
-    ];
     this.#lines.push(
-      `RUN python -m pip install ${list.map((one) => JSON.stringify(one)).join(" ")} ${flags.join(" ")}`.trim(),
+      `RUN python -m pip install ${list.map((one) => JSON.stringify(one)).join(" ")} ${pipFlags(options)}`.trim(),
     );
     return this;
   }
 
-  pipInstallFromRequirements(requirementsTxt: string): Image {
+  pipInstallFromRequirements(requirementsTxt: string, options: PipInstallOptions = {}): Image {
     const remote = `/.requirements/${createHash("sha256").update(requirementsTxt).digest("hex").slice(0, 12)}.txt`;
     this.#files.push({ local: requirementsTxt, remote, dir: false });
-    this.#lines.push(`COPY ${remote.slice(1)} ${remote}`, `RUN python -m pip install -r ${remote}`);
+    this.#lines.push(
+      `COPY ${remote.slice(1)} ${remote}`,
+      `RUN python -m pip install -r ${remote} ${pipFlags(options)}`.trim(),
+    );
     return this;
   }
 
@@ -127,7 +133,20 @@ export class Image {
     return this;
   }
 
-  dockerfileCommands(dockerfileCommands: string[]): Image {
+  dockerfileCommands(
+    dockerfileCommands: string[],
+    contextDir?: string,
+    options: { strictContext?: boolean } = {},
+  ): Image {
+    if (options.strictContext && !contextDir)
+      throw new DaytonaInvalidArgumentError(
+        "strictContext requires contextDir so that the build context boundary is explicit",
+      );
+    if (contextDir)
+      throw new NotSupportedError(
+        "A build context directory for dockerfileCommands (contextDir)",
+        "Add the files with addLocalDir(contextDir, remotePath) or addLocalFile, then COPY from where they land, or build from a Dockerfile with Image.fromDockerfile(path).",
+      );
     this.#lines.push(...dockerfileCommands);
     return this;
   }

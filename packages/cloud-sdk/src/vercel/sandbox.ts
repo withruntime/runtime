@@ -12,7 +12,7 @@ import {
   type WithRuntime,
 } from "./client.js";
 import { Command, CommandFinished, exitCodeOf, type LogOutputLine } from "./command.js";
-import { APIError, guard, NotSupportedError, translate } from "./errors.js";
+import { APIError, guard, NotSupportedError, StreamError, translate } from "./errors.js";
 import { FileSystem } from "./filesystem.js";
 import {
   rootOrThrow,
@@ -230,7 +230,7 @@ async function resolveImage(
   if (found) return { image: found.id };
   throw new NotSupportedError(
     `The image ${image}, which is not a Runtime image`,
-    `Build it as a Runtime image with that name and this call starts from it: \`npx withruntime image build --dockerfile Dockerfile --name ${image}\`, or runtime.images.build({ name: "${image}", image: "<registry reference>" }).`,
+    `Build it as a Runtime image with that name and this call starts from it: \`npx withruntime images build --dockerfile Dockerfile --name ${image}\`, or runtime.images.build({ name: "${image}", image: "<registry reference>" }).`,
   );
 }
 
@@ -395,7 +395,7 @@ export class Sandbox {
   /** Creates a sandbox and waits until it runs. Vercel's defaults: 2 vCPUs,
    * 2048 MiB per vCPU, persistent. With no `timeout` it has no time limit: it
    * runs while it works and pauses when idle. A `timeout` is kept as given. Funding is left to
-   * Runtime: the included usage first, then prepaid credit, exactly as withruntime's own create. */
+   * Runtime: the free usage first, then prepaid credit, exactly as withruntime's own create. */
   static async create(params: CreateSandboxParams = {}): Promise<Sandbox & AsyncDisposable> {
     refuseCreate(params);
     const client = clientFor(params);
@@ -723,6 +723,12 @@ export class Sandbox {
         }),
       params,
     );
+    if (result.stdoutTruncated || result.stderrTruncated)
+      throw new StreamError(
+        "output_truncated",
+        "Some command output is no longer available.",
+        result.processId ?? this.#rt.id,
+      );
     return new CommandFinished(
       {
         id: result.processId ?? `cmd_${startedAt}`,
@@ -1042,7 +1048,7 @@ export class Sandbox {
     return Promise.reject(
       new NotSupportedError(
         "Vercel's interactive shell (openInteractive)",
-        "Use `await sandbox.withruntime.terminal({ cols, rows, onData })`, or `npx withruntime sandbox shell <id>`.",
+        "Use `await sandbox.withruntime.terminal({ cols, rows, onData })`, or `npx withruntime sandboxes shell <id>`.",
       ),
     );
   }

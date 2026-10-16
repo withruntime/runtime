@@ -114,7 +114,7 @@ export async function runE2BInterpreter() {
             apiKey: "fixture",
             domain: "invalid.example",
           });
-          sandbox.getJupyterRequestUrl = () => `${fixture}/execute`;
+          Object.defineProperty(sandbox, "jupyterUrl", { get: () => fixture });
         } else {
           const client = new Runtime({
             apiKey: "rt_fixture",

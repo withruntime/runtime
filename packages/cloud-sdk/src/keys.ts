@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { connectionOrigins } from "./credentials.js";
 import { RuntimeError } from "./errors.js";
 import { named } from "./cli-name.js";
+import { sandboxIdentityHeaders } from "./identity.js";
 import { describeRoute, envFetch } from "./proxy.js";
 
 /* `runtime keys create`: an API key for somewhere with no browser, a CI runner
@@ -146,6 +147,7 @@ export async function createKey(
         headers: {
           "content-type": "application/json",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
+          ...(await sandboxIdentityHeaders()),
         },
         body: JSON.stringify(body),
       });

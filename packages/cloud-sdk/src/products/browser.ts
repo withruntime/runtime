@@ -20,6 +20,11 @@ export type SandboxBrowser =
       expiresAt: string | null;
       /** headless: false only: the desktop's live view. */
       streamUrl?: string;
+      /** start() only: the sandbox's memory, which is the browser's. */
+      memoryMiB?: number;
+      /** start() only, under 2 GiB: heavy apps such as Google Sheets, YouTube
+       * and StackBlitz need a 2 GiB sandbox; 1 GiB suits light pages. */
+      hint?: string;
     };
 export type BrowserStartOptions = {
   /** true (the default): no window. false: on the sandbox's desktop, with a live view. */

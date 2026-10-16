@@ -1,5 +1,6 @@
-"""runtime.billing.topup() and topup_status() against a stub API, sync and
-async. The route is tested in packages/cloud (billing-api)."""
+"""runtime.billing.topup(), topup_status() and auto top-up against a stub
+API, sync and async. The routes are tested in packages/cloud (billing-api,
+auto-top-up-api)."""
 import asyncio
 import json
 import threading
@@ -37,6 +38,8 @@ class Stub(BaseHTTPRequestHandler):
 
     do_GET = answer
     do_POST = answer
+    do_PUT = answer
+    do_DELETE = answer
 
 
 class BillingTest(unittest.TestCase):
@@ -66,6 +69,33 @@ class BillingTest(unittest.TestCase):
                 return await runtime.billing.topup(20)
 
         self.assertEqual(asyncio.run(go())["networks"][0]["address"], "0xbase")
+
+
+    def test_sync_auto_top_up(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.billing.auto_top_up()
+            runtime.billing.set_auto_top_up(True, 15, 20, 100, idempotency_key="k2")
+            runtime.billing.auto_top_up_off()
+        self.assertEqual(Stub.seen[0][:2], ("GET", "/v1/billing/auto-top-up"))
+        self.assertEqual(
+            Stub.seen[1],
+            (
+                "PUT",
+                "/v1/billing/auto-top-up",
+                {"enabled": True, "below": 15, "amount": 20, "monthlyLimit": 100},
+                "k2",
+            ),
+        )
+        self.assertEqual(Stub.seen[2][:2], ("DELETE", "/v1/billing/auto-top-up"))
+
+    def test_async_auto_top_up(self):
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                return await runtime.billing.set_auto_top_up(False, amount=50)
+
+        asyncio.run(go())
+        # A figure left out is not sent: the server keeps the saved one, or its default.
+        self.assertEqual(Stub.seen[0][:3], ("PUT", "/v1/billing/auto-top-up", {"enabled": False, "amount": 50}))
 
 
 if __name__ == "__main__":

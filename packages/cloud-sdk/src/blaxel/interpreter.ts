@@ -1,7 +1,7 @@
 import type { ExecutionResult } from "../products/interpreter.js";
 import { ENV_FILE, parseEnvFile } from "./context.js";
 import { guard, isNotFound, NotSupportedError, ResponseError } from "./errors.js";
-import { SandboxInstance } from "./sandbox.js";
+import { SandboxInstance, type SandboxCreateOptions } from "./sandbox.js";
 import type {
   Port,
   Sandbox as SandboxModel,
@@ -117,7 +117,7 @@ export class CodeInterpreter extends SandboxInstance {
   static override async create<T extends typeof SandboxInstance>(
     this: T,
     sandbox?: SandboxCreateConfiguration | SandboxModel | Record<string, unknown> | null,
-    options: { safe?: boolean; createIfNotExist?: boolean } = {},
+    options: SandboxCreateOptions = {},
   ): Promise<InstanceType<T>> {
     const defaults: SandboxCreateConfiguration = {
       image: CodeInterpreter.DEFAULT_IMAGE,

@@ -11,6 +11,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from .._async_client import AsyncRuntime
 from .._compat_lease import end_of, extension_seconds, no_limit
+from .._errors import WAITS_FOR_ROOM
+from .._request_scope import cleanup_scope, request_scope
 
 from . import _core as core
 from ._async_io import AsyncPtyHandle, call, catch_up, finish, later, pty_options, start
@@ -18,9 +20,9 @@ from ._core import (CodeRunParams, ComputerUseStartResponse, ComputerUseStatusRe
                     DisplayInfo, DisplayInfoResponse, ListRecordingsResponse, MousePosition, PtyResult,
                     PtySessionInfo, PtySize, Recording, ScreenshotOptions, ScreenshotRegion, ScreenshotResponse,
                     WindowInfo, WindowsResponse, CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, CreateSnapshotParams,
-                    DaytonaCommandAlreadyCompletedError, DaytonaConfig, DaytonaConflictError, DaytonaError,
-                    DaytonaFileNotFoundError, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError,
-                    DaytonaSessionEndedError, ExecuteResponse, ExecutionArtifacts, ExecutionError, ExecutionResult,
+                    DaytonaCommandAlreadyCompletedError, DaytonaConfig, DaytonaConflictError, DaytonaConnectionError,
+                    DaytonaError, DaytonaFileNotFoundError, DaytonaNotFoundError, DaytonaProcessExecutionTimeoutError,
+                    DaytonaQueueTimeoutError, DaytonaSessionEndedError, DaytonaTimeoutError, ExecuteResponse, ExecutionArtifacts, ExecutionError, ExecutionResult,
                     FileDownloadRequest, FileDownloadResponse, FileInfo, FileUpload, GitCommitResponse, GitStatus,
                     InterpreterContext, ListBranchResponse, ListSandboxesQuery, Match, NotSupportedError,
                     OutputMessage, PaginatedSnapshots, PortPreviewUrl, ReplaceResult, SandboxState, SearchFilesResponse,
@@ -661,16 +663,44 @@ class AsyncMouse(_Desktop):
         await _guard("other", lambda: desktop.move(x, y))
         return MousePosition(x=x, y=y)
 
-    async def click(self, x: int, y: int, button: str = "left", double: bool = False,
-                    request_timeout: Optional[float] = None) -> MousePosition:
+    async def down(self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left",
+                   request_timeout: Optional[float] = None) -> MousePosition:
+        """Presses and holds ``button``, first moving to (x, y) if both are given, until ``up()``."""
+        return await self._hold("mouse_down", x, y, button)
+
+    async def up(self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left",
+                 request_timeout: Optional[float] = None) -> MousePosition:
+        """Releases a held ``button``, first moving to (x, y) if both are given."""
+        return await self._hold("mouse_up", x, y, button)
+
+    async def _hold(self, action: str, x: Optional[int], y: Optional[int], button: str) -> MousePosition:
         which = core.mouse_button(button)
         desktop = await self._desktop()
-        await _guard("other", lambda: desktop.click(x, y, button=which, double=double))
+        at = x is not None and y is not None
+        if at:
+            await _guard("other", lambda: desktop.move(x, y))
+        await _guard("other", lambda: getattr(desktop, action)(which))
+        if at:
+            return MousePosition(x=x, y=y)
+        where = await _guard("other", lambda: desktop.cursor())
+        return MousePosition(x=where.get("x"), y=where.get("y"))
+
+    async def click(self, x: int, y: int, button: str = "left", double: bool = False,
+                    request_timeout: Optional[float] = None, clicks: Optional[int] = None,
+                    modifiers: Optional[List[str]] = None) -> MousePosition:
+        """One click, or two with ``double``; ``clicks`` (1 or 2 here) wins over ``double``."""
+        which = core.mouse_button(button)
+        core.no_held_keys(modifiers, "click")
+        twice = core.click_count(double, clicks) == 2
+        desktop = await self._desktop()
+        await _guard("other", lambda: desktop.click(x, y, button=which, double=twice))
         return MousePosition(x=x, y=y)
 
     async def drag(self, start_x: int, start_y: int, end_x: int, end_y: int, button: str = "left",
-                   request_timeout: Optional[float] = None) -> MousePosition:
+                   request_timeout: Optional[float] = None,
+                   modifiers: Optional[List[str]] = None) -> MousePosition:
         which = core.mouse_button(button)
+        core.no_held_keys(modifiers, "drag")
         desktop = await self._desktop()
         if which == "left":
             await _guard("other", lambda: desktop.drag((start_x, start_y), (end_x, end_y)))
@@ -682,12 +712,16 @@ class AsyncMouse(_Desktop):
         return MousePosition(x=end_x, y=end_y)
 
     async def scroll(self, x: int, y: int, direction: str, amount: int = 1,
-                     request_timeout: Optional[float] = None) -> bool:
-        """``amount`` wheel clicks up or down at (x, y)."""
-        if direction not in ("up", "down"):
-            raise ValueError(f'direction is "up" or "down", not {direction!r}.')
+                     request_timeout: Optional[float] = None,
+                     modifiers: Optional[List[str]] = None) -> bool:
+        """``amount`` wheel clicks up, down, left or right at (x, y)."""
+        dy, dx = core.scroll_step(direction)
+        core.no_held_keys(modifiers, "scroll")
         desktop = await self._desktop()
-        await _guard("other", lambda: desktop.scroll(amount if direction == "down" else -amount, x=x, y=y))
+        if dx:
+            await _guard("other", lambda: desktop.scroll(0, dx=dx * amount, x=x, y=y))
+        else:
+            await _guard("other", lambda: desktop.scroll(dy * amount, x=x, y=y))
         return True
 
 
@@ -711,6 +745,13 @@ class AsyncKeyboard(_Desktop):
         combination = "+".join(core.desktop_key(one) for one in keys.split("+"))
         desktop = await self._desktop()
         await _guard("other", lambda: desktop.press(combination))
+
+    async def down(self, key: str, request_timeout: Optional[float] = None) -> None:
+        """Runtime's desktop presses keys and lets go at once; it cannot hold one."""
+        raise core.holding_refused()
+
+    async def up(self, key: str, request_timeout: Optional[float] = None) -> None:
+        raise core.holding_refused()
 
 
 class AsyncScreenshot(_Desktop):
@@ -1097,8 +1138,22 @@ class AsyncSandbox:
         runtime = await self._live()
         await _guard("sandbox", lambda: runtime.network.set(**rules))
 
+    async def set_public(self, public: bool, request_timeout: Optional[float] = None) -> None:
+        """Makes every port it shares public, or private with a token, and the
+        ports get_preview_link shares from now on. A port already shared
+        changes at once, keeping its address, as on Daytona. Without credit,
+        public is refused (public_preview_not_allowed) and nothing changes."""
+        visibility = "public" if public else "private"
+        runtime = await self._live()
+        for preview in await _guard("sandbox", lambda: runtime.previews.list()):
+            if preview.get("visibility") != visibility:
+                await _guard("sandbox", lambda port=preview["port"]: runtime.previews.create(
+                    port, visibility=visibility))
+        self.public = public
+
     async def get_preview_link(self, port: int) -> PortPreviewUrl:
-        """Public when created with public=True, else private with a token."""
+        """Public when created with public=True or set_public(True) since, else
+        private with a token."""
         runtime = await self._live()
         preview = await _guard("sandbox", lambda: runtime.previews.create(
             port, visibility="public" if self.public else "private"))
@@ -1147,7 +1202,8 @@ class AsyncSandbox:
             await _guard("sandbox", lambda: self.withruntime.update(labels={**labels, **internal}))
         return self.labels
     recover = staticmethod(core.unsupported("Recovering a failed sandbox", "Create a new sandbox."))
-    resize = staticmethod(core.unsupported("Resizing a sandbox", "Create a new one with the resources you need."))
+    resize = wait_for_resize_complete = staticmethod(
+        core.unsupported("Resizing a sandbox", "Create a new one with the resources you need."))
     get_metrics = staticmethod(core.unsupported("Sandbox metrics", "Use `sandbox.withruntime.metrics(range=\"1h\")` for its CPU and memory over time."))
     get_metrics_latest = get_metrics
     set_ttl = staticmethod(core.unsupported("Changing the time to live after create",
@@ -1163,7 +1219,7 @@ class AsyncSandbox:
         "Rotating the preview signing key", "Use sandbox.withruntime.previews.rotate(port)."))
     upload_url = staticmethod(core.unsupported("Signed upload URLs", "Use sandbox.fs.upload_file(data, path)."))
     download_url = staticmethod(core.unsupported("Signed download URLs", "Use sandbox.fs.download_file(path)."))
-    create_ssh_access = staticmethod(core.unsupported("SSH access", "Use `npx withruntime sandbox ssh <id>` (also VS Code and JetBrains)."))
+    create_ssh_access = staticmethod(core.unsupported("SSH access", "Use `npx withruntime sandboxes ssh <id>` (also VS Code and JetBrains)."))
     revoke_ssh_access = create_ssh_access
     validate_ssh_access = create_ssh_access
 
@@ -1288,12 +1344,30 @@ class AsyncDaytona:
                      runtime_create: Optional[Dict[str, Any]] = None) -> AsyncSandbox:
         """Creates a sandbox with Daytona's defaults (1 vCPU, 1 GiB, 3 GiB
         disk, pausing after 15 minutes without calls). Funding is left to
-        Runtime: the included usage first, then prepaid credit. ``runtime_create`` passes Runtime fields (snake_case)."""
+        Runtime: the free usage first, then prepaid credit. ``runtime_create`` passes Runtime fields (snake_case).
+
+        ``timeout`` (seconds, 0 for none) bounds the create, as Daytona's does,
+        but not the build of an Image, which Runtime builds before the
+        sandbox is asked for. ``queue_timeout`` (minutes) is how long it waits
+        for room."""
+        core.check_timeout(timeout)
         params = params or CreateSandboxFromSnapshotParams()
         core.refuse_create(params)
+        source = await self._source(params, on_snapshot_create_logs)
+        deadline = time.monotonic() + timeout if timeout else None
+        try:
+            with request_scope(timeout or None):
+                return await self._create(params, source, runtime_create)
+        except Exception as error:
+            if deadline is not None and time.monotonic() >= deadline and isinstance(
+                    error, (TimeoutError, DaytonaTimeoutError, DaytonaConnectionError)):
+                raise DaytonaTimeoutError(f"Function 'create' exceeded timeout of {timeout} seconds.") from error
+            raise
+
+    async def _create(self, params: Any, source: Dict[str, Any],
+                      runtime_create: Optional[Dict[str, Any]]) -> AsyncSandbox:
         lifecycle = core.lifecycle_of(params)
         resources = getattr(params, "resources", None) or core.Resources()
-        source = await self._source(params, on_snapshot_create_logs)
         volumes = await self._volumes(params.volumes)
         fields: Dict[str, Any] = {}
         if "snapshot" not in source:
@@ -1327,10 +1401,21 @@ class AsyncDaytona:
             fields["network"] = network
         if volumes:
             fields["volumes"] = volumes
+        waited: List[float] = []
+        if params.queue_timeout is not None:
+            fields.update(wait_for_capacity=params.queue_timeout * 60,
+                          on_capacity_wait=lambda refusal, seconds: waited.append(seconds))
         fields.update(source)
         fields.update(self._runtime_create)
         fields.update(runtime_create or {})
-        runtime = await _guard("sandbox", lambda: self._client.sandboxes.create(**fields))
+        try:
+            runtime = await _guard("sandbox", lambda: self._client.sandboxes.create(**fields))
+        except DaytonaError as error:
+            if waited and error.code in WAITS_FOR_ROOM:
+                raise DaytonaQueueTimeoutError(f"No room for the sandbox within its queue_timeout of "
+                                               f"{params.queue_timeout} minutes. {error.message}",
+                                               error.status_code, error_code=error.code) from error
+            raise
         if lifecycle.auto_delete_interval > 0 or user:
             try:
                 if lifecycle.auto_delete_interval > 0:
@@ -1342,7 +1427,9 @@ class AsyncDaytona:
                         raise core.missing_user(user, ready.exit_code, ready.stderr or "")
             except BaseException as original:
                 try:
-                    await runtime.stop(wait=False)
+                    # Its own deadline: the create's may be what ran out.
+                    with cleanup_scope():
+                        await runtime.stop(wait=False)
                 except BaseException as cleanup:
                     raise original from cleanup
                 raise
@@ -1379,7 +1466,7 @@ class AsyncDaytona:
         raise DaytonaNotFoundError(
             f'No Runtime image or snapshot is named "{name}". Daytona snapshots do not move to Runtime; build the '
             f'same environment as a Runtime image with that name: daytona.snapshot.create(CreateSnapshotParams('
-            f'name="{name}", image=...)), or `npx withruntime image build --dockerfile Dockerfile --name '
+            f'name="{name}", image=...)), or `npx withruntime images build --dockerfile Dockerfile --name '
             f'{core.image_name(name)}`.', 404)
 
     async def _volumes(self, mounts: Optional[List[Any]]) -> List[Dict[str, str]]:

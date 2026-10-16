@@ -406,7 +406,9 @@ describe("process", () => {
       ((await refuse().catch((e: unknown) => e)) as NotSupportedError).alternative;
     expect(await alternative(() => sandbox.updateSecrets())).toContain("withruntime secrets set");
     expect(await alternative(() => sandbox.getMetrics())).toContain("sandbox.withruntime.metrics(");
-    expect(await alternative(() => sandbox.createSshAccess())).toContain("withruntime sandbox ssh");
+    expect(await alternative(() => sandbox.createSshAccess())).toContain(
+      "withruntime sandboxes ssh",
+    );
     expect(await alternative(() => daytona.create({ secrets: { A: "b" } }))).toContain(
       "withruntime secrets set",
     );

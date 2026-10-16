@@ -152,7 +152,7 @@ describe("SandboxInstance.create", () => {
     expect(missing).toBeInstanceOf(NotSupportedError);
     expect(missing.feature).toBe("The image blaxel/nextjs:latest, which is not a Runtime image");
     expect(missing.alternative).toBe(
-      'Build it as a Runtime image named blaxel-nextjs: `npx withruntime image build --dockerfile Dockerfile --name blaxel-nextjs -t blaxel-nextjs:latest`. The code can keep "blaxel/nextjs:latest": the adapter starts from blaxel-nextjs:latest.',
+      'Build it as a Runtime image named blaxel-nextjs: `npx withruntime images build --dockerfile Dockerfile --name blaxel-nextjs -t blaxel-nextjs:latest`. The code can keep "blaxel/nextjs:latest": the adapter starts from blaxel-nextjs:latest.',
     );
     expect(missing.message).toStartWith(
       "The image blaxel/nextjs:latest, which is not a Runtime image, is not supported on Runtime. Build",
@@ -277,7 +277,7 @@ describe("SandboxInstance.create", () => {
         { volumes: [{ name: "v", mountPath: "/data", type: "ephemeral", sizeMb: 10 }] },
         /Ephemeral/,
       ],
-      [{ volumes: [{ name: "missing", mountPath: "/data" }] }, /volume create --name missing/],
+      [{ volumes: [{ name: "missing", mountPath: "/data" }] }, /volumes create --name missing/],
       [{ envs: [{ name: "BAD-NAME", value: "x" }] }, /BAD-NAME/],
       [
         {

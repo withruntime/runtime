@@ -5,8 +5,10 @@
 #
 # Every sandbox of your organization then has ``OPENAI_API_KEY`` set to a
 # placeholder. The egress proxy swaps in the value on HTTPS requests to the
-# hosts (in the URL and headers), or, with ``header``, sets that header on every
-# request to them. That value is sealed and never returned by anything.
+# hosts in a credential header (Authorization, x-api-key, x-goog-api-key and a
+# few more), or, with ``header``, sets that header on every request to them;
+# never in the URL or another header. That value is sealed and never returned
+# by anything.
 #
 #     await runtime.secrets.set("DB_PASSWORD", value=password, jobs=True)
 #
@@ -64,12 +66,41 @@ class AsyncSecrets:
     async def _live(self, name: str) -> Optional[dict[str, Any]]:
         return next((c for c in await self._job_copies() if c["name"] == name and c.get("deletedAt") is None), None)
 
+    async def _rotate(self, live: dict[str, Any], value: str, version: int, key: Optional[str]) -> dict[str, Any]:
+        return await self._store("POST", f"/v1/secrets/{quote(live['id'], safe='')}:rotate",
+                                 body={"value": value, "expectedVersion": version}, idempotency_key=key)
+
+    async def _rotate_or_replay(self, live: dict[str, Any], value: str, key: Optional[str],
+                                created: Optional[str] = None) -> dict[str, Any]:
+        """Rotates from the version the copy has now. A key used before, by
+        this same call whose answer was lost, is answered by the identical
+        request again, with no second rotation: a set's create (``created``
+        names it), or the rotate from the version before. Until 10 October
+        2026 the retry changed its request and was refused as a conflict."""
+        try:
+            return await self._rotate(live, value, live["version"], key)
+        except RuntimeError as error:
+            if error.code != "idempotency_conflict":
+                raise
+            replays = []
+            if created is not None:
+                replays.append(lambda: self._store("POST", "/v1/secrets", body={"name": created, "value": value},
+                                                   idempotency_key=key))
+            if live["version"] > 1:
+                replays.append(lambda: self._rotate(live, value, live["version"] - 1, key))
+            for replay in replays:
+                try:
+                    return await replay()
+                except RuntimeError as again:
+                    if again.status != 409:
+                        raise
+            raise
+
     async def _set_job_copy(self, name: str, value: str, key: Optional[str]) -> dict[str, Any]:
         copies = await self._job_copies()
         live = next((c for c in copies if c["name"] == name and c.get("deletedAt") is None), None)
         if live is not None:
-            return await self._store("POST", f"/v1/secrets/{quote(live['id'], safe='')}:rotate",
-                                     body={"value": value, "expectedVersion": live["version"]}, idempotency_key=key)
+            return await self._rotate_or_replay(live, value, key, created=name)
         if any(c["name"] == name for c in copies):
             raise ConflictError(f"A jobs secret named {name} was deleted, and a deleted name cannot be used again.",
                                 code="name_conflict", status=409, hint="Store it under another name.",
@@ -160,9 +191,7 @@ class AsyncSecrets:
         if live is None:
             raise NotFoundError(f"{name} has no copy for jobs to rotate.", code="not_found", status=404,
                                 hint="Store one with set(name, value=..., jobs=True).")
-        return await self._store("POST", f"/v1/secrets/{quote(live['id'], safe='')}:rotate",
-                                 body={"value": value, "expectedVersion": live["version"]},
-                                 idempotency_key=idempotency_key)
+        return await self._rotate_or_replay(live, value, idempotency_key)
 
     async def reveal(self, name: str, *, version: Optional[int] = None) -> dict[str, Any]:
         """The jobs copy's value (the key needs secrets_reveal). The sandboxes'

@@ -47,6 +47,15 @@ const expected: Record<string, string> = {
   "withruntime/freestyle": "Freestyle",
   "withruntime/modal": "ModalClient",
   "withruntime/cloudflare": "getSandbox",
+  "withruntime/sandboxes": "sandboxes",
+  "withruntime/snapshots": "snapshots",
+  "withruntime/images": "images",
+  "withruntime/volumes": "volumes",
+  "withruntime/jobs": "jobs",
+  "withruntime/domains": "domains",
+  "withruntime/ports": "ports",
+  "withruntime/ips": "ips",
+  "withruntime/networks": "networks",
 };
 
 test("engines asks for the Node that require(esm) needs", () => {

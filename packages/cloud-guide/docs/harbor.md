@@ -45,7 +45,6 @@ async def main():
         JobConfig(
             environment=EnvironmentConfig(
                 import_path="withruntime.harbor:RuntimeEnvironment",
-                kwargs={"funding": "trial"},
             ),
             agents=[AgentConfig(name="oracle")],
             tasks=[TaskConfig(name="hello-world/hello-world")],
@@ -63,7 +62,7 @@ Every option is optional.
 
 | `--ek`     | What it does                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `funding`  | Accepted and ignored: the included usage is spent first, then prepaid credit                                              |
+| `funding`  | Accepted and ignored: the free usage is spent first, then prepaid credit                                                  |
 | `region`   | The region to run in; left out, the default                                                                               |
 | `image`    | A Runtime image (id, name or `name:tag`) to start every trial from, instead of building the task's                        |
 | `build`    | Build limits, such as `build='{"disk_mib": 16384}'`: `vcpu`, `memory_mib`, `disk_mib`, `max_image_mib`, `timeout_seconds` |
@@ -105,8 +104,8 @@ only to its built-in environments.
 - Each task is its own image. Builds run one at a time until your account holds
   credit, then four. An account without credit keeps its first three images free;
   after that they are billed as stored images
-  ([pricing](./pricing#snapshots-images-and-volumes)). `runtime image ls` lists
-  them and `runtime image rm` removes them.
+  ([pricing](./pricing#snapshots-images-and-volumes)). `runtime images ls` lists
+  them and `runtime images rm` removes them.
 - Harbor stops each sandbox when its trial ends.
 
 ## What was verified

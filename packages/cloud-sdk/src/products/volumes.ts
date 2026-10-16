@@ -83,7 +83,13 @@ export type VolumeBackup = {
   storedBytes: number | null;
   meteredBytes: number | null;
   error: string | null;
+  /** Why it failed, when a code says it: `backup_stalled` when its copy off
+   * the host never began; back it up again. */
+  errorCode?: string | null;
   createdAt: string;
+  /** When its copy off the volume's server began; null while it waits its
+   * turn behind other copies there. */
+  copyStartedAt?: string | null;
   readyAt: string | null;
   expiresAt: string;
 };

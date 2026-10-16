@@ -38,13 +38,12 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
   prepaid credit from {{topup-min}} is the whole account.
 - **A one-line switch.** `withruntime/vercel` runs code written for Vercel
   Sandbox's SDK, in JavaScript and Python: commands, files, ports, snapshots and
-  persistent sandboxes, with no Vercel project or token. Run `runtime switch --from vercel` before your
-  first top-up and it is matched, up to {{switching-max}}.
+  persistent sandboxes, with no Vercel project or token. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 - **Single sign-on included.** SAML or OIDC sign-in, SCIM, roles and an audit
   log come with every Runtime account ([single sign-on](./single-sign-on)).
   Vercel sells SAML single sign-on as an add-on for Pro teams and keeps
   directory sync for Enterprise.
-- **Your agent sets itself up.** It runs `npx withruntime sandbox run -- ...`,
+- **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
   into a prompt or a config file, and the [MCP server](./mcp) reuses the same
   connection.
@@ -102,7 +101,7 @@ Runtime's terms.
 ## How to switch
 
 Give your coding agent the one instruction in [migration](./migrate). It
-replaces the Vercel calls on a branch, tests them on the included usage, and tells
+replaces the Vercel calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
@@ -122,7 +121,7 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 Sandboxes get Vercel's defaults: 2 vCPUs with 2048 MiB each, a 5-minute
 timeout, and persistence, so `stop()` pauses a sandbox and the next call or
 `Sandbox.get({ name })` wakes it. Ports listed at create get public addresses,
-and `domain(port)` answers from them. They use the included usage first, then prepaid credit.
+and `domain(port)` answers from them. They use the free usage first, then prepaid credit.
 
 With no timeout a sandbox has no time limit: it runs while it works. A timeout
 over an hour works too: the sandbox object moves Runtime's hour-long limit on

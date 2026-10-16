@@ -95,6 +95,19 @@ class DaytonaConnectionError(DaytonaError):
     pass
 
 
+class DaytonaConnectionTimeoutError(DaytonaConnectionError, DaytonaTimeoutError):
+    """A call that ran past its own deadline before an answer came."""
+
+
+class DaytonaQueueTimeoutError(DaytonaTimeoutError):
+    """No room for a new sandbox within create's ``queue_timeout``."""
+
+
+class DaytonaSpotEvictedError(DaytonaError):
+    """Daytona's spot sandbox taken back. Runtime has no spot sandboxes, so
+    nothing raises it; it exists for code that catches it."""
+
+
 class DaytonaFileNotFoundError(DaytonaNotFoundError):
     pass
 
@@ -178,6 +191,8 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
         out = DaytonaProcessNotFoundError(message)
     elif code == "command_timeout":
         out = DaytonaProcessExecutionTimeoutError(message)
+    elif not status and code in ("timeout", "request_timeout"):
+        out = DaytonaConnectionTimeoutError(message)
     elif not status:
         out = DaytonaConnectionError(message)
     else:
@@ -276,6 +291,8 @@ class CreateSandboxBaseParams:
     spot: Optional[bool] = None
     linked_sandbox: Optional[str] = None
     secrets: Optional[Dict[str, str]] = None
+    queue_timeout: Optional[int] = None
+    kvm: Optional[bool] = None
 
 
 @dataclass
@@ -762,6 +779,43 @@ def mouse_button(button: str) -> str:
     return button
 
 
+# (dy, dx) per wheel click: positive is down and right.
+SCROLL = {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)}
+
+
+def scroll_step(direction: str) -> tuple:
+    if direction not in SCROLL:
+        raise ValueError(f'direction is "up", "down", "left" or "right", not {direction!r}.')
+    return SCROLL[direction]
+
+
+def holding_refused() -> "NotSupportedError":
+    """Runtime's desktop presses keys and lets go at once; it cannot hold one."""
+    return NotSupportedError("Holding a key down (keyboard.down and keyboard.up)",
+                             'Press the key with its modifiers at once: keyboard.press("t", ["ctrl", "shift"]) '
+                             'or keyboard.hotkey("ctrl+shift+t").')
+
+
+def no_held_keys(modifiers: Optional[List[str]], what: str) -> None:
+    """Keys held through a click, drag or scroll need a key held down, which
+    Runtime's desktop cannot do; refused before anything happens."""
+    if modifiers:
+        raise NotSupportedError(f"Holding keys through a {what} (modifiers)",
+                                'Leave out modifiers; for a shortcut, keyboard.press(key, modifiers) '
+                                'or keyboard.hotkey("ctrl+a").')
+
+
+def click_count(double: bool, clicks: Optional[int]) -> int:
+    """1 or 2; ``clicks`` wins over ``double``, as on Daytona."""
+    count = (2 if double else 1) if clicks is None else clicks
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 10:
+        raise ValueError(f"clicks is a whole number from 1 to 10, not {clicks!r}.")
+    if count > 2:
+        raise NotSupportedError(f"{count} clicks at once (clicks)",
+                                "Click once or twice (double=True); to select a line, click once and press shift+End.")
+    return count
+
+
 _RECORDING_STATUS = {"starting": "recording", "installing": "recording", "recording": "recording",
                      "finished": "completed", "failed": "failed"}
 
@@ -1016,6 +1070,18 @@ def refuse_create(params: CreateSandboxBaseParams) -> None:
     resources = getattr(params, "resources", None)
     if resources is not None and resources.gpu:
         raise NotSupportedError("GPUs", "Runtime runs sandboxes on CPUs; remove gpu from resources.")
+    if params.kvm:
+        raise NotSupportedError("Nested virtualization (kvm)",
+                                "Remove it: Runtime sandboxes are microVMs without /dev/kvm inside.")
+    queue = params.queue_timeout
+    if queue is not None and (isinstance(queue, bool) or not isinstance(queue, int) or queue <= 0):
+        raise DaytonaValidationError("queue_timeout must be a positive integer")
+
+
+def check_timeout(timeout: Optional[float]) -> None:
+    """Daytona's check of a call's ``timeout``, before any request."""
+    if timeout is not None and timeout < 0:
+        raise DaytonaValidationError("Timeout must be a non-negative number")
 
 
 def network_rules(block_all: Optional[bool], cidrs: Optional[str], domains: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -1163,6 +1229,16 @@ class MarkerReader:
         return self.out_done and self.err_done
 
 
+def _pip_flags(find_links: Optional[List[str]], index_url: Optional[str], extra_index_urls: Optional[List[str]],
+               pre: bool, extra_options: str) -> str:
+    """pip's options as Daytona's Image writes them, after the packages."""
+    flags = ([f"--index-url {index_url}"] if index_url else []) + \
+        [f"--extra-index-url {url}" for url in extra_index_urls or []] + \
+        [f"--find-links {url}" for url in find_links or []] + (["--pre"] if pre else []) + \
+        ([extra_options] if extra_options else [])
+    return f" {' '.join(flags)}" if flags else ""
+
+
 class Image:
     """Daytona's declarative image, kept as the Dockerfile it stands for and
     built as a Runtime image when a sandbox or snapshot is created from it."""
@@ -1202,18 +1278,17 @@ class Image:
         names = [one for group in packages for one in ([group] if isinstance(group, str) else group)]
         if not names:
             return self
-        flags = ([f"--index-url {index_url}"] if index_url else []) + \
-            [f"--extra-index-url {url}" for url in extra_index_urls or []] + \
-            [f"--find-links {url}" for url in find_links or []] + (["--pre"] if pre else []) + \
-            ([extra_options] if extra_options else [])
         self._lines.append(f"RUN python -m pip install {' '.join(json.dumps(n) for n in names)}"
-                           + (f" {' '.join(flags)}" if flags else ""))
+                           + _pip_flags(find_links, index_url, extra_index_urls, pre, extra_options))
         return self
 
-    def pip_install_from_requirements(self, requirements_txt: str, **_: Any) -> "Image":
+    def pip_install_from_requirements(self, requirements_txt: str, find_links: Optional[List[str]] = None,
+                                      index_url: Optional[str] = None, extra_index_urls: Optional[List[str]] = None,
+                                      pre: bool = False, extra_options: str = "") -> "Image":
         remote = f"/.requirements/{hashlib.sha256(str(requirements_txt).encode()).hexdigest()[:12]}.txt"
         self._files.append((str(requirements_txt), remote.lstrip("/")))
-        self._lines += [f"COPY {remote.lstrip('/')} {remote}", f"RUN python -m pip install -r {remote}"]
+        flags = _pip_flags(find_links, index_url, extra_index_urls, pre, extra_options)
+        self._lines += [f"COPY {remote.lstrip('/')} {remote}", f"RUN python -m pip install -r {remote}{flags}"]
         return self
 
     def pip_install_from_pyproject(self, *_: Any, **__: Any) -> "Image":
@@ -1251,7 +1326,15 @@ class Image:
         self._lines.append(f"CMD {json.dumps(cmd)}")
         return self
 
-    def dockerfile_commands(self, commands: List[str], *_: Any, **__: Any) -> "Image":
+    def dockerfile_commands(self, commands: List[str], context_dir: Optional[str] = None, *,
+                            strict_context: bool = False) -> "Image":
+        """Lines added to the Dockerfile as they are. A build context for
+        them is refused: their COPY and ADD would not find its files."""
+        if strict_context and context_dir is None:
+            raise DaytonaValidationError("strict_context requires context_dir")
+        if context_dir is not None and any(re.match(r"\s*(COPY|ADD)\b", line, re.I) for line in commands):
+            raise NotSupportedError("COPY or ADD from a build context (dockerfile_commands context_dir)",
+                                    "Add the files with add_local_file or add_local_dir first, then use them.")
         self._lines += list(commands)
         return self
 

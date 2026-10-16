@@ -17,9 +17,9 @@ Two environments, one after the other, each a trial sandbox (1 vCPU, 2 GiB,
   adapter's refusal instead of passing.
 
 Each builds a Runtime image once (kept as harbor-e2e-<case>:<hash>, stored
-under the account's image quota; `runtime image rm` removes it). `--task`
-then runs `harbor run -p <task> -a oracle -e withruntime.harbor:RuntimeEnvironment
---ek funding=trial`, the oracle solution against the task's own tests.
+under the account's image quota; `runtime images rm` removes it). `--task`
+then runs `harbor run -p <task> -a oracle -e withruntime.harbor:RuntimeEnvironment`,
+the oracle solution against the task's own tests.
 
 Prints PASS or FAIL for each check, then checks that no sandbox it created
 is still running. RUNTIME_API_URL points it elsewhere. Not part of the tests."""
@@ -68,7 +68,7 @@ def environment(work: Path, case: str, dockerfile: str | None, docker_image: str
     config = EnvironmentConfig(docker_image=docker_image, cpus=1, memory_mb=2048, storage_mb=10240,
                                env={"TASK_VAR": "from-task"})
     return RuntimeEnvironment(environment_dir=env_dir, environment_name=f"e2e-{case}", session_id=f"e2e-{case}__env",
-                              trial_paths=paths, task_env_config=config, funding="trial")
+                              trial_paths=paths, task_env_config=config)
 
 
 async def exercise(env: RuntimeEnvironment, case: str, work: Path, cwd: str) -> None:
@@ -157,7 +157,7 @@ async def main() -> int:
         task = sys.argv[sys.argv.index("--task") + 1]
         jobs = tempfile.mkdtemp(prefix="runtime-harbor-jobs-")
         command = ["harbor", "run", "-p", task, "-a", "oracle", "-e", "withruntime.harbor:RuntimeEnvironment",
-                   "--ek", "funding=trial", "--jobs-dir", jobs]
+                   "--jobs-dir", jobs]
         print("$ " + " ".join(command), flush=True)
         done = subprocess.run(command, env={**os.environ, "PYTHONPATH": str(HERE.parent)})
         await sweep({Path(task).name})

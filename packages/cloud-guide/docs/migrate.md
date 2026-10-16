@@ -1,6 +1,6 @@
 # Switch to Runtime from another sandbox provider
 
-Move your sandbox code to Runtime in one pass, test it on the included usage, and see what you save each month.
+Move your sandbox code to Runtime in one pass, test it on the free usage, and see what you save each month.
 
 Your model, prompts and application stay as they are; only the sandbox calls
 change. For a project with no sandbox yet, start with [Get started](./start).
@@ -13,7 +13,7 @@ change. For a project with no sandbox yet, start with [Get started](./start).
 The agent follows the steps below and keeps going until your real job runs on
 Runtime. It ends with your monthly saving in dollars and what is left for you
 to go live.
-It tests without credit, asks before going on once the included usage is used, and never touches your old provider's account.
+It tests without credit, asks before going on once the free usage is used, and never touches your old provider's account.
 
 **Why teams switch:**
 
@@ -29,7 +29,7 @@ It tests without credit, asks before going on once the included usage is used, a
 - **More is built in.** A desktop, a code interpreter, custom images, volumes,
   and preview URLs that are private by default.
 - **No API key to copy.** One browser approval connects the CLI, SDKs and MCP.
-- **Test it free.** {{included-machine}} every month, no card, up to eight running at once.
+- **Test it free.** {{included-machine}}, no card, up to {{trial-sandboxes}} running at once.
   A sandbox without credit reaches ports 80 and 443 and shares previews privately, with
   a token; other outbound ports and public previews need paid credit.
 
@@ -60,8 +60,8 @@ snapshots or region guarantees. On Runtime:
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | Root                    | Passwordless `sudo` inside the sandbox                                                                                   |
 | Docker                  | Docker Engine and Compose with `sudo enable-docker` ([environment](./sandbox-environment#docker))                        |
-| SSH or an editor        | `runtime sandbox ssh`, and `<id>.runtime` in VS Code or JetBrains ([SSH and editors](./editors))                         |
-| A port on your machine  | `runtime sandbox port-forward <id> 5432`, any TCP port, over the API                                                     |
+| SSH or an editor        | `runtime sandboxes ssh`, and `<id>.runtime` in VS Code or JetBrains ([SSH and editors](./editors))                       |
+| A port on your machine  | `runtime sandboxes port-forward <id> 5432`, any TCP port, over the API                                                   |
 | WebSockets              | Supported, including through a preview                                                                                   |
 | A browser               | Playwright's Chromium installs in two commands, or use the [desktop](./products)                                         |
 | Custom images           | Build from a package list, any public or private image, or a Dockerfile                                                  |
@@ -83,7 +83,7 @@ npx withruntime feedback --kind migration_blocker --competitor E2B \
 
 ```bash no-run
 npx withruntime login --no-browser
-npx withruntime sandbox run -- echo hello
+npx withruntime sandboxes run -- echo hello
 ```
 
 The first command prints a link and a code: show them to the owner and wait for
@@ -132,7 +132,7 @@ Runtime handles differently, such as drives or schedules, throws
 - Without credit, a sandbox is at most 2 vCPU and 4096 MB; `memory: 8192` needs paid
   credit.
 - An image other than Blaxel's own templates must be a ready Runtime image of
-  the same name: `npx withruntime image build --dockerfile Dockerfile --name <name>`.
+  the same name: `npx withruntime images build --dockerfile Dockerfile --name <name>`.
 - Blaxel's preview token header (`X-Blaxel-Preview-Token`) and parameter
   (`?bl_preview_token=`) are accepted.
 
@@ -150,7 +150,7 @@ its token in the `x-runtime-preview-token` header.
 An E2B template becomes a Runtime image of the same name, built once from the
 same Dockerfile:
 
-1. Build it: `npx withruntime image build --dockerfile e2b.Dockerfile --name <template>`.
+1. Build it: `npx withruntime images build --dockerfile e2b.Dockerfile --name <template>`.
    Its `WORKDIR` is where commands start, as on E2B. A start or ready command
    from `e2b.toml` is not carried over; start it with
    `commands.run(cmd, { background: true })` after the create.
@@ -199,9 +199,9 @@ docs.
   `runtime.sandboxes.exec(id, argv)` is `sbx.exec(argv)`.
 - Keys are automatic; pass `idempotencyKey` only to make a retry safe across
   restarts.
-- The CLI is `npx withruntime sandbox <verb>` (`runtime sandbox <verb>`
-  installed), and MCP tools are `runtime_sandbox_*`, `runtime_sandbox_exec`,
-  `runtime_sandbox_files_*`.
+- The CLI is `npx withruntime sandboxes <verb>` (`runtime sandboxes <verb>`
+  installed), and MCP tools are `runtime_sandboxes_*`, `runtime_sandboxes_exec`,
+  `runtime_sandboxes_files_*`.
 - The 0.1.0 HTTP routes were removed; each answers 410 and names its
   replacement.
 
@@ -216,10 +216,10 @@ finish the switch.
 - Check that outputs match, not only that commands succeeded.
 - Check exit codes, failures and retries.
 - Record completion time over several runs, startup included.
-- List sandboxes at the end (`npx withruntime sandbox ls --json`) and stop any
+- List sandboxes at the end (`npx withruntime sandboxes ls --json`) and stop any
   the test left running.
 - If the job hits a limit without credit, stop and tell the owner which limit the error
-  named and that a top-up lifts it. Do not shrink the job to fit.
+  named and that adding credit lifts it. Do not shrink the job to fit.
 
 ## 6. Work out the saving
 
@@ -229,9 +229,9 @@ The quickest way: `npx withruntime compare --from <provider>` prices the
 sandboxes you actually ran at that provider's published rates and prints the
 monthly saving, with the date the rates were checked (`runtime_account` with
 action `compare` over MCP). It prices sandboxes without credit at the standard rates and says how many
-ran without credit, so the saving is the one paid credit gives. Before the owner's first top-up, `npx withruntime switch --from
-<provider>` records the move, and that top-up is matched, up to {{switching-max}}
-([switching credit](./pricing#switching-credit)). To work it out by hand:
+ran without credit, so the saving is the one paid credit gives. `npx withruntime switch --from <provider>` records the move,
+and credit the owner adds within {{welcome-days}} days of signing up is matched, up to
+{{welcome-max}} in total ([welcome match](./pricing#welcome-match)). To work it out by hand:
 
 1. **Runtime's cost.** After the test runs, `npx withruntime usage --json` lists
    each sandbox with its measured `activeCpuSeconds`, `billedCpuSeconds` and
@@ -254,7 +254,7 @@ ran without credit, so the saving is the one paid credit gives. Before the owner
    saving divided by the old cost; leave it out when the old cost is unknown.
 
 Say which figures are measured and which are published rates, with their dates.
-Never present an estimate as an invoice, or count included usage as a saving.
+Never present an estimate as an invoice, or count free usage as a saving.
 If Runtime is more expensive or lacks a needed feature, say so.
 
 A report in this shape, with made-up volumes:
@@ -278,9 +278,9 @@ only they can take:
   [API keys](https://withruntime.com/account/keys) and stores it as
   `RUNTIME_API_KEY` in the app's secrets. The agent's own connection is for
   this machine only.
-- The owner merges. Then check that `npx withruntime sandbox ls` shows the
+- The owner merges. Then check that `npx withruntime sandboxes ls` shows the
   app's sandboxes.
-- Never spend paid credit on your own: going on past the included usage is the owner's word.
+- Never spend paid credit on your own: going on past the free usage is the owner's word.
 - The old provider's account, keys and data are the owner's to close. Leave
   them as they are.
 - Send feedback on anything that slowed the switch:

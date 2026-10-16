@@ -55,10 +55,10 @@ func main() {
 ```
 
 `Create` returns once the sandbox is running. `opts` may be `nil`: with no
-options you get the included usage while it lasts, the default region, and 2 vCPU,
+options you get the free usage while it lasts, the default region, and 2 vCPU,
 4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
 when idle, with no time limit (`TimeoutSeconds` sets one, 60 to 86,400; `EndsAt`
-is nil while none applies). The included usage is spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
+is nil while none applies). The free usage is spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
 
 ```go
 package main
@@ -475,10 +475,6 @@ func main() {
 
 	dev.KeepAlive(ctx, nil)
 	defer dev.StopKeepAlive()
-	off := false
-	if err := dev.Update(ctx, withruntime.SandboxSettings{AutoWake: &off}, nil); err != nil {
-		log.Fatal(err)
-	}
 }
 ```
 
@@ -788,7 +784,7 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `Retryable()` says whether trying the same call again may work.
 
-**A create waits for room.** When all eight slots without credit are taken (`no_credit_running_limit`), the
+**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `Sandboxes.Create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
@@ -889,7 +885,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println(domain.Records) // Publish these at your DNS provider, then call Domains.Verify.
-	address, err := client.Addresses.Reserve(ctx, 4)
+	address, err := client.IPs.Reserve(ctx, 4)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -903,11 +899,11 @@ func main() {
 }
 ```
 
-`Ports.Open` returns `Connect`, the public address and port. `Tunnel.Create`
+`Ports.Open` returns `Connect`, the public address and port. `Networks.WireGuard.Create`
 creates the account's WireGuard network; `AddPeer` and `RotatePeer` return a
 configuration holding a generated private key once. Save `Config` even when
 `ConfigReady` is false: it is a draft whose gateway public key must be filled
-from `Tunnel.Get` before use. A generated-key request is never automatically
+from `Networks.WireGuard.Get` before use. A generated-key request is never automatically
 retried. To keep the private key entirely on your machine, supply `PublicKey`.
 
 Dedicated addresses and WireGuard networks expose `Funded`, `FundedUntil`,

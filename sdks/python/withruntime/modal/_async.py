@@ -2,11 +2,16 @@
 from __future__ import annotations
 import asyncio
 import codecs
+import inspect
 import json
+import math
+import time
 from .. import AsyncRuntime
 from .._compat import CompatibilityError, ENV_PATH, environment, positive, reject
 from ._dual import Dual, async_only
-from . import Sandbox, Image, App, _Writer, _create_plan, _entrypoint_ms, _limit
+from . import (Sandbox, Image, _Writer, _plan, _native_create, _entrypoint_ms, _buffering, _ready_timeout,
+               _tunnel_from_preview)
+from .exception import TimeoutError as _ProbeTimeout
 
 
 class _AsyncReader:
@@ -146,22 +151,33 @@ class AsyncContainerProcess:
     kill = Dual(async_only, _kill)
 
 
-async def create(*args, app=None, name=None, tags=None, image=None, env=None, secrets=None,
-                 timeout=None, workdir=None, gpu=None, cpu=None, memory=None, block_network=False,
-                 outbound_domain_allowlist=None, client=None, **options):
-    image, variables, lifetime, fields = _create_plan(image, env, secrets, timeout, gpu, cpu, memory, options)
-    runtime = client or AsyncRuntime()
-    source = {"snapshot": image._snapshot_id} if image._snapshot_id else {
-        "image": (await runtime.images.build(dockerfile=image._dockerfile))["id"]}
-    sb = await runtime.sandboxes.create(name=name, **source, **_limit(lifetime), on_lease_end="stop", labels={"modal.tags": json.dumps(tags or {}), "compat.provider": "modal",
-        "modal.app": app.name or "" if app else "", "modal.name": name or ""},
-        network={"internet": not block_network, **({"allow": list(outbound_domain_allowlist)} if outbound_domain_allowlist is not None else {})}, **fields)
+
+_CREATE = inspect.signature(Sandbox.create)
+
+
+async def create(*args, **kwargs):
+    bound = _CREATE.bind(*args, **kwargs)
+    bound.apply_defaults()
+    options = dict(bound.arguments)
+    args = options.pop("args")
+    plan = _plan(args, options)
+    runtime = options["client"] or AsyncRuntime()
+    source = await plan["image"]._source_aio(runtime)
+    for disk in plan["disks"].values():
+        await disk._load_aio(runtime)
+    sb = await runtime.sandboxes.create(**_native_create(plan, source, options["name"]))
     try:
-        if not image._snapshot_id or env is not None or secrets is not None:
-            await sb.files.write(ENV_PATH, json.dumps(variables), mode=0o600)
+        if plan["write_env"]:
+            await sb.files.write(ENV_PATH, json.dumps(plan["variables"]), mode=0o600)
+        for path, bucket in plan["buckets"].items():
+            await sb.mounts.add(**bucket._mount(path))
+        for port in plan["ports"]:
+            await sb.previews.create(port, visibility="public")
         entry = None
         if args:
-            process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", timeout_ms=_entrypoint_ms(lifetime))
+            process = await sb.spawn(list(args), cwd=options["workdir"], env=plan["variables"], stdin="pipe",
+                                     timeout_ms=_entrypoint_ms(plan["lifetime"]),
+                                     **({"pty": {"rows": 24, "cols": 80}} if plan["pty"] else {}))
             await sb.update(labels={**sb.info.get("labels", {}), "modal.entrypoint": process.id})
             entry = AsyncContainerProcess(process, on_exit=sb.stop)
     except BaseException as original:
@@ -172,6 +188,7 @@ async def create(*args, app=None, name=None, tags=None, image=None, env=None, se
         raise
     box = Sandbox(runtime, sb, entry)
     box._async_mode = True
+    box._readiness, box._read_only_disks = plan["probe"], any(disk._read_only for disk in plan["disks"].values())
     return box
 
 
@@ -186,6 +203,7 @@ async def from_id(sandbox_id, client=None):
 
 
 def _native_async(box):
+    box._attached()
     if getattr(box, "_async_mode", False):
         return box._sandbox
     # Sync handles support `.aio` without routing I/O through executor threads.
@@ -198,21 +216,22 @@ def _native_async(box):
 
 async def execute(self, *args, timeout=None, workdir=None, env=None, secrets=None, text=True, bufsize=-1, pty=False, **options):
     reject(options, "Modal Sandbox.exec")
-    if bufsize not in (-1, 1) or (bufsize == 1 and not text):
-        raise ValueError("bufsize must be -1 or 1; line buffering requires text=True")
+    _buffering(text, bufsize)
     sb = _native_async(self)
     variables = environment(await sb.files.read(ENV_PATH))
     for secret in secrets or []:
         variables.update(secret._values)
-    variables.update(env or {})
+    variables.update({key: value for key, value in (env or {}).items() if value is not None})
     process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe",
         timeout_ms=None if timeout is None else int(positive(timeout, "timeout") * 1000),
         pty={"rows": 24, "cols": 80} if pty else None, **({"output_encoding": "base64"} if not text else {}))
     return AsyncContainerProcess(process, text=text, bufsize=bufsize, binary_transport=not text)
 
 
-async def terminate(self):
+async def terminate(self, *, wait=False):
     await _native_async(self).stop()
+    self._terminated = True
+    return self.returncode if wait else None
 
 
 async def wait(self, raise_on_termination=True):
@@ -240,6 +259,35 @@ async def snapshot_filesystem(self, timeout=55, *, ttl=30 * 24 * 3600):
     return Image(None, snapshot_id=checked(snapshot)['id'])
 
 
+async def wait_until_ready(self, *, timeout=300):
+    deadline = time.monotonic() + _ready_timeout(timeout)
+    probe = self._probe()
+    sb = _native_async(self)
+    while True:
+        left = deadline - time.monotonic()
+        result = await sb.exec(probe._command(), timeout_ms=max(1, math.ceil(min(left, 10) * 1000)))
+        if result.exit_code == 0:
+            return
+        if time.monotonic() + probe.interval_ms / 1000 >= deadline:
+            raise _ProbeTimeout(f"Sandbox was not ready within {timeout} seconds")
+        await asyncio.sleep(probe.interval_ms / 1000)
+
+
+async def tunnels(self, timeout=50):
+    sb = _native_async(self)
+    if self._tunnels is None:
+        ports = self._ports()
+        shared = await sb.previews.list() if ports else []
+        self._tunnels = {item["port"]: _tunnel_from_preview(item) for item in shared
+                         if item["port"] in ports and item.get("visibility") == "public"}
+    return self._tunnels
+
+
+async def reload_volumes(self, *, timeout=55):
+    self._attached()
+    self._check_reload(timeout)
+
+
 async def enter(self):
     return self
 
@@ -248,15 +296,10 @@ async def exit(self, *args):
     await terminate(self)
 
 
-async def lookup(name, *, create_if_missing=False, **options):
-    reject(options, "Modal App.lookup")
-    return App(name)
-
-
 async def from_name(app_name, name, *, environment_name=None, client=None):
-    from ._lookup import validate_environment
     from .exception import NotFoundError, ConflictError
-    validate_environment(environment_name)
+    if environment_name is not None:
+        raise CompatibilityError("Modal environment namespaces are not Runtime account namespaces")
     runtime = client or AsyncRuntime()
     found = [sb async for sb in await runtime.sandboxes.list(state=["running"], labels={"compat.provider": "modal", "modal.app": app_name, "modal.name": name})]
     if not found:
@@ -298,7 +341,8 @@ def install():
     Sandbox.list = Dual(Sandbox.list, list_sandboxes, static=True)
     for name, asynchronous in (("exec", execute), ("terminate", terminate), ("wait", wait),
                                ("poll", poll), ("snapshot_filesystem", snapshot_filesystem),
-                               ("get_tags", get_tags), ("set_tags", set_tags)):
+                               ("get_tags", get_tags), ("set_tags", set_tags),
+                               ("wait_until_ready", wait_until_ready), ("tunnels", tunnels),
+                               ("reload_volumes", reload_volumes)):
         setattr(Sandbox, name, Dual(getattr(Sandbox, name), asynchronous))
     Sandbox.__aenter__, Sandbox.__aexit__ = enter, exit
-    App.lookup = Dual(App.lookup, lookup, static=True)

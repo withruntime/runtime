@@ -44,18 +44,25 @@ says whether it then pauses or stops. `persistent: true` keeps a sandbox
 running until you stop it, with no idle pause; its disk is billed as any
 sandbox's.
 
-**Start free, every month.** Every account gets [included usage](./included-usage) each calendar month, with no card: {{free-memory}} of memory, {{free-cpu}} of active CPU, {{free-saved-copies}} of saved copies (snapshots, images, backups) and {{free-disks}} of volumes, {{included-machine}}. It is used before credit, renews on the 1st (UTC) and is never charged. An account given free hours before 5 October 2026 keeps what is left of them as well.
+**Start free.** Every account gets [free usage](./included-usage), with no card: {{free-memory}} of memory, {{free-cpu}} of active CPU, {{free-saved-copies}} of saved copies (snapshots, images, backups) and {{free-disks}} of volumes: enough for {{included-machine}}. An account that has never paid has the machine time once, across its first 30 days; one that has paid has it every month, renewed on the 1st (UTC). It is used before credit and is never charged. An account given free hours before 5 October 2026 keeps what is left of them as well.
 
 **Then prepay.** Add credit by card at
 [Usage & billing](https://withruntime.com/account/billing), any amount from {{topup-min}}
 to {{topup-max}}. There is no subscription. The page shows how long your credit lasts
 at this month's pace and what each product cost each day, and its ledger links
-each card purchase to its Stripe receipt. Refer a company and you both get credit
-equal to its first top-up, up to {{referral-max}} each ([referrals](./referrals)). Moving
-from another provider? Your first top-up is matched, up to {{switching-max}}
-([switching credit](#switching-credit)). A venture-backed startup building with AI
+each card purchase to its Stripe receipt. Runtime emails you once each purchase's credit is in, with any match it earned and your balance. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total ([welcome match](#welcome-match)).
+Refer a company and you both get up to {{referral-max}}, then {{referral-share}} of what it spends for
+{{referral-share-months}} months ([referrals](./referrals)). A venture-backed startup building with AI
 agents can apply to [Runtime for Startups](https://withruntime.com/startups) for
-{{startup-credit}} of credit, added over {{startup-months}} months.
+{{startup-machine}}, given once: {{startup-cpu}} of active CPU and
+{{startup-memory}} of memory, used after the month's free usage and before
+credit. They never renew: use them within 12 months. For those 12 months,
+Runtime for Startups also includes {{startup-saved-copies}} of saved copies and
+{{startup-disks}} of volumes kept free each month, on top of the month's free usage; storage past them is
+charged at the published rates. For the same 12 months an accepted startup
+is a paid account with no top-up, and runs {{startup-builds}} image builds at
+once, and up to {{startup-at-once-most}} sandboxes at once if it asks; after
+them, it is a paid account once it holds credit it bought.
 
 ## How many at once
 
@@ -67,7 +74,8 @@ costs {{=$2 cost:runtime:16x64x3600x57600x1}} an hour.
 A paid account runs **{{paid-sandboxes}} sandboxes at once**, counting those starting, running,
 waking or pausing; paused and stopped ones do not count. It has up to
 **{{account-vcpus}} vCPUs and {{account-memory}} of memory** across the running ones and {{account-disk}} of
-disk, from the first top-up. A disputed payment, a suspension or an abuse
+disk, from the first top-up, and twice each, {{auto-sandboxes}} sandboxes at
+once, while [auto top-up](#auto-top-up) is on. A disputed payment, a suspension or an abuse
 report puts an account back to {{restricted-sandboxes}} sandboxes at once. A paused sandbox holds no
 CPU or memory; waking one while the account already runs its limit is refused
 with `quota_exceeded`, and the sandbox stays paused until another pauses or
@@ -94,8 +102,9 @@ level is missing: "needs credit" or "needs a kept top-up".
 
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
+Every limit, with credit and without, is listed in [limits](./limits).
 Past a limit, a create returns `quota_exceeded`, saying which limit and, for
-a new account, when it lifts, and costs nothing. An account without credit runs {{trial-sandboxes}} at once, at most {{no-credit-total}} in all ([included usage](./included-usage)).
+a new account, when it lifts, and costs nothing. An account without credit runs {{trial-sandboxes}} at once, at most {{no-credit-total}} in all, keeps at most {{no-credit-kept}} sandboxes and makes at most {{no-credit-daily}} a day; its scheduled jobs wait for credit ([free usage](./included-usage)).
 
 ## Paused storage
 
@@ -121,7 +130,9 @@ is kept free for three days, with one notice a day before, and then deleted.
 A paused sandbox on a paid account is kept as long as the account has credit,
 until you delete it, or for 1–365 days if you set them with `:retention`. When
 credit runs out it is kept seven more days, with a notice first, and a top-up
-before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free. Once
+before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free.
+`:retention` on a sandbox made without credit answers `retention_unavailable`:
+its days cannot be set. Once
 the account holds credit, a sandbox paused without credit is kept as a paid one is,
 and its storage is billed from the end of its seven free days. The resource's `pausedExpiresAt` (null while it is kept as long as you
 have credit) and paused-storage receipt give its actual terms.
@@ -168,23 +179,27 @@ The snapshot and image rate is paused storage's, rounded down to whole
 microdollars. The volume rate is the reserved disk rate: a volume holds its whole
 size on its server from the moment you create it.
 
-Building an image is free (without credit it counts toward the included usage, unless it fails through a fault of ours),
+Building an image is free (without credit it counts toward the free usage, unless it fails through a fault of ours),
 and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, up to a year from when it was taken (7 days without credit), unless you choose 1 to 365 days. A snapshot's copy
-off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**, charged on
+off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**; a
+backup made before this price keeps {{backup-rate-before}} until {{backup-raise-date}}. Backups are charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
 Every volume is backed up off its server daily unless you turn that off.
 
-The [included usage](./included-usage) stores your first three images and your first 10 GiB of
+The [free usage](./included-usage) stores your first three images and your first 10 GiB of
 volumes free, for as long as you keep them. They are never charged, even after
 you add credit. Deleting one frees its place. Snapshots are not part of that free storage.
 
-An item's rate is fixed when you make it and never changes. It is under `rates`
-in `GET /v1/usage`: `storage.stored` for a snapshot, `storage.reserved` for an
-image and `storage.provisioned` for a volume.
+An item's rate is fixed when you make it. A new price reaches items that
+already exist only from a date announced ahead, here and in the
+[changelog](./changelog). Its rate now is under `rates`
+in `GET /v1/usage`: `storage.stored` for a snapshot or a volume backup,
+`storage.reserved` for an image and `storage.provisioned` for a volume.
 
 Storage is paid an hour at a time from your balance. The hold covers the most
 the item can be charged for that hour; the charge is what it used, and the rest
-is released.
+is released. Each hour settles within a minute of its end, usually seconds, and
+is in the [usage export](./api#export-settled-usage) from then.
 
 ## Network products
 
@@ -201,7 +216,10 @@ none of the allowance.
 
 The allowance is shared by all of an account's sandboxes and starts again on
 the first of each month, UTC. Traffic is charged from your balance each time a
-sandbox's compute settles: each half hour while it runs, and when it stops or pauses.
+sandbox's compute settles: while it runs, in windows of up to an hour, each
+settled after it ends; when it stops or pauses; and whenever you read the
+[usage export](./api#export-settled-usage), which first settles each running
+sandbox paid from credit through about a minute ago.
 It is never held in advance and never takes the balance below zero. The rate is
 fixed in each sandbox's quote, as `egress.outbound` in `rates` for what it
 sends and `egress.served` for what it serves, and
@@ -220,6 +238,95 @@ If credit or another spending permission prevents renewal, address and tunnel
 traffic stops. The reservation stays yours until you release it; unpaid time
 is never billed later. A dedicated address never silently switches to a shared
 outbound address. See [networking](./networking) for funding status and access.
+
+## Pay with stablecoins
+
+Credit can be bought in USDC on Base, Solana or Tempo, from any wallet:
+`runtime billing topup 50` prints an address per network and the exact amount
+to send, and `--wait` waits until the credit lands; `runtime billing status <id>`
+says whether the payment arrived. A top-up is {{topup-min}} to {{topup-max}},
+and a new account buys at most $500 in its first week.
+
+An agent working with no person can open its own account this way. There is
+no sign-in, no browser and no card, and no free trial: the account gets its
+key only once its payment lands. Until a person takes the account over, it
+earns no [welcome match](#welcome-match) and no referral reward; payments
+after a takeover earn them as anyone's do.
+
+```bash no-run
+npx withruntime billing topup 20 --new-account --accept-terms --wait
+```
+
+- `--accept-terms` agrees to the [terms](https://withruntime.com/legal/terms)
+  for whoever the agent acts for.
+- It prints a claim code, shown once. It is the only way to the account's key,
+  so keep it secret. `runtime billing claim <code> --wait` fetches the key if
+  the first answer was lost.
+- `--wait` saves the key on that machine once the money lands; the CLI, SDKs
+  and MCP use it from then on.
+- A person can take the account over later at
+  [withruntime.com/account/claim](https://withruntime.com/account/claim) with
+  the claim code.
+
+Over HTTP, with no CLI:
+
+1. Make a claim code: `rtclaim_` and 43 base64url characters from 32 random
+   bytes. Holding it before the first answer means a retry finds the same
+   account and opens no second one.
+2. `POST https://withruntime.com/api/wallet/topups` with
+   `{"usd": 20, "acceptTerms": true, "claimCode": "rtclaim_…"}` answers 201
+   with an address per network and the exact amount. Send exactly that amount
+   to one of them.
+3. `POST https://withruntime.com/api/wallet/claim` with
+   `{"claimCode": "rtclaim_…"}` answers 202 until the payment lands, then 200
+   with `apiKey`, once. Store it as `RUNTIME_API_KEY`.
+
+With MCP and no shell, `npx -y withruntime mcp` offers `runtime_wallet_open`
+and `runtime_wallet_claim` before it is connected; the claim saves the key and
+Runtime's tools appear. A remote MCP client with no key connects to
+`https://api.withruntime.com/mcp?signup=wallet` for the same two tools; its
+claim answers with the key once, for `Authorization: Bearer <key>` on
+`https://api.withruntime.com/mcp`.
+
+Every SDK has the two calls: `openWalletAccount` and `claimWalletAccount` in
+JavaScript, `withruntime.wallet` in Python, `OpenWalletAccount` and
+`ClaimWalletAccount` in Go, `WithRuntime::Wallet` in Ruby and `Wallet` in Java.
+
+## Auto top-up
+
+Auto top-up adds credit from a saved card when your balance falls below a line
+you pick, so sandboxes never stop for an empty balance. Turn it on at
+[Usage & billing](https://withruntime.com/account/billing#auto-top-up). It
+starts ready to go: when credit falls below {{auto-below}}, add
+{{auto-amount}}, at most {{auto-monthly}} in a calendar month (UTC). Change
+any of them. The line can be any amount from {{auto-below}}, and the monthly
+most any amount from {{auto-least-monthly}}. The amount runs from
+{{auto-amount}} to {{topup-max}}, $500 in an account's first week, as for any
+top-up, which is also the most an account adds in 24 hours. The card is
+saved on Stripe's page; Runtime never sees its number.
+
+- Each automatic top-up earns **{{auto-bonus}} more as credit** once its charge
+  has gone through: add $20 and you get $21. The extra is granted credit, never
+  cash, and it is used after the month's free usage.
+- While auto top-up is on with a saved card, the account runs
+  **{{auto-sandboxes}} sandboxes at once** instead of {{paid-sandboxes}}, with
+  twice the vCPUs, memory and disk across them. Turning it off returns new
+  starts to {{paid-sandboxes}}; sandboxes already running keep running. A limit
+  set for your account by support or a pilot stays as it is.
+- One charge at a time: the line is checked every minute, and a charge is never
+  repeated for the same fall below the line. Tax is added as on any top-up.
+- If the bank declines a charge or asks to confirm it, auto top-up turns itself
+  off and Usage & billing says why. Nothing that is running stops. Turn it on
+  again, or save another card. Removing the card turns it off too.
+- If an automatic top-up is refunded or charged back, its extra credit goes
+  back too, up to what is unspent, and a refund is smaller by any of the extra
+  already spent.
+
+Owners, admins and billing members change it, and so does a key one of them
+made: `runtime billing auto-top-up on --below 25 --amount 50 --monthly 1000`,
+`billing.autoTopUp.set()` in the SDK, or `PUT /v1/billing/auto-top-up`; a
+figure left out keeps the one saved, and `runtime billing auto-top-up off`
+turns it off. `runtime_account_get` in MCP shows it. Only a person saves the card.
 
 ## When your balance runs out
 
@@ -356,29 +463,37 @@ stops answering Runtime, the sandbox is charged only up to the last moment it
 answered. Time a server holds a sandbox frozen because it cannot reach
 Runtime is not charged either, for memory or CPU.
 
-## Switching credit
+## Welcome match
 
-Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare, Fly or Blaxel? Say so
-before your first top-up, and that top-up is matched with credit, up to {{switching-max}}:
+Credit your organization adds within {{welcome-days}} days of signing up is matched
+with credit, up to {{welcome-max}} in total. There is nothing to claim: add credit at
+[Usage & billing](https://withruntime.com/account/billing#add-credit) and the match lands
+beside it. Home and the billing page show how much of the {{welcome-max}} is used and
+when the offer ends.
 
-```bash check
-runtime switch --from e2b
-```
-
-- Once per organization, and only before its first top-up. Your agent can do
-  it for you: `POST /v1/switching`, or the `runtime_switching_record` MCP tool.
-- The credit lands when the payment settles. Pay $40 and you get $40 more; pay
-  $250 and you get {{switching-max}} more. Paid through Link or another wallet
-  that does not tell us the card, it lands once someone at Runtime has checked
-  it.
+- Every payment in those {{welcome-days}} days counts, not only the first. Add $20
+  and then $500 and you get $520 more; add $800 and then $500 and you get
+  {{welcome-max}} more. Credit added after day {{welcome-days}} is not matched.
+- The credit lands when each payment settles, whether you pay by card or
+  through Link. Paid through a wallet that tells us neither the card nor the
+  Link account, it lands once someone at Runtime has checked it.
+- It is granted credit: used after the month's free usage, and it expires
+  12 months after it is given.
 - It does not stack with a [referral](./referrals). If you signed up through a
-  referral link, the referral's match applies instead, and it is never smaller.
-- If the top-up is refunded or charged back, the matching credit goes back too,
-  up to what is unspent, and a refund of that top-up is smaller by any matching
-  credit already spent.
+  referral link, the referral matches your payments instead, the same
+  {{referral-max}} over the same {{referral-days}} days, and it is never smaller.
+- One payer, one match: a card or Link account whose payment was matched for
+  another organization is not matched again.
+- If a payment is refunded or charged back, its matching credit goes back too,
+  up to what is unspent, and a refund of that payment is smaller by any of its
+  matching credit already spent. The rest of the match stays, and what was
+  taken back can be matched again within the {{welcome-days}} days.
 
-`runtime switch` on its own shows whether you can still claim it and what it
-paid.
+Moving from E2B, Daytona, Vercel Sandbox, Modal, Cloudflare, Fly or Blaxel?
+`runtime switch --from e2b` records where you came from, so `runtime compare`
+and Runtime know what you left; your credit is matched as everyone's is.
+`runtime switch` on its own shows the match: how much is used and left, and how
+long you have.
 
 ## Check it on your own workload
 
@@ -391,7 +506,7 @@ runtime compare --from e2b
 
 It takes your settled sandboxes from the last 30 days (`--days` up to 90). It
 prices them at the rates you were quoted, and the same vCPUs, memory and
-running time at the rival's published rates from the table above. Sandboxes the included usage paid for are priced at the standard rates, what the same work costs
+running time at the rival's published rates from the table above. Sandboxes the free usage paid for are priced at the standard rates, what the same work costs
 on paid credit, and the output says how many there were. Then it says
 what you save, and about how much that is a month. With no sandboxes yet it
 prices an example and says so. It compares compute only: storage, network,

@@ -23,7 +23,9 @@ for (const action of ["add", "rotate"]) {
       fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
         const url = new URL(_input instanceof Request ? _input.url : String(_input));
         expect(url.pathname).toBe(
-          action === "add" ? "/v1/tunnel/peers" : `/v1/tunnel/peers/${peerId}:rotate`,
+          action === "add"
+            ? "/v1/networks/wireguard/peers"
+            : `/v1/networks/wireguard/peers/${peerId}:rotate`,
         );
         if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
         sent = JSON.parse(init.body);
@@ -42,7 +44,7 @@ for (const action of ["add", "rotate"]) {
     });
     const logs: string[] = [];
     await networkProductCommand(
-      "tunnel",
+      "wireguard",
       ["peer", action, argument],
       { positional: ["peer", action, argument], flags: new Map([["out", [file]]]) },
       { json: false, write: (t) => logs.push(t), error: (t) => logs.push(t) },
@@ -53,7 +55,7 @@ for (const action of ["add", "rotate"]) {
     expect(privateKey).toMatch(/^[A-Za-z0-9+/]{43}=$/);
     expect(JSON.stringify(sent)).not.toContain(privateKey);
     expect((await stat(file)).mode & 0o077).toBe(0);
-    expect(text).toContain("PublicKey = <gatewayPublicKey from runtime tunnel get>");
+    expect(text).toContain("PublicKey = <gatewayPublicKey from runtime networks wireguard get>");
     expect(logs.join("\n")).toContain("Keep this file");
     expect(logs.join("\n")).not.toContain("Bring it up with");
   });

@@ -301,7 +301,8 @@ test("accepted lifecycle/file/execution options refuse pre-aborted work before a
     () => f.client.devboxes.executions.retrieve(ID, "execution", {}, options),
     () => f.client.devboxes.executions.kill(ID, "execution", options),
     () => f.client.devboxes.executions.kill(ID, "execution", {}, options),
-    () => f.client.devboxes.executions.sendStdIn(ID, "execution", options),
+    // Runloop 2.0 removed the options-only overload: stdin now requires a body.
+    () => f.client.devboxes.executions.sendStdIn(ID, "execution", {}, options),
     () => f.client.devboxes.executions.sendStdIn(ID, "execution", { text: "never" }, options),
   ]) {
     await expect(operation()).rejects.toBe(reason);

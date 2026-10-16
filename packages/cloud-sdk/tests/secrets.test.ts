@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseSecretRules, run, secretsCommand } from "../src/cli";
+import { parseSecretRules, run, scopeText, secretsCommand } from "../src/cli";
 import { Runtime } from "../src/client";
 
 /* runtime.secrets and `runtime secrets` against a stub API. The routes are
@@ -197,4 +197,99 @@ test("`runtime secrets ls` shows each secret's rules", async () => {
       expect(lines.join("\n")).toMatch(/rtsec_\w+\s+POST \/v1\/\*/);
     },
   );
+});
+
+test("`runtime secrets set --only-label/--only-sandbox` scopes a secret, --all-sandboxes widens it, and ls says who gets it", async () => {
+  const HUB = "ef01c6ef-6648-450b-acd2-6fe82ac31960";
+  const only = { labels: [{ role: "hub" }, { purpose: "agent", tier: "x" }], sandboxes: [HUB] };
+  await withStub(
+    () => ({ ...SECRET, only, enforced: true }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await secretsCommand(
+          [
+            "set",
+            "SLACK_APP_TOKEN",
+            "--host",
+            "slack.com",
+            "--only-label",
+            "role=hub",
+            "--only-label",
+            "purpose=agent,tier=x",
+            "--only-sandbox",
+            HUB.toUpperCase(),
+          ],
+          env,
+          out,
+          async () => "xapp_x",
+        ),
+      ).toBe(0);
+      expect(JSON.parse(seen[0]!.body)).toEqual({ value: "xapp_x", hosts: ["slack.com"], only });
+      expect(lines.join("\n")).toContain(
+        `Only these sandboxes get it and see OPENAI_API_KEY=${SECRET.placeholder}: role=hub | purpose=agent,tier=x | ${HUB}.`,
+      );
+    },
+  );
+  // No flag: nothing sent, so the scope the secret has stays.
+  await withStub(
+    () => ({ ...SECRET, enforced: true }),
+    async (seen) => {
+      const { out } = output();
+      await secretsCommand(["set", "K", "--host", "a.example.com"], env, out, async () => "v");
+      expect(JSON.parse(seen[0]!.body)).not.toHaveProperty("only");
+      await secretsCommand(
+        ["set", "K", "--host", "a.example.com", "--all-sandboxes"],
+        env,
+        out,
+        async () => "v",
+      );
+      expect(JSON.parse(seen[1]!.body).only).toEqual({});
+    },
+  );
+  const { out } = output();
+  for (const bad of [
+    ["--only-label", "role"],
+    ["--only-label", "=hub"],
+    ["--only-sandbox", "agents-hub"],
+    ["--only-label", "role=hub", "--all-sandboxes"],
+  ])
+    await expect(
+      secretsCommand(["set", "K", "--host", "a.example.com", ...bad], env, out, async () => "v"),
+    ).rejects.toThrow(/--only-label|--only-sandbox|--all-sandboxes/);
+  expect(scopeText(undefined)).toBe("all");
+  await withStub(
+    () => ({ secrets: [{ ...SECRET, only: { labels: [{ role: "hub" }] } }] }),
+    async () => {
+      const { lines, out: listed } = output();
+      expect(await run(["secrets", "ls"], env, listed)).toBe(0);
+      expect(lines.join("\n")).toMatch(/rtsec_\w+\s+-\s+role=hub/);
+    },
+  );
+});
+
+test("`runtime secrets scope` changes who gets a secret without reading a value", async () => {
+  await withStub(
+    () => ({ ...SECRET, only: { labels: [{ role: "hub" }] }, enforced: true }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await secretsCommand(
+          ["scope", "SLACK_APP_TOKEN", "--only-label", "role=hub"],
+          env,
+          out,
+          () => {
+            throw new Error("scope reads no value");
+          },
+        ),
+      ).toBe(0);
+      expect(seen[0]!.line).toBe("PUT /v1/egress-secrets/SLACK_APP_TOKEN/sandboxes");
+      expect(JSON.parse(seen[0]!.body)).toEqual({ labels: [{ role: "hub" }] });
+      expect(lines.join("\n")).toContain("OPENAI_API_KEY: only role=hub.");
+      await secretsCommand(["scope", "K", "--all-sandboxes"], env, out);
+      expect(JSON.parse(seen[1]!.body)).toEqual({});
+    },
+  );
+  const { out } = output();
+  await expect(secretsCommand(["scope", "K"], env, out)).rejects.toThrow(/Say who gets it/);
 });

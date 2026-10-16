@@ -18,14 +18,79 @@ published 30 September 2026, is a different package: it removes `getSandbox`, th
 pin stays 0.12.10; `compatibility-lock.json` records 1.0.0 as reviewed and
 unsupported, and `bun run compat:upstream` flags any other release.
 
-| Provider    | Published package inspected             | Runtime import            | Implemented sandbox surface                                                                                                                                                                                                                                                                             |
-| ----------- | --------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runloop     | `@runloop/api-client` 1.32.0            | `withruntime/runloop`     | `Runloop`, devbox create/get/list/suspend/resume/shutdown, disk snapshots; synchronous and asynchronous commands, resident named shells with variables, functions, aliases, options and working directory, execution completion/output/stdin/signals, text files                                        |
-| CodeSandbox | `@codesandbox/sdk` 2.4.2                | `withruntime/codesandbox` | `CodeSandbox`, `VMTier`, create/fork/resume/shutdown/restart/hibernate/delete/list/get; connected command and file clients; output/status subscriptions and same-client command restart; configured tasks and setup steps; public preview ports and readiness checks                                    |
-| Fly Sprites | `@fly/sprites` 0.2.3                    | `withruntime/sprites`     | `SpritesClient`, create/lookup/list/delete/restart; `exec`, `execFile`, Node streams and event-based `spawn`; attachable native processes; binary/text/JSON files, directory traversal, append, chmod; preview access settings                                                                          |
-| Freestyle   | `freestyle` 0.2.16                      | `withruntime/freestyle`   | `Freestyle`, VM create/ref/get/list/start/pause/delete/update; command execution, binary/text files and streams, filesystem metadata; native snapshots; explicit deny-all or outbound-public firewall intent                                                                                            |
-| Modal       | `modal` 0.11.0                          | `withruntime/modal`       | `ModalClient`, app-name grouping, registry images and Dockerfile layers, CPU sandbox create/get/list/name lookup, text/binary process streams and stdin, command completion, filesystem transfer and metadata, tags, encrypted public previews, outbound allowlists, memory snapshot capture            |
-| Cloudflare  | `@cloudflare/sandbox` 0.12.10 (0.x API) | `withruntime/cloudflare`  | `getSandbox`, named Runtime sandboxes, explicit execution sessions, text exec and SSE output, background processes, logs/signals/waits, binary/text files, recursive listings, environment updates, signed Runtime previews, conditional Worker Durable Object entry, Worker preview proxy, destruction |
+| Provider    | Published package inspected             | Runtime import            | Implemented sandbox surface                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------- | --------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runloop     | `@runloop/api-client` 2.0.0             | `withruntime/runloop`     | `Runloop`, basic `RunloopSDK` command handles, devbox create/get/list/suspend/resume/shutdown, disk snapshots; synchronous and asynchronous commands, resident named shells with variables, functions, aliases, options and working directory, execution completion/output/stdin/signals, text files                                                                                                                     |
+| CodeSandbox | `@codesandbox/sdk` 2.4.2                | `withruntime/codesandbox` | `CodeSandbox`, `VMTier`, create/fork/resume/shutdown/restart/hibernate/delete/list/get; connected command and file clients; output/status subscriptions and same-client command restart; configured tasks and setup steps; public preview ports and readiness checks                                                                                                                                                     |
+| Fly Sprites | `@fly/sprites` 0.2.3                    | `withruntime/sprites`     | `SpritesClient`, create/lookup/list/delete/restart; `exec`, `execFile`, Node streams and event-based `spawn`; attachable native processes; binary/text/JSON files, directory traversal, append, chmod, chown and `asRoot` through sudo, file watches; preview access settings; checkpoints as disk snapshots; domain network policy; session kill; port watcher and port proxy; `APIError` with the vendor's limit codes |
+| Freestyle   | `freestyle` 0.2.17                      | `withruntime/freestyle`   | `Freestyle`, VM create/ref/get/list/start/pause/delete/update; command execution, binary/text files and streams, filesystem metadata; native snapshots; explicit deny-all or outbound-public firewall intent                                                                                                                                                                                                             |
+| Modal       | `modal` 0.11.0                          | `withruntime/modal`       | `ModalClient`, app-name grouping, registry images and Dockerfile layers, CPU sandbox create/get/list/name lookup, text/binary process streams and stdin, command completion, filesystem transfer and metadata, tags, encrypted public previews, outbound allowlists, memory snapshot capture                                                                                                                             |
+| Cloudflare  | `@cloudflare/sandbox` 0.12.10 (0.x API) | `withruntime/cloudflare`  | `getSandbox`, named Runtime sandboxes, explicit execution sessions, text exec and SSE output, background processes, logs/signals/waits, binary/text files, recursive listings, environment updates, signed Runtime previews, conditional Worker Durable Object entry, Worker preview proxy, destruction                                                                                                                  |
+
+### Freestyle 0.2.17 review (11 October 2026)
+
+The pin advances from 0.2.16; support remains partial. The exact npm tarballs
+were compared without installing or executing them.
+
+- New `FreestyleTransportError` (a `TypeError` with `errors` and `toJSON`) for a
+  fetch that got no HTTP response. The adapter throws it, with the native
+  `ConnectionError` as `cause`, where it used to throw `FreestyleApiError`.
+- `exec` accepts `timeoutMs` up to 24 hours on guest agents with native
+  resumable exec, else 5 minutes (`AGENT_UNSUPPORTED`). Runtime passes the
+  value to its native exec unchanged; no adapter change.
+- `ListObjects` joins the S3 operations of the TLS edge (refused here with the
+  rest of `tls`). Identity-token clients now background execs; identity tokens
+  are refused here. Docs-only changes elsewhere.
+
+### Runloop 2.0.0 review (8 October 2026)
+
+Both `@runloop/api-client` and Python `runloop-api-client` 2.0.0 retain the
+covered sandbox API. Both pins advance; support remains partial. The exact npm
+tarballs and every PyPI wheel/source archive for 1.32.0 and 2.0.0 were compared
+without installing or executing them. Python wheel and source package contents
+match. The upstream checker needs no new record type: this is a sandbox adapter
+update, not a refusal of the major release or deferred source qualification.
+
+- Both releases remove benchmark jobs/runs, scenarios, scorers, their types and
+  pagination, shared `RunProfile`, benchmark/scenario key scopes, and the
+  `scenario`/`scoring_validation` devbox initiators. Python also removes
+  `InputContextPreview`. None was implemented by these sandbox adapters.
+- JavaScript execution `sendStdIn` now requires a body; the options-only overload
+  is removed. Both languages require exactly one nonempty text value or signal.
+  The adapters validate before lookup and map text, EOF and INTERRUPT to native
+  process input, EOF and SIGINT. Python's new synchronous/asynchronous
+  `Execution.send_std_in` and `close_std_in` helpers are implemented with scoped
+  request timeouts. JavaScript adds `RunloopSDK.devbox.create`/`fromId`,
+  `cmd.exec`/`execAsync`, and execution handles with `sendStdIn`/`closeStdIn`,
+  state, kill and result/output methods. The handle calls the same validated
+  low-level input path and throws `RunloopError` on an unsuccessful reply.
+  This is a basic command facade, not the full upstream high-level SDK:
+  callback streaming and extra polling options refuse with native alternatives;
+  file, shell, snapshot and list workflows still use the low-level adapter.
+- New `SecretById`/`AsyncSecretById` handles and retrieve/update/delete-by-ID calls
+  select exact secret rows. Name reads/updates instead select the greatest ID;
+  deletion removes all selected same-name rows nonatomically. Runloop's duplicate
+  secret rows and injected environment-secret semantics are not Runtime's
+  host-scoped secret API. Access to the secret namespace refuses explicitly and
+  names that native alternative.
+- Objects add `upload_headers`; upload helpers preserve those headers, isolate
+  API credentials, refuse redirects/retries and redact upload errors. Python's
+  storage wrappers accept optional headers and clear them on completion. The
+  adapter refuses Runloop storage objects and points to Runtime sandbox files.
+- Axons add `deleted_at_ms` and retain readable deleted registry entries while
+  refusing updates; gateway/MCP/network-policy names become reusable labels, and
+  devbox gateway/MCP names bind the newest configuration. Those provider service
+  namespaces refuse explicitly, naming Runtime events, secrets or sandbox egress
+  settings as the alternative; these are not equivalent Runloop services.
+- Tunnel documentation clarifies that omitted authentication means open/public.
+  Runloop tunnels remain outside the covered surface; use Runtime signed
+  previews. Python custom CPU annotations change from integer to float, allowing
+  0.5 cores upstream; the adapters still refuse fractional CPU before allocation
+  and direct callers to Runtime whole cores.
+
+The focused tests use simulated native processes/transports and guest state.
+They do not execute the downloaded SDKs or prove live Runloop behavior,
+Linux isolation, durability, host recovery, or a competitor performance margin.
 
 ## Authentication and resources
 
@@ -128,7 +193,7 @@ Remaining implementation work is tracked only in the repository `WORKLIST.md`.
 | All six     | Default sandboxes use Runtime's environment. Explicit vendor image/template/snapshot IDs require migration to Runtime; arbitrary foreign IDs are not substituted with a stock image. Provider credential formats, wire protocols, error hierarchies and every optional transport hook are not interchangeable. Retained process output is bounded. Binary process mode requires the native byte-output capability (`outputEncoding`); an API or guest without it refuses before execution. This capability has only local release evidence here.                                                                                                                                                                                                                                                                                                                                                      |
 | Runloop     | Blueprints name Runtime image IDs/names; snapshots name Runtime snapshots. No provider blueprint builds, mounts, secret gateways, MCP grants, lifecycle hooks or ARM placement. `X_SMALL`/fractional CPU shapes are refused. Named shells use a resident Bash process. Interactive stdin in named shells is explicitly refused. `snapshotDisk` takes a blocking disk-only native snapshot; `snapshotDiskAsync` is refused, a memory snapshot is refused as a disk snapshot, and snapshot metadata beyond Runtime's label bounds is refused. `diskSnapshots` lists, updates, polls and deletes them. Devbox and snapshot lists return cursor pages that can be awaited or iterated across pages; the generated `APIPromise` wrapper and its response helpers are not reproduced.                                                                                                                       |
 | CodeSandbox | No browser editor/Pitcher protocol, browser-session tokens, interpreters, live VM resizing, fork tier changes, read-only or global editor sessions, or private host-token emulation. Configured tasks run under a guest supervisor and setup steps under a guest runner, both started by the adapter and surviving client disconnects; a task's port must be configured with `task.preview.port`, because automatic task-to-port discovery is refused. Private host-only preview requests fail explicitly; native signed preview URLs remain available. Public port discovery lists registered previews, not all listening sockets. Default workspace is prepared at `/project/sandbox`. Command restart preserves the originating client's captured argv, environment and working directory; a command discovered by another client refuses restart because its private spawn recipe is unavailable. |
-| Sprites     | No control-mode WebSocket protocol, managed services, provider health/upgrade, port watchers, URL role policy, filesystem checkpoint restoration in place, or full network/privilege/resource policy surfaces. Checkpoint operations fail explicitly because native snapshots also include memory. Session handles use native process IDs, not tmux. The sprite URL maps port 8080. File bytes and process byte streams preserve binary data.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Sprites     | No control-mode WebSocket protocol, managed services, in-place checkpoint restore (start a new sandbox from the snapshot), checkpoint history filters, network presets (`include`), an allow rule inside a denied wildcard (Runtime's deny always wins), privilege or resource policies, `maxRunAfterDisconnect`, Fly token exchange or Sprite list streaming; each is refused by name. A checkpoint is a Runtime disk snapshot (files, not running processes); the Sprite pauses for the moment it takes. An allow rule makes an allowlist, as Sprites' DNS allowlist does. The port watcher polls `ss` once a second. Session handles use native process IDs, not tmux. The sprite URL maps port 8080. File bytes and process byte streams preserve binary data.                                                                                                                                    |
 | Freestyle   | Provider catalog snapshot slugs are not Runtime snapshots and are refused. Firewall support is limited to an explicit empty rule set or the exact allow-public-outbound shape; arbitrary rule selectors, TLS policies and private networks are refused. No automatic-restart guarantee, retention scheduler, placement constraints, live resize, Linux-user switching, PTY namespace, public IPv6 or account-owned egress address emulation. Native snapshot retention is positive whole days.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Modal       | CPU sandboxes only; different resource reservation/limit values, fractional CPU, GPU and foreign placement are refused. Named Apps group Runtime sandboxes; they do not deploy Functions. Registry authentication uses Runtime's registry configuration. No Functions/Cls, volumes/bucket mounts, GPU image steps, readiness probes, sidecars, directory mounts, filesystem-only images from snapshots, or snapshot restoration API. Entry-point completion stops the sandbox while the originating client is alive; the native lease remains the bound if that client disappears. A different client can reconnect using the saved entrypoint process ID.                                                                                                                                                                                                                                            |
 | Cloudflare  | The conditional Worker entry supplies a Durable Object bridge and custom-hostname preview proxy; infrastructure configuration must still remove the vendor Container declaration and provide Runtime secrets. Custom preview routing is implemented but has no live public-hostname acceptance evidence. No isolated PID namespaces, interpreter contexts, bucket mounts, backup format, terminal WebSocket protocol, watchers/change versions, custom process IDs or provider cleanup-record semantics. Foreground named sessions use resident Bash; background processes inherit exported state/cwd but do not yet inherit every local variable/function/option.                                                                                                                                                                                                                                    |

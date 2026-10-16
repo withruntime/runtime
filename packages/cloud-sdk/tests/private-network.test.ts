@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { run } from "../src/cli";
 import { Runtime } from "../src/client";
 
-/* runtime.network.private and `runtime network private on|off|status` against
+/* runtime.networks.private and `runtime networks private on|off|status` against
  * a stub API. The routes are tested on Postgres in packages/cloud
  * (private-network-api-postgres.test.ts), and the connections themselves in
  * private-mesh.test.ts. */
@@ -50,35 +50,35 @@ const answer = (method: string, body: unknown) => ({
   enabled: method === "PUT" ? (body as { enabled: boolean }).enabled : true,
 });
 
-test("runtime.network.private sets and reads the switch", async () => {
+test("runtime.networks.private sets and reads the switch", async () => {
   await withStub(answer, async (seen) => {
     const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
-    expect((await runtime.network.private.set({ enabled: true })).enabled).toBe(true);
-    expect(await runtime.network.private.get()).toMatchObject({
+    expect((await runtime.networks.private.set({ enabled: true })).enabled).toBe(true);
+    expect(await runtime.networks.private.get()).toMatchObject({
       enabled: true,
       suffix: "sandbox.internal",
     });
     expect(seen).toEqual([
-      { line: "PUT /v1/network/private", body: { enabled: true } },
-      { line: "GET /v1/network/private", body: undefined },
+      { line: "PUT /v1/networks/private", body: { enabled: true } },
+      { line: "GET /v1/networks/private", body: undefined },
     ]);
   });
 });
 
-test("`runtime network private on|off|status` says what it means", async () => {
+test("`runtime networks private on|off|status` says what it means", async () => {
   await withStub(answer, async (seen) => {
-    const on = await cli(["network", "private", "on"]);
+    const on = await cli(["networks", "private", "on"]);
     expect(on.code).toBe(0);
     expect(on.text).toContain("<name>.sandbox.internal");
-    const off = await cli(["network", "private", "off"]);
+    const off = await cli(["networks", "private", "off"]);
     expect(off.text).toContain("cut");
-    expect((await cli(["network", "private", "status"])).text).toContain("On:");
+    expect((await cli(["networks", "private", "status"])).text).toContain("On:");
     expect(seen.map((s) => [s.line, s.body])).toEqual([
-      ["PUT /v1/network/private", { enabled: true }],
-      ["PUT /v1/network/private", { enabled: false }],
-      ["GET /v1/network/private", undefined],
+      ["PUT /v1/networks/private", { enabled: true }],
+      ["PUT /v1/networks/private", { enabled: false }],
+      ["GET /v1/networks/private", undefined],
     ]);
-    await expect(cli(["network", "private", "maybe"])).rejects.toMatchObject({ code: "usage" });
+    await expect(cli(["networks", "private", "maybe"])).rejects.toMatchObject({ code: "usage" });
   });
 });
 
@@ -86,7 +86,7 @@ test("a trial account is told it needs a paid account", async () => {
   await withStub(
     () => ({ ...STATE, enabled: false, allowed: false, why: "not_paid", enabledAt: null }),
     async () => {
-      expect((await cli(["network", "private", "status"])).text).toContain("needs a kept top-up");
+      expect((await cli(["networks", "private", "status"])).text).toContain("needs a kept top-up");
     },
   );
 });

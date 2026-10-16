@@ -16,7 +16,9 @@ invite someone.
 | Start, run and delete sandboxes and other resources, using credit |  yes  |  yes  |    yes    |    —    |
 | Create API keys and approve CLI connections                       |  yes  |  yes  |    yes    |    —    |
 | Revoke or limit a key somebody else made                          |  yes  |  yes  |     —     |    —    |
+| Have a key make, list and revoke keys over the API                |  yes  |  yes  |     —     |    —    |
 | Make a key account-wide, or limit it to its own again             |  yes  |  yes  |     —     |    —    |
+| Make, fill and delete compartments                                |  yes  |  yes  |     —     |    —    |
 | Add credit and see payments                                       |  yes  |  yes  |     —     |   yes   |
 | Invite, remove and change the role of members                     |  yes  |  yes  |     —     |    —    |
 | Read the audit log                                                |  yes  |  yes  |     —     |    —    |
@@ -97,11 +99,78 @@ account sees every key, with who made it, at
   an owner or admin. Changed to developer, it sees only what it made again, on
   the next request. Developers and billing members cannot make or switch one.
   A read-only key already sees the whole account and is never account-wide.
+- An owner or admin can put a key in a **compartment** when making it: it then
+  sees only what its compartment's keys made, and no other key reaches in
+  except an account-wide one ([compartments](./security#compartments)).
+- A full-access key of an owner or admin can make more keys over the API
+  ([run a swarm](#run-a-swarm)).
 - The person who made a key sets or changes its daily spending limit. Owners and
   admins can limit or revoke any key.
 - When someone leaves or is removed, the keys they made are revoked in the same
   step. What they created, such as sandboxes, volumes and images, stays with the
   account.
+
+## Run a swarm
+
+One paid account, a coordinator and many workers. The coordinator holds a
+full-access key of an owner or admin (a wallet account's key is one). It makes a key per
+worker, each with its own daily cap.
+
+```bash no-run
+runtime keys create --name worker-1 --daily-limit 5   # prints the key once
+runtime keys ls                                       # each worker, with its spend
+runtime keys usage <keyId>                            # one worker in full
+runtime keys revoke <keyId>                           # when the worker is done
+```
+
+```ts no-run
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime(); // RUNTIME_API_KEY
+const worker = await runtime.keys.create({ name: "worker-1", dailyLimitMicros: 5_000_000 });
+// hand worker.key to the worker, then later:
+console.log(await runtime.keys.usage(worker.keyId));
+await runtime.keys.revoke(worker.keyId);
+```
+
+```bash no-run
+curl -sS https://api.withruntime.com/v1/keys -H "Authorization: Bearer ${RUNTIME_API_KEY}" \
+  -H "Idempotency-Key: worker-1" -H "Content-Type: application/json" \
+  -d '{"name":"worker-1","dailyLimitMicros":5000000}'
+curl -sS "https://api.withruntime.com/v1/usage?key=${KEY_ID}" -H "Authorization: Bearer ${RUNTIME_API_KEY}"
+curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authorization: Bearer ${RUNTIME_API_KEY}"
+```
+
+- `POST /v1/keys` takes `name`, and optionally `access` (`full` or `read`),
+  `reach` (`agent`, the default, or `account`) and `dailyLimitMicros`. It
+  answers the new key once; a retry with the same `Idempotency-Key` answers
+  without it.
+- Each key is its own agent. A worker with reach `agent` sees only its own
+  sandboxes, and its spend and audit rows are its own.
+- A key made by a key with reach `agent` uses what a sandbox needs (sandboxes,
+  files, images, volumes, snapshots, previews and ports), its own usage, and
+  `/v1/keys`. The account's own settings are refused with `403 forbidden`,
+  whatever its person's role: closing the account, webhooks, telemetry
+  exports, the audit log, credit and billing, secrets, domains and networks.
+  Call those with a key made on the website, or make this key account-wide.
+- The coordinator sees each worker's spend with `runtime keys ls` or
+  `GET /v1/usage?key=<keyId>`, for itself, the keys it made at any depth, and
+  any key its reads already reach.
+- Revoking stops a key within ten seconds. What its agent made keeps running
+  until stopped.
+- Only a full-access key made by an owner or admin can do this. A read-only
+  key, a selected-actions key, a developer's key or a key in a compartment
+  cannot make, list or revoke keys.
+- A new key never has more than the key that made it: account-wide only from
+  an account-wide key, and it keeps the maker's expiry and per-request cap. When the maker has a daily limit, every key it makes needs
+  one, and the daily limits of every live key under it, at any depth, add up to
+  at most the maker's: a worker's own workers share its limit, never add to
+  it. Keys are made at most 8 deep. A read-only key cannot spend, so takes no
+  limit.
+- At most 100 live keys made this way per account, and 1,000 made in any 24
+  hours (`quota_exceeded`). Revoke workers' keys when done.
+- Each is in the [audit log](#audit-log) as `key.created`, by the making key's
+  agent, with `madeBy` naming the key that made it.
 
 ## Leaving and removing
 

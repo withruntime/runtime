@@ -215,8 +215,9 @@ test("the command refuses what the keys page does not offer before asking anythi
     ["keys", "create", "--expires", "30d"],
     ["keys", "create", "extra"],
     ["keys", "create", "--daily-limit", "free"],
-    ["keys", "ls"],
-    ["keys", "revoke", "abc"],
+    ["keys", "ls", "extra"],
+    ["keys", "revoke"],
+    ["keys", "usage"],
     ["keys", "craete"],
   ])
     await expect(run(argv, env, out)).rejects.toMatchObject({ code: "usage" });
@@ -247,4 +248,107 @@ test("--account-wide asks for a key that sees the whole account, and says so whe
     error: () => undefined,
   });
   expect(written.join("")).toContain("--account-wide");
+});
+
+test("with a key on this machine, `keys create` makes the key over the API with no browser, and ls, usage and revoke work", async () => {
+  const calls: { method: string; path: string; auth: string | null; body: unknown }[] = [];
+  const worker = `rtcloud_${randomUUID()}_${randomBytes(32).toString("base64url")}`;
+  const workerId = randomUUID();
+  const api = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      calls.push({
+        method: request.method,
+        path: `${url.pathname}${url.search}`,
+        auth: request.headers.get("authorization"),
+        body: request.method === "POST" ? await request.json() : undefined,
+      });
+      if (request.method === "POST")
+        return Response.json({
+          key: worker,
+          keyId: workerId,
+          agentId: randomUUID(),
+          orgId: randomUUID(),
+          name: "worker-1",
+          access: "full",
+          reach: "agent",
+          dailyLimitMicros: 5_000_000,
+          expires: null,
+          madeBy: keyId,
+        });
+      if (url.pathname === "/v1/keys")
+        return Response.json({
+          keys: [
+            {
+              keyId: workerId,
+              agentId: randomUUID(),
+              name: "worker-1",
+              access: "full",
+              reach: "agent",
+              dailyLimitMicros: 5_000_000,
+              dailyUsedMicros: 1_250_000,
+              madeBy: keyId,
+              createdAt: new Date().toISOString(),
+              expiresAt: null,
+              revokedAt: null,
+            },
+          ],
+        });
+      if (url.pathname === "/v1/usage")
+        return Response.json({
+          unit: "microdollars",
+          key: {
+            keyId: workerId,
+            agentId: randomUUID(),
+            name: "worker-1",
+            madeBy: keyId,
+            revokedAt: null,
+            dailyLimitMicros: "5000000",
+            dailyUsedMicros: "1250000",
+            spentMicros: "1000000",
+            heldMicros: "250000",
+            runningSandboxes: 1,
+            resources: 2,
+          },
+        });
+      return Response.json({ keyId: workerId, revokedAt: new Date().toISOString() });
+    },
+  });
+  try {
+    const local = { RUNTIME_API_KEY: key, RUNTIME_API_URL: `http://127.0.0.1:${api.port}` };
+    const written: string[] = [];
+    const notes: string[] = [];
+    const out = {
+      json: false,
+      write: (t: string) => written.push(t),
+      error: (t: string) => notes.push(t),
+    };
+    expect(
+      await run(["keys", "create", "--name", "worker-1", "--daily-limit", "5"], local, out),
+    ).toBe(0);
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/v1/keys",
+      auth: `Bearer ${key}`,
+      body: { name: "worker-1", access: "full", reach: "agent", dailyLimitMicros: 5_000_000 },
+    });
+    // The key alone on stdout, as the browser path prints it.
+    expect(written).toEqual([worker]);
+    expect(notes.join("")).toContain("made by this machine's key");
+    expect(notes.join("")).toContain("daily limit $5.00");
+    written.length = 0;
+    expect(await run(["keys", "ls"], local, out)).toBe(0);
+    expect(written.join("")).toContain("worker-1");
+    expect(written.join("")).toContain("$1.25");
+    written.length = 0;
+    expect(await run(["keys", "usage", workerId], local, out)).toBe(0);
+    expect(calls.at(-1)!.path).toBe(`/v1/usage?key=${workerId}`);
+    expect(written.join("")).toContain("$1.25 of $5.00");
+    expect(await run(["keys", "revoke", workerId], local, out)).toBe(0);
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: `/v1/keys/${workerId}` });
+  } finally {
+    await api.stop(true);
+  }
 });

@@ -27,6 +27,22 @@ export class SandboxError extends Error {
   }
 }
 export class TimeoutError extends SandboxError {}
+/** The sandbox is confirmed stopped or paused; create or resume one. */
+export class SandboxNotRunningError extends TimeoutError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message);
+    this.name = "SandboxNotRunningError";
+    if (options?.cause !== undefined) this.cause = options.cause;
+  }
+}
+/** The sandbox cannot be reached, without confirmation that it stopped. */
+export class SandboxUnreachableError extends TimeoutError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message);
+    this.name = "SandboxUnreachableError";
+    if (options?.cause !== undefined) this.cause = options.cause;
+  }
+}
 export class InvalidArgumentError extends SandboxError {}
 export class NotEnoughSpaceError extends SandboxError {}
 export class NotFoundError extends SandboxError {}
@@ -84,6 +100,23 @@ export class SecretError extends Error {
   }
 }
 export class SecretNotFoundError extends SecretError {}
+/** E2B 2.55's Dockerfile parse error, from `@e2b/dockerfile-utils`: a plain
+ * Error, not a SandboxError, with the line it names. Runtime parses no
+ * Dockerfile here (templates are Runtime images, built by
+ * `npx withruntime images build`), so nothing throws it; it exists so that
+ * code importing it or catching it still loads. */
+export class DockerfileSyntaxError extends Error {
+  readonly line: number | undefined;
+  constructor(message: string, line?: number) {
+    super(
+      line === undefined
+        ? `Dockerfile parse error: ${message}`
+        : `Dockerfile parse error on line ${line}: ${message}`,
+    );
+    this.line = line;
+    this.name = "DockerfileSyntaxError";
+  }
+}
 
 /** A call that E2B supports and Runtime does not, or not in the same way.
  * Thrown before anything is done, never after doing something different.
@@ -174,7 +207,13 @@ export function translate(error: unknown, subject: Subject = "other"): unknown {
     .filter(Boolean)
     .join("\n");
   let out: Error;
-  if (error.status === 503 && error.code.endsWith("_unavailable"))
+  // Runtime reports the sandbox state explicitly. A generic connection failure
+  // does not prove it stopped; never replay a command or write to classify it.
+  if (["sandbox_stopped", "sandbox_paused", "sandbox_not_running"].includes(error.code))
+    out = new SandboxNotRunningError(message);
+  else if (error.code === "sandbox_not_ready" || error.code === "host_unavailable")
+    out = new SandboxUnreachableError(message);
+  else if (error.status === 503 && error.code.endsWith("_unavailable"))
     // A product switched off on purpose (forks, previews): Runtime's own words
     // say what is off and what to use meanwhile.
     out = new NotSupportedError(error.code.replace(/_unavailable$/, ""), error.hint ?? "", message);

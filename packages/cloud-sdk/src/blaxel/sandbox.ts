@@ -14,7 +14,14 @@ import {
   parseProcessLine,
   toRuntimePath,
 } from "./context.js";
-import { codeOf, guard, NotSupportedError, responseError, translate } from "./errors.js";
+import {
+  codeOf,
+  guard,
+  NotSupportedError,
+  responseError,
+  SandboxCreationTimeoutError,
+  translate,
+} from "./errors.js";
 import { SandboxFileSystem } from "./filesystem.js";
 import {
   ARCHIVED,
@@ -124,6 +131,77 @@ export type SandboxForkOptions = {
   lifecycle?: SandboxLifecycle;
 };
 export type SandboxArchiveOptions = { wait?: boolean; maxWait?: number; interval?: number };
+
+/** The longest creation `timeout` Blaxel accepts, in seconds. */
+export const MAX_CREATION_TIMEOUT_SECONDS = 50;
+/** Options of SandboxInstance.create / createIfNotExists, as Blaxel's. */
+export type SandboxCreateOptions = {
+  /** List `/` once it runs, and delete it if that fails. */
+  safe?: boolean;
+  /** Answer the sandbox already holding the name instead of a 409. */
+  createIfNotExist?: boolean;
+  /** Give up after this many whole seconds (1 to 50): the sandbox is deleted
+   * and the call rejects with SandboxCreationTimeoutError. */
+  timeout?: number;
+};
+
+/** Blaxel's own check of `timeout`, with its words. */
+function creationTimeout({ timeout }: SandboxCreateOptions): number | undefined {
+  if (timeout === undefined) return undefined;
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_CREATION_TIMEOUT_SECONDS)
+    throw new Error(
+      `SandboxInstance.create: 'timeout' must be a whole number of seconds between 1 and ${MAX_CREATION_TIMEOUT_SECONDS}, got ${timeout}.`,
+    );
+  return timeout;
+}
+
+/** A create that must be running within `timeout` seconds of the call, the
+ * wait for capacity included. One that is not is deleted, so the name is
+ * free again, and the call rejects with SandboxCreationTimeoutError. */
+async function createWithin(
+  client: Runtime,
+  input: RuntimeCreate,
+  timeout: number,
+): Promise<Awaited<ReturnType<Runtime["sandboxes"]["create"]>>> {
+  const deadline = performance.now() + timeout * 1000;
+  const runtime = await guard(() =>
+    whenNameFree(client, () =>
+      client.sandboxes.create({ ...input, wait: false }, { waitForCapacityMs: timeout * 1000 }),
+    ),
+  );
+  // A sandbox the name already had is the caller's, whatever its state: it is
+  // answered as it is, as without a timeout, and never deleted here.
+  if (runtime.state === "running" || runtime.info.reused) return runtime;
+  const left = deadline - performance.now();
+  if (left > 0)
+    try {
+      await runtime.waitFor("running", {
+        timeoutSeconds: Math.max(1, Math.ceil(left / 1000)),
+        timeoutMs: Math.ceil(left) + 5_000,
+      });
+    } catch (error) {
+      if (!(error instanceof RuntimeError && error.code === "timeout")) {
+        await runtime.delete().catch(() => undefined);
+        throw translate(error);
+      }
+    }
+  // waitFor updated the state TypeScript narrowed above.
+  const state = runtime.state as string;
+  if (state === "running") return runtime;
+  await runtime.delete().catch(() => undefined);
+  if (state !== "starting")
+    throw translate(
+      new RuntimeError({
+        message: `Sandbox ${runtime.id} is ${runtime.state}, not running.`,
+        code: "start_failed",
+        status: 0,
+        hint: "Create it again; SandboxInstance.get(name) reads why it stopped.",
+      }),
+    );
+  throw new SandboxCreationTimeoutError(input.name, timeout, {
+    message: `It was still starting after ${timeout}s.`,
+  });
+}
 
 /** What a create asked for that no label keeps: shown by `spec` in the
  * client that created the sandbox. */
@@ -312,7 +390,7 @@ async function resolveImage(
   }
   if (found && found.state === "ready") return { image: found.id };
   const feature = `The image ${image}, which is not a Runtime image`;
-  const alternative = `Build it as a Runtime image named ${name}: \`npx withruntime image build --dockerfile Dockerfile --name ${name} -t ${name}:${tag}\`. The code can keep "${image}": the adapter starts from ${name}:${tag}.`;
+  const alternative = `Build it as a Runtime image named ${name}: \`npx withruntime images build --dockerfile Dockerfile --name ${name} -t ${name}:${tag}\`. The code can keep "${image}": the adapter starts from ${name}:${tag}.`;
   throw new NotSupportedError(
     feature,
     alternative,
@@ -341,7 +419,7 @@ async function resolveVolumes(client: Runtime, volumes: VolumeAttachment[] | und
       if (!found)
         throw new NotSupportedError(
           `The volume ${volume.name}, which is not a Runtime volume`,
-          `Create it first: runtime.volumes.create({ name: "${volume.name}" }) or \`npx withruntime volume create --name ${volume.name}\`.`,
+          `Create it first: runtime.volumes.create({ name: "${volume.name}" }) or \`npx withruntime volumes create --name ${volume.name}\`.`,
         );
       return { volumeId: found.id, path: toRuntimePath(volume.mountPath!) };
     }),
@@ -659,13 +737,15 @@ export class SandboxInstance {
 
   /** Creates a sandbox and answers once it runs. Blaxel's defaults: the base
    * image (Runtime's stock image) and 4096 MB, with vCPUs at one per 2048 MB.
-   * Funding is left to Runtime: the included usage first, then prepaid credit. A name another live sandbox holds is refused
+   * Funding is left to Runtime: the free usage first, then prepaid credit. A name another live sandbox holds is refused
    * with a 409, as in Blaxel. */
   static async create<T extends typeof SandboxInstance>(
     this: T,
     sandbox?: SandboxCreateConfiguration | SandboxModel,
-    { createIfNotExist = false }: { safe?: boolean; createIfNotExist?: boolean } = {},
+    options: SandboxCreateOptions = {},
   ): Promise<InstanceType<T>> {
+    const { createIfNotExist = false, safe = false } = options;
+    const timeout = creationTimeout(options);
     const config = configOf(sandbox);
     const region = config.region || defaultRegion();
     checkRegion(region);
@@ -704,7 +784,10 @@ export class SandboxInstance {
       ...(createIfNotExist && config.name ? { getOrCreate: true } : {}),
       ...config.withruntime?.create,
     };
-    const runtime = await guard(() => whenNameFree(client, () => client.sandboxes.create(input)));
+    const runtime =
+      timeout === undefined
+        ? await guard(() => whenNameFree(client, () => client.sandboxes.create(input)))
+        : await createWithin(client, input, timeout);
     const asked: Asked = {
       ...(Object.keys(envs).length ? { envs } : {}),
       ...(config.network ? { network: config.network } : {}),
@@ -715,6 +798,7 @@ export class SandboxInstance {
     const instance = new this({ runtime, client, asked }) as InstanceType<T>;
     try {
       await instance.#setUp(envs, lifetime.days);
+      if (safe) await instance.fs.ls("/");
     } catch (error) {
       await runtime.stop({ wait: false }).catch(() => undefined);
       throw translate(error);
@@ -727,8 +811,9 @@ export class SandboxInstance {
   static async createIfNotExists<T extends typeof SandboxInstance>(
     this: T,
     sandbox: SandboxCreateConfiguration | SandboxModel,
+    options: Omit<SandboxCreateOptions, "createIfNotExist"> = {},
   ): Promise<InstanceType<T>> {
-    return this.create(sandbox, { createIfNotExist: true });
+    return this.create(sandbox, { ...options, createIfNotExist: true });
   }
 
   /** The live sandbox with this name (or Runtime id). It is not woken: the

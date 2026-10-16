@@ -96,6 +96,7 @@ class RuntimeSandboxEnvironmentConfig(BaseModel, frozen=True):
     dockerfile: Optional[str] = None
     runtime_image: Optional[str] = None
     funding: Optional[Literal["trial", "paid"]] = None
+    """Accepted and ignored: the account decides, free usage first, then credit."""
     region: Optional[str] = None
     vcpu: Optional[int] = None
     memory_mib: Optional[int] = None
@@ -276,7 +277,7 @@ class RuntimeSandboxEnvironment(SandboxEnvironment):
     def default_concurrency(cls) -> Optional[int]:
         # The free trial's concurrency, which packages/cloud-guide/src/facts.test.ts holds to
         # the API's limit; raise it with --max-sandboxes on a paid account.
-        return 8
+        return 4
 
     @classmethod
     async def task_init(cls, task_name: str, config: SandboxEnvironmentConfigType | None) -> None:
@@ -301,21 +302,20 @@ class RuntimeSandboxEnvironment(SandboxEnvironment):
                 **(settings.labels or {})}}
             if image is not None:
                 fields["image"] = image
-            for name in ("funding", "region", "network"):
+            for name in ("region", "network"):
                 if getattr(settings, name) is not None:
                     fields[name] = getattr(settings, name)
-            sizes, notes = _sizes(settings.vcpu, settings.memory_mib, settings.disk_mib, settings.funding == "trial")
+            sizes, notes = _sizes(settings.vcpu, settings.memory_mib, settings.disk_mib, False)
             for note in notes:
                 logger.warning("Runtime: %s.", note)
             fields.update(sizes)
             try:
                 sandbox = await runtime.sandboxes.create(**fields)
             except RuntimeCloudError as error:
-                if error.code != "no_credit_size_limit" or settings.funding is not None:
+                if error.code != "no_credit_size_limit":
                     raise
                 sizes, notes = _sizes(settings.vcpu, settings.memory_mib, settings.disk_mib, True)
-                logger.warning("Runtime: this account runs on its trial, so %s. Set funding='paid' for the size "
-                               "asked.", "; ".join(notes) or "the size was cut")
+                logger.warning("Runtime: this account has no credit, so %s. Add credit for the size asked.", "; ".join(notes) or "the size was cut")
                 sandbox = await runtime.sandboxes.create(**{**fields, **sizes})
             _RUNNING[sandbox.id] = _run_id()
             sandbox.keep_alive()
@@ -438,7 +438,7 @@ class RuntimeSandboxEnvironment(SandboxEnvironment):
         return data.decode("utf-8") if text else data
 
     async def connection(self, *, user: Optional[str] = None) -> SandboxConnection:
-        return SandboxConnection(type=SANDBOX_TYPE, command=f"runtime sandbox ssh {self.sandbox.id}",
+        return SandboxConnection(type=SANDBOX_TYPE, command=f"runtime sandboxes ssh {self.sandbox.id}",
                                  container=self.sandbox.id)
 
 

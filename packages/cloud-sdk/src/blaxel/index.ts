@@ -4,7 +4,7 @@
  *   import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
  *
  * and set RUNTIME_API_KEY, or run `npx withruntime login` once. A Blaxel key
- * (BL_API_KEY) is never sent anywhere. Every name `@blaxel/core` 0.3.23
+ * (BL_API_KEY) is never sent anywhere. Every name `@blaxel/core` 0.3.25
  * exports can be imported; what Runtime cannot do the way Blaxel does throws
  * NotSupportedError, naming what to use. */
 import { RuntimeError } from "../errors.js";
@@ -24,6 +24,8 @@ export {
   type SandboxListQuery,
   type SandboxForkOptions,
   type SandboxArchiveOptions,
+  MAX_CREATION_TIMEOUT_SECONDS,
+  type SandboxCreateOptions,
 } from "./sandbox.js";
 export { CodeInterpreter } from "./interpreter.js";
 export {
@@ -85,6 +87,8 @@ export {
 } from "./snapshot.js";
 export {
   ResponseError,
+  SandboxCreationTimeoutError,
+  isCreationTimeoutError,
   SandboxGatewayError,
   isGatewayError,
   isGatewayTimeout,
@@ -230,7 +234,7 @@ const MCP =
 const JOBS =
   "Run the batch as processes in sandboxes: SandboxInstance.create, then sandbox.process.exec for each task.";
 const IMAGES =
-  "Build a Runtime image and create sandboxes from it by name: `npx withruntime image build --dockerfile Dockerfile --name <image>` or runtime.images.build({ name, dockerfile | image }).";
+  "Build a Runtime image and create sandboxes from it by name: `npx withruntime images build --dockerfile Dockerfile --name <image>` or runtime.images.build({ name, dockerfile | image }).";
 const VOLUMES =
   'Use Runtime volumes: runtime.volumes.create({ name }) (`import { Runtime } from "withruntime"`), then pass volumes: [{ name, mountPath }] at create.';
 const HOSTING = "Serve it from a sandbox and share its port with sandbox.previews.create.";

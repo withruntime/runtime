@@ -25,7 +25,7 @@ from .interpreter import AsyncInterpreter
 from .limits import AsyncLimits
 from .mcp import AsyncMcp, AsyncSandboxMcp
 from .network import AsyncNetwork
-from .network_products import AsyncAccountNetwork, AsyncAddresses, AsyncDomains, AsyncPorts, AsyncTunnel
+from .network_products import AsyncAccountNetwork, AsyncAddresses, AsyncDomains, AsyncPorts
 from .observability import AsyncEvents, AsyncMetrics, AsyncOtel, AsyncWebhooks
 from .previews import AsyncPreviews
 from .referrals import AsyncReferrals
@@ -54,9 +54,8 @@ CLIENT["audit"] = AsyncAudit
 CLIENT["mcp"] = AsyncMcp
 CLIENT["domains"] = AsyncDomains
 CLIENT["ports"] = AsyncPorts
-CLIENT["addresses"] = AsyncAddresses
-CLIENT["tunnel"] = AsyncTunnel
-CLIENT["network"] = AsyncAccountNetwork
+CLIENT["ips"] = AsyncAddresses
+CLIENT["networks"] = AsyncAccountNetwork
 SANDBOX["interpreter"] = AsyncInterpreter
 SANDBOX["previews"] = AsyncPreviews
 SANDBOX["network"] = AsyncNetwork

@@ -271,7 +271,8 @@ class OpenAIAgentsTest(unittest.TestCase):
                 return session, result
         session, result = run(flow())
         create = self.world.calls[0]
-        self.assertEqual(create, ("create", {"on_lease_end": "pause", "funding": "trial", "memory_mib": 2048,
+        # funding is accepted and ignored: nothing is sent for it.
+        self.assertEqual(create, ("create", {"on_lease_end": "pause", "memory_mib": 2048,
                                              "max_total_cost_micros": 5_000_000, "snapshot": "snap-1"}))
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout, b"from the manifest\nb m\n")
@@ -441,14 +442,14 @@ class OpenAIAgentsTest(unittest.TestCase):
 
     def test_state_round_trips_through_serialization(self):
         async def flow():
-            session = await self.client.create(options=self.options(funding="paid", pause_on_exit=True))
+            session = await self.client.create(options=self.options(memory_mib=2048, pause_on_exit=True))
             payload = self.client.serialize_session_state(session.state)
             restored = self.client.deserialize_session_state(payload)
             await session.shutdown()
             return session.state, restored
         original, restored = run(flow())
         self.assertEqual(restored.sandbox_id, original.sandbox_id)
-        self.assertEqual(restored.create_fields, {"funding": "paid"})
+        self.assertEqual(restored.create_fields, {"memory_mib": 2048})
         self.assertTrue(restored.pause_on_exit)
 
 

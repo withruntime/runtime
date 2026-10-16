@@ -21,6 +21,11 @@ export type Upstream = {
     reviewedAt: string;
     disposition: "held-for-sdk-qualification";
     evidence: { sourceUrls: string[]; artifactSha256: Record<string, string>; changes: string[] };
+    /** Python only: stable releases published between the pin and the
+     * reviewed one, each source-reviewed with its files' sha256, so a release
+     * that lands while another is under review is not lost. Each stays watched:
+     * its published files must keep these hashes. */
+    between?: Record<string, Record<string, string>>;
   };
 };
 export type CompatibilityLock = {
@@ -201,6 +206,9 @@ export function compareLatestReview(
     for (const subject of [
       pin,
       { ...pin, version: reviewed.version, artifacts: reviewed.artifacts },
+      ...Object.entries(reviewed.between ?? {})
+        .filter(([version]) => versions[version] !== undefined)
+        .map(([version, artifacts]) => ({ ...pin, version, artifacts })),
     ]) {
       const listed = healthy(subject, {
         info: { version: subject.version, yanked: false },
@@ -214,6 +222,7 @@ export function compareLatestReview(
     (version) =>
       (pin.registry === "pypi" ? pythonStable(version) : stable(version)) &&
       version !== reviewed.version &&
+      !(pin.registry === "pypi" && reviewed.between?.[version] !== undefined) &&
       order(version, pin.version) > 0 &&
       // npm's latest tag defines the reviewed release channel. Higher-numbered
       // historical/other-channel releases do not override that authoritative tag.
@@ -375,7 +384,18 @@ export function validateLock(value: unknown): CompatibilityLock {
           ) ||
           !Array.isArray(evidence.changes) ||
           !evidence.changes.length ||
-          evidence.changes.some((change) => typeof change !== "string" || !change.trim())
+          evidence.changes.some((change) => typeof change !== "string" || !change.trim()) ||
+          (reviewed.between !== undefined &&
+            (pin.registry !== "pypi" ||
+              Object.entries(object(reviewed.between)).some(
+                ([between, files]) =>
+                  !stable(between) ||
+                  Bun.semver.order(between, version) <= 0 ||
+                  Bun.semver.order(between, reviewedVersion) >= 0 ||
+                  Object.values(hashed(files)).some(
+                    (hash) => typeof hash !== "string" || !/^sha256-[a-f0-9]{64}$/.test(hash),
+                  ),
+              )))
         )
           throw new Error(`Invalid latest review for ${name}`);
       }

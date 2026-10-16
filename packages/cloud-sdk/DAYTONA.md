@@ -17,7 +17,8 @@ from withruntime.daytona import AsyncDaytona  # was: from daytona import AsyncDa
 ```
 
 The mapping was written against `@daytona/sdk` 0.220.0 and `daytona` 0.220.0
-on PyPI, and checked against `@daytona/sdk` 0.222.0 on 5 October 2026. The exact releases and artifact hashes
+on PyPI, and checked against `@daytona/sdk` and `daytona` 0.223.1 on
+9 October 2026 (below, "0.223.1"). The exact releases and artifact hashes
 are kept in `compatibility-lock.json`.
 
 ## Keys
@@ -65,7 +66,7 @@ package talks only to Runtime.
 | `resources`, `envVars`, `labels`, `name`, `volumes`                           | `vcpu`, `memoryMiB`, `diskMiB`; environment given to every command; labels; name; Runtime volumes by id or by name.                                                                                                                                                        |
 | `setLabels` (Python `set_labels`)                                             | Replaces customer labels while preserving the language and Runtime compatibility labels; reconnects retain the language.                                                                                                                                                   |
 | `networkBlockAll`, `networkAllowList`, `domainAllowList`, `outboundProxyUrl`  | Runtime network rules (`internet: false`, or an `allow` list); the proxy as `HTTP_PROXY` and `HTTPS_PROXY` for commands.                                                                                                                                                   |
-| `public: true`                                                                | `getPreviewLink(port)` shares the port publicly; without it, privately with a token.                                                                                                                                                                                       |
+| `public: true`, `setPublic` (Python `set_public`)                             | `getPreviewLink(port)` shares the port publicly; without it, privately with a token. `setPublic` turns every port already shared public or private at once, at the same address.                                                                                           |
 | `language`                                                                    | The language of `codeRun`, kept in Daytona's `code-toolbox-language` label so a sandbox found later keeps it.                                                                                                                                                              |
 | `daytona.get(idOrName)`, `daytona.list(query)`                                | `sandboxes.get`, or the newest live sandbox with that name; `sandboxes.list` by labels and states, then Daytona's other filters (`id` and `name` prefixes, CPU, memory, disk, dates), `sort` and `order` here. Awaiting `list()` gives the older `{ items, total }` shape. |
 | `process.executeCommand(cmd, cwd, env, timeout)`                              | `exec` under bash with stderr joined to stdout, as Daytona's `result`, streamed so the whole output comes back. A non-zero exit is a result. Past `timeout` (seconds): `DaytonaProcessExecutionTimeoutError`.                                                              |
@@ -82,7 +83,7 @@ package talks only to Runtime.
 | `getUserHomeDir`, `getWorkDir`, `user`                                        | `/workspace`, and `daytona`, so `/home/daytona` (linked to `/workspace` the first time something names it) works.                                                                                                                                                          |
 | `create({ user })` (Python `os_user`)                                         | The user must exist in the image, as on Daytona. Commands, sessions and terminals run as it through `sudo`; files written through `fs` are given to it. It joins the owner's group, so both can share `/workspace`.                                                        |
 | `process.createPty`, `connectPty`, `listPtySessions`, `resizePtySession`      | A shell started with a terminal, which outlives the connection: `disconnect()` leaves it running, `connectPty` attaches again with what it printed so far, `killPtySession` ends it.                                                                                       |
-| `computerUse.mouse`, `keyboard`, `screenshot`, `display`, `recording`         | Runtime's desktop. `start()` installs it the first time, which takes a minute or two. Key names are Daytona's or xdotool's.                                                                                                                                                |
+| `computerUse.mouse`, `keyboard`, `screenshot`, `display`, `recording`         | Runtime's desktop. `start()` installs it the first time, which takes a minute or two. Key names are Daytona's or xdotool's. `mouse.down` and `up` hold and release a button; `scroll` goes up, down, left or right.                                                        |
 | `daytona.snapshot.create`, `get`, `list`, `delete`                            | Runtime images built, found, listed and deleted by name.                                                                                                                                                                                                                   |
 | `daytona.volume.get`, `list`, `delete`                                        | Runtime volumes by name.                                                                                                                                                                                                                                                   |
 | Error classes                                                                 | Daytona's names and parents, by HTTP status. Each also carries Runtime's `code`, `hint` and `requestId`, with the original error as `cause`.                                                                                                                               |
@@ -94,14 +95,16 @@ Each of these throws `NotSupportedError` before anything happens. Its
 
 | Daytona                                                               | Use instead                                                                                                                                                                             |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A snapshot name with no Runtime image or snapshot                     | `daytona.snapshot.create({ name, image })` here, or `npx withruntime image build`. This throws `DaytonaNotFoundError`.                                                                  |
+| A snapshot name with no Runtime image or snapshot                     | `daytona.snapshot.create({ name, image })` here, or `npx withruntime images build`. This throws `DaytonaNotFoundError`.                                                                 |
 | GPUs, `spot`, `linkedSandbox`, `secrets`, `otelEndpointOverride`      | Runtime runs Linux on CPUs. For `secrets`, a Runtime secret (`npx withruntime secrets set NAME --host <host>`): the sandbox sees a placeholder. For telemetry, `runtime.otel.create()`. |
 | A `target` other than `us`, `jwtToken`                                | Runtime runs in one US region and signs in with keys.                                                                                                                                   |
 | The entrypoint session, language servers                              | Sessions with `runAsync`.                                                                                                                                                               |
 | Screenshots of a region, with the cursor, scaled, or as WebP          | The whole screen as PNG or JPEG; crop and scale it yourself.                                                                                                                            |
 | `computerUse.accessibility`, the desktop's processes one by one       | Screenshots with the mouse and keyboard; `computerUse.getStatus()`, `stop()` and `start()`.                                                                                             |
+| `keyboard.down` and `up`, `modifiers` on a click, drag or scroll      | `keyboard.press(key, modifiers)` or `keyboard.hotkey("ctrl+shift+t")`: the keys pressed together at once.                                                                               |
+| `clicks` above 2                                                      | One click, or two with `double`; to select a line, click once and press shift+End.                                                                                                      |
 | `resize`, `recover`                                                   | Set labels and resources at create; create a new sandbox.                                                                                                                               |
-| Signed preview URLs, signed upload and download URLs, SSH access      | `getPreviewLink`, `fs.uploadFile` and `downloadFile`, `npx withruntime sandbox ssh <id>`.                                                                                               |
+| Signed preview URLs, signed upload and download URLs, SSH access      | `getPreviewLink`, `fs.uploadFile` and `downloadFile`, `npx withruntime sandboxes ssh <id>`.                                                                                             |
 | `getMetrics`                                                          | `sandbox.withruntime.metrics()`: its CPU and memory over time.                                                                                                                          |
 | `Image.pipInstallFromPyproject`, snapshot `resources` or `entrypoint` | `pipInstallFromRequirements`; resources at create; a session after create.                                                                                                              |
 | `volume.create(name)`                                                 | Runtime volumes have a size: `runtime.volumes.create({ name, sizeMiB })`.                                                                                                               |
@@ -122,6 +125,31 @@ Some differences are not refusals:
   client are found by name, but only their output from then on is known.
 - `autoArchiveInterval` is recorded only: Runtime has no archive tier.
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun.
+
+## 0.223.1, 9 October 2026
+
+Reviewed the published npm tarballs for `@daytona/sdk`, `@daytona/api-client`,
+`@daytona/toolbox-api-client` and `@daytona/analytics-api-client` 0.223.0 →
+0.223.1, and the PyPI wheel and sdist for `daytona` 0.223.0 → 0.223.1. Each was
+its registry's latest when checked. Every pinned file matched the hash already
+in `compatibility-lock.json`, and every new file matched its registry's SHA-512
+integrity or SHA-256 digest; each wheel's Python source is byte for byte its
+sdist's. Nothing was installed, imported or run. The three API clients changed
+only their version. `@daytona/sdk` changed `Sandbox` and `Process` (ESM and
+CommonJS alike), and `daytona` the same two modules, sync and async.
+
+| Upstream change                                                                                                                                                                                     | Drop-in disposition                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sandbox.setPublic(isPublic)` (Python `set_public(public, request_timeout=None)`) makes the sandbox's preview URLs public or private, and sets `sandbox.public`.                                    | Followed, in both languages. Every port already shared whose visibility differs is shared again with the new one, at the same address, and later `getPreviewLink` calls use it. Without credit Runtime refuses a public share (`public_preview_not_allowed`) and `public` is unchanged. |
+| `executeCommand` (Python `exec`) documents that commands run under zsh, bash or sh (zsh in Daytona's images), how to start a server in the background, and that `nproc` may report the host's CPUs. | Documentation only. The drop-in keeps running commands under bash, which is what Daytona's quoting advice is for; a sandbox's `nproc` reports its own vCPUs.                                                                                                                            |
+| `getPreviewLink` and `getSignedPreviewUrl` (Python `create_signed_preview_url`) document the token header, the API key as a bearer token, and a longer expiry.                                      | Documentation only. A Runtime private preview takes its token as `x-runtime-preview-token`; signed preview URLs stay refused, as above.                                                                                                                                                 |
+| `@daytona/sdk` requires `shell-quote` ^1.11.0, was ^1.8.2.                                                                                                                                          | The oracle's `bun.lock` already resolved 1.11.0.                                                                                                                                                                                                                                        |
+
+`tests/daytona/daytona-0-223-1.test.ts` and
+`sdks/python/tests/test_daytona_0_223_1.py` check `setPublic` both ways, that
+a public port is not shared again, and the refusal without credit; they fail
+without this change. The oracle was not run against the new release, since it
+executes Daytona's code; the provider remains marked `partial`.
 
 ## Tests
 

@@ -544,7 +544,8 @@ class Official(Base):
             client = httpx.AsyncClient(transport=httpx.MockTransport(reply))
             official = SimpleNamespace(connection_config=SimpleNamespace(request_timeout=60), sandbox_id="owned",
                 _envd_access_token=None, traffic_access_token=None, _client=client, _include_diagnostics=False,
-                _jupyter_request_url=lambda _: "https://official.invalid/execute")
+                _jupyter_request_url=lambda _: "https://official.invalid/execute",
+                _jupyter_url="https://official.invalid")
             world = World()
             world.interpreter = lambda *_: {"status": "ok", "stdout": "out\n", "stderr": "warn\n", "error": None,
                 "executionCount": 4, "results": [{"main": True, "data": {"text/plain": "2", "text/html": "<b>2</b>"}}]}

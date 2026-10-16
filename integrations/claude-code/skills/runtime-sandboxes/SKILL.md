@@ -18,21 +18,21 @@ then appears. Never ask the user for a key.
 
 ## Run work in a sandbox
 
-1. Choose an `idempotencyKey`, then `runtime_sandbox_create`. Use
+1. Choose an `idempotencyKey`, then `runtime_sandboxes_create`. Use
    `funding: "trial"` unless the user said to spend paid credit. Check that the
    returned state is `running`.
-2. Put the code in: `runtime_sandbox_files_write` for a few files, or from the shell
-   `npx -y withruntime sandbox cp ./project <id>:/workspace/project` for a
+2. Put the code in: `runtime_sandboxes_files_write` for a few files, or from the shell
+   `npx -y withruntime sandboxes cp ./project <id>:/workspace/project` for a
    directory.
-3. `runtime_sandbox_exec` with the sandbox `id` and a `command`. Check `exitCode`,
+3. `runtime_sandboxes_exec` with the sandbox `id` and a `command`. Check `exitCode`,
    `timedOut` and the truncation flags, not only that the call succeeded.
-4. For a server or a long job, `runtime_sandbox_exec` with `"background": true`, then
-   `runtime_sandbox_process` with `"action": "read"` to follow it.
-5. To show a web app, `runtime_sandbox_previews` with `"action": "create"` for its port. Private previews
+4. For a server or a long job, `runtime_sandboxes_exec` with `"background": true`, then
+   `runtime_sandboxes_process` with `"action": "read"` to follow it.
+5. To show a web app, `runtime_sandboxes_previews` with `"action": "create"` for its port. Private previews
    need the returned token; give the user `urlWithToken`.
-6. Copy results out (`runtime_sandbox_files_read`, or
-   `npx -y withruntime sandbox cp <id>:/workspace/out ./out`), then
-   `runtime_sandbox_manage` with `"action": "stop"`, even after a failure.
+6. Copy results out (`runtime_sandboxes_files_read`, or
+   `npx -y withruntime sandboxes cp <id>:/workspace/out ./out`), then
+   `runtime_sandboxes_manage` with `"action": "stop"`, even after a failure.
    Confirm `stopped` before saying cleanup is done.
 
 `"action": "pause"` instead keeps memory and files for later, and a paused

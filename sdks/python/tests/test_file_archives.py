@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 import tarfile
 import tempfile
+import time
 import unittest
 
 from withruntime._async_client import AsyncFiles
@@ -124,7 +125,7 @@ class FileArchives(unittest.TestCase):
         with request_scope(10), self.assertRaises(ConnectionError) as caught:
             Files(transport, "s").unarchive("/app", b"x" * 1_048_577)
         self.assertIs(caught.exception, primary)
-        self.assertIsNone(transport.abort_deadline)
+        self.assertLessEqual(transport.abort_deadline, time.monotonic() + 10)  # fresh and bounded
 
     def test_async_cancellation_aborts_without_replacing_cancelled_error(self):
         async def run():
@@ -134,7 +135,7 @@ class FileArchives(unittest.TestCase):
                 await AsyncFiles(AsyncArchiveTransport(transport), "s").unarchive("/app", b"x" * 1_048_577)
             self.assertIs(caught.exception, primary)
             self.assertTrue(transport.calls[-1][1].endswith(":abort"))
-            self.assertIsNone(transport.abort_deadline)
+            self.assertLessEqual(transport.abort_deadline, time.monotonic() + 10)  # fresh and bounded
         asyncio.run(run())
 
     def test_folder_upload_uses_root_route_and_preserves_real_tar_contents(self):

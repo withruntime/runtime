@@ -3,12 +3,31 @@ import { checked, missing, pathAt } from "./core.js";
 
 /** Guest operations use argv, never interpolated shell paths. */
 export class GuestFiles {
+  /** Staging copies whose removal failed; the next staged write or
+   * append tries them again. */
+  readonly #leftover = new Set<string>();
   constructor(
     private readonly get: () => Promise<Sandbox>,
     readonly cwd = "/workspace",
   ) {}
   path(path: string) {
     return pathAt(path, this.cwd);
+  }
+  /** Removes a staging copy, and remembers it for the next staged call if the
+   * removal fails. It never throws: the write's outcome, including its
+   * original failure, stands, and a successful destination write must not
+   * invite a replay. */
+  async #discard(sandbox: Sandbox, staging: string): Promise<void> {
+    try {
+      await sandbox.files.remove(staging);
+      this.#leftover.delete(staging);
+    } catch {
+      this.#leftover.add(staging);
+    }
+  }
+  /** Tries again every staging copy an earlier call could not remove. */
+  async #sweep(sandbox: Sandbox): Promise<void> {
+    for (const staging of [...this.#leftover]) await this.#discard(sandbox, staging);
   }
   async readFile(path: string): Promise<Uint8Array> {
     return (await this.get()).files.read(this.path(path));
@@ -28,6 +47,7 @@ export class GuestFiles {
       await sandbox.files.write(target, content, options);
       return;
     }
+    await this.#sweep(sandbox);
     const staging = `/workspace/.runtime-compat/write-${crypto.randomUUID()}`;
     try {
       await sandbox.files.write(staging, bytes, { mode: 0o600, signal: options.signal });
@@ -46,9 +66,7 @@ export class GuestFiles {
         { signal: options.signal },
       );
     } finally {
-      // Cleanup must preserve the write's outcome, including its original
-      // failure; a successful destination write must not invite a replay.
-      await sandbox.files.remove(staging).catch(() => undefined);
+      await this.#discard(sandbox, staging);
     }
   }
   writeTextFile(path: string, content: string) {
@@ -123,6 +141,7 @@ export class GuestFiles {
       });
       return;
     }
+    await this.#sweep(sandbox);
     const staging = `/workspace/.runtime-compat/append-${crypto.randomUUID()}`;
     try {
       await sandbox.files.write(staging, bytes, { mode: 0o600 });
@@ -135,8 +154,7 @@ export class GuestFiles {
         this.path(path),
       ]);
     } finally {
-      // A cleanup failure after success must not invite appending twice.
-      await sandbox.files.remove(staging).catch(() => undefined);
+      await this.#discard(sandbox, staging);
     }
   }
 }

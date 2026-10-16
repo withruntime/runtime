@@ -9,6 +9,9 @@ Runtime uses Firecracker microVMs on Runtime-operated dedicated servers.
   customers.
 - Tests on our own servers exercise guest separation, selected private-address
   refusals, restart recovery and time limits ending on the host.
+- A fork, or a create from a memory snapshot, copies each running program's
+  random-number state. Make keys and tokens after the copy; see
+  [randomness in copies](./storage#randomness-in-copies).
 
 ## Keys and secrets
 
@@ -79,7 +82,8 @@ An owner, admin or developer of the account can create a key, of either kind:
   ([keys in a team](./teams#keys-in-a-team)).
 - A key can read its own access and limit with `GET /v1/limits`,
   `runtime limits` or the `runtime_account` tool's `limits` action.
-- No key can raise, remove or set a limit, and no key can create another key.
+- No key can raise, remove or set a limit. A full-access key of an owner or admin
+  can make keys that have no more than it has ([run a swarm](./teams#run-a-swarm)).
 - Every key made, revoked or limited, and every connection approved, is in the
   account's [audit log](./teams#audit-log), with who did it and from where.
 
@@ -89,6 +93,45 @@ whole life: it stops there, with `stopReason` `lifetime_cap`.
 Set a limit above what the agent's paused sandboxes cost in a day. If storage
 for a paused sandbox cannot be paid for, it is treated like storage on an empty
 balance: you are notified, and after seven days unpaid it is deleted.
+
+## Compartments
+
+**A compartment walls a group of keys off from the rest of the account.** Use
+one per customer of your platform, or for an agent whose sandboxes no other key
+may reach.
+
+- An owner or admin makes one at [API keys](https://withruntime.com/account/keys):
+  choose **One compartment** under **Sees** when you make a key, and pick a
+  compartment or name a new one. More keys can join it the same way.
+- A key in a compartment lists, creates, runs commands in, forks, snapshots,
+  pauses, wakes and deletes the sandboxes, snapshots, images, volumes,
+  previews, ports, jobs and job secrets that its compartment's keys made, and
+  nothing else.
+- Anything outside its compartment answers 404 `not_found`, exactly as an id
+  that does not exist. No key outside it reaches in either, read-only keys
+  included, except an account-wide key, which sees everything in the account.
+- Each compartment has its own sandbox names: `getOrCreate("main")` in one
+  compartment never answers another's `main`, and a name another compartment
+  holds is never `name_taken`. An image name belongs to the compartment (or
+  the rest of the account) that first built it, so nobody else can add a
+  version to it or move its tags: another compartment's build with that name
+  answers 409 `name_taken`.
+- A fork, or a create from a snapshot, stays in the compartment of the key
+  that made it. A resource never moves between compartments: a key's
+  compartment is set when the key is made and never changes.
+- A key in a compartment cannot reach the account's own settings: billing,
+  keys, domains, dedicated addresses, the account's networks, egress secrets,
+  registry logins, webhooks, telemetry export, the audit log, apps and
+  functions. Those answer 403 `outside_compartment`. It can read who it is with
+  `GET /v1/me`, whose `compartment` names its compartment.
+- A compartment's sandboxes are left out of the account's private network and
+  its WireGuard peers. The account's egress rules, egress secrets, your own
+  proxy and signed requests still apply to them.
+- No key can make a compartment. A compartment is deleted only
+  once it holds nothing: deleting one that does answers 409
+  `compartment_not_empty`. Its keys stop working when it is deleted.
+- Each compartment, and every key put in one, is in the
+  [audit log](./teams#audit-log).
 
 ## Network access
 
@@ -140,6 +183,11 @@ blocked, or every purchase it made is refunded in full, its public previews
 need the token like private ones, and they are public again once it pays.
 Preview addresses are under `runtimehost.com`, never under
 `withruntime.com`, so sandbox content never shares an origin with your account.
+A preview signed in by its cookie takes a WebSocket or a request that changes
+something (any method but GET, HEAD and OPTIONS) only from its own address or a
+site you allow to embed it; from any other page, another preview included, it
+answers `origin_not_allowed` (403). Code that sends the preview token in its
+header or query is not affected.
 Rotating a preview token refuses every token issued before it, and closes
 connections opened with one, before the call returns. Making a preview private
 or deleting it, removing a custom domain and closing a TCP port take effect the
@@ -176,26 +224,92 @@ await runtime.secrets.set("GITHUB_TOKEN", {
 });
 ```
 
-- Every sandbox of your account has an environment variable of the secret's
+Or open [Settings → Secrets](https://withruntime.com/account/secrets): every
+secret by name, the hosts each may reach, where its value goes, its rules,
+which sandboxes get it, whether jobs have a copy, and who added and last
+changed it. An owner, admin or developer adds one, replaces its value or
+deletes it there. The value is typed once and never shown again.
+
+- Every sandbox of your account (or only the sandboxes the secret names, see
+  `only` below) has an environment variable of the secret's
   name, holding a placeholder such as `rtsec_3f9c…`. Code uses it as it would
   use the key: `Authorization: Bearer $OPENAI_API_KEY`, or an SDK that reads
   `OPENAI_API_KEY`.
-- The host's proxy replaces the placeholder with the value in the URL and
-  headers of HTTPS requests to the secret's hosts, and nowhere else. A request
-  to any other host carries the placeholder, which is worthless.
+- The host's proxy replaces the placeholder with the value in the credential
+  header of HTTPS requests to the secret's hosts: `Authorization`, `x-api-key`,
+  `x-goog-api-key`, `api-key`, `xi-api-key`, `x-subscription-token` or
+  `private-token`. A request to any other host carries the placeholder, which
+  is worthless.
+- The value never goes into the URL (its path or query) or any other header,
+  even to the secret's hosts: there the placeholder goes out as it is. A
+  hijacked agent that asks for `https://api.openai.com/v1/$OPENAI_API_KEY`,
+  hoping the server's error page repeats the path, gets back only the
+  placeholder.
+- When a placeholder goes out unreplaced where the proxy can see it (plain
+  HTTP, the URL or another header, a request the rules keep out, HTTPS to an
+  address), the account gets the event `sandbox.secret_not_applied` saying
+  which secret and why ([events](./observability#events)). To find why a
+  placeholder arrived unchanged, see
+  [troubleshooting](./troubleshooting#a-secret-s-placeholder-reaches-the-server-unchanged).
 - With `header`, the proxy sets that header on every HTTPS request to the hosts,
-  replacing one the sandbox sent, so code needs no placeholder at all.
+  replacing one the sandbox sent, so code needs no placeholder at all; the
+  value goes into that header and nowhere else. Use it for an API that reads
+  its key from another header. When two secrets set the same header on one
+  host (a key per team, say), the request carries the one whose placeholder
+  the sandbox put in that header; one naming neither is refused with a 400
+  that names both. An API that only takes a key in the URL (such as `?key=`)
+  cannot be used with a secret.
 - With `rules`, on accounts with credit, the value goes only into the requests a rule
   allows, by method and path, decided for each request on a connection. A path
   is exact (`/v1/chat/completions`) or a prefix ending in `/*`
-  (`/repos/acme/*`). Before matching, the proxy removes `.` and `..` segments
-  and decodes escaped letters and digits, so `/repos/acme/%2e%2e/admin` is
-  `/repos/admin`. A request whose path could be read two ways, with an encoded
-  slash, a semicolon or a backslash, gets no secret that has rules. Up to 16
+  (`/repos/acme/*`), which covers the paths under it but not `/repos/acme`
+  or `/repos/acme/`. The path is compared as sent, the query left out. A
+  request whose path a server could read two ways gets no secret that has
+  rules: one with `.` or `..` segments, a doubled slash (`//`), an escaped
+  slash, letter, digit or dot (`%2F`, `%2e`), a semicolon or a backslash.
+  Other escaped characters stay escaped, since a server may read `%3A` and `:`
+  differently: a client that sends `/v1/models/x%3AgenerateContent` needs a
+  rule written that way too. Up to 16
   rules of up to 16 paths each. In the CLI, from `withruntime` 0.7.0, give `--allow "GET,HEAD /repos/acme/*"` once per rule, or
   `--allow /v1/chat/completions` for every method; in the SDKs,
   `rules: [{ methods: ["GET"], paths: ["/repos/acme/*"] }]`. An account with
   no credit gets `payment_required` (402).
+- With `only`, the secret goes to some of your sandboxes instead of all of
+  them: those whose labels match a selector, and those you name by id. Any
+  other sandbox has no environment variable for it, and the proxy puts its
+  value into none of that sandbox's requests, even with the placeholder
+  copied in by hand. A selector matches a sandbox whose labels hold every one
+  of its pairs, and a sandbox matching any one selector gets the secret,
+  including one created or labelled later (it has the secret from its first
+  request, and a running one within seconds of the label). Use it to keep an
+  orchestrator's own credentials away from the sandboxes it starts for
+  others:
+
+  ```bash no-run
+  printf %s "$SLACK_APP_TOKEN" | runtime secrets set SLACK_APP_TOKEN --host slack.com --only-label role=hub
+  runtime secrets set GITHUB_TOKEN --host api.github.com --only-label role=hub --only-label purpose=agent < token.txt
+  runtime secrets set DEPLOY_KEY --host api.example.com --only-sandbox <sandbox id> < key.txt
+  runtime secrets scope RUNTIME_API_KEY --only-label role=hub   # an existing secret, no value needed
+  ```
+
+  Each `--only-label` is one selector (`role=hub,tier=prod` needs both);
+  `--only-sandbox` names a sandbox by id, up to 100. In the SDKs,
+  `only: { labels: [{ role: "hub" }], sandboxes: ["<id>"] }`; in the API and
+  MCP tool, the same `only` object. Replacing a secret's value without
+  `only` keeps the scope it has, so a new value never reaches more sandboxes
+  than the old one did; `--all-sandboxes` (`only: {}`) gives it to every
+  sandbox again. `runtime secrets scope` (`PUT /v1/egress-secrets/{name}/sandboxes`,
+  `runtime.secrets.scope(name, only)`) changes who gets an existing secret
+  without its value. `runtime secrets ls` shows who gets each one. Only the key
+  that made a sandbox can label it, but any key of the account that can make
+  sandboxes can make one with a scope's labels and so get the secret (a
+  sandbox made by a key in a compartment matches no label, only its id): for a
+  credential that matters, name its sandboxes by id, which only a key that can
+  write secrets can change, or keep keys that make sandboxes out of the
+  sandboxes you are guarding. A scope is free on
+  every account. An upstream proxy's credential is sent for every sandbox the
+  proxy covers, whatever its scope.
+
 - The value is sealed to the servers' key when you store it. No API, tool or
   command returns it, and a sandbox never holds it: not in its environment, its
   memory or its disk, so a prompt injection or a stolen sandbox cannot leak it.
@@ -215,9 +329,31 @@ await runtime.secrets.set("GITHUB_TOKEN", {
   instead: the proxy signs each request to its hosts again with the real key,
   and the secret key is never sent at all. See
   [mounting your own bucket](./storage#mount-your-own-bucket).
-- Replacing a secret keeps its placeholder; running sandboxes use the new value
-  within seconds. Deleting one erases the value; it does not revoke the key at
-  its provider.
+- A sandbox that starts or wakes after you store a secret has it from its first
+  request, however briefly it runs; until 9 October 2026 one that started on a
+  server not yet running another of your sandboxes could send the placeholder
+  for up to five minutes. Replacing a secret keeps its placeholder; running
+  sandboxes use the new value within seconds. Deleting one erases the value
+  from every server that held it, including servers no longer running your
+  sandboxes, and closing your account erases them all; it does not revoke the
+  key at its provider.
+- A change answers `enforced: true` once every server running your sandboxes,
+  and every server still holding an earlier version, has confirmed it; a
+  sandbox that starts or wakes later is given it before it runs. `false` means
+  a server has not confirmed it yet: each server asks Runtime for changes every
+  15 seconds and takes them by itself, and one that lost what it held is given
+  it again the same way. A server that has not heard from Runtime for a minute
+  stops putting any of your secrets' values into requests (the placeholder
+  goes out) until it has, so on a server cut off from Runtime a deleted secret
+  is sent for at most a minute, and none of your sandboxes starts or wakes
+  there until it hears again. A change reaches connections already open at
+  their next request.
+- A server keeps your secrets only while it runs your sandboxes, and for 5
+  minutes after the last one leaves it, for a quick wake; then it erases them.
+- Every change to a secret or to your upstream proxy is in the
+  [audit log](./teams), naming who made it, and is an
+  [event](./observability#events) a webhook can receive. Neither ever holds
+  the value.
 - Up to {{sandbox-secrets}} secrets for sandboxes (`--host`) per account, each at most 8 KiB of
   visible ASCII, with up to 16 hosts. Secrets for jobs (`--jobs`) have their
   own limit, {{paid-secrets}} per account ([jobs](./jobs#secrets-in-a-job)). The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
@@ -232,14 +368,14 @@ from its address.
 
 ```bash no-run
 printf %s "Basic $(printf %s user:pass | base64)" | runtime secrets set PROXY_AUTH --host proxy.example.com
-runtime network upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
+runtime networks upstream-proxy set http://proxy.example.com:3128 --secret PROXY_AUTH
 ```
 
 ```ts check
 import { Runtime } from "withruntime";
 
 const runtime = new Runtime();
-await runtime.network.upstreamProxy.set({
+await runtime.networks.upstreamProxy.set({
   url: "http://proxy.example.com:3128",
   secret: "PROXY_AUTH",
   hosts: ["*.internal.example.com"],
@@ -257,14 +393,16 @@ await runtime.network.upstreamProxy.set({
 - Secrets are still put in by Runtime before the bytes enter your proxy's
   tunnel, so your proxy sees encrypted traffic to the destination.
 - If your proxy refuses or cannot be reached, the connection fails with
-  `upstream-proxy-failed`. It never falls back to a direct connection. UDP to a
-  destination the proxy covers is refused.
+  `upstream-proxy-failed`. It never falls back to a direct connection, also
+  not on a server that has not yet been given your proxy: there every
+  connection fails the same way until it has. UDP to a destination the proxy
+  covers is refused.
 - The proxy's own address must be public, and its port one a sandbox may reach.
   An `https://` proxy's certificate must verify against the public roots.
-- `runtime network upstream-proxy get` and `remove` read and remove it; in
-  Python it is `runtime.network.upstream_proxy`. The API is `PUT`, `GET` and
-  `DELETE /v1/network/upstream-proxy`; the MCP tool is
-  `runtime_network_upstream_proxy`, with `set`, `get` and `remove`. The CLI command and the SDK methods
+- `runtime networks upstream-proxy get` and `remove` read and remove it; in
+  Python it is `runtime.networks.upstream_proxy`. The API is `PUT`, `GET` and
+  `DELETE /v1/networks/upstream-proxy`; the MCP tool is
+  `runtime_networks_upstream_proxy`, with `set`, `get` and `remove`. The CLI command and the SDK methods
   arrived in `withruntime` 0.7.0.
 
 ## Root inside the sandbox
@@ -382,7 +520,7 @@ Google Cloud account, or presents it to your own API. See
 
 ## Before production traffic
 
-- Run your real workload on the [included usage](./included-usage), including its package
+- Run your real workload on the [free usage](./included-usage), including its package
   registries, cleanup and recovery.
 - Give each agent or application its own key, with a daily limit where it helps.
 - Keep outputs you need outside the sandbox.
@@ -412,6 +550,20 @@ Anyone can sign up at https://withruntime.com/sign-in.
 ## Two-step sign-in
 
 Customer sign-in uses Google, an email link, single sign-on or a passkey.
+A new account opened by email is confirmed with a six-digit code, typed on the
+page where it was asked for within ten minutes and three tries; a link in an
+email never opens a new account. New accounts by email are not opened from a
+data-centre or VPN network (use Google, or write to support), and a home
+network opens at most two in an hour. Every address that asks for an email
+gets the same answer, after the same checks, so the sign-in page does not
+reveal whether an address has an account. An address is emailed at most five
+times an hour, and one network can send at most 30 sign-in emails an hour to
+existing accounts; asks from a network where the account has signed in within
+90 days have their own allowance, so no one else can use up yours. A code takes at most ten wrong tries a day per address,
+counted across every code and browser; after that, for a day, the address's
+codes stop working and its email carries only the one-click link. A new code
+cancels the one before it, and codes are stored keyed with a secret and
+compared in constant time.
 Directory reviewers use a separate, pre-provisioned demo identity with a
 password. That login accepts only the configured review identity, grants no
 extra permissions, and follows the same second-step requirements.

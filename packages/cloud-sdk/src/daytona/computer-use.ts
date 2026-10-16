@@ -102,9 +102,53 @@ export class Mouse {
     await guard("other", async () => (await desktop(this.#live)).move(x, y));
     return { x, y };
   }
-  async click(x: number, y: number, button = "left", double = false): Promise<Position> {
+  /** Presses and holds `button`, first moving to (x, y) if both are given,
+   * until `up()`. */
+  down(x?: number, y?: number, button = "left"): Promise<Position> {
+    return this.#hold("mouseDown", x, y, button);
+  }
+  /** Releases a held `button`, first moving to (x, y) if both are given. */
+  up(x?: number, y?: number, button = "left"): Promise<Position> {
+    return this.#hold("mouseUp", x, y, button);
+  }
+  async #hold(
+    action: "mouseDown" | "mouseUp",
+    x: number | undefined,
+    y: number | undefined,
+    button: string,
+  ): Promise<Position> {
+    const which = buttonOf(button);
+    return guard("other", async () => {
+      const screen = await desktop(this.#live);
+      const at = x !== undefined && y !== undefined;
+      if (at) await screen.move(x, y);
+      await screen[action](which);
+      if (at) return { x, y };
+      const where = await screen.cursor();
+      return { x: where.x, y: where.y };
+    });
+  }
+  /** One click, or two with `double`; `clicks` (1 or 2 here) wins over `double`. */
+  async click(
+    x: number,
+    y: number,
+    button = "left",
+    double = false,
+    clicks?: number,
+    modifiers?: string[],
+  ): Promise<Position> {
+    const which = buttonOf(button);
+    held(modifiers, "click");
+    const count = clicks ?? (double ? 2 : 1);
+    if (!Number.isInteger(count) || count < 1 || count > 10)
+      throw new RangeError(`clicks is a whole number from 1 to 10, not ${JSON.stringify(clicks)}.`);
+    if (count > 2)
+      throw new NotSupportedError(
+        `${count} clicks at once (clicks)`,
+        "Click once or twice (double: true); to select a line, click once and press shift+End.",
+      );
     await guard("other", async () =>
-      (await desktop(this.#live)).click(x, y, { button: buttonOf(button), double }),
+      (await desktop(this.#live)).click(x, y, { button: which, double: count === 2 }),
     );
     return { x, y };
   }
@@ -114,8 +158,10 @@ export class Mouse {
     endX: number,
     endY: number,
     button = "left",
+    modifiers?: string[],
   ): Promise<Position> {
     const which = buttonOf(button);
+    held(modifiers, "drag");
     await guard("other", async () => {
       const screen = await desktop(this.#live);
       if (which === "left") return screen.drag([startX, startY], [endX, endY]);
@@ -126,12 +172,23 @@ export class Mouse {
     });
     return { x: endX, y: endY };
   }
-  /** `amount` wheel clicks up or down at (x, y). */
-  async scroll(x: number, y: number, direction: "up" | "down", amount = 1): Promise<boolean> {
-    if (direction !== "up" && direction !== "down")
-      throw new RangeError(`direction is "up" or "down", not ${JSON.stringify(direction)}.`);
+  /** `amount` wheel clicks up, down, left or right at (x, y). */
+  async scroll(
+    x: number,
+    y: number,
+    direction: "up" | "down" | "left" | "right",
+    amount = 1,
+    modifiers?: string[],
+  ): Promise<boolean> {
+    const step = SCROLL[direction];
+    if (!step)
+      throw new RangeError(
+        `direction is "up", "down", "left" or "right", not ${JSON.stringify(direction)}.`,
+      );
+    held(modifiers, "scroll");
+    const [dy, dx] = [step[0] * amount, step[1] * amount];
     await guard("other", async () =>
-      (await desktop(this.#live)).scroll(direction === "down" ? amount : -amount, { x, y }),
+      (await desktop(this.#live)).scroll(dy, dx ? { dx, x, y } : { x, y }),
     );
     return true;
   }
@@ -161,6 +218,13 @@ export class Keyboard {
     await guard("other", async () =>
       (await desktop(this.#live)).press(keys.split("+").map(keyOf).join("+")),
     );
+  }
+  /** Runtime's desktop presses keys and lets go at once; it cannot hold one. */
+  down(_key: string): Promise<void> {
+    return Promise.reject(holding());
+  }
+  up(_key: string): Promise<void> {
+    return Promise.reject(holding());
   }
 }
 
@@ -388,6 +452,31 @@ function region(): NotSupportedError {
     "Screenshots of part of the screen",
     "Take the whole screen with takeFullScreen() or takeCompressed() and crop it yourself.",
   );
+}
+
+/** [dy, dx] per wheel click: positive is down and right. */
+const SCROLL: Record<string, [number, number] | undefined> = {
+  up: [-1, 0],
+  down: [1, 0],
+  left: [0, -1],
+  right: [0, 1],
+};
+
+function holding(): NotSupportedError {
+  return new NotSupportedError(
+    "Holding a key down (keyboard.down and keyboard.up)",
+    'Press the key with its modifiers at once: keyboard.press("t", ["ctrl", "shift"]) or keyboard.hotkey("ctrl+shift+t").',
+  );
+}
+
+/** Keys held through a click, drag or scroll need a key held down, which
+ * Runtime's desktop cannot do; refused before anything happens. */
+function held(modifiers: string[] | undefined, what: "click" | "drag" | "scroll"): void {
+  if (modifiers?.length)
+    throw new NotSupportedError(
+      `Holding keys through a ${what} (modifiers)`,
+      `Leave out modifiers; for a shortcut, keyboard.press(key, modifiers) or keyboard.hotkey("ctrl+a").`,
+    );
 }
 
 function buttonOf(button: string): "left" | "middle" | "right" {

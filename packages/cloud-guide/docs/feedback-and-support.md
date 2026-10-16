@@ -129,7 +129,9 @@ organization's audit log.
 
 Refunds, credits, disputed charges, security reports, suspected leaked keys,
 data loss, outages, abuse reports and legal questions always go to a person. So
-does any request for a person. If you suspect a key has leaked, revoke it at
+does any request for a person, a bug you report from your account, and a
+question the support agent cannot finish answering in one reply: it says so,
+and a person replies in the same conversation. If you suspect a key has leaked, revoke it at
 [withruntime.com/account/keys](https://withruntime.com/account/keys) first, then
 report it.
 

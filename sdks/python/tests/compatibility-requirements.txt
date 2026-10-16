@@ -195,12 +195,12 @@ connectrpc==0.11.1 \
     --hash=sha256:8a52e2e92a485fa9681c1101a79a5ebeb31807e3ea3d5aabd41f484a6398bc7b
 distro==1.9.0 \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
-dockerfile-parse==2.0.1 \
-    --hash=sha256:bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6
-e2b==2.52.1 \
-    --hash=sha256:708583a37c9b797b0044bd92fa407c21aec65f101f2fd4c4a0ccd842dbe33de1
-e2b-code-interpreter==2.10.1 \
-    --hash=sha256:f4c9732699ee4b1c289acedac8bff66fccecc6ab374bf0b4ef88d5ad063e333d
+e2b==2.55.1 \
+    --hash=sha256:30aec382a7cac5401e0aa0efb156422459f586101809c3e9f34a6fcf797097db
+e2b-code-interpreter==2.10.5 \
+    --hash=sha256:ac98cd29335ae4f035b70a4eb5f6ca89dc5728d48de79cfb7d90a08d57a652b5
+e2b-dockerfile-utils==0.1.0 \
+    --hash=sha256:fedc7d036d8a23cb962c01b90882ebec154520ec1bed064e1fe92796a7971553
 exceptiongroup==1.3.1 \
     --hash=sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598
 frozenlist==1.8.0 \
@@ -881,14 +881,14 @@ python-dateutil==2.9.0.post0 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
 rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
-runloop_api_client==1.32.0 \
-    --hash=sha256:23c36910de7423f73aef91d4a963abea80a6b2f5b2df5bb8e439d788d5486cc7
+runloop_api_client==2.0.0 \
+    --hash=sha256:85e22da5b7cc67dc6c4c126523800976794677ee42fa2c36ef9dd7be099f009a
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
 sniffio==1.3.1 \
     --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
-sprites-py==0.7.1 \
-    --hash=sha256:23774f8111c9a4fbb7007f8e305677734eb7616bebb6c668c394788399ff38a8
+sprites-py==0.7.2 \
+    --hash=sha256:b9015928cf2cab8c99f31f7fa245b088f9f26f37ce047721bcdf9c63e1f2f502
 synchronicity==0.12.5 \
     --hash=sha256:fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
 tenacity==9.1.4 \

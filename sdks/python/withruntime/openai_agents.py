@@ -12,7 +12,7 @@ microVM with its own kernel, and the agent definition does not change::
     agent = SandboxAgent(name="Coder", instructions="Fix the failing test.")
     result = await Runner.run(agent, "Go.", run_config=RunConfig(sandbox=SandboxRunConfig(
         client=RuntimeCloudSandboxClient(),
-        options=RuntimeCloudSandboxClientOptions(funding="trial"),
+        options=RuntimeCloudSandboxClientOptions(vcpu=2),
     )))
 
 Install with ``pip install "withruntime[openai-agents]"``. The key comes from
@@ -108,8 +108,8 @@ WorkspacePersistence = Literal["tar", "snapshot"]
 class RuntimeCloudSandboxClientOptions(BaseSandboxClientOptions):
     """How to create the Runtime Cloud sandbox. Every field is optional.
 
-    ``funding`` is ``"trial"`` or ``"paid"``; left out, the account's default
-    applies. ``image`` or ``snapshot_id`` start from a custom image or a ready
+    ``funding`` is accepted and ignored: free usage first, then credit.
+    ``image`` or ``snapshot_id`` start from a custom image or a ready
     snapshot. ``extra`` passes any other create field in snake_case, as
     ``AsyncRuntime.sandboxes.create`` takes it (``network``, ``cpu``,
     ``on_lease_end``, ``volumes``...).
@@ -159,7 +159,7 @@ class RuntimeCloudSandboxSessionState(SandboxSessionState):
 def _create_fields(options: RuntimeCloudSandboxClientOptions) -> dict[str, Any]:
     """The keyword arguments for ``runtime.sandboxes.create``."""
     fields: dict[str, Any] = dict(options.extra or {})
-    for name in ("funding", "region", "image", "vcpu", "memory_mib", "disk_mib", "timeout_seconds", "name",
+    for name in ("region", "image", "vcpu", "memory_mib", "disk_mib", "timeout_seconds", "name",
                  "labels", "max_cost_micros", "max_total_cost_micros"):
         value = getattr(options, name)
         if value is not None:

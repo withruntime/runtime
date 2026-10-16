@@ -545,6 +545,30 @@ test("guest_busy that never clears ends at the caller's deadline with its own er
   expect(calls).toBeGreaterThan(5);
 });
 
+/* On a loaded machine bun can fire AbortSignal.timeout before a setTimeout
+   that was due earlier (16 of 200 in a stalled loop, 11 October 2026): the
+   deadline then ended a wait the transport had judged to fit, and the call
+   failed as a timeout, not as the refusal it kept getting. Here every timer
+   fires 300 ms late, so the deadline always comes first. */
+test("guest_busy whose wait the deadline overtakes still ends with its own error", async () => {
+  const real = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: () => void, ms?: number) =>
+    real(handler, (ms ?? 0) + 300)) as typeof setTimeout;
+  try {
+    const t = transport((async () =>
+      Response.json(
+        { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
+        { status: 503 },
+      )) as unknown as typeof fetch);
+    const error = await t
+      .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
+      .catch((error: unknown) => error);
+    expect(error).toMatchObject({ code: "guest_busy", status: 503 });
+  } finally {
+    globalThis.setTimeout = real;
+  }
+});
+
 /* The leader drill on vin-5, 4 October 2026: a call in flight when the
    controller died waited, its connection silent, until its deadline, and
    failed. An attempt whose answer has not started by ANSWER_START_MS is sent
@@ -580,4 +604,79 @@ test("an attempt whose answer never starts is sent again under the same key", as
     server.closeAllConnections();
     server.close();
   }
+});
+
+/** A port nothing listens on, so a dial to it is refused. */
+async function closedPort() {
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((done) => server.close(() => done()));
+  return port;
+}
+
+/** A fetch that runs `first` on the first try and answers ok after, keeping
+ * when each try began and the Idempotency-Key it carried. */
+function tries(first: () => Promise<Response>) {
+  const at: number[] = [];
+  const keys: (string | null)[] = [];
+  const fetcher = (async (_url: string, init: RequestInit) => {
+    at.push(performance.now());
+    keys.push(new Headers(init.headers).get("idempotency-key"));
+    return at.length === 1 ? first() : Response.json({ ok: true });
+  }) as unknown as typeof fetch;
+  return { fetcher, at, keys, gap: () => at[1]! - at[0]! };
+}
+
+test("a write whose connection was refused never left, and is sent again at once with its key", async () => {
+  const port = await closedPort();
+  const t = tries(() => fetch(`http://127.0.0.1:${port}/v1/sandboxes`, { method: "POST" }));
+  await transport(t.fetcher).json({ method: "POST", path: "/v1/sandboxes", idempotencyKey: "k1" });
+  expect(t.at).toHaveLength(2);
+  // Before 11 October 2026 it waited backoff(0), 125 to 375 ms.
+  expect(t.gap()).toBeLessThan(100);
+  expect(t.keys).toEqual(["k1", "k1"]);
+});
+
+test("a connection reset after the request was sent keeps the backoff", async () => {
+  const server = createServer((request) => request.socket.destroy());
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const t = tries(() =>
+      fetch(`http://127.0.0.1:${port}/v1/sandboxes`, { method: "POST", body: "{}" }),
+    );
+    await transport(t.fetcher).json({
+      method: "POST",
+      path: "/v1/sandboxes",
+      idempotencyKey: "k2",
+    });
+    expect(t.gap()).toBeGreaterThanOrEqual(120);
+    expect(t.keys).toEqual(["k2", "k2"]);
+  } finally {
+    server.close();
+  }
+});
+
+test("a timeout keeps the backoff: the request may have reached a server", async () => {
+  const t = tries(() =>
+    Promise.reject(new DOMException("The operation timed out.", "TimeoutError")),
+  );
+  await transport(t.fetcher).json({ method: "GET", path: "/v1/me" });
+  expect(t.gap()).toBeGreaterThanOrEqual(120);
+});
+
+test("a second refusal in a row waits the backoff, so a down API is not hammered", async () => {
+  const port = await closedPort();
+  const at: number[] = [];
+  const fetcher = (async () => {
+    at.push(performance.now());
+    if (at.length <= 2) return fetch(`http://127.0.0.1:${port}/v1/me`);
+    return Response.json({ ok: true });
+  }) as unknown as typeof fetch;
+  await transport(fetcher).json({ method: "GET", path: "/v1/me" });
+  expect(at).toHaveLength(3);
+  expect(at[1]! - at[0]!).toBeLessThan(100);
+  // backoff(1): 250 to 750 ms.
+  expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(240);
 });

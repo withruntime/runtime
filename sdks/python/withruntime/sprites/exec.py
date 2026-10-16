@@ -1,4 +1,4 @@
-"""Go-style command handles matching sprites-py 0.7.1."""
+"""Go-style command handles matching sprites-py 0.7.2."""
 from __future__ import annotations
 from .exceptions import ExitError, TimeoutError
 from dataclasses import dataclass

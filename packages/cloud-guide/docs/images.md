@@ -14,8 +14,8 @@ in is packed, and only the parts that changed since your last build are
 uploaded.
 
 ```bash no-run
-runtime image build . -t web:v1
-runtime sandbox create --image web:v1
+runtime images build . -t web:v1
+runtime sandboxes create --image web:v1
 ```
 
 ```ts check
@@ -57,8 +57,11 @@ What a Dockerfile can use:
 - `FROM scratch`, any public image, a private image (see below), or
   `FROM runtime` for Runtime's own base image with Python, Node, Bun and the
   usual tools.
-- `COPY --chown`, `COPY --chmod`, `WORKDIR`, `ENV`, `USER`, `SHELL` and
-  `RUN --mount=type=cache`, which runs without the cache mount.
+- `COPY --chown`, `COPY --chmod` (octal such as `755`, or symbolic such as
+  `a+x` or `u+x,go-w` for files from the build context), `WORKDIR`, `ENV`,
+  `USER`, `SHELL` and `RUN --mount=type=cache`, which runs without the cache
+  mount. As on Docker, an `ENV` beats an `ARG` of the same name, and an `ARG`
+  with no value and no build argument stays unset.
 - `CMD`, `ENTRYPOINT` and `HEALTHCHECK` become the image's start and ready
   commands (see below).
 
@@ -77,9 +80,11 @@ the last `WORKDIR`, as on Docker and E2B, and in `/workspace` when there is
 none; so do the image's start and ready commands (`CMD`, `ENTRYPOINT`,
 `HEALTHCHECK`). The build gives that directory and everything in it to the
 sandbox user, so commands can write where they start. A system directory such
-as `/usr` or `/tmp` stays root's, and the build log says so. An image built
-earlier with a `WORKDIR` outside `/workspace` starts commands in `/workspace`
-until it is built again.
+as `/usr` or `/tmp` stays root's, and the build log says so. A file the image
+puts in `/tmp` is there when a sandbox starts, as on Docker; until 9 October
+2026 a sandbox from an image on Runtime's base started with `/tmp` empty. An
+image built earlier with a `WORKDIR` outside `/workspace` starts commands in
+`/workspace` until it is built again.
 
 Names resolve through Runtime's resolver in every image: the image's own
 `/etc/resolv.conf` is replaced, in each `RUN` step and in the sandbox, as
@@ -109,9 +114,9 @@ call returns it, and the API that stored it cannot read it back. A build opens
 it only to pull, inside its own build machine.
 
 ```bash no-run
-echo "$GHCR_TOKEN" | runtime image registry set ghcr.io --username my-user
-echo "$AWS_SECRET_ACCESS_KEY" | runtime image registry set 123456789012.dkr.ecr.us-east-1.amazonaws.com --access-key-id AKIA...
-runtime image registry ls
+echo "$GHCR_TOKEN" | runtime images registry set ghcr.io --username my-user
+echo "$AWS_SECRET_ACCESS_KEY" | runtime images registry set 123456789012.dkr.ecr.us-east-1.amazonaws.com --access-key-id AKIA...
+runtime images registry ls
 ```
 
 | Registry                                                | Give                                                                                                                  |
@@ -145,8 +150,8 @@ built first. Build it under its own name and tag, and the same words then name
 it:
 
 ```bash no-run
-runtime image build --from python:3.12-slim -t python:3.12-slim
-runtime sandbox create --image python:3.12-slim
+runtime images build --from python:3.12-slim -t python:3.12-slim
+runtime sandboxes create --image python:3.12-slim
 ```
 
 A reference that names nothing answers `image_not_found`. For a name you have
@@ -154,11 +159,11 @@ built, it lists the name's tags and versions, and `details` carries them; for a
 name you never built, it gives the build command above.
 
 ```bash no-run
-runtime image build . -t web:v2 -t web:latest
-runtime image versions web
-runtime image tag web@2 prod
-runtime image untag web@1 prod
-runtime image rm web@1
+runtime images build . -t web:v2 -t web:latest
+runtime images versions web
+runtime images tag web@2 prod
+runtime images untag web@1 prod
+runtime images rm web@1
 ```
 
 Deleting a version removes its tags too. Sandboxes already started from it
@@ -170,7 +175,7 @@ A new build leaves the sandboxes already running an image alone. To move one
 to the new version and keep its files, switch its image:
 
 ```bash no-run
-runtime sandbox switch-image "${id}" web:v2 --keep-workspace
+runtime sandboxes switch-image "${id}" web:v2 --keep-workspace
 ```
 
 `sbx.switchImage("web:v2")` in JavaScript, `sbx.switch_image("web:v2")` in
@@ -233,7 +238,7 @@ The start command runs once, in the background, as the sandbox user, in the
 image's `WORKDIR` (or `start.cwd`). The create call answers when the ready
 check passes: `readyPort` is being listened on, or `readyCommand` exits 0. It
 answers with `start.state` set to `ready`, `started` (no ready check, and
-still running half a second after it began), `timeout` (the check did not
+still running 150 ms after it began), `timeout` (the check did not
 pass within `readyTimeoutSeconds`, 60 by default and at most 300, within the
 SDKs' own five-minute call deadline), or `exited` (the start command ended
 first; `start.exitCode` and `start.stderr`, its last lines of error output,
@@ -252,9 +257,19 @@ size created from the image starts from the copy. Measured through the API on
 against 3.7 s to boot the image. A copy serves only its own size, so the first
 sandbox of another size boots the image, and Runtime then keeps a started copy
 of that size too: up to two more sizes per image, each with up to 8 GiB of
-memory. A pilot's servers keep one at the pilot's size from the start. Each copy
-is your account's alone, goes when the image is deleted, and counts toward your
-image disk quota; it is not charged.
+memory. A new build of an image starts with copies at those sizes already:
+it gets, before its first sandbox, a started copy of each size your account's
+other images have one of on that server (they count among its two), so a
+rebuilt image created at 1 vCPU and 512 MiB starts from a copy from its first
+create there. An image larger than the default 4 GiB disk gets its started copy at
+the default vCPU and memory on the smallest of 8, 16, 32 or 64 GiB of disk
+that holds it, so ask for that `diskMiB` to start fast from the first create.
+A start that finds no copy boots the image: measured on 8 October 2026, about
+2 s from create to running for a 4.4 GiB image, against 0.3 s from a copy.
+Each server keeps its own copies, so the first create of a size on a server
+that has none boots. A pilot's servers keep one at the pilot's size from the start. Each copy
+is your account's alone, goes when the image is deleted, and is neither
+charged nor counted toward your image disk quota.
 
 ## Faster rebuilds
 
@@ -285,12 +300,21 @@ the image says what it keeps.
 Checkpoints stay on the server with the image that made them and go when it is
 deleted. They count toward your image disk quota and are not charged. When a
 new build would go over that quota, the oldest checkpoints kept from failed
-builds are let go first, so they never stop a build. A checkpoint after the
-pull holds the base image as it was then; pass `cache: false` (`--no-cache`)
+builds are let go first, so they never stop a build.
+
+A base named by its tag, such as `FROM python:3.12-slim` or `:latest`, is
+looked up when the build is created and pinned to the digest the tag names
+then, as `docker buildx build` does. A tag that has moved since an earlier
+build is a different base, so the build pulls it again and reuses no step
+built on the old one. A base on a private registry, or one that does not
+answer within 5 seconds, cannot be looked up this way; it keeps its tag, the
+build's notes say so, and a checkpoint after its pull holds it as it was then.
+Pin such a base with `@sha256:<digest>`, or pass `cache: false` (`--no-cache`)
 to pull it again, build every step from scratch and keep no checkpoints.
 
 An identical build of your account, same plan and same files, built by the
-same builder version, is copied at once instead of built.
+same builder version, is copied at once instead of built, unless the build
+passes `cache: false`.
 
 ## Build machine
 
@@ -312,14 +336,15 @@ await runtime.images.build({
 
 In Python it is `build={"vcpu": 4, "memory_mib": 8192, "disk_mib": 16384}`;
 over HTTP, `build.diskMiB` in the body of `POST /v1/images`. The ranges are
-under [Limits](#limits). The scratch disk must fit the builder image; smaller
+under [Limits](#limits); an odd `memoryMiB` is rounded up to the next even
+number, as a sandbox's is. The scratch disk must fit the builder image; smaller
 requests are refused before a build is queued. From the CLI, `--disk-mib`, `--max-image-mib` and
 `--timeout` set the build's scratch disk, the image size and the build time.
 
 ## Build logs
 
 `images.build` streams the log to `onLog` (`on_log`) as it is written. The CLI
-prints it while it builds, and `runtime image logs <image> --follow` streams it
+prints it while it builds, and `runtime images logs <image> --follow` streams it
 again. Over HTTP, `GET /v1/images/{id}/logs?follow=true` answers with one JSON
 event per line: each `line`, then `done` with the image.
 
@@ -343,7 +368,7 @@ Dockerfile, and we are alerted; build again in a few minutes.
 | Builds at once       | 1 until your account holds credit, then 4                                                                                                         |
 | Build machine        | 1 to 8 vCPUs (2 by default), 1 to 16 GiB of memory (4 GiB), {{image-build-disk-min-gib}} to 32 GiB of scratch disk ({{image-build-disk-min-gib}}) |
 | Build time           | 60 seconds to 1 hour (30 minutes by default), counting starting the build machine and saving the image                                            |
-| Image size           | 512 MiB to 20 GiB (8 GiB by default)                                                                                                              |
+| Image size           | 512 MiB to 20 GiB (8 GiB by default); at least {{runtime-base-image-mib}} from Runtime's base, which is that size before any step                 |
 | Build context        | 100 MiB compressed, 20,000 files, 2 GiB unpacked                                                                                                  |
 | Context upload       | 1 MiB chunks, kept 24 hours after last use; 200 MiB held and 1 GiB uploaded a day per account                                                     |
 | Inline `files`       | 256 files and 1 MiB in all                                                                                                                        |
@@ -354,6 +379,6 @@ Dockerfile, and we are alerted; build again in a few minutes.
 
 A stored image is charged on its whole file. Storage
 quotas follow the same allocation ([pricing](./pricing#snapshots-images-and-volumes)). Building an image is free
-with credit. Without credit, a build counts toward the included usage, only for the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
+with credit. Without credit, a build counts toward the free usage, only for the time it builds, and is at most 2 vCPU and 4 GiB, {{trial-build-time}} and {{trial-builds-a-day}} builds
 a day. A build that fails through a fault of ours, such as a build machine
-that does not start, uses none of the included usage. An account without credit keeps its first three images free.
+that does not start, uses none of the free usage. The [free usage](./included-usage) stores your first three images free for as long as you keep them, even after you add credit, outside the monthly allowance for saved copies. `storedBytes` on an image is not what it is charged on: `sizeBytes` is.

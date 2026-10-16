@@ -38,10 +38,12 @@ export function named(markdown: string): Set<string> {
   for (const line of markdown.split("\n")) {
     if (line.startsWith("#")) product = "";
     for (const m of line.matchAll(
-      /\bruntime ([a-z-]+)(?: ([a-z][a-z-]*))?|`(?!runtime )([a-z][a-z-]*)[` ]/g,
+      /\bruntime (networks wireguard|[a-z-]+)(?: ([a-z][a-z-]*))?|`(?!runtime )([a-z][a-z-]*)[` ]/g,
     )) {
       if (m[1]) {
         product = m[1];
+        // `runtime networks wireguard` names networks' wireguard command too.
+        if (m[1].includes(" ")) out.add(`runtime ${m[1]}`);
         if (m[2]) out.add(`runtime ${m[1]} ${m[2]}`);
       } else if (product) out.add(`runtime ${product} ${m[3]}`);
     }
@@ -51,7 +53,7 @@ export function named(markdown: string): Set<string> {
 
 async function help(product?: string): Promise<string> {
   const child = Bun.spawn(
-    [process.execPath, join(sdk, "src", "cli.ts"), ...(product ? [product] : []), "help"],
+    [process.execPath, join(sdk, "src", "cli.ts"), ...(product ? product.split(" ") : []), "help"],
     { stdout: "pipe", stderr: "pipe", env: { ...process.env, RUNTIME_API_KEY: "rk_help" } },
   );
   const text = await new Response(child.stdout).text();
@@ -64,7 +66,8 @@ async function help(product?: string): Promise<string> {
  * out. */
 async function products(): Promise<Map<string, string>> {
   const list = /const OWN_HELP = \[([\s\S]*?)\];/.exec(source)![1]!;
-  const names = [...list.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]!);
+  // WireGuard is a product inside networks, with a help of its own.
+  const names = [...[...list.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]!), "networks wireguard"];
   const texts = await Promise.all(names.map((name) => help(name)));
   const out = new Map<string, string>();
   const seen = new Set<string>();
@@ -107,28 +110,22 @@ const dispatched = (word: string) =>
 const options = (text: string) => [...text.matchAll(/--[a-z][a-z0-9-]*/g)].map((m) => m[0]);
 
 /** Commands of a feature switched off on the deployment, whose guide
- * comes with it. `runtime billing` pays in stablecoins, until Marc turns it
- * on (1f621467). Resize, volume growth and shared volumes are off until the
+ * comes with it. Resize, volume growth and shared volumes are off until the
  * server's switches are set (WORKLIST, "Sandbox features round, 2 October
  * 2026"); their passages left the guides on 4 October 2026, and the server's
  * own codes are held the same way (packages/cloud/tests/docs-completeness.test.ts,
  * SWITCHED_OFF). The CLI cannot read a server's switch, so these stay listed
  * until the guide comes back. */
 const SWITCHED_OFF = new Set([
-  "runtime billing topup",
-  "runtime billing status",
-  "runtime billing claim",
-  "--new-account",
-  "--accept-terms",
   // RUNTIME_CLOUD_SANDBOX_RESIZE_ENABLED.
-  "runtime sandbox resize",
+  "runtime sandboxes resize",
   "--restart",
   // RUNTIME_CLOUD_VOLUME_RESIZE_ENABLED.
-  "runtime volume resize",
+  "runtime volumes resize",
   // RUNTIME_CLOUD_SHARED_VOLUMES_ENABLED.
-  "runtime volume attach",
-  "runtime volume attachment",
-  "runtime volume detach",
+  "runtime volumes attach",
+  "runtime volumes attachment",
+  "runtime volumes detach",
   "--shared",
   "--path",
 ]);
@@ -170,7 +167,7 @@ test("every command and option in the CLI's help is named in a guide, and every 
   expect([...allowed].filter((entry) => !missing.has(entry)).sort()).toEqual([]);
   // A guide names only commands the CLI has.
   const invented: string[] = [];
-  for (const m of guides.matchAll(/\bruntime ([a-z-]+) ([a-z][a-z-]*)\b/g)) {
+  for (const m of guides.matchAll(/\bruntime (networks wireguard|[a-z-]+) ([a-z][a-z-]*)\b/g)) {
     const commandsOf = known.get(m[1]!);
     if (commandsOf && !commandsOf.has(m[2]!)) invented.push(m[0]);
   }

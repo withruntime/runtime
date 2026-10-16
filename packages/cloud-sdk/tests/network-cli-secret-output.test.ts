@@ -54,7 +54,7 @@ async function setup(
   });
   const run = (output = path) =>
     networkProductCommand(
-      "tunnel",
+      "wireguard",
       ["peer", action, "office"],
       { positional: ["peer", action, "office"], flags: new Map([["out", [output]]]) },
       { json: false, write: (text) => messages.push(text), error: (text) => messages.push(text) },

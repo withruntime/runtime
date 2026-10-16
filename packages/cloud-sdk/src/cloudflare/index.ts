@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
 import { Runtime } from "../client.js";
 import { NotFoundError } from "../errors.js";
+import { timeoutSignal } from "../transport.js";
 import type { Process as NativeProcess, Sandbox as NativeSandbox } from "../sandbox.js";
 import {
+  quote,
   client,
   closeShell,
   CompatibilityError,
+  refuse,
+  type Refused,
+  type RefusedAsync,
   destroy,
   environment,
   execOptions,
@@ -16,7 +21,43 @@ import {
   shellRoot,
   type ClientOptions,
 } from "../compat/core.js";
+import {
+  BucketUnmountError,
+  InvalidMountConfigError,
+  ProcessExitedBeforeReadyError,
+  ProcessReadyTimeoutError,
+  S3FSMountError,
+  response,
+} from "./errors.js";
+import {
+  CodeInterpreter,
+  hasEnv,
+  RUN_ENV,
+  type CodeContext,
+  type CreateContextOptions,
+  type RunCodeOptions,
+} from "./interpreter.js";
+import { sseStream, type FileStreamEvent } from "./streams.js";
+import { CHANGES, watchFilters } from "./watch.js";
 export { CompatibilityError };
+export * from "./errors.js";
+export { CodeInterpreter } from "./interpreter.js";
+export type {
+  CodeContext,
+  CreateContextOptions,
+  ExecutionError,
+  OutputMessage,
+  RunCodeOptions,
+} from "./interpreter.js";
+export {
+  collectFile,
+  isExecResult,
+  isProcess,
+  isProcessStatus,
+  parseSSEStream,
+  streamFile,
+} from "./streams.js";
+export type { FileChunk, FileMetadata, FileStreamEvent } from "./streams.js";
 export class SandboxSecurityError extends Error {
   constructor(
     message: string,
@@ -60,6 +101,53 @@ export interface ExecOptions {
   onComplete?: (result: ExecResult) => void;
   onError?: (error: Error) => void;
   signal?: AbortSignal;
+  /** Cloudflare's log level for the command; it changes nothing else. */
+  origin?: "user" | "internal";
+}
+export interface StreamOptions extends Omit<
+  ExecOptions,
+  "stream" | "onOutput" | "onComplete" | "onError"
+> {
+  sessionId?: string;
+  /** Accepted as Cloudflare accepts it: its SDK does not use it either. */
+  bufferSize?: number;
+}
+export interface WatchOptions {
+  recursive?: boolean;
+  include?: string[];
+  exclude?: string[];
+  sessionId?: string;
+}
+export interface CheckChangesOptions extends WatchOptions {
+  since?: string;
+}
+export type CheckChangesResult =
+  | { success: true; status: "unchanged" | "changed"; version: string; timestamp: string }
+  | {
+      success: true;
+      status: "resync";
+      reason: "expired" | "restarted";
+      version: string;
+      timestamp: string;
+    };
+export interface GitCheckoutResult {
+  success: boolean;
+  repoUrl: string;
+  branch: string;
+  targetDir: string;
+  timestamp: string;
+  exitCode?: number;
+}
+export type BucketProvider = "r2" | "s3" | "gcs";
+export interface MountBucketOptions {
+  endpoint?: string;
+  provider?: BucketProvider;
+  credentials?: { accessKeyId: string; secretAccessKey: string };
+  readOnly?: boolean;
+  s3fsOptions?: string[];
+  prefix?: string;
+  credentialProxy?: boolean;
+  localBucket?: boolean;
 }
 export interface ExecResult {
   success: boolean;
@@ -102,6 +190,8 @@ export interface ProcessOptions {
   cwd?: string;
   encoding?: string;
   sessionId?: string;
+  processId?: string;
+  autoCleanup?: boolean;
   onOutput?: (stream: "stdout" | "stderr", data: string) => void;
   onExit?: (code: number | null) => void;
   onStart?: (process: Process) => void;
@@ -143,6 +233,29 @@ export class Sandbox {
   private pending?: Promise<NativeSandbox>;
   private existing?: NativeSandbox;
   readonly id: string;
+  /** The port Cloudflare's container serves on; Runtime previews any port. */
+  readonly defaultPort = 3000;
+  /** What setEnvVars gave this handle; the sandbox keeps them for every command. */
+  envVars: Record<string, string> = {};
+  readonly #interpreter = new CodeInterpreter(this);
+  // Durable Object and Worker plumbing Runtime has no counterpart for.
+  declare readonly client: Refused;
+  declare readonly tunnels: Refused;
+  declare readonly callTunnels: RefusedAsync;
+  declare readonly setSandboxName: RefusedAsync;
+  declare readonly setContainerTimeouts: RefusedAsync;
+  declare readonly setTransport: RefusedAsync;
+  declare readonly onStart: RefusedAsync;
+  declare readonly onStop: RefusedAsync;
+  declare readonly onError: Refused;
+  declare readonly onActivityExpired: RefusedAsync;
+  declare readonly fetch: RefusedAsync;
+  declare readonly containerFetch: RefusedAsync;
+  declare readonly wsConnect: RefusedAsync;
+  declare readonly getContainerPlacementId: RefusedAsync;
+  declare readonly validatePortToken: RefusedAsync;
+  declare readonly createBackup: RefusedAsync;
+  declare readonly restoreBackup: RefusedAsync;
   constructor(
     readonly runtime: Runtime,
     id: string,
@@ -150,6 +263,21 @@ export class Sandbox {
   ) {
     validateSandboxConfiguration(options);
     this.id = id;
+  }
+  get sleepAfter(): string | number {
+    return this.options.sleepAfter ?? "10m";
+  }
+  setSleepAfter(sleepAfter: string | number) {
+    return this.configure({ sleepAfter });
+  }
+  setKeepAlive(keepAlive: boolean) {
+    return this.configure({ keepAlive });
+  }
+  /** Replaces the sandbox's labels, as Cloudflare's does. */
+  async setLabels(labels: Record<string, string>) {
+    for (const [key, value] of Object.entries(labels))
+      if (typeof value !== "string") throw new TypeError(`Label ${key} must be a string`);
+    await (await this.native()).update({ labels: { ...labels, "compat.provider": "cloudflare" } });
   }
   async configure(options: Pick<SandboxOptions, "sleepAfter" | "keepAlive">) {
     only("Cloudflare configure", options, ["sleepAfter", "keepAlive"]);
@@ -223,14 +351,42 @@ export class Sandbox {
   private session(id = `sandbox-${this.id}`, options: SessionOptions = {}) {
     return new ExecutionSession(this, id, options);
   }
+  /** A session by id: its saved settings, or a fresh session of that id, as
+   * Cloudflare starts one again after its shell ended. */
+  private async sessionFor(id?: string) {
+    if (id === undefined || id === `sandbox-${this.id}`) return this.session();
+    try {
+      return await this.getSession(id);
+    } catch (error) {
+      if (error instanceof NotFoundError) return this.session(id);
+      throw error;
+    }
+  }
   exec(command: string, options?: ExecOptions) {
     return this.session().exec(command, options);
   }
-  execStream(command: string, options?: ExecOptions) {
-    return this.session().execStream(command, options);
+  async execWithSessionToken(command: string, sessionId: string, options?: ExecOptions) {
+    return (await this.sessionFor(sessionId)).exec(command, options);
   }
-  startProcess(command: string, options: ProcessOptions = {}) {
-    return this.session(options.sessionId).startProcess(command, options);
+  async execStream(command: string, options: StreamOptions = {}) {
+    const { sessionId, bufferSize, ...rest } = options;
+    if (bufferSize !== undefined && (!Number.isSafeInteger(bufferSize) || bufferSize <= 0))
+      throw new TypeError("bufferSize must be a positive integer");
+    return (await this.sessionFor(sessionId)).execStream(command, rest);
+  }
+  execStreamWithSessionToken(command: string, sessionId: string, options: StreamOptions = {}) {
+    return this.execStream(command, { ...options, sessionId });
+  }
+  async startProcess(command: string, options: ProcessOptions = {}) {
+    if (options.processId !== undefined)
+      throw new CompatibilityError("Cloudflare", "processId; Runtime names each process itself");
+    if (options.autoCleanup)
+      throw new CompatibilityError(
+        "Cloudflare",
+        "autoCleanup; Runtime keeps a finished process's record and output until the sandbox ends",
+      );
+    const { autoCleanup: _kept, ...rest } = options;
+    return this.session(options.sessionId).startProcess(command, rest);
   }
   async createSession(options: SessionOptions = {}) {
     only("Cloudflare session", options, [
@@ -278,44 +434,91 @@ export class Sandbox {
   async setEnvVars(env: Record<string, string | undefined>) {
     const s = await this.native();
     await saveEnvironment(s, { ...(await environment(s)), ...cleanEnv(env) });
+    this.envVars = { ...this.envVars, ...cleanEnv(env) };
   }
-  writeFile(
+  /** Stops the sandbox; its files stay, and the next call starts it again. */
+  async stop(signal?: unknown) {
+    if (signal !== undefined)
+      throw new CompatibilityError("Cloudflare", "a stop signal; Runtime stops every process");
+    await (await this.native()).stop();
+  }
+  async writeFile(
     path: string,
     content: string | ReadableStream<Uint8Array>,
-    options?: { encoding?: string },
+    options: { encoding?: string; sessionId?: string } = {},
   ) {
-    return this.session().writeFile(path, content, options);
+    const { sessionId, ...rest } = options;
+    return (await this.sessionFor(sessionId)).writeFile(path, content, rest);
   }
-  readFile(path: string, options: { encoding: "none" }): Promise<ReadFileStreamResult>;
   readFile(
     path: string,
-    options?: { encoding?: "utf8" | "utf-8" | "base64" },
+    options: { encoding: "none"; sessionId?: string },
+  ): Promise<ReadFileStreamResult>;
+  readFile(
+    path: string,
+    options?: { encoding?: "utf8" | "utf-8" | "base64"; sessionId?: string },
   ): Promise<ReadFileResult>;
-  readFile(
+  async readFile(
     path: string,
-    options?: { encoding?: "utf8" | "utf-8" | "base64" | "none" },
+    options: { encoding?: "utf8" | "utf-8" | "base64" | "none"; sessionId?: string } = {},
   ): Promise<ReadFileResult | ReadFileStreamResult> {
-    return options?.encoding === "none"
-      ? this.session().readFile(path, { encoding: "none" })
-      : this.session().readFile(path, options as { encoding?: "utf8" | "utf-8" | "base64" });
+    const { sessionId, encoding } = options;
+    const session = await this.sessionFor(sessionId);
+    return encoding === "none"
+      ? session.readFile(path, { encoding: "none" })
+      : session.readFile(path, { encoding });
   }
-  mkdir(path: string, options?: { recursive?: boolean }) {
-    return this.session().mkdir(path, options);
+  /** The file as Cloudflare streams it: `data:` lines of a metadata event,
+   * chunks (base64 for a binary file) and a complete event; read it with
+   * streamFile() or collectFile(). */
+  async readFileStream(path: string, options: { sessionId?: string } = {}) {
+    const read = await this.readFile(path, { encoding: "none", sessionId: options.sessionId });
+    const bytes = new Uint8Array(await new Response(read.content).arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
+    const isBinary = text.includes("\0") || text.includes("\ufffd");
+    return sseStream<FileStreamEvent>(async (send) => {
+      send({
+        type: "metadata",
+        mimeType: isBinary ? "application/octet-stream" : "text/plain",
+        size: bytes.length,
+        isBinary,
+        encoding: isBinary ? "base64" : "utf-8",
+      });
+      const CHUNK = 65_536;
+      if (isBinary)
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          let raw = "";
+          for (const byte of bytes.subarray(i, i + CHUNK)) raw += String.fromCharCode(byte);
+          send({ type: "chunk", data: btoa(raw) });
+        }
+      else
+        for (let i = 0; i < text.length; i += CHUNK)
+          send({ type: "chunk", data: text.slice(i, i + CHUNK) });
+      send({ type: "complete", bytesRead: bytes.length });
+    });
   }
-  deleteFile(path: string) {
-    return this.session().deleteFile(path);
+  async mkdir(path: string, options: { recursive?: boolean; sessionId?: string } = {}) {
+    const { sessionId, ...rest } = options;
+    return (await this.sessionFor(sessionId)).mkdir(path, rest);
   }
-  renameFile(from: string, to: string) {
-    return this.session().renameFile(from, to);
+  async deleteFile(path: string, sessionId?: string) {
+    return (await this.sessionFor(sessionId)).deleteFile(path);
   }
-  moveFile(from: string, to: string) {
-    return this.renameFile(from, to);
+  async renameFile(from: string, to: string, sessionId?: string) {
+    return (await this.sessionFor(sessionId)).renameFile(from, to);
   }
-  listFiles(path: string, options?: { recursive?: boolean; includeHidden?: boolean }) {
-    return this.session().listFiles(path, options);
+  moveFile(from: string, to: string, sessionId?: string) {
+    return this.renameFile(from, to, sessionId);
   }
-  exists(path: string) {
-    return this.session().exists(path);
+  async listFiles(
+    path: string,
+    options: { recursive?: boolean; includeHidden?: boolean; sessionId?: string } = {},
+  ) {
+    const { sessionId, ...rest } = options;
+    return (await this.sessionFor(sessionId)).listFiles(path, rest);
+  }
+  async exists(path: string, sessionId?: string) {
+    return (await this.sessionFor(sessionId)).exists(path);
   }
   async listProcesses() {
     const s = await this.native();
@@ -378,6 +581,318 @@ export class Sandbox {
   async unexposePort(port: number) {
     await (await this.native()).previews.delete(port);
   }
+  /** Runtime's previews have their own addresses: hostname is not used to build them. */
+  async getExposedPorts(_hostname: string) {
+    return (await (await this.native()).previews.list()).map((p) => ({
+      url: p.urlWithToken ?? p.url,
+      port: p.port,
+      status: "active" as const,
+    }));
+  }
+  async isPortExposed(port: number) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
+    return (await (await this.native()).previews.list()).some((p) => p.port === port);
+  }
+  /** Cloudflare's returns 0 too: a process's record outlives it on both. */
+  async cleanupCompletedProcesses(_sessionId?: string) {
+    return 0;
+  }
+  /** The process's output as `data:` lines of stdout, stderr and exit events. */
+  async streamProcessLogs(processId: string, options: { signal?: AbortSignal } = {}) {
+    only("Cloudflare streamProcessLogs", options, ["signal"]);
+    options.signal?.throwIfAborted();
+    const p = await (await this.native()).processes.get(processId);
+    return sseStream<Record<string, unknown>>(async (send, cancelled) => {
+      const signal = options.signal ? AbortSignal.any([options.signal, cancelled]) : cancelled;
+      for await (const e of p.output({ signal })) {
+        const at = new Date().toISOString();
+        if (e.type === "stdout" || e.type === "stderr")
+          send({ type: e.type, timestamp: at, data: e.data, processId });
+        else if (e.type === "exit")
+          send({ type: "exit", timestamp: at, data: "", processId, exitCode: e.exitCode });
+        else if (e.type === "truncated")
+          send({ type: "error", timestamp: at, data: "Process output was truncated", processId });
+      }
+    });
+  }
+  /** Clones with git in the sandbox, as Cloudflare's container does. */
+  async gitCheckout(
+    repoUrl: string,
+    options: {
+      branch?: string;
+      targetDir?: string;
+      sessionId?: string;
+      depth?: number;
+      cloneTimeoutMs?: number;
+    } = {},
+  ): Promise<GitCheckoutResult> {
+    only("Cloudflare gitCheckout", options, [
+      "branch",
+      "targetDir",
+      "sessionId",
+      "depth",
+      "cloneTimeoutMs",
+    ]);
+    const timeout = options.cloneTimeoutMs ?? 600_000;
+    if (options.depth !== undefined && (!Number.isInteger(options.depth) || options.depth <= 0))
+      throw new Error(
+        `Invalid depth value: ${options.depth}. Must be a positive integer (e.g., 1, 5, 10).`,
+      );
+    if (!Number.isInteger(timeout) || timeout <= 0)
+      throw new Error(
+        `Invalid timeout value: ${timeout}. Must be a positive integer number of milliseconds.`,
+      );
+    const name =
+      repoUrl
+        .replace(/\/+$/, "")
+        .split(/[/:]/)
+        .pop()
+        ?.replace(/\.git$/, "") || "repo";
+    const targetDir = options.targetDir ?? `/workspace/${name}`;
+    const session = await this.sessionFor(options.sessionId);
+    const args = [
+      "git clone",
+      ...(options.branch ? ["--branch", quote(options.branch)] : []),
+      ...(options.depth ? ["--depth", String(options.depth)] : []),
+      "--",
+      quote(repoUrl),
+      quote(targetDir),
+    ];
+    const clone = await session.exec(
+      `${args.join(" ")} && git -C ${quote(targetDir)} rev-parse --abbrev-ref HEAD`,
+      { timeout },
+    );
+    if (!clone.success)
+      throw new Error(`Failed to clone ${repoUrl}: ${clone.stderr.trim() || clone.stdout.trim()}`);
+    return {
+      success: true,
+      repoUrl,
+      branch: options.branch ?? clone.stdout.trim().split("\n").pop()!,
+      targetDir,
+      timestamp: new Date().toISOString(),
+      exitCode: clone.exitCode,
+    };
+  }
+  /** Changes under a directory as `data:` lines of Cloudflare's watch events,
+   * once the watch is established, until the stream is cancelled. */
+  async watch(path: string, options: WatchOptions = {}): Promise<ReadableStream<Uint8Array>> {
+    only("Cloudflare watch", options, ["recursive", "include", "exclude", "sessionId"]);
+    const filters = watchFilters(options);
+    const directory = await (await this.sessionFor(options.sessionId)).resolve(path);
+    const encode = new TextEncoder();
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let closed = false;
+    const send = (event: object) => {
+      if (!closed) stream.enqueue(encode.encode(`data: ${JSON.stringify(event)}\n\n`));
+    };
+    const handle = await (
+      await this.native()
+    ).files.watch(
+      directory,
+      (e) => {
+        const timestamp = new Date().toISOString();
+        const event = (eventType: string, at: string) =>
+          send({ type: "event", eventType, path: at, isDirectory: e.isDir, timestamp });
+        if (e.type === "rename") {
+          if (e.oldPath) event("move_from", e.oldPath);
+          event("move_to", e.path);
+        } else
+          event(
+            { create: "create", write: "modify", remove: "delete", chmod: "attrib" }[
+              e.type as string
+            ] ?? e.type,
+            e.path,
+          );
+      },
+      {
+        recursive: options.recursive ?? true,
+        ...filters,
+        timeoutMs: 0,
+        onNotice: (n) =>
+          send({ type: "error", error: n.k === "overflow" ? "Events were lost" : `Watch ${n.k}` }),
+        onExit: (reason) => {
+          send({ type: "stopped", reason });
+          if (!closed) {
+            closed = true;
+            stream.close();
+          }
+        },
+      },
+    );
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        stream = controller;
+        send({ type: "watching", path: directory, watchId: handle.id });
+      },
+      async cancel() {
+        closed = true;
+        await handle.stop();
+      },
+    });
+  }
+  /** Whether anything under a path changed since a version this returned:
+   * the version is a digest of every entry's path, size, time and mode, tied
+   * to this boot of the sandbox. */
+  async checkChanges(path: string, options: CheckChangesOptions = {}): Promise<CheckChangesResult> {
+    only("Cloudflare checkChanges", options, [
+      "since",
+      "recursive",
+      "include",
+      "exclude",
+      "sessionId",
+    ]);
+    const filters = watchFilters(options);
+    const session = await this.sessionFor(options.sessionId);
+    const r = await (
+      await this.native()
+    ).exec([
+      "python3",
+      "-c",
+      CHANGES,
+      await session.resolve(path),
+      options.recursive === false ? "0" : "1",
+      JSON.stringify(filters.include ?? []),
+      JSON.stringify(filters.exclude ?? []),
+    ]);
+    if (r.exitCode !== 0) throw new Error(`checkChanges failed: ${r.stderr.trim()}`);
+    const version = r.stdout.trim();
+    const timestamp = new Date().toISOString();
+    if (options.since === undefined || options.since === version)
+      return {
+        success: true,
+        status: options.since === undefined ? "changed" : "unchanged",
+        version,
+        timestamp,
+      };
+    return options.since.split(".")[0] === version.split(".")[0]
+      ? { success: true, status: "changed", version, timestamp }
+      : { success: true, status: "resync", reason: "restarted", version, timestamp };
+  }
+  /** Mounts an S3, R2 or Google Cloud Storage bucket with Runtime's mounts. A
+   * private bucket needs a Runtime secret: store its keys with
+   * runtime.secrets.set and mount with sandbox.mounts.add({ secret }). */
+  async mountBucket(bucket: string, mountPath: string, options: MountBucketOptions) {
+    only("Cloudflare mountBucket", options, [
+      "endpoint",
+      "provider",
+      "credentials",
+      "readOnly",
+      "s3fsOptions",
+      "prefix",
+      "credentialProxy",
+      "localBucket",
+    ]);
+    if (options.credentials || options.credentialProxy)
+      throw new CompatibilityError(
+        "Cloudflare",
+        "credentials in mountBucket; store them with runtime.secrets.set and mount with sandbox.mounts.add({ secret })",
+      );
+    if (options.s3fsOptions?.length)
+      throw new CompatibilityError("Cloudflare", "s3fsOptions; Runtime mounts with its own client");
+    if (options.localBucket || options.endpoint === undefined)
+      throw new CompatibilityError(
+        "Cloudflare",
+        "an R2 binding; give the bucket's endpoint, https://<account>.r2.cloudflarestorage.com",
+      );
+    if (!mountPath.startsWith("/"))
+      throw new InvalidMountConfigError(`Mount path must be absolute: ${mountPath}`);
+    let host: string;
+    try {
+      host = new URL(options.endpoint).hostname;
+    } catch {
+      throw new InvalidMountConfigError(`Invalid endpoint URL: ${options.endpoint}`);
+    }
+    const r2 = /^([a-f0-9]{32})\.r2\.cloudflarestorage\.com$/.exec(host);
+    const provider =
+      options.provider ?? (r2 ? "r2" : host === "storage.googleapis.com" ? "gcs" : "s3");
+    const prefix = options.prefix?.replace(/^\/+|\/+$/g, "") || undefined;
+    try {
+      await (
+        await this.native()
+      ).mounts.add({
+        provider,
+        bucket,
+        path: mountPath,
+        ...(prefix ? { prefix } : {}),
+        ...(provider === "r2" && r2
+          ? { accountId: r2[1] }
+          : provider === "gcs"
+            ? {}
+            : { endpoint: `https://${host}` }),
+        ...(options.readOnly !== undefined ? { readOnly: options.readOnly } : {}),
+      });
+    } catch (error) {
+      throw new S3FSMountError(
+        `Failed to mount ${bucket} at ${mountPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  async unmountBucket(mountPath: string) {
+    try {
+      await (await this.native()).mounts.remove(mountPath);
+    } catch (error) {
+      throw new BucketUnmountError(
+        `Failed to unmount ${mountPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  createCodeContext(options?: CreateContextOptions): Promise<CodeContext> {
+    return this.#interpreter.createCodeContext(options);
+  }
+  async runCode(code: string, options: RunCodeOptions = {}) {
+    if (hasEnv(options.envVars)) throw new CompatibilityError("Cloudflare", RUN_ENV);
+    return (await this.#interpreter.runCode(code, options)).toJSON();
+  }
+  runCodeStream(code: string, options: RunCodeOptions = {}) {
+    if (hasEnv(options.envVars)) throw new CompatibilityError("Cloudflare", RUN_ENV);
+    return this.#interpreter.runCodeStream(code, options);
+  }
+  listCodeContexts() {
+    return this.#interpreter.listCodeContexts();
+  }
+  deleteCodeContext(contextId: string) {
+    return this.#interpreter.deleteCodeContext(contextId);
+  }
+}
+refuse("Cloudflare", "Sandbox", Sandbox, {
+  client: "Runtime's API is the client; use the Sandbox methods",
+  tunnels: "use exposePort for a public URL",
+  callTunnels: "use exposePort for a public URL",
+  setSandboxName: "the name is getSandbox's id",
+  setContainerTimeouts: "Runtime starts a sandbox in under a second, with nothing to tune",
+  setTransport: "Runtime's API is the only transport",
+  onStart: "a Runtime sandbox has no Durable Object lifecycle hooks",
+  onStop: "a Runtime sandbox has no Durable Object lifecycle hooks",
+  onActivityExpired: "set sleepAfter or keepAlive instead",
+  fetch: "fetch the URL exposePort returns",
+  containerFetch: "fetch the URL exposePort returns",
+  wsConnect: "connect to the URL exposePort returns",
+  getContainerPlacementId: "a Runtime sandbox's id is its place",
+  validatePortToken: "Runtime checks preview tokens itself",
+  createBackup: "snapshot the sandbox with Runtime's snapshots, or keep the folder on a volume",
+  restoreBackup: "create a sandbox from a Runtime snapshot",
+});
+refuse(
+  "Cloudflare",
+  "Sandbox",
+  Sandbox,
+  { onError: "a Runtime sandbox has no Durable Object lifecycle hooks" },
+  { sync: true },
+);
+
+/** Cloudflare's Worker-side terminal proxy has no Runtime counterpart. */
+export async function proxyTerminal(..._args: unknown[]): Promise<Response> {
+  throw new CompatibilityError(
+    "Cloudflare",
+    "proxyTerminal; open a terminal with the native Runtime sandbox's terminal()",
+  );
+}
+/** Runtime previews are served by Runtime, not through your Worker. */
+export async function proxyToSandbox(..._args: unknown[]): Promise<Response | null> {
+  throw new CompatibilityError(
+    "Cloudflare",
+    "proxyToSandbox; Runtime serves the URLs exposePort returns itself",
+  );
 }
 export class ExecutionSession {
   constructor(
@@ -396,7 +911,10 @@ export class ExecutionSession {
       "onComplete",
       "onError",
       "signal",
+      "origin",
     ]);
+    if (options.origin !== undefined && !["user", "internal"].includes(options.origin))
+      throw new TypeError("origin is user or internal");
     if (options.encoding && !["utf8", "utf-8"].includes(options.encoding))
       throw new CompatibilityError("Cloudflare", `process encoding ${options.encoding}`);
     const s = await this.sandbox.native();
@@ -522,6 +1040,10 @@ export class ExecutionSession {
           else if (e.type === "truncated") throw new Error("Process output was truncated");
       })().catch((e: unknown) => options.onError?.(e instanceof Error ? e : new Error(String(e))));
     return process;
+  }
+  /** A path as this session sees it: relative paths from its working directory. */
+  resolve(path: string) {
+    return this.path(path);
   }
   private async path(path: string) {
     if (path.startsWith("/")) return path;
@@ -701,13 +1223,31 @@ export class Process {
   }
   async waitForExit(timeout?: number) {
     const r = await this.native.wait({
-      signal: timeout ? AbortSignal.timeout(timeout) : undefined,
+      signal: timeout ? timeoutSignal(timeout) : undefined,
     });
     return { exitCode: r.exitCode ?? -1 };
   }
   async waitForLog(pattern: string | RegExp, timeout = 30000) {
+    const condition = `log pattern ${String(pattern)}`;
+    const context = { processId: this.id, command: this.command, condition };
+    const signal = timeoutSignal(timeout);
+    try {
+      return await this.#waitForLog(pattern, signal);
+    } catch (error) {
+      if (!signal.aborted) throw error;
+      throw new ProcessReadyTimeoutError(
+        response(
+          "PROCESS_READY_TIMEOUT",
+          `Process did not become ready within ${timeout}ms`,
+          { ...context, timeout },
+          { httpStatus: 408, operation: "process.start" },
+        ),
+      );
+    }
+  }
+  async #waitForLog(pattern: string | RegExp, signal: AbortSignal) {
     let output = "";
-    for await (const e of this.native.output({ signal: AbortSignal.timeout(timeout) })) {
+    for await (const e of this.native.output({ signal })) {
       if (e.type === "stdout" || e.type === "stderr") {
         output += e.data;
         const match =
@@ -724,8 +1264,21 @@ export class Process {
                 ) ?? output,
             ...(typeof pattern === "string" ? {} : { match }),
           };
-      }
+      } else if (e.type === "exit")
+        throw new ProcessExitedBeforeReadyError(
+          response(
+            "PROCESS_EXITED_BEFORE_READY",
+            "Process exited before expected output",
+            {
+              processId: this.id,
+              command: this.command,
+              condition: `log pattern ${String(pattern)}`,
+              exitCode: e.exitCode ?? -1,
+            },
+            { httpStatus: 409, operation: "process.start" },
+          ),
+        );
     }
-    throw new Error("Process exited before expected output");
+    throw new Error("Process output ended before expected output");
   }
 }

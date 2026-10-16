@@ -10,7 +10,10 @@ import {
   only,
   quote,
   ready,
+  refuse,
   type ClientOptions,
+  type Refused,
+  type RefusedAsync,
 } from "../compat/core.js";
 import { GuestFiles } from "../compat/files.js";
 import { ManagedTasks } from "./guest-service.js";
@@ -51,19 +54,27 @@ export class VMTier {
     );
   }
 }
-export type CreateSandboxOpts = {
+export type StartSandboxOpts = {
+  vmTier?: VMTier;
+  hibernationTimeoutSeconds?: number;
+  /** Runtime wakes a paused sandbox on any request, preview visit, command or
+   * file call: both true or both false. */
+  automaticWakeupConfig?: { http: boolean; websocket: boolean };
+  ipcountry?: string;
+};
+export type CreateSandboxOpts = StartSandboxOpts & {
   id?: string;
   title?: string;
   description?: string;
   tags?: string[];
   privacy?: "private" | "public" | "public-hosts" | "unlisted";
-  vmTier?: VMTier;
-  hibernationTimeoutSeconds?: number;
 };
 export type SessionCreateOptions = {
   id?: string;
   env?: Record<string, string>;
   permission?: "read" | "write";
+  git?: { provider: string; username?: string; accessToken?: string; email: string; name?: string };
+  hostToken?: { token: string; sandboxId: string };
 };
 export type ShellRunOpts = {
   env?: Record<string, string>;
@@ -74,9 +85,60 @@ export type ShellRunOpts = {
 };
 export class CodeSandbox {
   readonly sandboxes: Sandboxes;
-  constructor(apiToken?: string, options: ClientOptions = {}) {
-    this.sandboxes = new Sandboxes(client({ ...options, apiKey: options.apiKey ?? apiToken }));
+  readonly hosts = new HostTokens();
+  constructor(
+    apiToken?: string,
+    options: ClientOptions & { headers?: Record<string, string>; tracer?: unknown } = {},
+  ) {
+    const { headers, tracer, ...rest } = options;
+    if (headers && Object.keys(headers).length)
+      throw new CompatibilityError("CodeSandbox", "custom API headers");
+    if (tracer)
+      throw new CompatibilityError(
+        "CodeSandbox",
+        "an OpenTelemetry tracer; export Runtime's sandbox telemetry with runtime.observability",
+      );
+    this.sandboxes = new Sandboxes(client({ ...rest, apiKey: rest.apiKey ?? apiToken }));
   }
+}
+/** CodeSandbox's host tokens open private previews. Runtime's private
+ * previews carry their own signed token: `sandbox.previews.create(port)`. */
+export class HostTokens {
+  declare readonly createToken: RefusedAsync;
+  declare readonly listTokens: RefusedAsync;
+  declare readonly revokeToken: RefusedAsync;
+  declare readonly revokeAllTokens: RefusedAsync;
+  declare readonly updateToken: RefusedAsync;
+  declare readonly getUrl: Refused;
+  declare readonly getHeaders: Refused;
+  declare readonly getCookies: Refused;
+}
+const PREVIEW_TOKENS =
+  "use Runtime's private previews, sandbox.previews.create(port), which carry a signed token";
+refuse("CodeSandbox", "HostTokens", HostTokens, {
+  createToken: PREVIEW_TOKENS,
+  listTokens: PREVIEW_TOKENS,
+  revokeToken: PREVIEW_TOKENS,
+  revokeAllTokens: PREVIEW_TOKENS,
+  updateToken: PREVIEW_TOKENS,
+});
+refuse(
+  "CodeSandbox",
+  "HostTokens",
+  HostTokens,
+  { getUrl: PREVIEW_TOKENS, getHeaders: PREVIEW_TOKENS, getCookies: PREVIEW_TOKENS },
+  { sync: true },
+);
+/** Passing it to create() makes a fresh sandbox from Runtime's default image. */
+const DEFAULT_TEMPLATE = "runtime-default";
+function wakeup(config: StartSandboxOpts["automaticWakeupConfig"]): boolean | undefined {
+  if (!config) return undefined;
+  if (config.http !== config.websocket)
+    throw new CompatibilityError(
+      "CodeSandbox",
+      "waking on HTTP but not WebSocket requests, or the reverse; Runtime wakes on both",
+    );
+  return config.http;
 }
 const metadata = (s: NativeSandbox) => ({
   id: s.id,
@@ -100,6 +162,9 @@ function validateHibernationTimeout(seconds: number | undefined): void {
 
 export class Sandboxes {
   constructor(private readonly runtime: Runtime) {}
+  get defaultTemplateId(): string {
+    return DEFAULT_TEMPLATE;
+  }
   async create(options: CreateSandboxOpts = {}): Promise<Sandbox> {
     only("CodeSandbox create", options, [
       "id",
@@ -109,21 +174,32 @@ export class Sandboxes {
       "privacy",
       "vmTier",
       "hibernationTimeoutSeconds",
+      "automaticWakeupConfig",
+      "ipcountry",
     ]);
+    if (options.ipcountry)
+      throw new CompatibilityError("CodeSandbox", "ipcountry; Runtime's sandboxes run in us-east");
     validateHibernationTimeout(options.hibernationTimeoutSeconds);
+    const autoWake = wakeup(options.automaticWakeupConfig);
     const labels = {
       "compat.provider": "codesandbox",
       "cs.tags": JSON.stringify([...new Set([...(options.tags ?? []), "sdk"])]),
       "cs.privacy": options.privacy ?? "public-hosts",
       "cs.description": options.description ?? "",
     };
-    if (options.id) {
-      if (options.vmTier) throw new CompatibilityError("CodeSandbox", "changing a fork's VM tier");
+    if (options.id && options.id !== DEFAULT_TEMPLATE) {
       const source = await this.runtime.sandboxes.get(options.id);
       const fork = await source.fork({ name: options.title, labels });
-      if (options.hibernationTimeoutSeconds !== undefined)
-        await fork.update({ idlePauseSeconds: options.hibernationTimeoutSeconds });
-      return new Sandbox(fork, "FORK");
+      if (options.hibernationTimeoutSeconds !== undefined || autoWake !== undefined)
+        await fork.update({
+          ...(options.hibernationTimeoutSeconds !== undefined
+            ? { idlePauseSeconds: options.hibernationTimeoutSeconds }
+            : {}),
+          ...(autoWake !== undefined ? { autoWake } : {}),
+        });
+      const sandbox = new Sandbox(fork, "FORK");
+      if (options.vmTier) await sandbox.updateTier(options.vmTier);
+      return sandbox;
     }
     const tier = options.vmTier ?? VMTier.Pico;
     const sandbox = await create(
@@ -137,6 +213,7 @@ export class Sandboxes {
         diskMiB: Math.ceil((tier.diskGB * 1e9) / 1048576),
         idlePauseSeconds: options.hibernationTimeoutSeconds,
         persistent: true,
+        ...(autoWake !== undefined ? { autoWake } : {}),
       },
       {},
       async (sandbox) => {
@@ -170,8 +247,32 @@ export class Sandboxes {
       await s.update({ idlePauseSeconds: options.hibernationTimeoutSeconds });
     return new Sandbox(s, "CLEAN");
   }
-  fork(id: string, options: Omit<CreateSandboxOpts, "id"> = {}) {
+  fork(
+    id: string,
+    options: StartSandboxOpts &
+      Pick<CreateSandboxOpts, "title" | "description" | "tags" | "privacy"> = {},
+  ) {
     return this.create({ ...options, id });
+  }
+  /** The account's running CodeSandbox-adapter sandboxes. Runtime has no
+   * per-account count of running machines, so the limit is null. */
+  async listRunning() {
+    const running = (await all(this.runtime, "codesandbox")).filter((s) => s.state === "running");
+    return {
+      concurrentVmCount: running.length,
+      concurrentVmLimit: null as number | null,
+      vms: running.map((s) => ({
+        id: s.id,
+        creditBasis: undefined as string | undefined,
+        lastActiveAt: s.info.lastActiveAt ? new Date(s.info.lastActiveAt) : undefined,
+        sessionStartedAt: s.info.readyAt ? new Date(s.info.readyAt) : undefined,
+        specs: {
+          cpu: s.info.vcpu,
+          memory: s.info.memoryMiB / 1024,
+          storage: s.info.diskMiB / 1024,
+        },
+      })),
+    };
   }
   async get(id: string) {
     return metadata(await this.runtime.sandboxes.get(id));
@@ -246,6 +347,16 @@ export class Sandbox {
   get cluster() {
     return this.native.info.region;
   }
+  /** Runtime's guest agent is updated with the host: always current. */
+  get isUpToDate() {
+    return true;
+  }
+  /** Resizes to the tier's CPUs and memory; a running sandbox restarts, as CodeSandbox's does. */
+  async updateTier(tier: VMTier): Promise<void> {
+    await this.native.resize({ vcpu: tier.cpuCores, memoryMiB: tier.memoryGiB * 1024 });
+  }
+  declare readonly createSession: RefusedAsync;
+  declare readonly createBrowserSession: RefusedAsync;
   async updateHibernationTimeout(timeoutSeconds: number): Promise<void> {
     await this.native.update({ idlePauseSeconds: timeoutSeconds });
   }
@@ -258,6 +369,12 @@ export class Sandbox {
     return client;
   }
 }
+refuse("CodeSandbox", "Sandbox", Sandbox, {
+  createSession:
+    "use sandbox.connect(); a browser reaches a Runtime sandbox with a session token from the native sandbox.sessions.create()",
+  createBrowserSession:
+    "make a session token with the native sandbox.sessions.create() and open it with Runtime's Sandbox.fromSession",
+});
 export class CommandError extends Error {
   constructor(
     message: string,
@@ -466,6 +583,37 @@ export class FileSystem {
       isSymlink: e.type === "symlink",
     }));
   }
+  /** Changes under a path, as CodeSandbox's add, change and remove events. */
+  async watch(path: string, options: { recursive?: boolean; excludes?: readonly string[] } = {}) {
+    only("CodeSandbox watch", options, ["recursive", "excludes"]);
+    const events = emitter<{ paths: string[]; type: "add" | "change" | "remove" }>();
+    const handle = await this.native.files.watch(
+      this.files.path(path),
+      (e) => {
+        if (e.type === "rename") {
+          if (e.oldPath) events.fire({ paths: [e.oldPath], type: "remove" });
+          events.fire({ paths: [e.path], type: "add" });
+        } else
+          events.fire({
+            paths: [e.path],
+            type: e.type === "create" ? "add" : e.type === "remove" ? "remove" : "change",
+          });
+      },
+      {
+        recursive: options.recursive ?? false,
+        ...(options.excludes?.length ? { exclude: [...options.excludes] } : {}),
+        timeoutMs: 0,
+      },
+    );
+    return {
+      onEvent: events.event,
+      dispose: () => {
+        events.clear();
+        void handle.stop().catch(() => undefined);
+      },
+    };
+  }
+  declare readonly download: RefusedAsync;
   async stat(path: string) {
     const e = await this.files.stat(path);
     const r = await this.native.exec(["stat", "-c", "%X %Y %Z", "--", this.files.path(path)], {
@@ -482,8 +630,14 @@ export class FileSystem {
     };
   }
 }
+refuse("CodeSandbox", "FileSystem", FileSystem, {
+  download:
+    "read it with fs.readFile, or with the native sandbox.files.download(); Runtime has no signed download links",
+});
 type SavedCommand = {
   version: 1;
+  /** A terminal from terminals.create; absent for a command. */
+  kind?: "terminal";
   command: string;
   name?: string;
   options: Parameters<NativeSandbox["spawn"]>[1];
@@ -492,16 +646,353 @@ type SavedCommand = {
 const commandPath = (id: string) =>
   `/workspace/.runtime-compat/codesandbox/commands/${encodeURIComponent(id)}.json`;
 
+type ShellSize = { cols: number; rows: number };
+/** A shell CodeSandbox lists: a command's name is JSON whose type is "command". */
+export function isCommandShell(shell: {
+  shellId?: string;
+  name: string;
+  status?: string;
+  exitCode?: number;
+  shellType?: string;
+  startCommand?: string;
+  ownerUsername?: string;
+  isSystemShell?: boolean;
+}): boolean {
+  try {
+    return (JSON.parse(shell.name) as { type?: string }).type === "command";
+  } catch {
+    return false;
+  }
+}
+
+/** What the client's commands, terminals and ports share with it. */
+type Session = {
+  native: NativeSandbox;
+  env: Record<string, string>;
+  workspacePath: string;
+  assertConnected(): void;
+  start(saved: SavedCommand): Promise<Process>;
+  attach(process: Process, saved: SavedCommand): Command;
+  previewURLs: Map<number, string>;
+};
+
+export class SandboxCommands {
+  constructor(private readonly session: Session) {}
+  async runBackground(command: string | string[], options: ShellRunOpts = {}) {
+    only("CodeSandbox command", options, ["env", "cwd", "name", "dimensions", "asGlobalSession"]);
+    if (options.asGlobalSession)
+      throw new CompatibilityError("CodeSandbox", "global editor sessions");
+    const { native, env, workspacePath } = this.session;
+    this.session.assertConnected();
+    const { stdin: _stdin, ...spawnOptions } = await execOptions(native, {
+      env: { ...env, ...options.env },
+      cwd: options.cwd ?? workspacePath,
+    });
+    // The published SDK treats arrays as sequential shell commands, not argv.
+    const saved: SavedCommand = {
+      version: 1,
+      command: Array.isArray(command) ? command.join(" && ") : command,
+      name: options.name,
+      options: {
+        ...spawnOptions,
+        env: { ...spawnOptions.env },
+        pty: { ...(options.dimensions ?? { cols: 128, rows: 24 }) },
+      },
+    };
+    return this.session.attach(await this.session.start(saved), saved);
+  }
+  async run(command: string | string[], options?: ShellRunOpts) {
+    return (await this.runBackground(command, options)).waitUntilComplete();
+  }
+  async getAll() {
+    const { native } = this.session;
+    this.session.assertConnected();
+    const commands: Command[] = [];
+    for (const saved of await savedShells(native))
+      if (saved.taskId === undefined && saved.kind !== "terminal")
+        commands.push(this.session.attach(await native.processes.get(saved.processId), saved));
+    return commands;
+  }
+}
+/** The running processes this adapter started, with what it saved about each. */
+async function savedShells(native: NativeSandbox) {
+  const shells: (SavedCommand & { processId: string })[] = [];
+  for (const process of await native.processes.list()) {
+    if (process.state !== "running" || !(await native.files.exists(commandPath(process.id))))
+      continue;
+    const saved = JSON.parse(await native.files.readText(commandPath(process.id))) as SavedCommand;
+    if (saved.version !== 1 || typeof saved.command !== "string" || !saved.options)
+      throw new Error(`Invalid saved CodeSandbox command: ${process.id}`);
+    shells.push({ ...saved, processId: process.id });
+  }
+  return shells;
+}
+
+/** The ports listening in the sandbox, from the kernel's socket tables. */
+const LISTENING = String.raw`import sys
+ports=set()
+for name in ("/proc/net/tcp","/proc/net/tcp6"):
+ try:
+  for line in open(name).readlines()[1:]:
+   f=line.split()
+   if f[3]=="0A": ports.add(int(f[1].rsplit(":",1)[1],16))
+ except FileNotFoundError: pass
+print(" ".join(str(p) for p in sorted(ports)))`;
+
+export class Ports {
+  private readonly opened = emitter<{ port: number; host: string }>();
+  private readonly closed = emitter<number>();
+  private watching?: ReturnType<typeof setInterval>;
+  private known?: Set<number>;
+  private polling = false;
+  constructor(private readonly session: Session) {}
+  /** A port's events start a watch of the sandbox's listening ports, once a second. */
+  get onDidPortOpen() {
+    return (listener: (port: { port: number; host: string }) => void) =>
+      this.subscribe(this.opened.event(listener));
+  }
+  get onDidPortClose() {
+    return (listener: (port: number) => void) => this.subscribe(this.closed.event(listener));
+  }
+  private subscribe(subscription: { dispose: () => boolean }) {
+    this.watching ??= setInterval(() => void this.poll(), 1000);
+    void this.poll();
+    return {
+      dispose: () => {
+        subscription.dispose();
+      },
+    };
+  }
+  /** The ports listening now. */
+  async listening(): Promise<number[]> {
+    const r = await this.session.native.exec(["python3", "-c", LISTENING], { check: true });
+    return r.stdout.trim() ? r.stdout.trim().split(" ").map(Number) : [];
+  }
+  private async poll() {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      const now = new Set(await this.listening());
+      const before = this.known;
+      this.known = now;
+      if (!before) return;
+      for (const port of now) if (!before.has(port)) this.opened.fire(await this.get(port));
+      for (const port of before) if (!now.has(port)) this.closed.fire(port);
+    } catch {
+      // A failed look is tried again at the next tick.
+    } finally {
+      this.polling = false;
+    }
+  }
+  dispose() {
+    clearInterval(this.watching);
+    this.watching = undefined;
+    this.opened.clear();
+    this.closed.clear();
+  }
+  async get(port: number) {
+    const { native, previewURLs } = this.session;
+    this.session.assertConnected();
+    if (native.info.labels["cs.privacy"] === "private")
+      throw new CompatibilityError(
+        "CodeSandbox",
+        "private port host authentication; use Runtime signed preview URLs",
+      );
+    const p = await native.previews.create(port, { visibility: "public" });
+    previewURLs.set(port, p.urlWithToken ?? p.url);
+    return { port, host: new URL(p.urlWithToken ?? p.url).host };
+  }
+  async getAll() {
+    this.session.assertConnected();
+    return (await this.session.native.previews.list()).map((p) => {
+      this.session.previewURLs.set(p.port, p.urlWithToken ?? p.url);
+      return { port: p.port, host: new URL(p.url).host };
+    });
+  }
+  async waitForPort(port: number, options: { timeoutMs?: number } = {}) {
+    only("CodeSandbox waitForPort", options, ["timeoutMs"]);
+    this.session.assertConnected();
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new TypeError("Invalid port");
+    await this.session.native.exec(
+      [
+        "python3",
+        "-c",
+        'import socket,sys,time\nport=int(sys.argv[1]); end=time.monotonic()+float(sys.argv[2])/1000\nwhile True:\n try:\n  s=socket.create_connection(("127.0.0.1",port),timeout=0.25); s.close(); break\n except OSError:\n  if time.monotonic() >= end: raise TimeoutError("Port did not open")\n  time.sleep(0.1)',
+        String(port),
+        String(options.timeoutMs ?? 30000),
+      ],
+      { check: true, timeoutMs: (options.timeoutMs ?? 30000) + 1000 },
+    );
+    return this.get(port);
+  }
+}
+
+/** URLs of the ports this client exposed with ports.get or listed with ports.getAll. */
+export class Hosts {
+  constructor(private readonly session: Session) {}
+  getUrl(port: number, protocol = "https") {
+    const url = this.session.previewURLs.get(port);
+    if (!url) throw new Error(`Port ${port} has not been exposed; call ports.get(${port}) first`);
+    const at = new URL(url);
+    at.protocol = `${protocol}:`;
+    return at.toString();
+  }
+  /** Public previews need no token: nothing to send. */
+  getHeaders(): Record<string, string> {
+    return {};
+  }
+  getCookies(): Record<string, string> {
+    return {};
+  }
+}
+
+/** Interactive shells, each a process with a terminal of its own. */
+export class Terminals {
+  constructor(private readonly session: Session) {}
+  async create(
+    command: "bash" | "zsh" | "fish" | "ksh" | "dash" = "bash",
+    options: ShellRunOpts = {},
+  ) {
+    only("CodeSandbox terminal", options, ["env", "cwd", "name", "dimensions", "asGlobalSession"]);
+    if (options.asGlobalSession)
+      throw new CompatibilityError("CodeSandbox", "global editor sessions");
+    if (!["bash", "zsh", "fish", "ksh", "dash"].includes(command))
+      throw new TypeError(`Unknown shell: ${command}`);
+    const { native, env, workspacePath } = this.session;
+    this.session.assertConnected();
+    const { stdin: _stdin, ...spawnOptions } = await execOptions(native, {
+      env: { ...env, ...options.env },
+      cwd: options.cwd ?? workspacePath,
+    });
+    const saved: SavedCommand = {
+      version: 1,
+      kind: "terminal",
+      command,
+      name: options.name,
+      options: {
+        ...spawnOptions,
+        env: { ...spawnOptions.env },
+        stdin: "pipe",
+        pty: { ...(options.dimensions ?? { cols: 80, rows: 24 }) },
+      },
+    };
+    const process = await this.session.start(saved);
+    return new Terminal(process, options.name ?? command);
+  }
+  async get(shellId: string) {
+    return (await this.getAll()).find((terminal) => terminal.id === shellId);
+  }
+  async getAll() {
+    const { native } = this.session;
+    this.session.assertConnected();
+    const terminals: Terminal[] = [];
+    for (const saved of await savedShells(native))
+      if (saved.kind === "terminal")
+        terminals.push(
+          new Terminal(await native.processes.get(saved.processId), saved.name ?? saved.command),
+        );
+    return terminals;
+  }
+}
+export class Terminal {
+  private readonly outputEvent = emitter<string>();
+  readonly onOutput = this.outputEvent.event;
+  private output: string[] = [];
+  private following?: AbortController;
+  constructor(
+    private readonly process: Process,
+    readonly name: string,
+  ) {}
+  get id() {
+    return this.process.id;
+  }
+  /** Its output so far, and what it prints from now on through onOutput. */
+  async open(dimensions: ShellSize = { cols: 80, rows: 24 }) {
+    await this.process.resize(dimensions.cols, dimensions.rows);
+    if (!this.following) {
+      const info = await this.process.refresh();
+      const end = info.outputBytes;
+      const signal = (this.following = new AbortController()).signal;
+      let replayed = "";
+      let caughtUp!: () => void;
+      const ready = new Promise<void>((resolve) => (caughtUp = resolve));
+      if (end <= info.firstOffset) caughtUp();
+      void (async () => {
+        try {
+          for await (const e of this.process.output({ signal }))
+            if (e.type === "stdout" || e.type === "stderr") {
+              if (e.offset < end) replayed += e.data;
+              else {
+                this.output.push(e.data);
+                this.outputEvent.fire(e.data);
+              }
+              if (e.offset + new TextEncoder().encode(e.data).length >= end) caughtUp();
+            } else if (e.type === "exit") break;
+        } catch {
+          // The terminal ended, or this client let go of it.
+        } finally {
+          caughtUp();
+        }
+      })();
+      await ready;
+      this.output.unshift(replayed);
+    }
+    return this.output.join("");
+  }
+  async write(input: string, dimensions?: ShellSize) {
+    if (dimensions) await this.process.resize(dimensions.cols, dimensions.rows);
+    await this.process.write(input);
+  }
+  run(input: string, dimensions?: ShellSize) {
+    return this.write(`${input}\n`, dimensions);
+  }
+  async kill() {
+    this.following?.abort();
+    await this.process.kill("SIGKILL");
+  }
+}
+
+/** One-off JavaScript and Python snippets, run as CodeSandbox runs them: the
+ * last line's value is printed. */
+export class Interpreters {
+  constructor(private readonly commands: SandboxCommands) {}
+  javascript(code: string) {
+    const body = code
+      .split("\n")
+      .map((line, i, lines) =>
+        i === lines.length - 1 && !line.startsWith("return") ? `return ${line}` : line,
+      )
+      .join("\n");
+    return this.commands.run(`node -p "$(cat <<'EOF'\n(() => {${body}})()\nEOF\n)"`, {
+      env: { NO_COLOR: "true" },
+    });
+  }
+  python(code: string) {
+    const body = code
+      .split("\n")
+      .map((line, i, lines) =>
+        i === lines.length - 1 && !line.startsWith("print") ? `print(${line})` : line,
+      )
+      .join("\n");
+    return this.commands.run(`python3 <<'PYCODE'\n${body}\nPYCODE\n`);
+  }
+}
+
 export class SandboxClient {
   readonly fs: FileSystem;
-  readonly commands;
-  readonly ports;
+  readonly commands: SandboxCommands;
+  readonly ports: Ports;
+  readonly terminals: Terminals;
+  readonly interpreters: Interpreters;
+  readonly hosts: Hosts;
   readonly tasks: Tasks;
   readonly setup: Setup;
   readonly workspacePath = "/project/sandbox";
+  declare static readonly create: RefusedAsync;
   private disconnected = false;
   private readonly attached = new Set<Command>();
   private readonly previewURLs = new Map<number, string>();
+  private readonly stateEvent = emitter<"CONNECTED" | "DISCONNECTED">();
   private stopKeepAlive?: () => void;
   constructor(
     private readonly native: NativeSandbox,
@@ -510,85 +1001,31 @@ export class SandboxClient {
     this.fs = new FileSystem(native);
     this.tasks = new Tasks(this, native);
     this.setup = new Setup(this, native);
-    const runBackground = async (command: string | string[], options: ShellRunOpts = {}) => {
-      only("CodeSandbox command", options, ["env", "cwd", "name", "dimensions", "asGlobalSession"]);
-      if (options.asGlobalSession)
-        throw new CompatibilityError("CodeSandbox", "global editor sessions");
-      if (this.disconnected) throw new Error("Sandbox client is disconnected.");
-      const { stdin: _stdin, ...spawnOptions } = await execOptions(native, {
-        env: { ...this.env, ...options.env },
-        cwd: options.cwd ?? this.workspacePath,
-      });
-      // The published SDK treats arrays as sequential shell commands, not argv.
-      const saved: SavedCommand = {
-        version: 1,
-        command: Array.isArray(command) ? command.join(" && ") : command,
-        name: options.name,
-        options: {
-          ...spawnOptions,
-          env: { ...spawnOptions.env },
-          pty: { ...(options.dimensions ?? { cols: 128, rows: 24 }) },
-        },
-      };
-      return this.attach(await this.start(saved), saved);
+    const session: Session = {
+      native,
+      env,
+      workspacePath: this.workspacePath,
+      assertConnected: () => this.assertConnected(),
+      start: (saved) => this.start(saved),
+      attach: (process, saved) => this.attach(process, saved),
+      previewURLs: this.previewURLs,
     };
-    this.commands = {
-      runBackground,
-      run: async (command: string | string[], options?: ShellRunOpts) =>
-        (await runBackground(command, options)).waitUntilComplete(),
-      getAll: async () => {
-        this.assertConnected();
-        const commands: Command[] = [];
-        for (const process of await native.processes.list()) {
-          if (process.state !== "running" || !(await native.files.exists(commandPath(process.id))))
-            continue;
-          const saved = JSON.parse(
-            await native.files.readText(commandPath(process.id)),
-          ) as SavedCommand;
-          if (saved.version !== 1 || typeof saved.command !== "string" || !saved.options)
-            throw new Error(`Invalid saved CodeSandbox command: ${process.id}`);
-          if (saved.taskId === undefined)
-            commands.push(this.attach(await native.processes.get(process.id), saved));
-        }
-        return commands;
-      },
-    };
-    this.ports = {
-      get: async (port: number) => {
-        this.assertConnected();
-        if (native.info.labels["cs.privacy"] === "private")
-          throw new CompatibilityError(
-            "CodeSandbox",
-            "private port host authentication; use Runtime signed preview URLs",
-          );
-        const p = await native.previews.create(port, { visibility: "public" });
-        this.previewURLs.set(port, p.urlWithToken ?? p.url);
-        return { port, host: new URL(p.urlWithToken ?? p.url).host };
-      },
-      getAll: async () => {
-        this.assertConnected();
-        return (await native.previews.list()).map((p) => ({
-          port: p.port,
-          host: new URL(p.url).host,
-        }));
-      },
-      waitForPort: async (port: number, options: { timeoutMs?: number } = {}) => {
-        this.assertConnected();
-        if (!Number.isInteger(port) || port < 1 || port > 65535)
-          throw new TypeError("Invalid port");
-        await native.exec(
-          [
-            "python3",
-            "-c",
-            'import socket,sys,time\nport=int(sys.argv[1]); end=time.monotonic()+float(sys.argv[2])/1000\nwhile True:\n try:\n  s=socket.create_connection(("127.0.0.1",port),timeout=0.25); s.close(); break\n except OSError:\n  if time.monotonic() >= end: raise TimeoutError("Port did not open")\n  time.sleep(0.1)',
-            String(port),
-            String(options.timeoutMs ?? 30000),
-          ],
-          { check: true, timeoutMs: (options.timeoutMs ?? 30000) + 1000 },
-        );
-        return this.ports.get(port);
-      },
-    };
+    this.commands = new SandboxCommands(session);
+    this.ports = new Ports(session);
+    this.terminals = new Terminals(session);
+    this.interpreters = new Interpreters(this.commands);
+    this.hosts = new Hosts(session);
+  }
+  /** Runtime's guest agent is updated with the host: always current. */
+  get isUpToDate() {
+    return true;
+  }
+  /** The sandbox's page in Runtime's console. */
+  get editorUrl() {
+    return `https://withruntime.com/account/sandboxes/${encodeURIComponent(this.native.id)}`;
+  }
+  get onStateChange() {
+    return this.stateEvent.event;
   }
   async initialize() {
     await this.tasks.getAll();
@@ -636,7 +1073,9 @@ export class SandboxClient {
     return this.disconnected ? "DISCONNECTED" : "CONNECTED";
   }
   async disconnect() {
+    if (!this.disconnected) this.stateEvent.fire("DISCONNECTED");
     this.disconnected = true;
+    this.ports.dispose();
     this.tasks.dispose();
     this.setup.dispose();
     for (const command of this.attached) command.detach();
@@ -645,6 +1084,7 @@ export class SandboxClient {
   }
   async reconnect() {
     await ready(await this.native.refresh());
+    if (this.disconnected) this.stateEvent.fire("CONNECTED");
     this.disconnected = false;
     await this.tasks.reconnect();
     await this.setup.reconnect();
@@ -654,14 +1094,26 @@ export class SandboxClient {
     if (enabled) this.stopKeepAlive = this.native.keepAlive();
   }
   dispose() {
+    if (!this.disconnected) this.stateEvent.fire("DISCONNECTED");
     this.disconnected = true;
+    this.ports.dispose();
     this.tasks.dispose();
     this.setup.dispose();
     for (const command of this.attached) command.detach();
     this.attached.clear();
     this.stopKeepAlive?.();
+    this.stateEvent.clear();
   }
 }
+
+refuse(
+  "CodeSandbox",
+  "SandboxClient",
+  { prototype: SandboxClient },
+  {
+    create: "connect with sandbox.connect(); Runtime has no separate session handshake",
+  },
+);
 
 export type TaskDefinition = {
   name: string;

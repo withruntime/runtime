@@ -42,7 +42,7 @@ name, or through `getByExternalId`, use the same Runtime key.
   `sudo enable-docker`). Any other image `ns/name:tag` is the ready Runtime
   image named `ns-name` (every `/` becomes `-`, as Runtime names hold none) at
   tag `tag` (`latest` when none is given). Build it once with
-  `npx withruntime image build --dockerfile Dockerfile --name ns-name -t ns-name:tag`,
+  `npx withruntime images build --dockerfile Dockerfile --name ns-name -t ns-name:tag`,
   and the code keeps `image: "ns/name:tag"` as it is.
 - **Standby and lifetime:** a Blaxel sandbox goes to standby when unused and
   resumes on the next call. On Runtime it pauses after 60 seconds without a
@@ -121,7 +121,7 @@ names the gap and its `alternative` says what to use.
 
 | Blaxel                                                                                                                   | Use instead                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| An `image` with no ready Runtime image of the name it maps to (Blaxel's other templates too)                             | Build it: `npx withruntime image build --dockerfile Dockerfile --name ns-name -t ns-name:tag`; the error gives the exact command.       |
+| An `image` with no ready Runtime image of the name it maps to (Blaxel's other templates too)                             | Build it: `npx withruntime images build --dockerfile Dockerfile --name ns-name -t ns-name:tag`; the error gives the exact command.      |
 | A region outside the US                                                                                                  | Runtime runs in one US region.                                                                                                          |
 | `extraArgs` other than `iptables`; network `egress`, `firewall`, `subnet`, and a `proxy` with more than its domain lists | Remove them; `allowedDomains` and `forbiddenDomains` (on the network or its proxy); Runtime secrets.                                    |
 | Read-only and ephemeral volumes; a volume with no Runtime volume of that name                                            | Mount read-write; write scratch files under `/workspace`; `runtime.volumes.create`.                                                     |

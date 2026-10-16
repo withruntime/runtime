@@ -4,7 +4,7 @@
 #     job = runtime.jobs.create("nightly-report", cron="0 3 * * *", timezone="Europe/Berlin",
 #                                     command=["python3", "/workspace/report.py"])
 #
-# Each run is a sandbox, paid for as one: from the included usage first while the run fits the limits without credit, then from credit at the sandbox rates,
+# Each run is a sandbox, paid for as one: from the free usage first while the run fits the limits without credit, then from credit at the sandbox rates,
 # through the same holds and spending limits. When jobs are switched
 # off where you call, every method raises ServiceUnavailableError (code
 # ``unavailable``) at once, and retrying does not change it.
@@ -74,26 +74,33 @@ def job_time(at: Union["datetime", str, int, float]) -> int:
                    f"milliseconds; got {at!r}.", "schedule.at")
 
 
+def job_schedule(*, at: Any = None, cron: Optional[str] = None,
+                 timezone: Optional[str] = None) -> dict[str, Any]:
+    """The API's schedule from ``at=`` or ``cron=`` (with ``timezone=``), as
+    ``create`` and ``reschedule`` take it."""
+    if (at is None) == (cron is None):
+        raise _invalid("Give at= for one run or cron= for a schedule.", "schedule")
+    if at is not None:
+        if timezone is not None:
+            raise _invalid("timezone goes with cron; at takes a time with its own offset.", "schedule.timezone")
+        return {"kind": "once", "at": job_time(at)}
+    expression = str(cron).strip()
+    if len(expression.split()) != 5:
+        raise _invalid(f'A cron schedule has five fields, minute hour day-of-month month day-of-week, '
+                       f'such as "0 3 * * *"; got "{expression}".', "schedule.cron")
+    schedule: dict[str, Any] = {"kind": "cron", "expression": expression}
+    if timezone is not None:
+        schedule["timezone"] = timezone
+    return schedule
+
+
 def job_body(name: str, *, command: Union[list[str], dict[str, Any]], at: Any = None,
              cron: Optional[str] = None, timezone: Optional[str] = None,
              timeout_seconds: Optional[int] = None, compute: Optional[dict[str, Any]] = None,
              retry: Optional[dict[str, int]] = None, secrets: Optional[list[dict[str, str]]] = None,
              max_total_cost_micros: Optional[int] = None) -> dict[str, Any]:
     """The API's job body, every default filled in and the size checked before sending."""
-    if (at is None) == (cron is None):
-        raise _invalid("Give at= for one run or cron= for a schedule.", "schedule")
-    if at is not None:
-        if timezone is not None:
-            raise _invalid("timezone goes with cron; at takes a time with its own offset.", "schedule.timezone")
-        schedule: dict[str, Any] = {"kind": "once", "at": job_time(at)}
-    else:
-        expression = str(cron).strip()
-        if len(expression.split()) != 5:
-            raise _invalid(f'A cron schedule has five fields, minute hour day-of-month month day-of-week, '
-                           f'such as "0 3 * * *"; got "{expression}".', "schedule.cron")
-        schedule = {"kind": "cron", "expression": expression}
-        if timezone is not None:
-            schedule["timezone"] = timezone
+    schedule = job_schedule(at=at, cron=cron, timezone=timezone)
     argv = command if isinstance(command, list) else command.get("argv")
     if not argv:
         raise _invalid('command is an argv list such as ["python3", "job.py"].', "command")
@@ -229,6 +236,23 @@ class Jobs:
 
     def resume(self, job_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         return self._json("POST", f"/v1/jobs/{_enc(job_id)}:resume", body={}, idempotency_key=idempotency_key)
+
+    def trigger(self, job_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Run it now, once, beside its schedule, which does not move. A paused
+        job runs once and stays paused. While a run is starting or going it is
+        refused with ``run_in_progress``; a cancelled or finished job with
+        ``invalid_state``. The run is in ``runs`` with ``trigger`` ``manual``."""
+        return self._json("POST", f"/v1/jobs/{_enc(job_id)}:trigger", body={}, idempotency_key=idempotency_key)
+
+    def reschedule(self, job_id: str, *, at: Any = None, cron: Optional[str] = None,
+                     timezone: Optional[str] = None,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """A new schedule: ``cron=`` with an optional ``timezone``, or ``at=``
+        for one run. The next run is the new schedule's next time; a run going
+        finishes as it began, and a paused job stays paused."""
+        body = {"schedule": job_schedule(at=at, cron=cron, timezone=timezone)}
+        return self._json("POST", f"/v1/jobs/{_enc(job_id)}:reschedule", body=body,
+                                idempotency_key=idempotency_key)
 
     def cancel(self, job_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """End the job for good and stop any run in progress. A run that already

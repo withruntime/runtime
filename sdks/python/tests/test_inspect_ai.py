@@ -123,7 +123,7 @@ class InspectSandboxTest(unittest.TestCase):
         uid, cwd = result.stdout.split()
         self.assertEqual(uid, "0")
         self.assertTrue(cwd.endswith("/workspace"), cwd)
-        self.assertEqual(connection.command, f"runtime sandbox ssh {sandbox.sandbox.id}")
+        self.assertEqual(connection.command, f"runtime sandboxes ssh {sandbox.sandbox.id}")
         create = self.world.of("create")[0][1]
         self.assertNotIn("image", create)
         self.assertEqual(create["labels"]["created_by"], "inspect-ai")
@@ -166,7 +166,8 @@ class InspectSandboxTest(unittest.TestCase):
         self.assertTrue(result.stdout.split()[1].endswith("/workspace/app"))
         self.assertEqual(self.world.of("build")[0][1]["image"], "python:3.12-slim")
         create = self.world.of("create")[0][1]
-        self.assertEqual((create["vcpu"], create["memory_mib"], create["funding"]), (2, 2048, "trial"))
+        self.assertEqual((create["vcpu"], create["memory_mib"]), (2, 2048))
+        self.assertNotIn("funding", create, "accepted and ignored")
         self.assertEqual(create["network"], {"internet": False})
 
     def test_several_compose_services_are_refused(self):

@@ -107,7 +107,7 @@ test("`sandbox logs` without -f prints the output so far and returns while the p
       );
       const errors = stderr.mock.calls.map((c) => String(c[0]));
       expect(errors).toContain("GET / 200\n");
-      expect(errors.join("")).toContain(`sandbox logs ${SANDBOX} p1 -f`);
+      expect(errors.join("")).toContain(`sandboxes logs ${SANDBOX} p1 -f`);
       expect(seen.some((line) => line.includes("follow=true"))).toBe(false);
 
       const json: string[] = [];
@@ -169,7 +169,7 @@ test("`usage` prints a summary in dollars; --json keeps every figure", async () 
         /^set aside for running sandboxes and this hour's storage\s+\$0\.0011$/m,
       );
       expect(text).toMatch(
-        /^free time\s+99 hours left \(100 free hours given before 5 October 2026, and the included usage\)$/m,
+        /^free time\s+99 hours left \(100 free hours given before 5 October 2026, and the free usage\)$/m,
       );
       expect(text).toMatch(
         /^outbound traffic this month\s+104\.7 GiB sent, 0 GiB of 100 GiB free left, \$0\.1000 charged$/m,
@@ -228,6 +228,79 @@ test("`usage` on a pilot account says the sandbox-hours left, and that they are 
         expect(lines.join("\n")).toMatch(said);
       },
     );
+});
+
+test("`usage` on an accepted startup says, in the console's words, what startup hours are left until when, the GB it keeps free, and what it runs at once", async () => {
+  const at = {
+    source: "startup",
+    grantedAt: "2026-10-07T16:00:00.000Z",
+    expiresAt: "2027-10-07T16:00:00.000Z",
+  };
+  const once = (pool: string, unit: string, quantity: number, used: number) => ({
+    ...at,
+    pool,
+    unit,
+    period: "once",
+    quantity,
+    used,
+    reserved: 0,
+    left: quantity - used,
+    keptGB: null,
+  });
+  const month = (pool: string, keptGB: number) => ({
+    ...at,
+    pool,
+    unit: "GB",
+    period: "month",
+    quantity: 100,
+    used: null,
+    reserved: null,
+    left: null,
+    keptGB,
+  });
+  const usage = {
+    available: "0",
+    credited: "0",
+    spent: "0",
+    held: "0",
+    expired: "0",
+    trial: null,
+    resources: [],
+    startupIncluded: [
+      month("disks", 6.5),
+      once("machine-cpu", "vCPU-hour", 20_000, 1_250.5),
+      once("machine-memory", "GiB-hour", 40_000, 3_000),
+      month("saved-copies", 131.25),
+    ],
+    startupLimits: { buildsAtOnce: 8, sandboxesAtOnce: 1_000 },
+  };
+  for (const generation of ["current", "legacy", "both"] as const) {
+    const { startupIncluded, startupLimits, ...base } = usage;
+    const answer = {
+      ...base,
+      ...(generation !== "legacy" ? { startupIncluded, startupLimits } : {}),
+      ...(generation !== "current" ? { pot: startupIncluded, potLimits: startupLimits } : {}),
+    };
+    await withStub(
+      (_method, url) => (url.pathname === "/v1/usage" ? answer : undefined),
+      async (lines) => {
+        expect(await run(["usage"], env, out(lines))).toBe(0);
+        const text = lines.join("\n");
+        expect(text).not.toMatch(/\bpots?\b/i);
+        const rows = text
+          .split("\n")
+          .filter((l) => /^(startup hours|Runtime for Startups): /.test(l));
+        expect(rows.map((l) => l.replace(/\s{2,}/, " | "))).toEqual([
+          "startup hours: vCPU-hours | 18,749.5 of 20,000 vCPU-hours left until 7 Oct 2027",
+          "startup hours: memory | 37,000 of 40,000 GiB-hours left until 7 Oct 2027",
+          "Runtime for Startups: saved copies kept free | 100 GB kept free until 7 Oct 2027 · 131.3 GB kept now; past 100 GB bills at the published rate",
+          "Runtime for Startups: volumes | 100 GB kept free until 7 Oct 2027 · 6.5 GB kept now",
+          "Runtime for Startups: sandboxes at once | 1,000",
+          "Runtime for Startups: image builds at once | 8",
+        ]);
+      },
+    );
+  }
 });
 
 test("`usage --csv` is one row per resource with exact dollars, quoted where it must be", async () => {
@@ -407,7 +480,7 @@ test("`whoami` names the organization, the role and what it can spend", async ()
       expect(text).toMatch(/^organization\s+Acme \(org-1\)$/m);
       expect(text).toMatch(/^role\s+owner$/m);
       expect(text).toMatch(
-        /^funding\s+included usage, 95\.5 hours left without credit; \$24\.99 of credit$/m,
+        /^funding\s+free usage, 95\.5 hours left without credit; \$24\.99 of credit$/m,
       );
     },
   );

@@ -66,6 +66,11 @@ class SandboxFilesystemError(SandboxError, OSError):
     pass
 
 
+class SandboxInteractiveError(SandboxError):
+    """Vercel's error for an interactive terminal whose connection fails
+    (vercel-sandbox 0.8.0); exported so ``except`` clauses import."""
+
+
 class NotSupportedError(SandboxError):
     """A call Vercel supports and Runtime does not, or not the same way.
     Raised before anything is done. ``feature`` names what was asked;
@@ -109,6 +114,27 @@ def unsupported(feature: str, alternative: str) -> Callable[..., Any]:
     def refuse(*_: Any, **__: Any) -> Any:
         raise NotSupportedError(feature, alternative)
     return refuse
+
+
+class UnsupportedName:
+    """A Vercel export Runtime has no counterpart for: importing it works;
+    using it raises NotSupportedError naming the alternative."""
+
+    def __init__(self, name: str, alternative: str) -> None:
+        self._refuse = unsupported(f"Vercel's {name}", alternative)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._refuse()
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self._refuse()
+
+
+INTERACTIVE = ("interactive terminals",
+               "Use Runtime's terminal: box.withruntime.terminal(cols=80, rows=24), then write() and recv(); "
+               "or `npx withruntime sandboxes shell <id>`.")
 
 
 # ---- models ----------------------------------------------------------------------
@@ -170,16 +196,58 @@ class NetworkPolicySubnets:
 
 @dataclass
 class NetworkPolicyTransform:
+    """Headers to add to matching requests. vercel-sandbox 0.8.0 took away
+    ``header_names``, which only described a policy read back."""
     headers: Optional[Dict[str, str]] = None
-    header_names: Optional[List[str]] = None
+
+
+_PROXY_HEADERS = {"connection", "content-length", "transfer-encoding"}
+
+
+@dataclass
+class NetworkPolicyResponse:
+    """An answer the network proxy gives without asking the origin
+    (vercel-sandbox 0.8.0), checked as Vercel checks it."""
+    status_code: int
+    headers: Optional[Dict[str, str]] = None
+    body: Optional[str] = None
+    content_type: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if type(self.status_code) is not int or not 200 <= self.status_code <= 599:
+            raise ValueError("response status_code must be an integer between 200 and 599")
+        if self.body is not None and not isinstance(self.body, str):
+            raise TypeError("response body must be a string")
+        if self.content_type is not None and not isinstance(self.content_type, str):
+            raise TypeError("response content_type must be a string")
+        if self.body is not None and self.status_code in {204, 205, 304}:
+            raise ValueError("response body is not allowed for status codes 204, 205, and 304")
+        if self.body is not None and self.content_type is None:
+            raise ValueError("response content_type is required when body is set")
+        if self.headers is not None:
+            headers = dict(self.headers)
+            if any(not isinstance(name, str) or not isinstance(value, str) for name, value in headers.items()):
+                raise TypeError("response headers must map strings to strings")
+            names = [name.lower() for name in headers]
+            if len(names) != len(set(names)):
+                raise ValueError("response headers cannot contain duplicate names")
+            if any(name in _PROXY_HEADERS for name in names):
+                raise ValueError("response headers cannot set proxy-managed headers")
+            self.headers = headers
 
 
 @dataclass
 class NetworkPolicyRule:
+    """One action for requests to a domain: exactly one of ``transform``,
+    ``forward_url`` or ``response``, as vercel-sandbox 0.8.0 requires."""
     transform: Optional[List[NetworkPolicyTransform]] = None
     forward_url: Optional[str] = None
     match: Any = None
-    response: Any = None
+    response: Optional[NetworkPolicyResponse] = None
+
+    def __post_init__(self) -> None:
+        if sum((bool(self.transform), self.forward_url is not None, self.response is not None)) != 1:
+            raise ValueError("network policy rule requires exactly one of transform, forward_url, or response")
 
 
 @dataclass
@@ -199,6 +267,43 @@ class NetworkPolicy:
     @staticmethod
     def custom(allow: Any = None, subnets: Optional[NetworkPolicySubnets] = None) -> "NetworkPolicy":
         return NetworkPolicy("custom", allow, subnets)
+
+
+# vercel-sandbox 0.8.0's shapes for a policy read back, which cannot be sent;
+# exported so code that names them imports.
+@dataclass(frozen=True)
+class NetworkPolicyInjectionRuleSummary:
+    domain: str
+    header_names: tuple = ()
+    match_dimensions: tuple = ()
+
+
+@dataclass(frozen=True)
+class NetworkPolicyForwardRuleSummary:
+    domain: str
+    forward_url: str
+    match_dimensions: tuple = ()
+
+
+@dataclass(frozen=True)
+class NetworkPolicyResponseRuleSummary:
+    domain: str
+    status_code: int
+    match_dimensions: tuple = ()
+
+    def __post_init__(self) -> None:
+        if type(self.status_code) is not int or not 200 <= self.status_code <= 599:
+            raise ValueError("response rule summary status_code must be between 200 and 599")
+
+
+@dataclass(frozen=True)
+class NetworkPolicyReadback:
+    mode: str
+    allowed_domains: tuple = ()
+    subnets: Optional[NetworkPolicySubnets] = None
+    injection_rules: tuple = ()
+    forward_rules: tuple = ()
+    response_rules: tuple = ()
 
 
 @dataclass
