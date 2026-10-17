@@ -156,6 +156,9 @@ with the same key, a growing delay and a bounded deadline.
   retry, for a client that reads only HTTP. The SDKs keep their own growing
   delay.
 - `no_credit_running_limit` clears when one of the {{trial-sandboxes}} running sandboxes without credit stops or pauses. A fork asking for more copies than that never fits.
+- `own_share_full` (409, `Retry-After: 300`) is answered only to Runtime's own
+  organization: its sandboxes may take at most a share of a region, so the
+  rest is always left for customers. No customer's request is answered it.
 
 ## Retries and idempotency
 

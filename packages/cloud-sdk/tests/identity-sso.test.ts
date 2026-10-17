@@ -96,6 +96,49 @@ test("a refusal carries the API's code and message; outside a sandbox there is n
   }
 });
 
+test("a request token gone stale (a renewed lease, an App copy restored from its build) is read again from the host, once", async () => {
+  // The build sandbox's statement, as a copy's saved server holds it.
+  process.env.RUNTIME_ID_TOKEN_REQUEST_URL = "http://runtime.internal/v1/identity/token";
+  process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN = "rtid1.build.sig";
+  const seen = stub((request) => {
+    if (request.url === "http://runtime.internal/v1/environment")
+      return Response.json({
+        RUNTIME_ID_TOKEN_REQUEST_URL: "http://runtime.internal/v1/identity/token",
+        RUNTIME_ID_TOKEN_REQUEST_TOKEN: "rtid1.copy.sig",
+        STRIPE_KEY: "placeholder",
+      });
+    return request.headers.get("authorization") === "Bearer rtid1.copy.sig"
+      ? Response.json(TOKEN)
+      : Response.json(
+          { error: { code: "identity-bearer", message: "Use this sandbox's current token" } },
+          { status: 403 },
+        );
+  });
+  expect((await identityToken({ audience: "sts.amazonaws.com" })).token).toBe("h.p.s");
+  expect(seen.map((r) => [new URL(r.url).pathname, r.headers.get("authorization")])).toEqual([
+    ["/v1/identity/token", "Bearer rtid1.build.sig"],
+    ["/v1/environment", null],
+    ["/v1/identity/token", "Bearer rtid1.copy.sig"],
+  ]);
+
+  // The host's own token refused (the sandbox stopped): one ask, no loop.
+  process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN = "rtid1.copy.sig";
+  const again = stub((request) =>
+    request.url === "http://runtime.internal/v1/environment"
+      ? Response.json({
+          RUNTIME_ID_TOKEN_REQUEST_URL: "http://runtime.internal/v1/identity/token",
+          RUNTIME_ID_TOKEN_REQUEST_TOKEN: "rtid1.copy.sig",
+        })
+      : Response.json({ error: { code: "forbidden", message: "Stopped." } }, { status: 403 }),
+  );
+  const refused = await identityToken({ audience: "x" }).catch((e: unknown) => e);
+  expect((refused as RuntimeError).code).toBe("forbidden");
+  expect(again.map((r) => new URL(r.url).pathname)).toEqual([
+    "/v1/identity/token",
+    "/v1/environment",
+  ]);
+});
+
 test("a long-running process whose request token changed asks again with the guest file's current one", async () => {
   const dir = mkdtempSync(join(tmpdir(), "identity-"));
   const file = join(dir, "environment.json");
@@ -119,7 +162,9 @@ test("a long-running process whose request token changed asks again with the gue
           }),
     );
     expect((await identityToken({ audience: "runtime-hub" })).token).toBe("h.p.s");
-    expect(seen.map((r) => r.headers.get("authorization"))).toEqual([
+    // The host's listener answered nothing here, so the file's token was used.
+    const asks = seen.filter((r) => new URL(r.url).pathname === "/v1/identity/token");
+    expect(asks.map((r) => r.headers.get("authorization"))).toEqual([
       "Bearer rtid1.old.token",
       "Bearer rtid1.current.token",
     ]);
@@ -129,7 +174,7 @@ test("a long-running process whose request token changed asks again with the gue
     expect(((await identityToken({ audience: "x" }).catch((e) => e)) as RuntimeError).code).toBe(
       "forbidden",
     );
-    expect(again).toHaveLength(1);
+    expect(again.filter((r) => new URL(r.url).pathname === "/v1/identity/token")).toHaveLength(1);
   } finally {
     sandboxMarker.path = marker;
   }

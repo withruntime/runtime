@@ -10,6 +10,16 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 17 October 2026
 
+- **Swarm worker keys cannot reach scheduled jobs or their secrets.** A key
+  made by another key with reach `agent` now gets `403 forbidden` on
+  `/v1/secrets`, `/v1/jobs` and `/v1/job-runs`, and on the `runtime_jobs` and
+  `runtime_secrets_jobs` tools, as the guide already said for secrets: a
+  job's secrets belong to the person the key's agent serves, often the owner.
+  See [Run a swarm](./teams#run-a-swarm).
+- **A revoked worker's spend still counts against its maker's limit.** A key
+  revoked, expired or retired counts what it spent in the last day toward
+  the daily limit its maker's keys share, so revoking a worker that spent its
+  limit and making another no longer spends that limit twice.
 - **Wake and restart wait for room.** In the JavaScript, Python, Ruby, Go and
   Java SDKs, a sandbox's `wake` and `restart` now wait for room as `create`
   does. When the sandbox's own server is full (`no_capacity`), the SDK sends
@@ -50,6 +60,12 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 16 October 2026
 
+- **Identity tokens in Python and copied programs.** Python's
+  `Sandbox.identity_token()` (0.13.1) now asks again with the sandbox's
+  current request token when the one a program started with is refused, as
+  the TypeScript SDK does, and both SDKs (TypeScript 0.15.1) read it from the
+  sandbox itself first, so a server carried into a fork gets a token naming
+  its own sandbox instead of a 403. See [identity tokens](./identity-tokens).
 - **Private preview link expiry.** A WebSocket, stream or download opened
   with a private preview's link now ends when that link expires, so a link
   made to last ten minutes, or one read through a sandbox session, opens

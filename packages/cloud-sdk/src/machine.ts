@@ -249,7 +249,8 @@ export abstract class Machine<
    * true is the only value, and it is sent either way, so an API from before
    * it was optional accepts the call too. */
   async resize(
-    size: { vcpu?: number; memoryMiB?: number },
+    /** diskMiB only grows; the filesystem fills it at the restart. */
+    size: { vcpu?: number; memoryMiB?: number; diskMiB?: number },
     options: RequestOptions & { restart?: true } = {},
   ): Promise<this> {
     const { restart = true, ...rest } = options;

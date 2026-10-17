@@ -50,7 +50,11 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
   can get tokens only for this sandbox, only while it is running, and stops
   when the sandbox stops or pauses. Treat it like a password anyway: anyone who
   copies it can get tokens as this sandbox until then.
-- A fork's programs keep the source's request token: read it again after a copy.
+- The request token changes with each renewal of the sandbox's lease, and a
+  fork's programs keep the source's. A program that runs a long time, or was
+  copied, reads the current one again from
+  `http://runtime.internal/v1/environment` (JSON, with both variables); the
+  JavaScript and Python SDKs do this for you when a token they hold is refused.
 - Use the supplied `RUNTIME_ID_TOKEN_REQUEST_URL`. It points to Runtime's
   internal token relay, which accepts only this sandbox's current request
   token. You do not need to allow access to the host's public address.

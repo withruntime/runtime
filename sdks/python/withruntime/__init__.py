@@ -62,6 +62,42 @@ class Sandbox(_Sandbox):
         return _identity_token(audience, lifetime_seconds, timeout)
 
 
+# The sandbox's own listener (packages/cloud/src/linux/egress.ts).
+_ENVIRONMENT_URL = "http://runtime.internal/v1/environment"
+_ENVIRONMENT_FILE = "/run/runtime/environment.json"
+
+
+def _file_credentials():
+    import json as _json
+    try:
+        with open(_ENVIRONMENT_FILE, "rb") as file:
+            env = _json.load(file)
+        return env.get("RUNTIME_ID_TOKEN_REQUEST_URL"), env.get("RUNTIME_ID_TOKEN_REQUEST_TOKEN")
+    except (OSError, ValueError, AttributeError):
+        return None, None
+
+
+def _current_credentials(timeout: float):
+    """The sandbox's request token as its host holds it now. The one in
+    os.environ was current when the process started: it changes with every
+    renewal of the sandbox's lease (about every 30 minutes for one that keeps
+    running), and a server restored from a snapshot (an App's copies, a fork)
+    holds the statement of the sandbox it was saved from."""
+    import json as _json
+    import urllib.request as _request
+    try:
+        with _request.urlopen(_ENVIRONMENT_URL, timeout=min(timeout, 5.0)) as answer:
+            env = _json.load(answer)
+        url, token = env.get("RUNTIME_ID_TOKEN_REQUEST_URL"), env.get("RUNTIME_ID_TOKEN_REQUEST_TOKEN")
+        if isinstance(url, str) and url and isinstance(token, str) and token:
+            return url, token
+    except _request.HTTPError as error:  # type: ignore[attr-defined]
+        error.close()
+    except (OSError, ValueError, AttributeError):
+        pass  # Not in a sandbox, or a host that predates the listener's environment.
+    return _file_credentials()
+
+
 def _identity_token(audience: str, lifetime_seconds: Optional[int], timeout: float) -> str:
     import json as _json
     import os as _os
@@ -71,22 +107,32 @@ def _identity_token(audience: str, lifetime_seconds: Optional[int], timeout: flo
     url = _os.environ.get("RUNTIME_ID_TOKEN_REQUEST_URL")
     token = _os.environ.get("RUNTIME_ID_TOKEN_REQUEST_TOKEN")
     if not url or not token:
-        try:
-            with open("/run/runtime/environment.json", "rb") as file:
-                env = _json.load(file)
-            url, token = env.get("RUNTIME_ID_TOKEN_REQUEST_URL"), env.get("RUNTIME_ID_TOKEN_REQUEST_TOKEN")
-        except (OSError, ValueError):
-            pass
+        url, token = _file_credentials()
     if not url or not token:
         raise RuntimeError("Identity tokens are issued only inside a Runtime sandbox (RUNTIME_ID_TOKEN_REQUEST_TOKEN is not set).",
                            code="identity_unavailable")
     query = {"audience": audience}
     if lifetime_seconds is not None:
         query["lifetimeSeconds"] = str(lifetime_seconds)
-    request = _request.Request(f"{url}?{_parse.urlencode(query)}", headers={"Authorization": f"Bearer {token}"})
-    try:
+
+    def ask(url, token):
+        request = _request.Request(f"{url}?{_parse.urlencode(query)}", headers={"Authorization": f"Bearer {token}"})
         with _request.urlopen(request, timeout=timeout) as answer:
             return _json.load(answer)["token"]
+
+    try:
+        try:
+            return ask(url, token)
+        except _request.HTTPError as error:  # type: ignore[attr-defined]
+            # Refused for a request token that is no longer this sandbox's
+            # current one: ask once more with the one its host holds now.
+            if error.code not in (401, 403):
+                raise
+            current_url, current_token = _current_credentials(timeout)
+            if not current_url or not current_token or current_token == token:
+                raise
+            error.close()
+            return ask(current_url, current_token)
     except _request.HTTPError as error:  # type: ignore[attr-defined]
         try:
             message = _json.load(error).get("error", {}).get("message", str(error))

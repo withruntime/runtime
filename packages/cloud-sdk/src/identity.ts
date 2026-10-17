@@ -13,30 +13,54 @@ export type IdentityToken = {
   audience: string;
 };
 
-/** The guest's environment file, which holds the sandbox's current request
- * token: the guest writes it again when the token changes (a wake on another
- * server, a restore), while a process keeps the environment it started with. */
-async function fileCredentials(): Promise<{ url?: string; token?: string } | null> {
+type Credentials = { url: string; token: string };
+
+async function requestCredentials(): Promise<Credentials | null> {
+  const url = process.env.RUNTIME_ID_TOKEN_REQUEST_URL;
+  const token = process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
+  if (url && token) return { url, token };
+  // A process started before the guest wrote its environment still finds it.
+  return fileCredentials();
+}
+
+async function fileCredentials(): Promise<Credentials | null> {
   try {
     // Loaded here, so the SDK still loads where there is no file system.
     const { readFile } = await import("node:fs/promises");
     const env = JSON.parse(await readFile(sandboxMarker.path, "utf8")) as Record<string, string>;
-    return { url: env.RUNTIME_ID_TOKEN_REQUEST_URL, token: env.RUNTIME_ID_TOKEN_REQUEST_TOKEN };
+    const url = env.RUNTIME_ID_TOKEN_REQUEST_URL;
+    const token = env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
+    return url && token ? { url, token } : null;
   } catch {
     return null;
   }
 }
 
-async function requestCredentials(): Promise<{ url: string; token: string } | null> {
-  let url = process.env.RUNTIME_ID_TOKEN_REQUEST_URL;
-  let token = process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
-  if (!url || !token) {
-    // A process started before the guest wrote its environment still finds it.
-    const file = await fileCredentials();
-    url = file?.url;
-    token = file?.token;
+/** The sandbox's own listener (packages/cloud/src/linux/egress.ts). */
+const ENVIRONMENT_URL = "http://runtime.internal/v1/environment";
+
+/** The sandbox's request token as its host holds it now. The one in
+ * process.env was current when the process started: it changes with every
+ * renewal of the sandbox's lease (about every 30 minutes for one that keeps
+ * running), and a server restored from a snapshot (an App's copies, a fork)
+ * holds the statement of the sandbox it was saved from. The host's listener
+ * answers this sandbox's own; guest-net.py's file is a few seconds behind it. */
+async function currentCredentials(signal?: AbortSignal): Promise<Credentials | null> {
+  try {
+    const response = await fetch(ENVIRONMENT_URL, {
+      signal: signal ?? AbortSignal.timeout(5_000),
+    });
+    if (response.ok) {
+      const env = (await response.json()) as Record<string, unknown>;
+      const url = env.RUNTIME_ID_TOKEN_REQUEST_URL;
+      const token = env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
+      if (typeof url === "string" && url && typeof token === "string" && token)
+        return { url, token };
+    }
+  } catch {
+    // Not in a sandbox, or a host that predates the listener's environment.
   }
-  return url && token ? { url, token } : null;
+  return fileCredentials();
 }
 
 /**
@@ -63,24 +87,25 @@ export async function identityToken(input: {
       message:
         "Identity tokens are issued only inside a Runtime sandbox (RUNTIME_ID_TOKEN_REQUEST_TOKEN is not set).",
     });
-  const ask = (from: { url: string; token: string }) => {
-    const url = new URL(from.url);
+  const ask = (credentials: Credentials) => {
+    const url = new URL(credentials.url);
     url.searchParams.set("audience", input.audience);
     if (input.lifetimeSeconds !== undefined)
       url.searchParams.set("lifetimeSeconds", String(input.lifetimeSeconds));
     return fetch(url, {
-      headers: { authorization: `Bearer ${from.token}` },
+      headers: { authorization: `Bearer ${credentials.token}` },
       signal: input.signal ?? AbortSignal.timeout(10_000),
     });
   };
   let response = await ask(found);
-  // Refused for a request token that has since changed: a long-running
-  // process asks again with the current one from the guest's file (the hub's
-  // own, 16 October 2026, from its start until it was restarted).
+  // Refused for a request token that is no longer this sandbox's current one:
+  // ask once more with the one its host holds now.
   if (response.status === 401 || response.status === 403) {
-    const file = await fileCredentials();
-    if (file?.url && file.token && file.token !== found.token)
-      response = await ask({ url: file.url, token: file.token });
+    const current = await currentCredentials(input.signal);
+    if (current && current.token !== found.token) {
+      await response.body?.cancel();
+      response = await ask(current);
+    }
   }
   const body = (await response.json().catch(() => ({}))) as IdentityToken & {
     error?: { code?: string; message?: string; requestId?: string };

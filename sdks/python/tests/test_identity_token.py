@@ -9,11 +9,14 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import withruntime
 from withruntime import RuntimeError, Sandbox
 
 
 class Stub(BaseHTTPRequestHandler):
     seen: list = []
+    # What the sandbox's listener answers at /v1/environment; None: nothing.
+    current = None
 
     def log_message(self, *args):
         pass
@@ -21,7 +24,9 @@ class Stub(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         Stub.seen.append((url.path, parse_qs(url.query), self.headers.get("Authorization")))
-        if self.headers.get("Authorization") != "Bearer rtid1.statement.sig":
+        if url.path == "/v1/environment":
+            body, status = (Stub.current, 200) if Stub.current else ({}, 404)
+        elif self.headers.get("Authorization") != "Bearer rtid1.statement.sig":
             body, status = {"error": {"code": "unauthorized", "message": "This request token is not valid."}}, 401
         else:
             body, status = {"token": "header.payload.signature", "expiresAt": "2026-09-24T00:10:00Z"}, 200
@@ -40,9 +45,13 @@ class IdentityTokenTest(unittest.TestCase):
         self.thread.start()
         self.saved = {k: os.environ.get(k) for k in ("RUNTIME_ID_TOKEN_REQUEST_URL", "RUNTIME_ID_TOKEN_REQUEST_TOKEN")}
         os.environ["RUNTIME_ID_TOKEN_REQUEST_URL"] = f"http://127.0.0.1:{self.server.server_port}/v1/identity/token"
-        Stub.seen = []
+        Stub.seen, Stub.current = [], None
+        self.where = (withruntime._ENVIRONMENT_URL, withruntime._ENVIRONMENT_FILE)
+        withruntime._ENVIRONMENT_URL = f"http://127.0.0.1:{self.server.server_port}/v1/environment"
+        withruntime._ENVIRONMENT_FILE = "/nonexistent/runtime/environment.json"
 
     def tearDown(self):
+        withruntime._ENVIRONMENT_URL, withruntime._ENVIRONMENT_FILE = self.where
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
@@ -83,13 +92,27 @@ class IdentityTokenTest(unittest.TestCase):
                     Sandbox.identity_token("sts.amazonaws.com")
             self.assertIn("not valid", str(caught.exception))
             self.assertEqual(caught.exception.status, 401)
-            self.assertEqual(len(responses), 1)
-            self.assertTrue(responses[0].closed, "identity error response was not closed")
+            # The listener had nothing newer: one ask, and its environment read.
+            self.assertEqual([seen[0] for seen in Stub.seen], ["/v1/identity/token", "/v1/environment"])
+            self.assertEqual(len(responses), 2)
+            self.assertTrue(all(r.closed for r in responses), "an error response was not closed")
         finally:
             # Preserve deterministic cleanup even against the unfixed client;
             # the assertion above observes SDK ownership, before this fallback.
             for response in responses:
                 response.close()
+
+    def test_a_stale_request_token_is_read_again_from_the_host_once(self):
+        # The build sandbox's statement, as an App copy's saved server holds it.
+        os.environ["RUNTIME_ID_TOKEN_REQUEST_TOKEN"] = "rtid1.build.sig"
+        Stub.current = {"RUNTIME_ID_TOKEN_REQUEST_URL": os.environ["RUNTIME_ID_TOKEN_REQUEST_URL"],
+                        "RUNTIME_ID_TOKEN_REQUEST_TOKEN": "rtid1.statement.sig"}
+        self.assertEqual(Sandbox.identity_token("sts.amazonaws.com"), "header.payload.signature")
+        self.assertEqual([(path, auth) for path, _, auth in Stub.seen], [
+            ("/v1/identity/token", "Bearer rtid1.build.sig"),
+            ("/v1/environment", None),
+            ("/v1/identity/token", "Bearer rtid1.statement.sig"),
+        ])
 
     def test_outside_a_sandbox_there_is_nothing_to_ask_with(self):
         os.environ.pop("RUNTIME_ID_TOKEN_REQUEST_TOKEN", None)

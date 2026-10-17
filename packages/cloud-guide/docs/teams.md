@@ -151,8 +151,9 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
   files, images, volumes, snapshots, previews and ports), its own usage, and
   `/v1/keys`. The account's own settings are refused with `403 forbidden`,
   whatever its person's role: closing the account, webhooks, telemetry
-  exports, the audit log, credit and billing, secrets, domains and networks.
-  Call those with a key made on the website, or make this key account-wide.
+  exports, the audit log, credit and billing, secrets, scheduled jobs and their
+  secrets, domains and networks. Call those with a key made on the website, or
+  make this key account-wide.
 - The coordinator sees each worker's spend with `runtime keys ls` or
   `GET /v1/usage?key=<keyId>`, for itself, the keys it made at any depth, and
   any key its reads already reach.

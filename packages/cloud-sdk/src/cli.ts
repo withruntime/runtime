@@ -187,9 +187,10 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   switch-image <id> <image> --keep-workspace  Move it to another image, keeping /workspace (your home),
                                               volumes, env and previews; processes restart, the rest of
                                               its disk is lost (snapshot it first to keep everything)
-  resize <id> [--vcpu 2] [--memory 4096] --restart
-                                              Change its size by a restart: the whole disk stays,
-                                              programs stop (snapshot it first to keep memory)
+  resize <id> [--vcpu 2] [--memory 4096] [--disk 20480] --restart
+                                              Change its size by a restart: the whole disk stays and
+                                              --disk only grows it; programs stop (snapshot it first
+                                              to keep memory)
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
@@ -1945,7 +1946,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       return 0;
     }
     case "resize": {
-      const args = parse(rest, ["restart"], ["vcpu", "memory"]);
+      const args = parse(rest, ["restart"], ["vcpu", "memory", "disk"]);
       const sbx = await use(
         need(
           args.positional[0],
@@ -1955,8 +1956,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const size = {
         ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
         ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
+        ...(integer(args, "disk") !== undefined ? { diskMiB: integer(args, "disk")! } : {}),
       };
-      if (size.vcpu === undefined && size.memoryMiB === undefined)
+      if (size.vcpu === undefined && size.memoryMiB === undefined && size.diskMiB === undefined)
         throw usage(
           `Name a new size, e.g. ${me} sandboxes resize ${sbx.id} --memory 4096 --restart`,
         );
