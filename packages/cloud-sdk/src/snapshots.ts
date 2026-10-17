@@ -33,6 +33,10 @@ export type Snapshot = {
     durableAt: string | null;
     storedBytes: number | null;
   };
+  /** An opaque tag for the server it is kept on, like `pl_3f9a0c1b2d4e5f60`.
+   * The same tag as a sandbox of yours means the same server. Null before it
+   * is placed. Absent from older servers. */
+  placement?: string | null;
   error: string | null;
   createdAt: string;
   readyAt: string | null;

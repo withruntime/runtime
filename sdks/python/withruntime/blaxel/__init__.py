@@ -8,14 +8,20 @@
 or run `npx withruntime login` once. A Blaxel key is never sent anywhere.
 What Runtime cannot do the way Blaxel does raises NotSupportedError, naming
 what to use."""
+import logging as _logging
+import os as _os
+import re as _re
 from typing import Any
 
-from . import _async_sandbox, _sync_sandbox
+from . import _async_sandbox, _core, _sync_sandbox
 from ._async_sandbox import (AsyncCodeInterpreter, AsyncPaginatedList, AsyncSandboxFileSystem, AsyncSandboxInstance,
                              AsyncSandboxPreview, AsyncSandboxPreviews, AsyncSandboxPreviewToken,
                              AsyncSandboxPreviewTokens, AsyncSandboxProcess, AsyncSandboxSessions, AsyncSandboxSnapshots,
                              AsyncSnapshot)
 from ._core import (MAX_CREATION_TIMEOUT_SECONDS, ApplicationAPIError, AsyncStreamHandle, AsyncWatchHandle,
+                    BlaxelActionErrorBody, BlaxelApiErrorBody, BlaxelError, BlaxelErrorCode, BlaxelErrorCodeValue,
+                    BlaxelPlatformErrorBody, BlaxelSandboxApiErrorBody, SandboxPreviewCreateConfiguration,
+                    SecretAPIError, VolumeAPIError, is_blaxel_error,
                     ContentSearchMatch, ContentSearchResponse, Context, CopyResponse, Directory, DriveAPIError, Env,
                     Execution, ExecutionError, ExpirationPolicy, File, FindMatch, FindResponse, Logs, Metadata,
                     NotSupportedError, OutputMessage, PaginationMeta, Port, Preview, PreviewMetadata, PreviewSpec,
@@ -86,7 +92,49 @@ BlaxelMcpServerTransport = websocket_client = _Unsupported(
     "share its port with sandbox.previews.create(...).")
 BlJobWrapper = _Unsupported("jobs", "Run the job as a process in a Runtime sandbox.")
 BlaxelAuth = auth = get_credentials = client = _Unsupported("auth and API client", _AUTH)
-settings = env = _Unsupported("settings", _AUTH)
+env = _Unsupported("settings", _AUTH)
+
+
+class _Settings(_core.Unsupported):
+    """Blaxel's settings: ``integration`` (blaxel 0.4.17) is kept and checked
+    as Blaxel does, and never sent, as Runtime does not attribute traffic by
+    it; anything else raises NotSupportedError naming the alternative."""
+
+    def __init__(self) -> None:
+        super().__init__("Blaxel's settings", _AUTH)
+        object.__setattr__(self, "_integration", None)
+        object.__setattr__(self, "_warned_integration", None)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_") or isinstance(getattr(type(self), name, None), property):
+            object.__setattr__(self, name, value)
+        else:
+            self._refuse()
+
+    @property
+    def integration(self) -> str:
+        """The token set here, else BL_INTEGRATION; "" when none, or when it
+        is not ``<name>/<semver>`` with a lowercase name (warned once per
+        value, as Blaxel does)."""
+        value = self._integration if self._integration is not None else _os.environ.get("BL_INTEGRATION", "")
+        if not value:
+            return ""
+        if not _INTEGRATION_TOKEN.fullmatch(value):
+            if self._warned_integration != value:
+                object.__setattr__(self, "_warned_integration", value)
+                _logging.getLogger(__name__).warning(
+                    "Ignoring invalid Blaxel integration token %r: expected <name>/<semver> with a lowercase name",
+                    value)
+            return ""
+        return value
+
+    @integration.setter
+    def integration(self, value: Any) -> None:
+        object.__setattr__(self, "_integration", value)
+
+
+_INTEGRATION_TOKEN = _re.compile(r"[a-z0-9][a-z0-9._-]*/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+settings = _Settings()
 find_from_cache = _Unsupported("cache", "Remove it: the adapter keeps no Blaxel cache.")
 verify_webhook_signature = verify_webhook_from_request = _Unsupported(
     "webhook verification", "Runtime signs its own webhooks: use withruntime.webhooks.verify_webhook.")
@@ -95,6 +143,13 @@ DriveInstance = SyncDriveInstance = DriveCreateConfiguration = _Unsupported("dri
 ApplicationInstance = SyncApplicationInstance = ApplicationCreateConfiguration = _Unsupported(
     "applications", "Run the app in a sandbox and share its port with sandbox.previews.create(...).")
 ImageInstance = ImageBuildContext = LocalFile = _Unsupported("image builder", _IMAGES)
+# blaxel 0.4.18's workspace secrets, which Blaxel's proxy puts into a sandbox's
+# routing as {{SECRET:name}}. Runtime's secrets are bound to the hosts they may
+# reach, which SecretInstance.set(name, value) does not name.
+SecretInstance = SyncSecretInstance = _Unsupported(
+    "workspace secrets", "Use Runtime secrets, which name the hosts a secret may reach: "
+    "runtime.secrets.set(name, value=..., hosts=[...]) (from withruntime import Runtime); the egress proxy adds "
+    "the value on HTTPS to those hosts and the sandbox never sees it.")
 _SANDBOX_PARTS = ("codegen, system, drives and schedules",
                   "See NotSupportedError's alternative for each call on sandbox.codegen and the rest.")
 SandboxCodegen = SyncSandboxCodegen = SandboxSystem = SyncSandboxSystem = SandboxDrive = SyncSandboxDrive = \
@@ -116,12 +171,16 @@ __all__ = [
     "PreviewTokenSpec", "SandboxSnapshot", "SandboxSnapshotRequest", "SandboxForkResponse", "OutputMessage", "Result",
     "ExecutionError", "Logs", "Execution", "Context", "SandboxAPIError", "SandboxCreationTimeoutError",
     "is_creation_timeout_error", "MAX_CREATION_TIMEOUT_SECONDS", "SnapshotAPIError", "ResponseError",
-    "DriveAPIError", "ApplicationAPIError", "NotSupportedError", "use_client", "autoload", "BlAgent", "bl_agent",
+    "DriveAPIError", "ApplicationAPIError", "VolumeAPIError", "NotSupportedError", "BlaxelError",
+    "BlaxelErrorCode", "BlaxelErrorCodeValue", "BlaxelApiErrorBody", "BlaxelActionErrorBody",
+    "BlaxelPlatformErrorBody", "BlaxelSandboxApiErrorBody", "is_blaxel_error", "SandboxPreviewCreateConfiguration",
+    "use_client", "autoload", "BlAgent", "bl_agent",
     "BLModel", "bl_model", "BlTools", "bl_tools", "convert_mcp_tool_to_blaxel_tool", "BlaxelMcpServerTransport",
     "websocket_client", "BlJobWrapper", "BlaxelAuth", "auth", "get_credentials", "client", "settings", "env",
     "find_from_cache", "verify_webhook_signature", "verify_webhook_from_request", "VolumeInstance",
     "SyncVolumeInstance", "VolumeCreateConfiguration", "DriveInstance", "SyncDriveInstance",
     "DriveCreateConfiguration", "ApplicationInstance", "SyncApplicationInstance", "ApplicationCreateConfiguration",
-    "ImageInstance", "ImageBuildContext", "LocalFile", "SandboxCodegen", "SyncSandboxCodegen", "SandboxSystem",
+    "ImageInstance", "ImageBuildContext", "LocalFile", "SecretInstance", "SyncSecretInstance", "SecretAPIError",
+    "SandboxCodegen", "SyncSandboxCodegen", "SandboxSystem",
     "SyncSandboxSystem", "SandboxDrive", "SyncSandboxDrive", "SandboxSchedules", "SyncSandboxSchedules",
 ]

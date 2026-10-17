@@ -293,6 +293,9 @@ class CreateSandboxBaseParams:
     secrets: Optional[Dict[str, str]] = None
     queue_timeout: Optional[int] = None
     kvm: Optional[bool] = None
+    target: Optional[str] = None
+    """The region for this create, over the client's target: "us" (Runtime's
+    one region) or none; any other is refused."""
 
 
 @dataclass
@@ -972,7 +975,13 @@ def check_config(config: Optional[DaytonaConfig]) -> None:
     if config.jwt_token is not None:
         raise NotSupportedError("Daytona JWT sign-in (jwt_token)",
                                 "Use a Runtime key: set RUNTIME_API_KEY, or run `npx withruntime login` once.")
-    target = config.target or os.environ.get("DAYTONA_TARGET")
+    refuse_target(config.target or os.environ.get("DAYTONA_TARGET"))
+
+
+def refuse_target(target: Optional[str]) -> None:
+    """Runtime runs in one US region: a Daytona target (the client's, or a
+    create's own since daytona 0.224) other than "us" is refused, and none or
+    "" means that region."""
     if target and target != "us":
         raise NotSupportedError(f'The Daytona target "{target}"',
                                 'Runtime runs in one US region; remove target or use "us".')
@@ -1055,6 +1064,7 @@ REFUSED_CREATE = {
 
 
 def refuse_create(params: CreateSandboxBaseParams) -> None:
+    refuse_target(params.target)
     for name, (feature, alternative) in REFUSED_CREATE.items():
         if getattr(params, name) is not None:
             raise NotSupportedError(feature, alternative)

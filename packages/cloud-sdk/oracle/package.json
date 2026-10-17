@@ -1,11 +1,11 @@
 {
   "private": true,
   "dependencies": {
-    "e2b": "2.55.0",
-    "@e2b/code-interpreter": "2.8.3",
-    "@daytona/sdk": "0.223.1",
-    "@vercel/sandbox": "3.6.1",
-    "@blaxel/core": "0.3.25"
+    "e2b": "2.56.0",
+    "@e2b/code-interpreter": "2.9.0",
+    "@daytona/sdk": "0.224.1",
+    "@vercel/sandbox": "3.8.0",
+    "@blaxel/core": "0.3.30"
   },
   "overrides": {
     "js-yaml": "4.3.2"

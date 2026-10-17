@@ -127,6 +127,9 @@ test("invalid cumulative progress cannot commit a file", async () => {
   }
 });
 
+// Begin (100 ms) and the chunk (200 ms) each fit the 250 ms deadline; together
+// they don't. At 25 + 70 ms against 80 ms, a busy check ran the deadline out
+// during begin itself, so no upload was owned and nothing aborted (16 Oct 2026).
 test("the explicit file deadline includes begin and chunk requests together", async () => {
   const calls: string[] = [];
   const files = new Files(
@@ -140,7 +143,7 @@ test("the explicit file deadline includes begin and chunk requests together", as
         calls.push(path);
         if (path.endsWith(":abort")) return Response.json({});
         await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, path.endsWith("/uploads") ? 25 : 70);
+          const timer = setTimeout(resolve, path.endsWith("/uploads") ? 100 : 200);
           const abort = () => {
             clearTimeout(timer);
             reject(request.signal.reason);
@@ -158,7 +161,7 @@ test("the explicit file deadline includes begin and chunk requests together", as
     "sandbox",
   );
   await expect(
-    files.write("/workspace/file", new Uint8Array(CHUNK + 1), { timeoutMs: 80 }),
+    files.write("/workspace/file", new Uint8Array(CHUNK + 1), { timeoutMs: 250 }),
   ).rejects.toMatchObject({ code: "timeout" });
   expect(calls.some((path) => path.endsWith(":commit"))).toBe(false);
   expect(calls.at(-1)).toEndWith(":abort");

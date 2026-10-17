@@ -110,6 +110,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("snapshot", snapshotId);
   }
 
+  /**
+   * One to 16 ids of your own sandboxes or snapshots. The new sandbox starts on a server none of
+   * them is on, and stays apart if its start is moved. With no other server that has room the
+   * create fails with no_capacity and nothing is made or charged.
+   */
+  public CreateSandbox spreadFrom(List<String> ids) {
+    return set("spreadFrom", new ArrayList<>(ids));
+  }
+
   /** Attaches a volume: mode "rw" (one sandbox at a time) or a read-only "snapshot" copy. */
   @SuppressWarnings("unchecked")
   public CreateSandbox volume(String volumeId, String path, String mode) {

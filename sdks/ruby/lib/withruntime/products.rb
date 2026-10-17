@@ -104,7 +104,7 @@ module WithRuntime
     end
   end
 
-  # +runtime.limits+: whether this key is read-only, and what its agent may still spend today.
+  # +runtime.limits+: whether this key is read-only, and what its agent may still spend today, plus +account+: the account's limits (limit, label, unit, max, used), or nil.
   class Limits < Product
     def get = Record.new(@t.json("GET", "/v1/limits"))
   end

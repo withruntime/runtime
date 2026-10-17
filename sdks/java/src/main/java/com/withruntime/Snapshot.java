@@ -35,6 +35,11 @@ public final class Snapshot extends JsonObject {
     return getLong("meteredBytes");
   }
 
+  /** An opaque tag for the server it is kept on; the same tag as a sandbox of yours means the same server. Null before it is placed. */
+  public String placement() {
+    return getString("placement");
+  }
+
   public Instant expiresAt() {
     return getInstant("expiresAt");
   }

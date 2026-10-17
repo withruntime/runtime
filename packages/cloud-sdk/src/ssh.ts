@@ -23,6 +23,9 @@ ${me} sandboxes ssh config [--install]          The ssh config for \`ssh <id|nam
                                       VS Code Remote-SSH and JetBrains Gateway; --install adds
                                       it to ~/.ssh/config
 ${me} sandboxes ssh proxy <id|name>[.runtime]   ProxyCommand mode: SSH on stdin and stdout
+${me} sandboxes code <id|name> [--editor vscode|cursor|windsurf] [--path /workspace] [--print]
+                                      Open it in your editor over SSH; installs the ssh config
+                                      above once. --print gives the link instead
 ${me} sandboxes port-forward <id|name> <port|local:remote>... [--address 127.0.0.1]
                                       Forward local ports to ports in the sandbox, until Ctrl-C
 
@@ -118,7 +121,7 @@ Host *.runtime
 async function installConfig(env: NodeJS.ProcessEnv): Promise<string> {
   const file = join(configDirectory(env), "ssh", "config");
   await writeFile(file, await sshConfig(env), { mode: 0o600 });
-  const sshDir = join(homedir(), ".ssh");
+  const sshDir = join(env.HOME || homedir(), ".ssh");
   await mkdir(sshDir, { recursive: true, mode: 0o700 });
   const main = join(sshDir, "config");
   const current = await readFile(main, "utf8").catch(() => "");
@@ -273,6 +276,115 @@ function usageError(message: string, me: string) {
     status: 0,
     hint: `Run \`${me} sandboxes ssh help\`.`,
   });
+}
+
+/** The editors `runtime sandboxes code` opens: each one's command line program
+ * and the URL scheme its app registers. All three are VS Code underneath and
+ * name an SSH remote the same way, `ssh-remote+<host>`. */
+export const EDITORS = {
+  vscode: { name: "VS Code", bin: "code", scheme: "vscode" },
+  cursor: { name: "Cursor", bin: "cursor", scheme: "cursor" },
+  windsurf: { name: "Windsurf", bin: "windsurf", scheme: "windsurf" },
+} as const;
+export type EditorName = keyof typeof EDITORS;
+
+/** What opens a sandbox's folder in an editor over the `*.runtime` ssh host:
+ * the editor's own program and its arguments, or, without the program on the
+ * PATH, the link its app answers. */
+export function editorLaunch(editor: EditorName, sandboxId: string, path: string) {
+  const { bin, scheme } = EDITORS[editor];
+  const remote = `ssh-remote+${sandboxId}.runtime`;
+  return {
+    host: `${sandboxId}.runtime`,
+    bin,
+    args: ["--remote", remote, path],
+    link: `${scheme}://vscode-remote/${remote}${path}`,
+  };
+}
+
+/** Runs a program, answering whether it started and exited 0; a program
+ * missing from the PATH is false, not an error. */
+function launched(bin: string, args: string[], env: NodeJS.ProcessEnv): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, {
+      env,
+      stdio: "ignore",
+      // `code` and `cursor` are .cmd scripts on Windows.
+      shell: process.platform === "win32",
+    });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+/** `runtime sandboxes code <id|name> [--editor cursor] [--path /workspace] [--print]`:
+ * a sandbox opened in VS Code, Cursor or Windsurf in one step. It makes sure
+ * the sandbox has an SSH server and this machine has the `*.runtime` ssh
+ * entry, then hands the editor the SSH remote. */
+export async function editorCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  out: Out,
+  connect: () => Promise<Runtime>,
+  me: string,
+): Promise<number> {
+  const valueOf = (flag: string) => {
+    const at = argv.indexOf(flag);
+    return at === -1 ? undefined : argv[at + 1];
+  };
+  const editor = (valueOf("--editor") ?? "vscode").toLowerCase().replace(/^code$/, "vscode");
+  const path = valueOf("--path") ?? "/workspace";
+  const valued = new Set(["--editor", "--path"]);
+  const [target] = argv.filter(
+    (word, i) => !word.startsWith("--") && !valued.has(argv[i - 1] ?? ""),
+  );
+  if (!target || target === "help") {
+    out.write(SSH_HELP(me));
+    return target ? 0 : 64;
+  }
+  if (!(editor in EDITORS))
+    throw new RuntimeError({
+      message: `${editor} is not an editor this opens.`,
+      code: "usage",
+      status: 0,
+      hint: `Use --editor ${Object.keys(EDITORS).join(", --editor ")}; JetBrains Gateway connects to <id>.runtime after \`${me} sandboxes ssh config --install\`.`,
+    });
+  if (!path.startsWith("/"))
+    throw usageError(`--path is a folder in the sandbox, from /: ${path}`, me);
+  const sbx = await resolveSandbox(await connect(), target);
+  await ensureSshd(sbx, out);
+  await installConfig(env);
+  const how = editorLaunch(editor as EditorName, sbx.id, path);
+  const { name } = EDITORS[editor as EditorName];
+  const print = argv.includes("--print");
+  // Without the editor's program on the PATH (VS Code's `code` is opt-in on a
+  // Mac), the desktop opens the editor's link.
+  const [opener, ...openerArgs] =
+    process.platform === "darwin"
+      ? ["open", how.link]
+      : process.platform === "win32"
+        ? ["cmd", "/c", "start", '""', how.link]
+        : ["xdg-open", how.link];
+  const opened = print
+    ? false
+    : (await launched(how.bin, how.args, env))
+      ? "program"
+      : (await launched(opener, openerArgs, env))
+        ? "link"
+        : false;
+  if (out.json)
+    out.write(
+      JSON.stringify({ sandboxId: sbx.id, editor, host: how.host, path, link: how.link, opened }),
+    );
+  else if (opened)
+    out.write(
+      `Opening ${path} of ${sbx.id} in ${name} over SSH (host ${how.host}). It needs ${name === "VS Code" ? "the Remote - SSH extension" : "its Remote - SSH extension"}; the first connection installs the editor's server in the sandbox.`,
+    );
+  else
+    out.write(
+      `${print ? "" : `Could not start ${how.bin} or open a link here. `}Open this link on this machine:\n${how.link}\nor run: ${how.bin} ${how.args.join(" ")}`,
+    );
+  return opened || print ? 0 : 1;
 }
 
 /** `runtime sandboxes port-forward <id> 5432 8080:3000 ...` */

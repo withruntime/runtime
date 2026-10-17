@@ -115,11 +115,11 @@ def _pip_flags(find_links, index_url, extra_index_url, pre, extra_options, *, uv
 def _toml(path):
     try:
         import tomllib
-    except ImportError:  # Python 3.10
+    except ImportError:  # before Python 3.11
         try:
             import tomli as tomllib
         except ImportError as error:
-            raise ImportError("Reading pyproject.toml on Python 3.10 needs the `tomli` package") from error
+            raise ImportError("Reading pyproject.toml before Python 3.11 needs the `tomli` package") from error
     with open(os.path.expanduser(path), "rb") as handle:
         return tomllib.load(handle)
 

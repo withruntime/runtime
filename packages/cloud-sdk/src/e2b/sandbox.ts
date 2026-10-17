@@ -606,11 +606,12 @@ export class Sandbox {
     }
   }
 
-  /** Sets the sandbox to end `timeoutMs` from now, up to 24 hours, as E2B
-   * does; the server keeps the deadline. Runtime cannot bring an end
-   * sooner, so that is refused. A sandbox with no time limit (one on a pilot
-   * account, kept running by the server) has no end to move, and nothing
-   * changes. */
+  /** Sets the sandbox to end `timeoutMs` from now, sooner or later, up to 24
+   * hours, as E2B does: the server keeps the new time limit (an update's
+   * timeoutSeconds), and what the end does stays as created. Under a minute
+   * is a minute, Runtime's shortest limit. A sandbox with no time limit gets
+   * one; a persistent one (a pilot's, kept running by the server) has none to
+   * set, and nothing changes. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: SandboxApiOpts = {}) {
     const client = clientFor(opts);
     const runtime = await guard("sandbox", () => client.sandboxes.get(sandboxId, request(opts)));
@@ -863,15 +864,9 @@ async function extendTo(
   timeoutMs: number,
   opts: Pick<ConnectionOpts, "requestTimeoutMs" | "signal">,
 ) {
-  checkTimeout(timeoutMs);
-  if (runtime.info.endsAt === null) return;
-  const later = secondsLater(runtime, timeoutMs);
-  if (later < -1)
-    throw new NotSupportedError(
-      "Ending a sandbox sooner than its time limit (a shorter setTimeout)",
-      "Runtime cannot bring a time limit forward. Call kill() when the work is done.",
-    );
-  if (later > 1) await guard("sandbox", () => runtime.extend(Math.ceil(later), request(opts)));
+  const seconds = timeoutSeconds(timeoutMs);
+  if (runtime.info.persistent === true) return;
+  await guard("sandbox", () => runtime.update({ timeoutSeconds: seconds }, request(opts)));
 }
 
 async function pause(runtime: RuntimeSandbox, opts: SandboxPauseOpts) {

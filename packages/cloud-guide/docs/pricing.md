@@ -111,9 +111,13 @@ a new account, when it lifts, and costs nothing. An account without credit runs 
 A paused sandbox keeps its files and memory for **{{paused-storage-rate}} per decimal GB per
 30-day month**. Its immutable resource quote holds the actual rate. A stopped
 sandbox keeps its disk the same way, at the same rate, for as long as a paused
-one, until you delete it; only a delete removes a disk. One stopped by a client
-older than 4 October 2026 (an SDK before 0.12.0, Go, Java or Ruby before 0.2.0)
-is kept free for three days, with one notice a day before, and then deleted.
+one, until you delete it; only a delete removes a disk. One made by an older
+client (a JavaScript or Python SDK before 0.12.0, Go, Java or Ruby before
+0.2.0, or raw HTTP without `x-runtime-client: http/2026-10-04`) is kept free
+for three days after it stops, with one notice a day before, and then deleted.
+The version counts, not its date: JavaScript 0.11.1 and 0.11.2 and Python
+0.11.1 came out after 4 October and still stop to clean up at the end of a
+`with` or `await using` block, so they are older clients.
 
 - **What counts:** disk and memory-snapshot blocks the sandbox alone owns. Shared
   base-image blocks and snapshot safety overhead are left out. Where the
@@ -447,6 +451,33 @@ Sources: [E2B pricing](https://e2b.dev/pricing),
 [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/),
 [Freestyle pricing](https://www.freestyle.sh/pricing),
 [Prime Sandboxes overview](https://docs.primeintellect.ai/sandboxes/overview).
+
+## Security and team features
+
+Everything here is free on every account. There is no enterprise plan, no seat
+fee and no add-on to buy: a company pays the same rates as one person.
+
+- **Single sign-on** over SAML or OIDC with Okta, Microsoft Entra ID, Google
+  Workspace or any SAML 2.0 or OpenID Connect provider, which an owner can
+  require of everyone else ([single sign-on](./single-sign-on)).
+- **Directory sync** over SCIM: your directory adds people, gives them roles
+  from its groups and removes them, revoking their keys, the moment they leave.
+- **Roles:** owner, admin, developer and billing, for as many people as you
+  need ([teams](./teams#roles)).
+- **An audit log** of every change to members, keys, money and security
+  settings, with who, when and from which address, kept at least 400 days,
+  downloadable as CSV and readable over the API ([audit log](./teams#audit-log)).
+- **Two-step sign-in** with a passkey or an authenticator app, which an owner
+  can require ([two-step sign-in](./security#two-step-sign-in)).
+- **Spending and access controls:** read-only keys, a daily spending limit per
+  key, and compartments that keep one team's keys out of another's work
+  ([read-only keys and daily limits](./security#read-only-keys-and-daily-limits)).
+- **A data processing addendum** that is part of the terms for every account
+  ([data processing addendum](/legal/dpa)), and the
+  [uptime promise](#uptime-promise) for every paid account.
+
+The [security and compliance](./trust) page is the summary a security review
+asks for. For a questionnaire, write to security@withruntime.com.
 
 ## Uptime promise
 

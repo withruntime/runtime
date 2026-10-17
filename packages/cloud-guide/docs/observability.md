@@ -122,7 +122,10 @@ started in the background gets its exit when a read or a list of its processes
 sees it end, and one never read before its sandbox stopped says so. The name
 is the program alone (`python3` for `FOO=1 python3 train.py --key …`, `pytest`
 for `bash -c "pytest -q"`); arguments and environment values are never stored
-([security](./security#keys-and-secrets)).
+([security](./security#keys-and-secrets)). A terminal is kept as its shell
+(`bash`), never what is typed in it. A code interpreter cell, including E2B's
+`runCode`, is kept as its language and `-cell` (`python-cell · exit 1 · 2 s`
+for a cell that raised), never its code.
 
 Code written for E2B's `getMetrics()` gets CPU and memory from these readings
 through `withruntime/e2b`; its `diskUsed` is null.

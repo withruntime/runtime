@@ -19,6 +19,30 @@ An account can hold its own address, which no other account sends from
 ([Dedicated outbound addresses](/docs/networking#dedicated-outbound-addresses)).
 To admit one customer and nobody else, ask them for theirs.
 
+## Shared addresses and per-address limits
+
+Each server's sandboxes send from that server's shared addresses, an account
+always from the same one of them. A service that limits callers by address
+when they bring no key counts every account on that address together.
+
+GitHub's API is the common case: calls without a token are capped at 60 an
+hour per address, so `gh` without login, installers and release downloads
+through `api.github.com`, and package resolvers that read GitHub answer
+`API rate limit exceeded for <address>` once anyone on that address has used
+the hour's 60. A token gives your account its own limit (5,000 an hour).
+Store it as a secret that the network adds to every request to GitHub's API,
+so tools need no change:
+
+```bash no-run
+printf %s "$GITHUB_TOKEN" | runtime secrets set GITHUB_TOKEN --host api.github.com --header Authorization --format "token {value}"
+```
+
+A fine-grained token with read access to public repositories is enough. For
+`gh`, the placeholder in `GITHUB_TOKEN` works as it is
+([secrets](/docs/security#secrets-sandboxes-never-see)). An account that needs an address no
+other account shares can hold a
+[dedicated outbound address](/docs/networking#dedicated-outbound-addresses).
+
 ## Signed requests
 
 An account can have its sandboxes sign their HTTP requests as Runtime's,

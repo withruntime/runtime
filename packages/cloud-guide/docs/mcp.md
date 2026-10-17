@@ -43,8 +43,11 @@ connected, the server offers one tool, `runtime_connect`:
 
 1. The agent calls it and shows you a link and a code.
 2. You approve **Connect agent** in your browser.
-3. The agent calls it again, and every Runtime tool appears. Nothing to
-   restart.
+3. The agent calls it again, and every Runtime tool appears. Its answer
+   carries the server's full instructions (limits, cleanup, safe retries),
+   which the agent read only the short version of before it connected. A
+   client that does not refresh its tools when told shows them once the server
+   or the client restarts: the connection is saved, so it connects at once.
 
 A machine already connected by the CLI (`npx withruntime login`) skips this
 step.

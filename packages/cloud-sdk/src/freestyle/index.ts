@@ -72,21 +72,25 @@ export class FreestyleTransportError extends TypeError {
     return { name: this.name, message: this.message, errors: this.errors };
   }
 }
+/** A Runtime error as Freestyle's client throws it. */
+function translate(error: unknown): unknown {
+  if (error instanceof ConnectionError)
+    return new FreestyleTransportError(error, [
+      { name: error.name, message: error.message, code: error.code },
+    ]);
+  if (!(error instanceof RuntimeError)) return error;
+  const translated = new FreestyleApiError(error.status, {
+    code: error.code.toUpperCase(),
+    message: error.message,
+  });
+  Object.defineProperty(translated, "cause", { value: error });
+  return translated;
+}
 async function api<T>(call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    if (error instanceof ConnectionError)
-      throw new FreestyleTransportError(error, [
-        { name: error.name, message: error.message, code: error.code },
-      ]);
-    if (!(error instanceof RuntimeError)) throw error;
-    const translated = new FreestyleApiError(error.status, {
-      code: error.code.toUpperCase(),
-      message: error.message,
-    });
-    Object.defineProperty(translated, "cause", { value: error });
-    throw translated;
+    throw translate(error);
   }
 }
 const notFound = (what: string) =>
@@ -724,7 +728,28 @@ export interface PtyAttachOptions {
   session: PtySessionSelector;
   linuxUser?: string;
 }
+export type PtyConnectionState = "connecting" | "connected" | "reconnecting" | "closed" | "exited";
+export interface PtyReconnectOptions {
+  /** Total time to recover one dropped connection. Default: five minutes. */
+  timeoutMs?: number;
+  /** Initial backoff, with 30% jitter. Default: 400ms. */
+  initialDelayMs?: number;
+  /** Backoff ceiling before jitter. Default: 10 seconds. */
+  maxDelayMs?: number;
+}
 export interface PtySessionEvents {
+  /** Reattach by itself after a dropped connection (Freestyle 0.2.18). */
+  reconnect?: boolean | PtyReconnectOptions;
+  /** Longest wait for each connection's terminal. Recovery waits at most 15
+   * seconds by default; a first connection, only when this is given. */
+  connectTimeoutMs?: number;
+  onStateChange?: (state: PtyConnectionState) => void;
+  /** Freestyle's exact replay boundaries. A Runtime terminal replays the
+   * session's output from its start on each connection without marking where
+   * the replay ends, as Freestyle's older guest agents do, so these never
+   * fire: the replay begins at the "connected" state. */
+  onReplayStart?: (info: { exact: boolean }) => void;
+  onReplayEnd?: () => void;
   onData?: (data: Uint8Array) => void;
   onExit?: (exitCode: number) => void;
   onClose?: (info: { wasClean: boolean; code: number; reason: string }) => void;
@@ -766,58 +791,274 @@ const dimension = (value: number | undefined, fallback: number, name: string) =>
   return value;
 };
 
-const PTY_OPEN = [
-  "exec",
-  "cols",
-  "rows",
-  "linuxUser",
-  "slug",
+const PTY_EVENTS = [
+  "reconnect",
+  "connectTimeoutMs",
+  "onStateChange",
+  "onReplayStart",
+  "onReplayEnd",
   "onData",
   "onExit",
   "onClose",
   "onError",
 ];
+const PTY_OPEN = ["exec", "cols", "rows", "linuxUser", "slug", ...PTY_EVENTS];
+/** Freestyle 0.2.18 checks its timers before anything is opened. */
+function connectionOptions(options: PtySessionEvents): void {
+  const { reconnect } = options;
+  if (reconnect !== undefined && reconnect !== null && typeof reconnect !== "boolean") {
+    if (typeof reconnect !== "object")
+      throw new TypeError("reconnect must be true, false or reconnect options");
+    only("Freestyle pty reconnect", reconnect, ["timeoutMs", "initialDelayMs", "maxDelayMs"]);
+  }
+  const timers = {
+    connectTimeoutMs: options.connectTimeoutMs,
+    ...(typeof reconnect === "object" && reconnect ? reconnect : {}),
+  };
+  for (const [name, value] of Object.entries(timers))
+    if (
+      value !== undefined &&
+      (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 2_147_483_647)
+    )
+      throw new RangeError(`${name} must be a positive finite timer duration`);
+}
+const LOST = { wasClean: false, code: 1006, reason: "Connection lost" };
+/** A 4xx other than 409 and 429 will not get better by retrying. */
+const fatal = (error: unknown) =>
+  error instanceof RuntimeError &&
+  error.status >= 400 &&
+  error.status < 500 &&
+  error.status !== 409 &&
+  error.status !== 429;
 
+/** A stable handle across reattachments; input is never retried or buffered.
+ * Each connection is a Runtime terminal attached to the session's process. */
 export class PtySession {
-  #readyState = 1;
+  #state: PtyConnectionState = "connecting";
+  #readyState = 0;
+  #terminal: Terminal | undefined;
+  #generation = 0;
+  #attempt = 0;
+  #deadline = 0;
+  #retry: ReturnType<typeof setTimeout> | undefined;
+  #stopped = false;
+  #exited = false;
+  #fatal = false;
+  #established = false;
+  #closeReported = false;
+  #dimensions: { cols: number; rows: number } | undefined;
+  #removeWake: (() => void) | undefined;
+  #resolveReady!: () => void;
+  #rejectReady!: (error: unknown) => void;
+  /** Resolves once the first connection is up. */
+  readonly ready: Promise<void>;
   constructor(
-    private readonly terminal: Terminal,
     private readonly sandbox: Sandbox,
     private readonly processId: string,
     readonly sessionId: number,
     readonly slug: string | undefined,
     readonly created: boolean,
-    events: PtySessionEvents,
+    private readonly events: PtySessionEvents,
+    dimensions?: { cols: number; rows: number },
   ) {
-    void terminal.exited.then((exitCode) => {
-      this.#readyState = 3;
-      if (exitCode !== null) events.onExit?.(exitCode);
-      events.onClose?.({ wasClean: true, code: 1000, reason: "" });
+    this.#dimensions = dimensions;
+    this.ready = new Promise((resolve, reject) => {
+      this.#resolveReady = resolve;
+      this.#rejectReady = reject;
     });
-    this.onError = events.onError;
+    void this.ready.catch(() => {});
+    if (events.reconnect && typeof window !== "undefined" && typeof document !== "undefined") {
+      // A browser back online or back in view retries a dropped session now.
+      const wake = () => {
+        if (document.visibilityState !== "hidden" && this.#state === "closed") this.reconnect();
+      };
+      window.addEventListener("online", wake);
+      window.addEventListener("pageshow", wake);
+      document.addEventListener("visibilitychange", wake);
+      this.#removeWake = () => {
+        window.removeEventListener("online", wake);
+        window.removeEventListener("pageshow", wake);
+        document.removeEventListener("visibilitychange", wake);
+      };
+    }
+    void this.#dial();
   }
-  private readonly onError: ((err: unknown) => void) | undefined;
+  #setState(state: PtyConnectionState): void {
+    if (this.#state === state) return;
+    this.#state = state;
+    this.events.onStateChange?.(state);
+  }
+  async #dial(): Promise<void> {
+    const generation = ++this.#generation;
+    const current = () => generation === this.#generation && !this.#stopped;
+    const limit = this.#established
+      ? Math.min(this.events.connectTimeoutMs ?? 15_000, Math.max(1, this.#deadline - Date.now()))
+      : this.events.connectTimeoutMs;
+    try {
+      // Before a reattachment, as Freestyle's preflight: a session that is
+      // gone, or credentials that no longer work, end it instead of retrying.
+      if (this.#established) await this.sandbox.processes.get(this.processId);
+      if (!current()) return;
+      const opening = this.sandbox.terminal({
+        processId: this.processId,
+        onData: (data) => {
+          if (current()) this.events.onData?.(data);
+        },
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const terminal = await (limit === undefined
+        ? opening
+        : Promise.race([
+            opening,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                void opening.then((late) => late.close()).catch(() => {});
+                reject(new Error("PTY handshake timed out"));
+              }, limit);
+            }),
+          ]).finally(() => clearTimeout(timer)));
+      if (!current()) {
+        terminal.close();
+        return;
+      }
+      this.#bind(terminal, generation);
+    } catch (error) {
+      if (!current()) return;
+      if (!this.#established) return this.#finish(translate(error));
+      if (fatal(error)) {
+        this.#fatal = true;
+        this.#finish(translate(error));
+      } else this.#scheduleRetry(translate(error));
+    }
+  }
+  #bind(terminal: Terminal, generation: number): void {
+    this.#terminal = terminal;
+    this.#readyState = 1;
+    const recovering = this.#established;
+    this.#established = true;
+    this.#attempt = 0;
+    this.#deadline = 0;
+    this.#closeReported = false;
+    this.#resolveReady();
+    this.#setState("connected");
+    if (recovering && this.#dimensions)
+      terminal.resize(this.#dimensions.cols, this.#dimensions.rows);
+    void terminal.exited.then((exitCode) => this.#ended(generation, exitCode));
+  }
+  /** The connection ended: with the shell's exit code, or without one when the
+   * shell was killed by a signal or the connection dropped. */
+  #ended(generation: number, exitCode: number | null): void {
+    const current = () => generation === this.#generation && !this.#stopped;
+    if (!current()) return;
+    this.#readyState = 3;
+    if (exitCode !== null) return this.#exit(exitCode);
+    this.sandbox.processes.get(this.processId).then(
+      (process) => {
+        if (!current()) return;
+        if (process.state === "running") this.#lost();
+        else this.#exit(process.exitCode);
+      },
+      (error: unknown) => {
+        if (current()) this.#lost(translate(error));
+      },
+    );
+  }
+  #retire(): void {
+    ++this.#generation;
+    clearTimeout(this.#retry);
+    if (this.#readyState === 1) this.#readyState = 2;
+    this.#terminal?.close();
+    this.#terminal = undefined;
+  }
+  #exit(exitCode: number | null): void {
+    this.#exited = true;
+    this.#retire();
+    this.#readyState = 3;
+    this.#setState("exited");
+    this.#removeWake?.();
+    if (exitCode !== null) this.events.onExit?.(exitCode);
+    this.#report({ wasClean: true, code: 1000, reason: "" });
+  }
+  #lost(error?: unknown): void {
+    this.#retire();
+    this.#readyState = 3;
+    if (this.#stopped) return;
+    if (!this.events.reconnect || this.#exited || this.#fatal) return this.#finish(error);
+    this.#scheduleRetry(error);
+  }
+  #scheduleRetry(error?: unknown): void {
+    const options = typeof this.events.reconnect === "object" ? this.events.reconnect : null;
+    this.#deadline ||= Date.now() + (options?.timeoutMs ?? 300_000);
+    if (Date.now() >= this.#deadline)
+      return this.#finish(error ?? new Error("PTY reconnect timed out"));
+    this.#setState("reconnecting");
+    const base = Math.min(
+      (options?.initialDelayMs ?? 400) * 2 ** this.#attempt++,
+      options?.maxDelayMs ?? 10_000,
+    );
+    const delay = Math.min(
+      Math.round(base * (0.7 + Math.random() * 0.6)),
+      Math.max(0, this.#deadline - Date.now()),
+    );
+    this.#retry = setTimeout(() => void this.#dial(), delay);
+  }
+  #finish(error?: unknown, info = LOST): void {
+    clearTimeout(this.#retry);
+    if (!this.#established) this.#rejectReady(error ?? new Error("PTY connection failed"));
+    this.#setState(this.#exited ? "exited" : "closed");
+    if (this.#fatal || this.#exited || !this.#established) this.#removeWake?.();
+    this.#report(info, error);
+  }
+  #report(info: { wasClean: boolean; code: number; reason: string }, error?: unknown): void {
+    if (this.#closeReported) return;
+    this.#closeReported = true;
+    if (error) this.events.onError?.(error);
+    this.events.onClose?.(info);
+  }
+  /** Retry now after a network change or a spent retry budget. Never opens a new shell. */
+  reconnect(): void {
+    if (this.#stopped || this.#exited || this.#fatal || !this.#established) return;
+    this.#retire();
+    this.#attempt = 0;
+    this.#deadline = 0;
+    this.#closeReported = false;
+    this.#scheduleRetry();
+  }
+  /** Send input once. Throws while disconnected; uncertain keystrokes are never replayed. */
   write(data: Uint8Array | string): void {
-    this.terminal.write(data);
+    if (this.#state !== "connected" || !this.#terminal) throw new Error("PTY is not connected");
+    this.#terminal.write(data);
   }
+  /** Remembers the size and applies it again after a reattachment. */
   resize(options: { cols: number; rows: number }): void {
-    this.terminal.resize(dimension(options.cols, 80, "cols"), dimension(options.rows, 24, "rows"));
+    const cols = dimension(options.cols, 80, "cols");
+    const rows = dimension(options.rows, 24, "rows");
+    this.#dimensions = { cols, rows };
+    if (this.#state === "connected") this.#terminal?.resize(cols, rows);
   }
   signal(sig: "sigint" | "sigkill"): void {
     if (sig !== "sigint" && sig !== "sigkill")
       throw new TypeError('signal must be "sigint" or "sigkill"');
+    if (this.#state !== "connected") throw new Error("PTY is not connected");
     void (async () => {
       const process = await this.sandbox.processes.get(this.processId);
       await process.kill(sig === "sigint" ? "SIGINT" : "SIGKILL");
-    })().catch((error: unknown) => this.onError?.(error));
+    })().catch((error: unknown) => this.events.onError?.(translate(error)));
   }
-  /** Closes the connection; the shell keeps running and attach() finds it. */
+  /** Cancels recovery and closes the connection; the shell keeps running and
+   * attach() finds it. */
   detach(): void {
-    this.#readyState = 2;
-    this.terminal.close();
+    if (this.#stopped) return;
+    this.#stopped = true;
+    this.#retire();
+    this.#removeWake?.();
+    this.#finish(undefined, { wasClean: true, code: 1000, reason: "Detached" });
   }
   get readyState(): number {
     return this.#readyState;
+  }
+  get state(): PtyConnectionState {
+    return this.#state;
   }
 }
 
@@ -844,20 +1085,23 @@ export class VmPty {
     found: Session,
     created: boolean,
     events: PtySessionEvents,
+    dimensions?: { cols: number; rows: number },
   ) {
-    const terminal = await sandbox.terminal({ processId: found.processId, onData: events.onData });
-    return new PtySession(
-      terminal,
+    const session = new PtySession(
       sandbox,
       found.processId,
       found.info.sessionId,
       found.info.slug ?? undefined,
       created,
       events,
+      dimensions,
     );
+    await session.ready;
+    return session;
   }
   async open(options: PtyOpenOptions & PtySessionEvents = {}): Promise<PtySession> {
     only("Freestyle pty open", options, PTY_OPEN);
+    connectionOptions(options);
     const cols = dimension(options.cols, 80, "cols");
     const rows = dimension(options.rows, 24, "rows");
     const user = options.linuxUser === undefined ? "" : validateLinuxUser(options.linuxUser);
@@ -876,7 +1120,7 @@ export class VmPty {
       if (options.slug !== undefined) {
         const existing = (await this.sessions(sandbox)).find((s) => s.info.slug === options.slug);
         // Get-or-create: a running session with the slug is handed back, exec unrun.
-        if (existing) return this.connect(sandbox, existing, false, options);
+        if (existing) return this.connect(sandbox, existing, false, options, { cols, rows });
       }
       const shell =
         options.exec === undefined
@@ -892,18 +1136,12 @@ export class VmPty {
       );
       const started = session(process.toJSON());
       if (!started) throw new Error("The started PTY session has no session line");
-      return this.connect(sandbox, started, true, options);
+      return this.connect(sandbox, started, true, options, { cols, rows });
     });
   }
   async attach(options: PtyAttachOptions & PtySessionEvents): Promise<PtySession> {
-    only("Freestyle pty attach", options, [
-      "session",
-      "linuxUser",
-      "onData",
-      "onExit",
-      "onClose",
-      "onError",
-    ]);
+    only("Freestyle pty attach", options, ["session", "linuxUser", ...PTY_EVENTS]);
+    connectionOptions(options);
     if (options.linuxUser !== undefined) validateLinuxUser(options.linuxUser);
     return api(async () => {
       const sandbox = await this.get();
@@ -958,6 +1196,129 @@ export class VmLinuxUserPty {
   }
   close(session: PtySessionSelector) {
     return this.pty.close(session, { linuxUser: this.linuxUser });
+  }
+}
+
+interface XtermDisposable {
+  dispose(): void;
+}
+interface XtermSequence {
+  prefix?: string;
+  intermediates?: string;
+  final: string;
+}
+/** The xterm.js surface connectXterm uses; xterm itself is not a dependency. */
+export interface XtermTerminal {
+  cols: number;
+  rows: number;
+  write(data: string | Uint8Array, callback?: () => void): void;
+  onData(listener: (data: string) => void): XtermDisposable;
+  onResize(listener: (size: { cols: number; rows: number }) => void): XtermDisposable;
+  parser: {
+    registerCsiHandler(id: XtermSequence, handler: () => boolean): XtermDisposable;
+    registerDcsHandler(id: XtermSequence, handler: () => boolean): XtermDisposable;
+  };
+}
+export type ConnectXtermOptions = PtyOpenOptions &
+  PtySessionEvents & {
+    pty: VmPty | VmLinuxUserPty;
+    terminal: XtermTerminal;
+    slug: string;
+  };
+/** Terminal queries a replay may hold (device attributes, status and mode
+ * reports, window ops): answering them again would type the answers. */
+const XTERM_QUERIES: XtermSequence[] = [
+  { final: "c" },
+  { prefix: ">", final: "c" },
+  { final: "n" },
+  { prefix: "?", final: "n" },
+  { final: "t" },
+  { intermediates: "$", final: "p" },
+  { prefix: "?", intermediates: "$", final: "p" },
+];
+/** Freestyle 0.2.18's connectXterm: xterm.js on a named session that
+ * reattaches by itself unless `reconnect: false`. Each connection replays the
+ * session's output from its start, so the screen is reset first and the
+ * replay's terminal queries go unanswered until it has been written (150ms
+ * quiet, at most 2 seconds). dispose() detaches; the shell keeps running. */
+export async function connectXterm({
+  pty,
+  terminal,
+  ...options
+}: ConnectXtermOptions): Promise<{ session: PtySession; dispose(): void }> {
+  only("Freestyle connectXterm", options, PTY_OPEN);
+  let muted: XtermDisposable[] = [];
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  let cap: ReturnType<typeof setTimeout> | undefined;
+  let replay = 0;
+  let disposed = false;
+  const unmute = () => {
+    clearTimeout(quiet);
+    clearTimeout(cap);
+    for (const handler of muted) handler.dispose();
+    muted = [];
+  };
+  const endReplay = () => {
+    clearTimeout(quiet);
+    clearTimeout(cap);
+    const current = replay;
+    // Unmute once xterm has parsed everything written before this point.
+    terminal.write("", () => {
+      if (current === replay) unmute();
+    });
+  };
+  const beginReplay = () => {
+    ++replay;
+    unmute();
+    terminal.write("\x1bc");
+    muted = XTERM_QUERIES.map((id) => terminal.parser.registerCsiHandler(id, () => true));
+    muted.push(terminal.parser.registerDcsHandler({ intermediates: "$", final: "q" }, () => true));
+    quiet = setTimeout(endReplay, 150);
+    cap = setTimeout(endReplay, 2_000);
+  };
+  const stopReplay = () => {
+    ++replay;
+    unmute();
+  };
+  try {
+    const session = await pty.open({
+      ...options,
+      reconnect: options.reconnect ?? true,
+      cols: options.cols ?? terminal.cols,
+      rows: options.rows ?? terminal.rows,
+      onStateChange(state) {
+        if (state === "connected") beginReplay();
+        if (state === "closed" || state === "exited") endReplay();
+        options.onStateChange?.(state);
+      },
+      onData(bytes) {
+        if (disposed) return;
+        if (muted.length) {
+          clearTimeout(quiet);
+          quiet = setTimeout(endReplay, 150);
+        }
+        terminal.write(bytes);
+        options.onData?.(bytes);
+      },
+    });
+    const input = terminal.onData((data) => {
+      if (session.state === "connected") session.write(data);
+    });
+    const resize = terminal.onResize((size) => session.resize(size));
+    return {
+      session,
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        input.dispose();
+        resize.dispose();
+        session.detach();
+        stopReplay();
+      },
+    };
+  } catch (error) {
+    stopReplay();
+    throw error;
   }
 }
 

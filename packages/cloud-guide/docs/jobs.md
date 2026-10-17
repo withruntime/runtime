@@ -62,7 +62,9 @@ results back there.
 - **A run may last up to {{job-max-run}}.** The timeout is
   {{job-timeout-default}} unless you set it, counted from when the command
   starts. At the timeout the run is stopped, and every process it started with
-  it, and it ends `failed` with the reason `timeout`.
+  it, and it ends `failed` with the reason `timeout`. A timeout as long as the
+  run's paid time (`durationSeconds`) falls 15 seconds before that time ends,
+  so the run's exit and output are kept and a retry you set still runs.
 - **Output is kept.** A run keeps its last {{job-log-kept}} of standard output
   and standard error together; `logsTruncated` says when earlier output was
   dropped.

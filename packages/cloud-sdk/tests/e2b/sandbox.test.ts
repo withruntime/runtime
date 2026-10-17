@@ -59,12 +59,11 @@ describe("Sandbox.create", () => {
     expect(Math.abs(info.endAt.getTime() - (Date.now() + 600_000))).toBeLessThan(2000);
     expect(info.lifecycle?.onTimeout).toBe("kill");
     await sbx.setTimeout(1_200_000);
-    // Ten minutes on, rounded up to a whole second: 601 when a millisecond
-    // passed between the create and the call.
-    const [id, seconds] = world.called("sandbox.extend").at(-1) as [string, number];
-    expect(id).toBe(sbx.sandboxId);
-    expect(seconds).toBeGreaterThanOrEqual(600);
-    expect(seconds).toBeLessThanOrEqual(601);
+    // Twenty minutes from now, as the new time limit.
+    expect(world.called("sandbox.update").at(-1)).toEqual([
+      sbx.sandboxId,
+      { timeoutSeconds: 1200 },
+    ]);
     // An explicit onTimeout "kill" deletes too, with or without a timeoutMs.
     await create({ lifecycle: { onTimeout: "kill" } });
     expect(lastCreate()).toMatchObject({ timeoutSeconds: 300, onLeaseEnd: "delete" });
@@ -90,6 +89,7 @@ describe("Sandbox.create", () => {
     await sbx.setTimeout(600_000);
     await Sandbox.connect(sbx.sandboxId, { ...runtime(), timeoutMs: 600_000 });
     expect(world.called("sandbox.extend")).toEqual([]);
+    expect(world.called("sandbox.update")).toEqual([]);
     // Its end is E2B's furthest, a day ahead, not where it is paid up to:
     // 5 October 2026, a pilot's read minutes ahead and looked about to end.
     const day = Date.now() + 86_400_000;
@@ -102,11 +102,12 @@ describe("Sandbox.create", () => {
     expect((await sbx.getInfo()).endAt.getTime()).toBe(Date.parse(fake(sbx).info.expiresAt));
   });
 
-  test("setTimeout cannot bring the end sooner, and says so", async () => {
+  test("setTimeout brings the end sooner, as E2B's does", async () => {
     const sbx = await create({ timeoutMs: 600_000 });
-    const error = await sbx.setTimeout(60_000).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(NotSupportedError);
-    expect((error as Error).message).toContain("kill()");
+    await sbx.setTimeout(60_000);
+    expect(world.called("sandbox.update")).toEqual([[sbx.sandboxId, { timeoutSeconds: 60 }]]);
+    const end = (await sbx.getInfo()).endAt.getTime();
+    expect(Math.abs(end - (Date.now() + 60_000))).toBeLessThan(2000);
   });
 
   test("maps timeoutMs, metadata, internet access and lifecycle", async () => {
@@ -864,15 +865,21 @@ describe("lifecycle", () => {
     expect(await Sandbox.kill(other.sandboxId, runtime())).toBe(false);
   });
 
-  test("setTimeout moves the end later and refuses to move it earlier", async () => {
+  test("setTimeout sets the end from now, later or sooner, by id too", async () => {
     const sbx = await create({ timeoutMs: 120_000 });
     await sbx.setTimeout(600_000);
-    const [, seconds] = world.called("sandbox.extend")[0]!;
-    expect(seconds as number).toBeGreaterThanOrEqual(479);
-    expect(seconds as number).toBeLessThanOrEqual(481);
-    expect(await sbx.setTimeout(60_000).catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
+    await sbx.setTimeout(90_500);
     await Sandbox.setTimeout(sbx.sandboxId, 900_000, runtime());
-    expect(world.called("sandbox.extend")).toHaveLength(2);
+    expect(world.called("sandbox.update").map(([, settings]) => settings)).toEqual([
+      { timeoutSeconds: 600 },
+      { timeoutSeconds: 91 },
+      { timeoutSeconds: 900 },
+    ]);
+    expect(world.called("sandbox.extend")).toEqual([]);
+    // Past 24 hours is E2B's own refusal.
+    expect(await sbx.setTimeout(86_400_001).catch((e: unknown) => e)).toBeInstanceOf(
+      InvalidArgumentError,
+    );
   });
 
   test("getInfo, isRunning, pause and connect", async () => {

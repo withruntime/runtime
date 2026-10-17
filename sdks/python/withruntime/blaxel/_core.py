@@ -9,14 +9,127 @@ import os
 import re
 import time
 from dataclasses import dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, TypedDict, Union
 
 from .._compat_lease import no_limit  # noqa: F401 - the adapter's name for it
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Blaxel's names --------------------------------------------------
+
+# blaxel 0.4.17's error codes and shapes (``blaxel.core.errors``). Blaxel's
+# backends return them; Runtime's errors carry Runtime's own codes in ``code``.
+BlaxelErrorCode = Literal[
+    "ROUTE_NOT_FOUND", "WORKLOAD_NOT_FOUND", "WORKSPACE_NOT_FOUND", "WORKLOAD_UNAVAILABLE", "WORKLOAD_FAILED",
+    "ROUTING_UNAVAILABLE", "AUTHENTICATION_REQUIRED", "AUTHENTICATION_FAILED", "TOKEN_REVOKED", "FORBIDDEN",
+    "BAD_REQUEST", "USAGE_LIMIT_EXCEEDED", "POLICY_VIOLATION", "UPSTREAM_CONNECT_FAILED", "UPSTREAM_CONNECT_TIMEOUT",
+    "UPSTREAM_ERROR", "UPSTREAM_TIMEOUT", "GATEWAY_INTERNAL_ERROR", "UNAUTHORIZED", "UNAUTHORIZED_WORKSPACE",
+    "AUTHENTICATION_UNAVAILABLE", "WORKSPACE_REQUIRED", "READ_FAILED", "PARSE_FAILED", "VALIDATION_FAILED",
+    "VALIDATION_ERROR", "INVALID_INPUT", "INVALID_IMAGE", "IMAGE_NOT_FOUND", "UPLOAD_NOT_SUPPORTED",
+    "UNSUPPORTED_GENERATION", "KERNEL_GENERATION_MISMATCH", "INVALID_PORTS", "INVALID_REGION", "REGION_MISMATCH",
+    "INVALID_VOLUME", "INVALID_VOLUME_COUNT", "INVALID_VOLUME_REGION", "VOLUME_ALREADY_ATTACHED",
+    "VOLUME_PROVIDER_MISMATCH", "VOLUME_NOT_FOUND", "ACCOUNT_NOT_FOUND", "SANDBOX_ALREADY_EXISTS",
+    "SANDBOX_DELETION_IN_PROGRESS", "SANDBOX_DELETED", "VOLUME_DELETED", "CREATION_TIMEOUT", "QUOTA_EXCEEDED",
+    "RATE_LIMIT_EXCEEDED", "WORKSPACE_RATE_LIMIT_EXCEEDED", "SERVICE_UNAVAILABLE", "DATABASE_ERROR",
+    "LOCK_ACQUISITION_FAILED", "VOLUME_LOOKUP_FAILED", "BUILD_TRIGGER_ERROR", "PRESIGNED_URL_ERROR",
+    "UPLOAD_UNAVAILABLE", "DEPLOYMENT_FAILED", "CLUSTER_GATEWAY_ERROR", "LOCKDOWN_ERROR", "PROXY_CONFIG_ERROR",
+    "VALIDATED_DATA_ERROR", "WORKSPACE_DATA_MISSING", "CALLBACK_SEND_FAILED", "FORK_FAILED", "HANDLER_ERROR",
+    "INTERNAL_ERROR", "UNKNOWN_ERROR",
+]
+BlaxelErrorCodeValue = Union[BlaxelErrorCode, str, int]
+
+
+class BlaxelApiErrorBody(TypedDict):
+    error: str
+    code: int
+
+
+class _ActionErrorRequired(TypedDict):
+    code: str
+    message: str
+    status_code: int
+
+
+class BlaxelActionErrorBody(_ActionErrorRequired, total=False):
+    reason: str
+    step: str
+    workspace: str
+    sandbox_name: str
+    timestamp: str
+    cause: str
+    details: Dict[str, Any]
+
+
+class _PlatformErrorRequired(TypedDict):
+    code: str
+    message: str
+    status: int
+
+
+class _PlatformError(_PlatformErrorRequired, total=False):
+    origin: str
+    retryable: bool
+    dispatch_state: str
+    safe_to_retry_request: bool
+    action: str
+    do_not: str
+    docs_url: str
+    timestamp: str
+
+
+class BlaxelPlatformErrorBody(TypedDict):
+    error: _PlatformError
+
+
+class BlaxelSandboxApiErrorBody(TypedDict):
+    error: str
+
+
+class BlaxelError(Exception):
+    """blaxel 0.4.17's common base of its API errors: every error the drop-in
+    raises for a failed call is one. ``status`` is the HTTP status, ``code``
+    the error's code (Runtime's, such as ``not_found``), ``request_id``
+    Runtime's request id, ``retryable`` whether Runtime says trying again can
+    work, ``body`` what the error carries. Blaxel's gateway fields
+    (``action``, ``do_not``, ``docs_url``, ``origin``, ``timestamp``) are
+    None: Runtime has no such gateway."""
+
+    status: Optional[int]
+    code: Any
+    message: str
+    request_id: Optional[str]
+    retryable: Optional[bool]
+    action: Optional[str]
+    do_not: Optional[str]
+    docs_url: Optional[str]
+    origin: Optional[str]
+    timestamp: Optional[str]
+    body: Any
+    response: Any
+
+    def __init__(self, message: str, *, status: Optional[int] = None, code: Any = None, body: Any = None,
+                 response: Any = None, headers: Optional[Mapping[str, str]] = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = str(message)
+        self.request_id = None
+        self.retryable = None
+        self.action = self.do_not = self.docs_url = self.origin = self.timestamp = None
+        self.body = body
+        self.response = response
+
+
+def is_blaxel_error(err: object, code: Optional[Union[BlaxelErrorCodeValue, Sequence[BlaxelErrorCodeValue]]] = None
+                    ) -> bool:
+    """blaxel 0.4.17's check: a BlaxelError, of ``code`` (or one of several)
+    when given."""
+    if not isinstance(err, BlaxelError):
+        return False
+    if code is None:
+        return True
+    return err.code == code if isinstance(code, (str, int)) else err.code in code
 
 
 class _Carries:
@@ -28,14 +141,15 @@ class _Carries:
     request_id: Optional[str] = None
 
 
-class SandboxAPIError(_Carries, Exception):
+class SandboxAPIError(_Carries, BlaxelError):
     """Blaxel's error for a sandbox call (create, get, list, update, delete,
-    fork, snapshots, previews): ``status_code`` and ``code``."""
+    fork, snapshots, previews): ``status_code`` and ``code``, and as a
+    BlaxelError ``status`` (the same as ``status_code``)."""
 
     def __init__(self, message: str, status_code: Optional[int] = None, code: Optional[str] = None) -> None:
-        super().__init__(message)
+        super().__init__(message, status=status_code, code=code,
+                         body={"error": str(message), **({"code": code} if code else {})})
         self.status_code = status_code
-        self.code = code
 
 
 #: The most whole seconds blaxel 0.4.13's create(config, timeout=N) takes.
@@ -77,6 +191,17 @@ class ApplicationAPIError(SandboxAPIError):
     pass
 
 
+class SecretAPIError(SandboxAPIError):
+    """blaxel 0.4.18 exports it from ``blaxel.core``; Blaxel's workspace
+    secrets are refused here (SecretInstance), so the drop-in never raises
+    it."""
+
+
+class VolumeAPIError(SandboxAPIError):
+    """blaxel 0.4.17 exports it from ``blaxel.core``; Blaxel's volumes are not
+    on Runtime, so the drop-in never raises it."""
+
+
 class _Reply:
     """What ``ResponseError.response`` offers of httpx's Response."""
 
@@ -90,17 +215,27 @@ class _Reply:
         return self._data
 
 
-class ResponseError(_Carries, Exception):
+class ResponseError(_Carries, BlaxelError):
     """Blaxel's error for a call inside the sandbox (processes and files).
-    ``response.status_code``, ``data`` and ``status_code``."""
+    ``response.status_code``, ``data`` and ``status_code``, and as a
+    BlaxelError ``status`` and ``body`` (``data``)."""
 
     def __init__(self, message: str, status_code: int = 0, code: Optional[str] = None) -> None:
         self.data: Dict[str, Any] = {"error": message, **({"code": code} if code else {})}
-        super().__init__(f"Sandbox request failed with status {status_code or 'unknown'}: {message}")
+        super().__init__(f"Sandbox request failed with status {status_code or 'unknown'}: {message}",
+                         status=status_code or None, code=code, body=self.data)
         self.response = _Reply(status_code, self.data)
         self.status_code = status_code
-        self.code = code
         self.error = None
+
+    @classmethod
+    def from_api_response(cls, response: Any) -> "ResponseError":
+        """Blaxel wraps its generated API client's responses here; that client
+        is not on Runtime (its calls raise NotSupportedError), so there is no
+        such response to wrap."""
+        raise NotSupportedError("Blaxel's ResponseError.from_api_response",
+                                "Blaxel's generated API client is not on Runtime: use SandboxInstance's methods, "
+                                "whose failures already raise ResponseError.")
 
 
 class NotSupportedError(SandboxAPIError):
@@ -173,6 +308,8 @@ def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
     else:
         out = ResponseError(message, error.status, code)
     out.hint, out.request_id = hint, error.request_id  # type: ignore[attr-defined]
+    if isinstance(out, BlaxelError) and not isinstance(out, NotSupportedError):
+        out.retryable = bool(error.retryable)
     out.__cause__ = error
     return out
 
@@ -663,6 +800,65 @@ class PreviewToken(_Model):
     metadata: Optional[PreviewTokenMetadata] = None
     spec: Optional[PreviewTokenSpec] = None
     _nested = {"metadata": PreviewTokenMetadata, "spec": PreviewTokenSpec}
+
+
+class SandboxPreviewCreateConfiguration:
+    """blaxel 0.4.17's shorthand for ``previews.create`` and
+    ``create_if_not_exists``: a port, with a name (``preview-<port>`` when
+    left out) and public (False when left out)."""
+
+    def __init__(self, port: int, name: Optional[str] = None, public: bool = False) -> None:
+        self.port = port
+        self.name = name
+        self.public = public
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SandboxPreviewCreateConfiguration":
+        return cls(port=data.get("port", 0), name=data.get("name"), public=data.get("public", False))
+
+
+def is_preview_shorthand(preview: Any) -> bool:
+    return isinstance(preview, SandboxPreviewCreateConfiguration) or (
+        isinstance(preview, dict) and "metadata" not in preview and "spec" not in preview)
+
+
+def normalize_preview(preview: Any) -> Any:
+    """Blaxel's shorthand as a Preview, with Blaxel's checks and messages;
+    any other preview as it was given (a dict as a Preview)."""
+    if not is_preview_shorthand(preview):
+        return Preview.from_dict(preview) if isinstance(preview, dict) else preview
+    config = SandboxPreviewCreateConfiguration.from_dict(preview) if isinstance(preview, dict) else preview
+    port, name, public = config.port, config.name, config.public
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("Preview port must be an integer between 1 and 65535")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ValueError("Preview name must be a nonempty string")
+    if not isinstance(public, bool):
+        raise ValueError("Preview public must be a boolean")
+    return Preview(metadata=PreviewMetadata(name=name if name is not None else f"preview-{port}"),
+                   spec=PreviewSpec(port=port, public=public))
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def token_bounds(expires_at: Any, min_validity: Any, now: datetime) -> Tuple[datetime, datetime]:
+    """blaxel 0.4.17's check of ``create_if_expired``'s arguments: the
+    ceiling (a day from now when None; a naive datetime is UTC) and the
+    earliest end a reused token may have."""
+    if not isinstance(min_validity, timedelta) or min_validity.total_seconds() < 0:
+        raise ValueError("min_validity must be a non-negative timedelta")
+    try:
+        if expires_at is not None and not isinstance(expires_at, datetime):
+            raise ValueError
+        minimum = now + min_validity
+        expiry = now + timedelta(hours=24) if expires_at is None else _utc(expires_at)
+        if expiry <= now or expiry < minimum:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        raise ValueError("expires_at must be a valid future datetime at least min_validity from now") from None
+    return expiry, minimum
 
 
 @dataclass

@@ -23,7 +23,10 @@ export type DnsRecord = { type: string; name: string; value: string; purpose: st
 export type Domain = {
   id: string;
   hostname: string;
-  sandboxId: string;
+  /** The sandbox it serves; null for an App's. */
+  sandboxId: string | null;
+  /** The App it serves, through every deploy and rollback; null for a sandbox's. */
+  appId?: string | null;
   port: number;
   /** pending until the TXT record proves the name is yours, then active. */
   state: "pending" | "active" | "released";
@@ -35,6 +38,9 @@ export type Domain = {
   verifiedAt: string | null;
   checkedAt: string | null;
   checkError: string | null;
+  /** An App's domain's certificate, issued before visitors arrive: point the
+   * name at the App once `ready` is true. Null for a sandbox's. */
+  certificate?: { ready: boolean; expiresAt: string | null; issuers: string[] } | null;
   createdAt: string;
 };
 export type CheckedDomain = Domain & {
@@ -112,9 +118,16 @@ type Listed<T> = { data: T[]; nextCursor: string | null };
 export function domains(t: Transport) {
   return {
     /** Claims the hostname and answers the DNS records to set. Calling it again
-     * with another sandbox or port points the name there. */
-    add: (input: { hostname: string; sandboxId: string; port: number }, options?: RequestOptions) =>
-      t.json<CheckedDomain>({ method: "POST", path: "/v1/domains", body: input, ...options }),
+     * with another sandbox or port points the name there. With `appId`, an App
+     * serves it: add the `_acme-challenge` CNAME too, and point the name at
+     * the App once `certificate.ready` is true. */
+    add: (
+      input: { hostname: string } & (
+        | { sandboxId: string; port: number; appId?: never }
+        | { appId: string; sandboxId?: never; port?: never }
+      ),
+      options?: RequestOptions,
+    ) => t.json<CheckedDomain>({ method: "POST", path: "/v1/domains", body: input, ...options }),
     /** Checks the TXT record now; the name goes live when it matches. */
     verify: (hostname: string, options?: RequestOptions) =>
       t.json<CheckedDomain>({

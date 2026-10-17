@@ -8,8 +8,237 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 17 October 2026
+
+- **Wake and restart wait for room.** In the JavaScript, Python, Ruby, Go and
+  Java SDKs, a sandbox's `wake` and `restart` now wait for room as `create`
+  does. When the sandbox's own server is full (`no_capacity`), the SDK sends
+  the call again with the same idempotency key, for up to two minutes by
+  default, instead of failing in a few milliseconds. A sandbox stays on its
+  server, so waiting is the only way it gets room. Set `waitForCapacityMs`
+  (JavaScript) or `wait_for_capacity` (Python, Ruby) on one call; `0` fails at
+  once. A fork never waits. See [JavaScript](./javascript#errors-and-retries).
+- **API rate limit grows with your sandboxes.** An API key's rate now grows
+  with the sandboxes its organization runs, as its requests in flight already
+  did: about 170 requests a second in bursts of 675 with 40 sandboxes, up to
+  400 a second in bursts of 1,600. Before, every key stayed at 50 a second
+  however many sandboxes it drove, so one key running dozens of agents was
+  answered `429 rate_limited` for much of its work. See
+  [Limits](./api#limits).
+- **Paused sandboxes keep their memory when many pause at once.** A sandbox
+  told it was paused is now written to disk early enough even while many
+  other sandboxes on its server are pausing too. Before, one could wait too
+  long behind them, and wake from its disk alone with its memory lost. See
+  [pause and wake](./javascript#pause-wake-extend).
+- **Console pages no longer hang.** A console page whose data the database
+  is slow to give now stops within 15 seconds and shows "This page did not
+  load" with Try again, where it could spin for minutes. Nothing you run is
+  affected. See [troubleshooting](./troubleshooting).
+- **Relabelling a sandbox into a secret's scope takes effect at once.**
+  Changing a running sandbox's labels so a scoped secret reaches it (or no
+  longer does) now waits until its server holds the change, and the answer
+  carries `secretsEnforced: true` (for a key that may read secrets; any
+  other key's relabel takes up to 15 seconds, as before). Before, requests could go out without the
+  value for up to 15 seconds after the label call returned. See
+  [Security](./security#secrets-sandboxes-never-see).
+- **A job run that reaches its timeout ends as a timeout.** A run whose
+  timeout was as long as its paid time (a one-hour timeout, say) ended
+  `unknown` or `canceled` with the reason `compute_stopped` when it ran to the
+  end, with no exit code and no retry. It now ends `failed` with the reason
+  `timeout`, keeps its exit code and output, and is retried when the job asks
+  for retries. See [jobs](./jobs#what-a-run-is).
+
+## 16 October 2026
+
+- **Private preview link expiry.** A WebSocket, stream or download opened
+  with a private preview's link now ends when that link expires, so a link
+  made to last ten minutes, or one read through a sandbox session, opens
+  nothing past its end. Open it again with a fresh link. See
+  [private preview tokens](./api#private-preview-tokens).
+- **Enterprise features on the pricing page.** The [pricing](https://withruntime.com/pricing#security-and-team-features)
+  page now lists single sign-on, SCIM directory sync, roles, the audit log,
+  two-step sign-in, key limits and compartments, the data processing addendum
+  and the uptime promise, each free on every account with no enterprise plan
+  or seat fee. See [pricing](./pricing#security-and-team-features).
+- **Identity tokens in long-running programs.** A program that runs for a
+  long time inside a sandbox, such as a server or an agent, now keeps getting
+  identity tokens after the sandbox's request token changes: the TypeScript
+  SDK asks again with the sandbox's current one instead of failing with a 403.
+  See [identity tokens](./identity-tokens).
+- **Referral share after a refund or a lost dispute.** If every matched
+  payment from someone you referred is refunded or disputed, their use no
+  longer earns you a monthly share. If they lose a dispute, your share now
+  starts again after one month instead of stopping for good. See
+  [referrals](./referrals).
+- **Someone leaving no longer deletes what they stored.** When a member is
+  removed, or your directory suspends them, the disks,
+  snapshots, volumes and images they made stay on the account's credit like
+  anything else. Until now their storage stopped being paid for and was
+  deleted seven days later, with a notice that blamed missing credit. A
+  storage item still stops only when the account itself has no credit, hits
+  a spending limit, or is suspended. See [teams](./teams).
+- **Faster console pages.** Agents & API keys, Networking, Secrets, Webhooks,
+  Two-step sign-in, Audit log, Limits, Support and Close account now download
+  about a quarter less code, and Home, Usage & billing and each sandbox's page
+  less too, so they open sooner on a slow connection. A mistyped address's
+  "not found" page is lighter as well. See [the quickstart](./start).
+- **Pay per call credits even after an interruption.** A sandbox paid for
+  per call over HTTP 402 is now credited to the paying wallet's account
+  within minutes, even if our server stopped right after sending your
+  transfer and you never used the claim code. See
+  [pay with stablecoins](./pricing#pay-with-stablecoins).
+- **Pause vs stop a sandbox.** One table now shows what a pause, a stop
+  and a delete each keep, how the sandbox comes back, when each happens on
+  its own and what each costs. See
+  [pause, stop or delete](./sandbox-environment#pause-stop-or-delete).
+- **Open a sandbox in your editor in one step.** `runtime sandboxes code <id>`
+  opens the sandbox in VS Code over SSH, and `--editor cursor` or
+  `--editor windsurf` in Cursor or Windsurf. It sets up the SSH entry the first
+  time and installs an SSH server in a sandbox without one. See
+  [SSH and editors](./editors#open-it-in-vs-code-cursor-or-windsurf).
+- **Blaxel session default length.** With the Blaxel drop-in,
+  `sandbox.sessions.create()` with no `expiresAt` now makes a session that
+  lasts a full day, as Blaxel's does, instead of a second less. See
+  [moving from Blaxel](./blaxel-alternative).
+- **Usage export and held credit.** The API guide now says which charges the
+  usage export leaves out: credit held for work still running is not in it,
+  and becomes a row once it settles. See
+  [export settled usage](./api#export-settled-usage).
+- **A restart runs the image's start command again.** A sandbox from an
+  image with a start command (a Dockerfile `CMD`, or `start` in
+  `images.build`) now runs it again after a stop and `:restart`, a `:resize`,
+  or a `getOrCreate` that restarts it, and reports it in `start` as a create
+  does. Before, the server it started was gone until started by hand. See
+  [images](./images).
+
 ## 15 October 2026
 
+- **Keep sandboxes on separate servers.** A create takes `spreadFrom`, up to
+  16 ids of your sandboxes or snapshots, and starts on a server none of them
+  is on. Every sandbox and snapshot now shows `placement`, an opaque tag that
+  is the same when two share a server. A copy of a memory snapshot starts
+  only on its snapshot's server, so keep warm sources apart and spread copies
+  across their snapshots: each server starts copies at its own pace rather
+  than refusing them `account_busy_here`. See [the API](./api).
+- **A sandbox's time limit can be set or changed after it starts.**
+  `:update` (`sandbox.update()` in the SDKs, or the CLI's
+  `runtime sandboxes update --timeout`) takes `timeoutSeconds`, a new limit counted from now, sooner or
+  later than before (`0` removes it), and `onTimeout`, what its end does. A
+  sandbox made without a limit can now get one. E2B's `setTimeout` to an earlier
+  time works under `withruntime/e2b` instead of throwing. See
+  [Sandboxes in the API guide](./api#sandboxes).
+- **Custom domain on an App.** An App can serve your own domain, apex or
+  `www`, through every deploy and rollback. Its HTTPS certificate is issued and
+  checked before you point the name at the App, so the first visitor already
+  gets HTTPS, and it renews by itself at least 30 days before it expires. See
+  [networking](./networking#on-an-app).
+- **Referral and welcome matches always land.** A referral or welcome match
+  that could not be decided the moment you paid, for a passing error on our
+  side, is no longer lost: it is tried again within minutes until it is paid,
+  and your payment is never held up by it. See [referrals](./referrals).
+- **Which stopped sandboxes lose their disk after three days.** Pricing now
+  names them by client version, not by date: a sandbox made by a JavaScript
+  or Python SDK before 0.12.0, Go, Java or Ruby before 0.2.0, or raw HTTP
+  without `x-runtime-client: http/2026-10-04` keeps its disk free for three
+  days after it stops, then it is deleted. JavaScript 0.11.1 and 0.11.2 and
+  Python 0.11.1 came out after 4 October and count as older. See
+  [paused storage](./pricing#paused-storage).
+- **pip install withruntime on Python 3.9.** The Python SDK now installs and
+  runs on Python 3.9, the `python3` a Mac comes with, where `pip` used to
+  find no version of it at all. See the [Python SDK](./python).
+- **GitHub API rate limit exceeded.** Calls to GitHub's API without a token
+  share GitHub's 60-an-hour limit with every sandbox sending from the same
+  address. The guide now shows how to save a GitHub token as a secret that the
+  network adds to each call, so tools get your own limit with no change. See
+  [shared addresses and per-address limits](./egress#shared-addresses-and-per-address-limits).
+- **llms-full.txt names each page.** Every guide in `llms-full.txt`, the
+  docs in one file, now starts with its address, so an assistant that reads
+  the one file can link you to the page a fact came from. AI assistants' search crawlers now get the home page itself
+  rather than the plain-text quickstart. See [start](./start).
+- **Listing sandboxes is faster.** `GET /v1/sandboxes` and every SDK's
+  list answer a page about three times sooner in any account with more than
+  one sandbox, and a list of only running sandboxes in an account with
+  thousands of stopped ones answers in milliseconds where it read all of them.
+  `GET /v1/usage` answers two to three times sooner in large accounts, and
+  `GET /v1/me` no longer waits on a usage read. The answers are the same. See
+  [Sandboxes](./api#sandboxes) and [Account](./api#account).
+- **Refer someone, not only a company.** The referral in Billing and Home
+  now reads "Refer someone", and your billing history names someone you
+  referred rather than a company: anyone you bring to Runtime counts. See
+  [referrals](./referrals).
+- **Set up Runtime with one line for your coding agent.** A new account's
+  Home now opens on the line to paste into Claude Code, Codex or Cursor,
+  shown as it will be pasted, with one Copy button; starting a sandbox in the
+  browser comes next, and the key and install steps by hand are folded below.
+  The line is shorter everywhere: "Move this project to Runtime Cloud: read
+  https://withruntime.com/llms.txt and follow it." See
+  [Get started](./start).
+- **Free hours card fits on every page.** The "100 free hours" card at the
+  end of the changelog, pricing and about pages now holds its whole title on
+  wide screens, where its second line ran past the card's edges. See
+  [pricing](./pricing).
+- **MCP server instructions on first connect.** When `npx withruntime mcp`
+  connects through `runtime_connect`, its answer now carries Runtime's full
+  instructions (limits, cleanup, safe retries), which an agent's first session
+  never saw before. If your client does not show the new tools, restart it:
+  the connection is saved. See [MCP](./mcp).
+- **`sandboxes run` deletes its sandbox.** `npx withruntime sandboxes run`
+  now deletes the sandbox when the command ends, so
+  nothing is left billing for disk and an account without credit no longer
+  reaches its 10 kept sandboxes after ten runs. `--keep` still keeps it. See
+  [CLI](./cli).
+- **A paused sandbox wakes when its server can't take it.** A wake whose
+  sandbox's own server is full, out of service or lost now comes back on
+  another server from the sandbox's saved copy, files and memory as they were,
+  where it was refused `no_capacity`. Each server is checked for this after
+  every release before it takes another server's sandboxes. See
+  [pause, wake, extend](./python#pause-wake-extend).
+- **Free account limits for backups, feedback and support.** An account
+  without credit keeps a volume backup at most seven days, like its snapshots
+  and paused sandboxes; one that has never added credit files 5 feedback
+  reports and sends 40 support messages a day. Adding credit lifts them. See
+  [volume backups](./storage) and
+  [feedback and support](./feedback-and-support).
+- **Preview token expiry explained.** Each create or read of a private
+  preview signs its own token with its own `tokenExpiresAt`, so a list after a
+  week-long create shows a different token that ends sooner; the token you
+  already hold still works until its own expiry or a rotate. See
+  [private preview tokens](./api#private-preview-tokens).
+- **Sandbox environment changes and running programs.** `:update` changes a
+  paused or stopped sandbox's `env` too, and a program already running keeps
+  the values it started with, so restart it to pick up a change. See
+  [Sandbox environment](./sandbox-environment).
+- **Vouch for a scheduled job.** An owner or admin can now vouch for a job on
+  its page in the console. Each run's identity token then names the job, its
+  version, who made it and who vouched for it, so your own API can accept a
+  job's call only when a person stood behind exactly what it runs. Any change
+  to the job takes the vouch off. See
+  [identity tokens](./identity-tokens#what-a-token-says).
+
+- **Code for the newest rival SDKs runs on Runtime.** The drop-ins follow
+  Daytona 0.224.1, E2B 2.56, Blaxel 0.3.30 (Python 0.4.18), Freestyle 0.2.20,
+  Modal 0.11.1 (Python 1.6.2), Prime Sandboxes 0.4.5 and Vercel Sandbox 3.8.0
+  (Python `vercel-sandbox` 0.9.1 and `vercel` 0.12.0). New here: finding a
+  stopped Modal sandbox by name (`includeTerminated`); Prime checkpoints, and
+  creating a sandbox from one; input to a running Vercel command (`stdin`,
+  `writeStdin`, `onStart`); Freestyle terminals that
+  reconnect after a dropped connection, and `connectXterm`; Blaxel's error
+  helpers, preview shorthand and `createIfExpired` tokens; a Prime background
+  job that cannot start now fails instead of reading as running. Anything
+  Runtime cannot do, such as another Daytona region or Prime LAN networks, is
+  refused with a plain error rather than ignored. See
+  [Migrate](./migrate).
+- **A snapshot of a running sandbox answers sooner.** `sandbox.snapshot()` in
+  every SDK now asks the server once, and the server pauses the sandbox for
+  the capture and wakes it before answering, where the SDKs paused, captured
+  and woke it in three calls of their own. A repeat snapshot of a 4 GiB
+  sandbox took 1.19 s at the median instead of 1.96 s in Virginia. Snapshots
+  and forks also see they are ready sooner on the server.
+- **Images start where their base says.** A Dockerfile stage `FROM` an image
+  now starts in that image's `WORKDIR`, as its `USER`, with its `CMD` and
+  `ENTRYPOINT`, as on Docker: `FROM golang` builds in `/go`. An image built
+  from `{image: "redis:7"}` starts redis. See
+  [Custom images](./images#build-from-a-dockerfile).
 - **Dockerfiles read more like Docker reads them.** An `ENV` now beats an
   `ARG` of the same name in `RUN`, an `ARG` with no value stays unset (so
   `${FOO:-default}` gives the default), quotes and `\$` keep `$` literal in
@@ -20,14 +249,74 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   allows 5 seconds for each request rather than for the whole read, accepts
   `index.docker.io` and `registry.hub.docker.com` as Docker Hub, and refuses
   an image built only for arm64 at create instead of failing later.
+- **Prove a volume backup restores.** The storage guide now says what a
+  `ready` backup already proves, that only a restore checks every byte, and
+  how to prove one: restore it, check it, and delete the restored volume,
+  charged only while it exists. A restored volume counts toward your volume
+  limit. See [volume backups](./storage#volume-backups).
+- **Creates from a snapshot no longer fail because its servers are full.**
+  When the servers keeping a disk snapshot have no room, the sandbox now
+  starts on another server in the region, once a verified copy of the
+  snapshot is brought there from its backup. That create takes longer (the
+  copy arrives first) instead of failing with `no_capacity`. Each such
+  create leaves the snapshot on one more server, so a snapshot used often
+  is kept on more servers as it is used.
+- **Dockerfile files are owned as Docker owns them.** `COPY` and `ADD` now
+  write files owned by root unless `--chown` says otherwise, whatever the
+  `USER`, and a `WORKDIR` that does not exist yet is made for the current
+  `USER`. So `USER node`, `WORKDIR /app`, `COPY . .`, `RUN npm ci` builds, where
+  it failed on an `/app` only root could write. See
+  [Build from a Dockerfile](./images#build-from-a-dockerfile).
+- **Morph Cloud code runs on Runtime after one import.** Change
+  `from "morphcloud"` to `from "withruntime/morph"` (`withruntime` 0.15.0):
+  snapshots and their cached `setup` steps, instances, `branch`, pause and
+  resume, `exec` and HTTP services run as Runtime sandboxes, snapshots and
+  previews. See [Switch to Runtime](./migrate).
+- **Morph Cloud's Python code runs on Runtime too.** Change `morphcloud` to
+  `withruntime.morph` in the imports (`withruntime` 0.14.0 on PyPI):
+  `from withruntime.morph import MorphCloudClient`. The same calls work, with
+  their `a`-prefixed async twins and Morph's `build` and cached `setup` chains.
+- **A reference on the page that did not load.** When a page of your account
+  fails to load, it now shows a reference number. Quote it when you ask for
+  help, and support can find exactly what went wrong with that page. See
+  [Feedback and support](./feedback-and-support).
 
 ## 14 October 2026
 
+- **Making /workspace needs permission to write files.** `files:mkdir` on
+  `/` or `/workspace` now needs a key that may write files, as on any other
+  path, and a key that may only read is refused. If the path exists but is
+  not a folder, it answers 409 `not_a_directory` instead of success. See
+  [Files](./api#files).
+- **A public preview's warning cannot be skipped from a link.** In browsers
+  that do not say where a click came from, only the warning's own Continue
+  button now takes a visitor past it. A link sent by someone else shows the
+  warning first. See [Networking](./networking).
+- **More outbound connections, and a clear answer at the limit.** A paid
+  sandbox now holds 512 outbound connections at once, or 128 per vCPU up to
+  1,024, and opens 100 new ones a second or more. Past its limit, a new
+  connection gets `503` with `X-Runtime-Egress: too many open connections`
+  and `Retry-After: 1` instead of a reset, and a connection silent for a
+  minute is closed first to make room. See
+  [the sandbox environment](./sandbox-environment).
 - **Image rebuilds get the newest base image.** A build `FROM python:3.12-slim`
   or `:latest` now starts from the image the tag names today, as
   `docker buildx build` does, instead of an earlier pull kept from a past
   build. `cache: false` (`--no-cache`) now always builds every step afresh.
   See [Faster rebuilds](./images#faster-rebuilds).
+- **Comparison tables that read cleanly.** The tables on the comparison,
+  blog and how-to pages are soft rounded cards again, with room around the
+  text instead of a hard square outline, and Runtime's row in a price ranking
+  is one even band. See [compare sandboxes](https://withruntime.com/compare).
+- **Best sandbox for AI agents, compared.** A new page ranks every sandbox
+  provider by the cost of the same agent job, sets their published start
+  times beside ours, and names which one fits each need, GPUs and
+  self-hosting included. The price index now opens on which agent sandbox is
+  cheapest. See
+  [Best sandbox for AI agents](https://withruntime.com/compare/best-sandbox-for-ai-agents).
+- **Faster first paint on the website.** Guides, blog posts, comparisons,
+  pricing and the home page now load only their own styles: a glossary page
+  fetches 30 KB of them instead of 67 KB, the home page 25 KB instead of 61 KB.
 
 - **A worker's own workers share its daily limit.** When a key with a daily
   limit makes keys, the limits of every live key under it, at any depth, now
@@ -49,6 +338,29 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   text in a code box. The blog, how-to guides, glossary, pricing and changelog
   pages share the cleaner look of the sandbox page. Each page's Markdown is
   unchanged for agents. See [Runtime vs E2B](./e2b-alternative#cost-for-the-same-job).
+- **MCP servers at a URL that never expires.** `public: true` on
+  `sbx.mcp.start` (`public=True` in Python, `Public` in Go, `--public` in the
+  CLI, `public` on `POST /v1/sandboxes/{id}/mcp` and the `runtime_sandboxes_mcp`
+  tool) serves the sandbox's MCP servers at a public preview: URLs with no
+  link token, so an agent is set up with them once. The `Authorization`
+  header still guards every request, and stays the same at every start,
+  after a restart too, until you stop the gateway. An idle sandbox pauses with
+  its servers in memory and wakes on the next request. Reading the gateway
+  no longer turns a public preview of its port back to private. Needs a
+  kept top-up. See [MCP servers](./javascript#a-url-to-configure-an-agent-with-once).
+- **The console stays fast for busy accounts.** Home, Usage & billing, a
+  sandbox's own page and Networking no longer slow down as an account's
+  history grows: on an account with 100,000 sandboxes in a month, Home opens
+  in under a tenth of a second instead of 1.5 s, and Usage & billing in
+  0.15 s instead of 1.2 s. Older pages of the audit log, and the log filtered
+  to one kind of change, open as fast as its first page. See
+  [the audit log](./teams#audit-log).
+- **Your account's limits, from the API.** `GET /v1/limits` (and
+  `runtime.limits.get()`, and the `runtime_limits_get` tool) now lists every
+  limit the account is held to with what it uses of each now, the numbers a
+  create past one is refused `quota_exceeded` by: sandboxes at once, their
+  vCPUs and memory, volumes and the rest. An agent can watch them and hold
+  back before it is refused. See [Limits](./limits).
 
 - **Swarm worker keys stay inside their own sandboxes.** A key made by
   another key with reach `agent` now gets `403 forbidden` on the account's own
@@ -57,6 +369,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   networks. It still runs sandboxes, reads its own usage and makes its own
   keys; an account-wide one keeps everything. See
   [Run a swarm](./teams#run-a-swarm).
+- **Code interpreter cells and terminals show in a sandbox's commands.** A
+  sandbox driven only by E2B's `runCode` / `run_code` listed no commands at
+  all. Each cell is now kept as its language (`python-cell · exit 1 · 2 s` for
+  a cell that raised), and a terminal as its shell; never the code or what is
+  typed. See [observability](./observability#commands).
 
 - **`mkdir -p /workspace` through the files API is success.** `files:mkdir`
   (and the files tool's mkdir) on `/workspace` or `/` answered 400 "Refusing

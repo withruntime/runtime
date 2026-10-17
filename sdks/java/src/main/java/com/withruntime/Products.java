@@ -60,7 +60,7 @@ public final class Products {
     }
   }
 
-  /** {@code runtime.limits()}: whether this key is read-only, and what its agent may still spend today. */
+  /** {@code runtime.limits()}: whether this key is read-only, and what its agent may still spend today, plus the account's limits ({@code account}: limit, label, unit, max, used; null when unreadable). */
   public static final class Limits {
     private final Transport t;
 

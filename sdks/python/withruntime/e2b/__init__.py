@@ -47,7 +47,7 @@ AsyncSecret = Secret
 wait_for_port = wait_for_url = wait_for_process = wait_for_file = wait_for_timeout = _Unsupported(
     "template ready checks", _TEMPLATES)
 
-# The rest of what e2b 2.55.1 exports (its __all__, read 9 October 2026), so
+# The rest of what e2b 2.56.0 exports (its __all__, read 15 October 2026), so
 # that every import written for E2B resolves. Types and values are E2B's own;
 # anything that would act raises NotSupportedException when used.
 from enum import Enum as _Enum

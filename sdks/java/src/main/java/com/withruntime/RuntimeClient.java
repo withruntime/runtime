@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.2.0";
+  public static final String VERSION = "0.3.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";

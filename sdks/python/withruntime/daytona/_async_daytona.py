@@ -1247,6 +1247,9 @@ class AsyncSnapshotService:
 
     async def create(self, params: CreateSnapshotParams, *, on_logs: Optional[Callable[[str], None]] = None,
                      timeout: Optional[float] = 0) -> Snapshot:
+        if params.region_id:
+            raise NotSupportedError("Choosing a snapshot region (region_id)",
+                                    "Omit region_id: Runtime places image builds on its available hosts.")
         if params.resources is not None:
             raise NotSupportedError("Resources on a snapshot", "Pass resources when creating each sandbox from it.")
         if params.entrypoint is not None:

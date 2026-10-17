@@ -31,18 +31,39 @@ export type Registry = {
   read(fetcher: Fetch): Promise<string[] | { unread: string }>;
 };
 
+/** Tries a read takes: a cut connection or a registry's passing 5xx or 429
+ * is read again (a GET), each try within its own time limit. On 15 October
+ * 2026 one cut read ("socket connection was closed unexpectedly") was the
+ * hub's whole SDK step for that tick, while npm answered in 0.1 s. */
+export const READ_TRIES = 3;
+export const READ_TIMEOUT = 30_000;
+/** The wait between tries; the tests set it to nothing. */
+export const reading = { pause: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
+
 async function get(
   fetcher: Fetch,
   url: string,
   as: "json" | "text",
 ): Promise<{ missing: true } | { unread: string } | { body: any }> {
-  const response = await fetcher(url, {
-    signal: AbortSignal.timeout(30_000),
-    headers: { accept: as === "json" ? "application/json" : "text/plain, application/xml" },
-  });
-  if (response.status === 404 || response.status === 410) return { missing: true as const };
-  if (!response.ok) return { unread: `${url} answered ${response.status}` };
-  return { body: as === "json" ? ((await response.json()) as any) : await response.text() };
+  for (let attempt = 1; ; attempt++) {
+    const last = attempt >= READ_TRIES;
+    try {
+      const response = await fetcher(url, {
+        signal: AbortSignal.timeout(READ_TIMEOUT),
+        headers: { accept: as === "json" ? "application/json" : "text/plain, application/xml" },
+      });
+      if (response.status === 404 || response.status === 410) return { missing: true as const };
+      if ((response.status >= 500 || response.status === 429) && !last) {
+        await reading.pause(1000 * attempt);
+        continue;
+      }
+      if (!response.ok) return { unread: `${url} answered ${response.status}` };
+      return { body: as === "json" ? ((await response.json()) as any) : await response.text() };
+    } catch (error) {
+      if (last) throw error;
+      await reading.pause(1000 * attempt);
+    }
+  }
 }
 
 function reader(url: string, as: "json" | "text", parse: (body: any) => unknown) {
@@ -144,7 +165,8 @@ export const REGISTRIES: Record<Target, Registry> = {
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
-function compare(a: string, b: string): number {
+/** Orders two versions as semver does (a leading v ignored). */
+export function compare(a: string, b: string): number {
   const parse = (v: string) => {
     const [core = "", pre] = v.replace(/^v/, "").split(/-(.*)/s);
     return { nums: core.split(".").map((n) => Number(n) || 0), pre };
@@ -177,4 +199,48 @@ export function decide(
       refused: `${version} is not newer than ${newest}, the newest ${label} has: bump the version past it`,
     };
   return { do: "publish" };
+}
+
+/** The registry each client the API names (packages/cloud/src/api/client-version.ts)
+ * installs from. */
+export const CLIENT_TARGETS: Record<string, Target> = {
+  "sdk-js": "npm",
+  "mcp-bridge": "npm",
+  "sdk-python": "pypi",
+  "sdk-go": "go",
+  "sdk-java": "maven",
+  "sdk-ruby": "rubygems",
+};
+
+/** The cutoffs client-version.ts's KNOWS names, read from its text: the hub
+ * reads them from the commit it publishes, and loads nothing of the API. */
+export function parseKnows(text: string): Record<string, readonly number[]> {
+  const block = /const KNOWS[^{]*\{([^}]*)\}/.exec(text)?.[1] ?? "";
+  return Object.fromEntries(
+    [...block.matchAll(/"([a-z-]+)": \[(\d+), (\d+), (\d+)\]/g)].map(([, client, ...v]) => [
+      client!,
+      v.map(Number),
+    ]),
+  );
+}
+
+/** Why a registry's customers cannot install a client the API counts as
+ * knowing that a stop keeps the disk (`knows`: client-version.ts KNOWS), or
+ * undefined. On 15 October 2026 PyPI's newest was 0.11.1 against the API's
+ * 0.12.0, so every Python customer's stop deleted the disk three days later,
+ * with nothing to install instead. */
+export function behindCutoff(
+  target: Target,
+  knows: Record<string, readonly number[]>,
+  listed: readonly string[],
+): string | undefined {
+  const first = Object.entries(CLIENT_TARGETS)
+    .filter(([client, t]) => t === target && knows[client])
+    .map(([client]) => knows[client]!.join("."))
+    .sort(compare)
+    .at(-1);
+  if (!first) return undefined;
+  const newest = [...listed].sort(compare).at(-1);
+  if (newest && compare(newest, first) >= 0) return undefined;
+  return `${REGISTRIES[target].label} has ${newest ?? "no version"}, below ${first}, the first the API counts as knowing that a stop keeps the disk: its customers' stops delete the disk after three days`;
 }

@@ -58,6 +58,11 @@ type SandboxInfo struct {
 	// Replayed is true when the answer repeats an earlier call with the same
 	// idempotency key.
 	Replayed bool `json:"replayed"`
+	// Placement is an opaque tag for the server it is on, like
+	// "pl_3f9a0c1b2d4e5f60". Your sandboxes and snapshots with the same tag
+	// are on the same server. It is never the server's name, and other
+	// accounts see unrelated tags. Nil before it is placed.
+	Placement *string `json:"placement"`
 	// Reused is true when GetOrCreate answered a sandbox that already had
 	// the name.
 	Reused bool `json:"reused"`
@@ -148,6 +153,14 @@ type CreateOptions struct {
 	Image         string        `json:"image,omitempty"`
 	Snapshot      string        `json:"snapshot,omitempty"`
 	Volumes       []VolumeMount `json:"volumes,omitempty"`
+
+	// SpreadFrom is one to 16 ids of your own sandboxes or snapshots. The new
+	// sandbox starts on a server none of them is on, and stays apart if its
+	// start is moved. With no other server that has room, the create fails
+	// with no_capacity and nothing is made or charged. A copy of a snapshot
+	// starts only where that snapshot is kept, so Snapshot with SpreadFrom
+	// naming its server also fails with no_capacity.
+	SpreadFrom []string `json:"spreadFrom,omitempty"`
 
 	// IdempotencyKey: leave it empty and the client makes one per call and
 	// keeps it across its own retries. Pass your own only to retry a create
@@ -325,4 +338,21 @@ type KeyLimits struct {
 	// Trial is the machine time the account can still run without credit, nil
 	// when it has none.
 	Trial *TrialTime `json:"trial"`
+	// Account is every limit the account is held to, with what it uses of
+	// each now: a create past one fails quota_exceeded, and Details["limit"]
+	// names the row. Nil when they can't be read.
+	Account []AccountLimit `json:"account"`
+}
+
+// AccountLimit is one of the account's limits, as
+// https://withruntime.com/account/limits shows it.
+type AccountLimit struct {
+	// Limit is "<kind>.<dimension>": sandbox.count, sandbox.vcpu,
+	// sandbox.memory_mib, volume.count...
+	Limit string `json:"limit"`
+	Label string `json:"label"`
+	// Unit is what Max and Used count: "count" for things, "mib" for MiB.
+	Unit string  `json:"unit"`
+	Max  float64 `json:"max"`
+	Used float64 `json:"used"`
 }

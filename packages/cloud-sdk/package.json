@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.14.0",
+  "version": "0.16.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -124,6 +124,11 @@
       "types": "./dist/freestyle/index.d.ts",
       "import": "./dist/freestyle/index.js",
       "default": "./dist/freestyle/index.js"
+    },
+    "./morph": {
+      "types": "./dist/morph/index.d.ts",
+      "import": "./dist/morph/index.js",
+      "default": "./dist/morph/index.js"
     },
     "./modal": {
       "types": "./dist/modal/index.d.ts",

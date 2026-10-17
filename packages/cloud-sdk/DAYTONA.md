@@ -17,8 +17,8 @@ from withruntime.daytona import AsyncDaytona  # was: from daytona import AsyncDa
 ```
 
 The mapping was written against `@daytona/sdk` 0.220.0 and `daytona` 0.220.0
-on PyPI, and checked against `@daytona/sdk` and `daytona` 0.223.1 on
-9 October 2026 (below, "0.223.1"). The exact releases and artifact hashes
+on PyPI, and checked against `@daytona/sdk` and `daytona` 0.224.1 on
+15 October 2026 (below, "0.224.1"). The exact releases and artifact hashes
 are kept in `compatibility-lock.json`.
 
 ## Keys
@@ -97,7 +97,7 @@ Each of these throws `NotSupportedError` before anything happens. Its
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A snapshot name with no Runtime image or snapshot                     | `daytona.snapshot.create({ name, image })` here, or `npx withruntime images build`. This throws `DaytonaNotFoundError`.                                                                 |
 | GPUs, `spot`, `linkedSandbox`, `secrets`, `otelEndpointOverride`      | Runtime runs Linux on CPUs. For `secrets`, a Runtime secret (`npx withruntime secrets set NAME --host <host>`): the sandbox sees a placeholder. For telemetry, `runtime.otel.create()`. |
-| A `target` other than `us`, `jwtToken`                                | Runtime runs in one US region and signs in with keys.                                                                                                                                   |
+| A `target` other than `us` (the client's or a create's), `jwtToken`   | Runtime runs in one US region and signs in with keys.                                                                                                                                   |
 | The entrypoint session, language servers                              | Sessions with `runAsync`.                                                                                                                                                               |
 | Screenshots of a region, with the cursor, scaled, or as WebP          | The whole screen as PNG or JPEG; crop and scale it yourself.                                                                                                                            |
 | `computerUse.accessibility`, the desktop's processes one by one       | Screenshots with the mouse and keyboard; `computerUse.getStatus()`, `stop()` and `start()`.                                                                                             |
@@ -125,6 +125,37 @@ Some differences are not refusals:
   client are found by name, but only their output from then on is known.
 - `autoArchiveInterval` is recorded only: Runtime has no archive tier.
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun.
+
+## 0.224.1, 15 October 2026
+
+Reviewed the published npm tarballs for `@daytona/sdk`, `@daytona/api-client`,
+`@daytona/toolbox-api-client` and `@daytona/analytics-api-client` 0.223.1 →
+0.224.1, and the PyPI wheel and sdist for `daytona` 0.223.1 → 0.224.1 (0.224.0,
+published between them, was also fetched: on npm, 0.224.1 adds only the stream
+decoder change and the dependency floors below; on PyPI it is the same source
+with a new version). Each was its registry's latest when checked. Every pinned
+file matched the hash already in `compatibility-lock.json`, and every new file
+matched its registry's SHA-512 integrity or SHA-256 digest; the wheel's Python
+source is byte for byte its sdist's. Nothing was installed, imported or run.
+The three API clients changed only their version. `@daytona/sdk` changed
+`Daytona` (create params and the client's `target` docs), `Snapshot` (docs),
+and its output stream decoder, ESM and CommonJS alike; `daytona` changed the
+same, sync and async, plus the async PTY handle.
+
+| Upstream change                                                                                                                                                                      | Drop-in disposition                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daytona.create({ target })` (Python `target` on `CreateSandboxFromSnapshotParams` and `CreateSandboxFromImageParams`) picks the region for that create, over the client's `target`. | Followed, in both languages. `"us"` or none creates the sandbox in Runtime's one region; any other is refused with the same `NotSupportedError` as a client `target`, before anything is built or made. Before, TypeScript dropped it without a word and Python raised `TypeError`. |
+| The client's `target` (and `DAYTONA_TARGET`) and a snapshot's `regionId` (Python `region_id`) are documented as the default region, overridden per call.                             | Documentation only; the client's `target` is checked as before. TypeScript already refused a snapshot `regionId`; Python accepted `region_id` and dropped it, and now refuses it the same way (`""` still means the default).                                                       |
+| The output stream decoder finds an stdout or stderr marker that ends exactly at the end of a message, which it held back before, and buffers in linear time.                         | Not applicable: the drop-in takes output from Runtime's exec, which keeps stdout and stderr apart, and never parses Daytona's markers.                                                                                                                                              |
+| Python `AsyncPtyHandle.wait()` shields its reader, so cancelling a caller's wait (for example `asyncio.wait_for`) leaves the PTY connected.                                          | Already so: the drop-in's `wait()` awaits `asyncio.shield` of its reader task.                                                                                                                                                                                                      |
+| `@daytona/sdk` requires `ws` exactly 8.22.0 (was ^8.22.0), `@aws-sdk/client-s3` and `lib-storage` ^3.1146.0 and `shell-quote` ^1.12.0.                                               | The oracle's `bun.lock` moves with them (ws stays 8.22.0).                                                                                                                                                                                                                          |
+
+`tests/daytona/daytona-0-224-1.test.ts` and
+`sdks/python/tests/test_daytona_0_224_1.py` check a create's `target` both
+ways, that it overrides the client's, and (Python) that a snapshot's
+`region_id` is refused; they fail without this change. The oracle was not run
+against the new release, since it executes Daytona's code; the provider
+remains marked `partial`.
 
 ## 0.223.1, 9 October 2026
 

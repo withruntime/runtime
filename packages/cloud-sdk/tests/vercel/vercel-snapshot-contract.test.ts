@@ -63,6 +63,8 @@ async function fixture(
     pendingStop?: boolean;
     stopWaitFail?: boolean;
     stopWaitStaysPending?: boolean;
+    /** The server paused the source and answered before the capture was over. */
+    capturing?: boolean;
   } = {},
 ) {
   let info = {
@@ -104,7 +106,11 @@ async function fixture(
         );
       info = { ...info, state: options.pendingStop ? "stopping" : "stopped" };
     } else if (url.pathname === `/v1/sandboxes/${ID}:snapshot`) {
-      expect(info.state).toBe("paused");
+      // The server pauses a running source itself. A capture it finishes
+      // before answering has woken the source again; one still capturing
+      // leaves it paused for the client to wake.
+      expect(info.state).not.toBe("stopped");
+      if (options.capturing) info = { ...info, state: "paused" };
       await captureHook?.(request.signal);
       const snapshot: NativeSnapshot = {
         id: `snapshot-${snapshots.size}`,
@@ -126,6 +132,8 @@ async function fixture(
         expiresAt: EXPIRES,
       };
       snapshots.set(snapshot.id, snapshot);
+      if (options.capturing)
+        return Response.json({ ...snapshot, state: "capturing", status: "capturing" });
       return Response.json(snapshot);
     } else if (url.pathname.startsWith("/v1/snapshots/")) {
       const snapshot = snapshots.get(url.pathname.split("/").at(-1)!.split(":")[0]!);
@@ -214,7 +222,7 @@ describe("Vercel filesystem snapshot contract", () => {
   });
 
   test("failed capture restores the source and never stops it", async () => {
-    const f = await fixture({ fail: true });
+    const f = await fixture({ fail: true, capturing: true });
     await expect(consumer(f.box)).rejects.toMatchObject({ code: "snapshot_failed" });
     expect(f.calls.some((one) => one.path.endsWith(":stop"))).toBe(false);
     expect(f.state()).toBe("running");
@@ -310,7 +318,7 @@ describe("Vercel filesystem snapshot contract", () => {
   });
 
   test("abort reaches an in-flight capture; cleanup restores source without stopping it", async () => {
-    const f = await fixture();
+    const f = await fixture({ capturing: true });
     const controller = new AbortController();
     let aborted = false;
     f.hold(async (signal) => {
@@ -339,7 +347,7 @@ describe("Vercel filesystem snapshot contract", () => {
   });
 
   test("abort after capture prevents the follow-up stop and preserves the disk snapshot", async () => {
-    const f = await fixture();
+    const f = await fixture({ capturing: true });
     const controller = new AbortController();
     f.onWake(() => controller.abort(new Error("cancel before stop")));
     await expect(consumer(f.box, { signal: controller.signal })).rejects.toMatchObject({

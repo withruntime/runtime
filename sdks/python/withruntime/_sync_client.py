@@ -244,7 +244,7 @@ class _Transport:
         """Sends a call and returns the response once it succeeded. Retries
         transport failures, 429, 502, 503 and 504 with backoff, with the same
         Idempotency-Key every time, so a retried write never happens twice.
-        With ``wait_for_capacity`` (seconds; only a create sets it) a refusal
+        With ``wait_for_capacity`` (seconds; a create, wake or restart sets it) a refusal
         that clears when a sandbox stops or a host frees room (WAITS_FOR_ROOM)
         is retried the same way until that long has passed, then raised;
         ``on_capacity_wait`` hears the refusal and the seconds before each try."""
@@ -461,7 +461,7 @@ class _Transport:
 _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
     "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "persistent", "max_total_cost_micros",
-    "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "volumes",
+    "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "volumes",
     "env", "tailscale",
 )
 
@@ -1207,7 +1207,7 @@ class Machine:
         self._t = t
         self.info = info
         self._keep_alive: Optional[Callable[[], None]] = None
-        # Marc, 6 October 2026: the end of a ``with`` block deletes a sandbox
+        # 6 October 2026: the end of a ``with`` block deletes a sandbox
         # ``create`` made, unless it was created with ``keep=True``. One from
         # ``get``, or an existing one ``get_or_create`` found, is only stopped.
         self._delete_at_block_end = False
@@ -1245,9 +1245,19 @@ class Machine:
         return self
 
     def _lifecycle(self: _M, verb: str, wait: bool, body: Optional[dict[str, Any]] = None,
-                         idempotency_key: Optional[str] = None) -> _M:
+                         idempotency_key: Optional[str] = None, *, waits_for_room: bool = False,
+                         wait_for_capacity: Optional[float] = None,
+                         on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None) -> _M:
+        # Only a wait for room passes its arguments, so a transport that takes
+        # none (a test's stand-in) is called as before.
+        room: dict[str, Any] = {}
+        if waits_for_room:
+            seconds = (getattr(self._t, "wait_for_capacity", 0.0) if wait_for_capacity is None
+                       else max(0.0, float(wait_for_capacity)))
+            if seconds > 0:
+                room = {"wait_for_capacity": seconds, "on_capacity_wait": on_capacity_wait}
         self.info = self._t.json("POST", self._path(f":{verb}"), body=body or {}, wait=60 if wait else None,
-                                       idempotency_key=idempotency_key)
+                                       idempotency_key=idempotency_key, **room)
         return self
 
     def stop(self: _M, wait: bool = True, idempotency_key: Optional[str] = None) -> _M:
@@ -1302,14 +1312,20 @@ class Machine:
         return self._t.json("DELETE", self._path(), idempotency_key=idempotency_key)
 
     def wake(self: _M, wait: bool = True, timeout_seconds: Optional[int] = None,
-                   idempotency_key: Optional[str] = None) -> _M:
+                   idempotency_key: Optional[str] = None, *, wait_for_capacity: Optional[float] = None,
+                   on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None) -> _M:
         """Carries on a paused sandbox; for one with a time limit,
         ``timeout_seconds`` is its new one. Waking one that is already awake
         is done, not an error (unless a new limit was asked for, which was not
-        given)."""
+        given). When its server has no room (``no_capacity``) it waits for
+        room, as ``create`` does, up to ``wait_for_capacity`` seconds (the
+        client's, 120 by default; 0 fails at once), sending the same
+        idempotency key each time; ``on_capacity_wait(refusal, seconds)`` is
+        called before each wait."""
         try:
             return self._lifecycle("wake", wait, {} if timeout_seconds is None else {"timeoutSeconds": timeout_seconds},
-                                         idempotency_key)
+                                         idempotency_key, waits_for_room=True, wait_for_capacity=wait_for_capacity,
+                                         on_capacity_wait=on_capacity_wait)
         except RuntimeError as error:
             if error.code != "not_paused" or timeout_seconds is not None:
                 raise
@@ -1319,9 +1335,10 @@ class Machine:
             return self
 
     def extend(self: _M, seconds: int, idempotency_key: Optional[str] = None) -> _M:
-        """More time before its time limit ends (at most an hour ahead of
+        """More time before its time limit ends (at most 24 hours ahead of
         now). A sandbox with no time limit needs none: the call answers at
-        once and changes nothing."""
+        once and changes nothing. To end it sooner, or give one with no limit
+        a limit, ``update(timeout_seconds=...)``."""
         return self._lifecycle("extend", False, {"seconds": seconds}, idempotency_key)
 
     def update(self: _M, idempotency_key: Optional[str] = None, **settings: Any) -> _M:
@@ -1332,8 +1349,12 @@ class Machine:
         from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
         ``persistent`` (keep it running until stopped, while credit lasts,
         never idle-paused; its disk is billed and kept as any sandbox's; paid
-        only) and
-        ``max_total_cost_micros`` (None removes the cap)."""
+        only),
+        ``max_total_cost_micros`` (None removes the cap),
+        ``timeout_seconds`` (a new time limit counted from now, 60 to 86400,
+        sooner or later than before; 0 takes it away; a paused sandbox counts
+        it from its next wake) and ``on_timeout`` (``"pause"``, ``"stop"`` or
+        ``"delete"`` at its end)."""
         return self._lifecycle("update", False, {_camel(k): v for k, v in settings.items()}, idempotency_key)
 
     def keep_alive(self, every_seconds: float = 60, margin_seconds: int = KEEP_ALIVE_MARGIN_SECONDS) -> Callable[[], None]:
@@ -1414,15 +1435,22 @@ class Machine:
         # A capture still running at the deadline needs its source paused: the
         # worker fails one whose source woke (4 October 2026).
         late = False
+        # Whether the server may have left a running source paused: it answered
+        # before the capture was over, or not at all.
+        left_paused = running
         try:
-            if running:
-                self.pause()
             try:
                 with request_scope(timeout_seconds if timeout_seconds and timeout_seconds > 0
                                    else SNAPSHOT_DEADLINE_SECONDS):
+                    # One call: the server pauses a running source for the
+                    # capture and wakes it before answering a capture that is
+                    # over. Pausing, snapshotting and waking it from here took
+                    # 1.96 s for a repeat snapshot at the median against 1.19 s
+                    # (15 October 2026).
                     snapshot = self._t.json("POST", self._path(":snapshot"),
                                                   body={k: v for k, v in body.items() if v is not None},
                                                   wait=10, idempotency_key=idempotency_key)
+                    left_paused = running and snapshot["state"] == "capturing"
                     while snapshot["state"] == "capturing":
                         _request_sleep(.2)
                         snapshot = self._t.json("GET", f"/v1/snapshots/{_enc(snapshot['id'])}")
@@ -1452,11 +1480,16 @@ class Machine:
             primary_error = error
             raise
         finally:
-            if running and not late:
+            if left_paused and not late:
                 # Capture's deadline must never prevent restoring the source.
                 try:
                     with request_scope(captured=Limits()):
-                        self.wake()
+                        # A call refused before anything paused (pausable:
+                        # False, volumes) leaves a running source alone.
+                        if snapshot is None:
+                            self.refresh()
+                        if snapshot is not None or self.state in ("paused", "pausing"):
+                            self.wake()
                 except BaseException as error:
                     failure = primary_error if primary_error is not None else error
                     recovery = {"message": str(error)}
@@ -1473,9 +1506,15 @@ class Machine:
                     if primary_error is None:
                         raise
 
-    def restart(self: _M, wait: bool = True, idempotency_key: Optional[str] = None) -> _M:
-        """Starts a stopped sandbox again from its disk (memory is not kept)."""
-        return self._lifecycle("restart", wait, idempotency_key=idempotency_key)
+    def restart(self: _M, wait: bool = True, idempotency_key: Optional[str] = None, *,
+                      wait_for_capacity: Optional[float] = None,
+                      on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None) -> _M:
+        """Starts a stopped sandbox again from its disk (memory is not kept).
+        When its server has no room (``no_capacity``) it waits for room like
+        ``wake`` (``wait_for_capacity`` seconds, the client's by default; 0
+        fails at once), with the same idempotency key each time."""
+        return self._lifecycle("restart", wait, idempotency_key=idempotency_key, waits_for_room=True,
+                                     wait_for_capacity=wait_for_capacity, on_capacity_wait=on_capacity_wait)
 
     def __enter__(self: _M) -> _M:
         return self
@@ -1727,7 +1766,8 @@ class Machines(Generic[_M]):
         cpu, cpu_floor_millis, timeout_seconds (a time limit, 60 to 86400; leave it
         out for none: it runs while it works and pauses when idle), on_lease_end ("pause", "stop" or "delete"),
         max_cost_micros, network={"internet": True, "deny": [...]}, and
-        image, snapshot, volumes and the rest of _CREATE_FIELDS; a misspelled one
+        image, snapshot, spread_from (one to 16 ids of your own sandboxes or snapshots: it
+        starts on a server none of them is on, or the create raises ``no_capacity``), volumes and the rest of _CREATE_FIELDS; a misspelled one
         raises TypeError, naming the one meant).
         When every slot without credit or the account's quota is taken, it waits for one
         to free, up to ``wait_for_capacity`` seconds (the client's, 120 by
@@ -1942,7 +1982,7 @@ class Runtime:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, *, timeout: float = 300,
                  max_retries: int = 4, max_connections: int = DEFAULT_MAX_CONNECTIONS,
                  wait_for_capacity: float = 120, on_queued: Optional[Callable[[int], None]] = None) -> None:
-        """``wait_for_capacity``: seconds ``sandboxes.create`` keeps retrying,
+        """``wait_for_capacity``: seconds ``sandboxes.create``, a wake and a restart keep retrying,
         with the same key and input, when the slots without credit, the account's quota or the region is full (no_credit_running_limit, quota_exceeded, no_capacity
         and the like). 0 fails at once. ``max_connections``: connections held
         at once, calls and streams (a command's output, a download) together;

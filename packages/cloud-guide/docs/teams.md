@@ -183,6 +183,10 @@ and confirm:
   and other admins; only an owner removes an owner.
 - Either way, the person loses access at once and their keys stop working. They
   can be invited back, with a new role if you like.
+- What they made stays in the account: their stopped and paused sandboxes'
+  disks, snapshots, volumes and images are kept on the account's credit, as
+  anyone's are, until someone deletes them. The same holds when your
+  directory suspends someone.
 
 ## Closing the account
 

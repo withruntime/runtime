@@ -38,6 +38,8 @@ Runtime records the program (`python3`, from `python3 train.py --token …`),
 its exit code, how long it ran, when it started, which key or person ran it and
 in which sandbox. Arguments, the rest of the command line and environment
 values are never stored, because arguments can carry a secret typed inline.
+A terminal is recorded as its shell and nothing typed in it; a code
+interpreter cell as its language (`python-cell`), never its code.
 The record is kept 14 days and shown on the sandbox's page in your account.
 
 ## Read-only keys and daily limits
@@ -281,7 +283,10 @@ deletes it there. The value is typed once and never shown again.
   copied in by hand. A selector matches a sandbox whose labels hold every one
   of its pairs, and a sandbox matching any one selector gets the secret,
   including one created or labelled later (it has the secret from its first
-  request, and a running one within seconds of the label). Use it to keep an
+  request, and a running one from the moment the label change answers: the
+  update, made with a key that may read secrets, waits until its server holds
+  the change and says so with `secretsEnforced: true`; any other key's
+  relabel reaches it within 15 seconds). Use it to keep an
   orchestrator's own credentials away from the sandboxes it starts for
   others:
 

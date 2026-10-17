@@ -16,11 +16,22 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 from withruntime.vercel.sandbox import sync as sandbox  # was: from vercel.sandbox import sync as sandbox
 ```
 
-The JavaScript mapping was checked against `@vercel/sandbox` 3.6.1 on
-8 October 2026. Python was checked against `vercel-sandbox` 0.9.0 on PyPI
-(the `vercel.sandbox` module of `vercel` 0.11.6) on 7 October 2026.
-0.9.0 adds `get_drive`, which raises `NotSupportedError` like
-the other Drive calls; `vercel` 0.11.6 only raises its `vercel-sandbox` floor.
+The JavaScript mapping was checked against `@vercel/sandbox` 3.8.0 on
+15 October 2026. Python was checked against `vercel-sandbox` 0.9.1 on PyPI
+(the `vercel.sandbox` module of `vercel` 0.12.0) on 15 October 2026.
+0.9.0 added `get_drive`, which raises `NotSupportedError` like the other
+Drive calls.
+
+Python review, 15 October 2026: each pinned wheel and sdist matched its
+SHA-256 in `compatibility-lock.json`, each new one the PyPI digest, and each
+new wheel's source its sdist; they were compared file by file, nothing
+installed or run. `vercel-sandbox` 0.9.1 changes only its version and its
+`vercel-internal-core` floor (0.2.2); no sandbox source changes. `vercel`
+0.12.0 moves `vercel.blob` into the separate `vercel-blob` package (a new
+dependency), removing its own Blob code, and raises its floors
+(`vercel-sandbox` 0.9.1). Blob is Vercel's storage product, which the
+drop-in has never offered (`withruntime.vercel` exports `sandbox` and
+`api`), so nothing changes; the inventory's 684 Python items are unchanged.
 
 ## Keys
 
@@ -124,6 +135,42 @@ Some differences are not refusals:
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun;
   Vercel's `universal` has Python 3.14.
 - A git source is cloned into the working directory itself.
+
+## JavaScript qualification, 15 October 2026
+
+Reviewed the exact published npm tarballs for `@vercel/sandbox` 3.6.1 → 3.7.0
+→ 3.8.0 (3.7.0 is the only stable release between them). 3.6.1 matched its
+SHA-512 in `compatibility-lock.json`; 3.7.0 and 3.8.0 matched
+`npm view @vercel/sandbox@<version> dist.integrity` (3.8.0:
+`sha512-2ib+Dl8W...`). No downloaded package code was installed or executed
+outside the oracle's frozen install.
+
+The source maps name six changed TypeScript files and one new one
+(`utils/pipe-stdin.ts`); CommonJS and ES-module builds match. `index.d.ts`
+exports nothing new. The changes and their dispositions:
+
+| Upstream change                                                                                                                                                                                                                                                                                                                                                                                                                                    | Drop-in disposition                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.7.0: `runCommand({ stdin: true, detached: true })` keeps the command's stdin open; `stdin: true` without `detached` throws `TypeError` before anything runs. Unset or false, stdin is empty, as before.                                                                                                                                                                                                                                          | Followed. The process is spawned with Runtime's piped stdin (`stdinMode: "pipe"`); the same `TypeError` message is thrown before any request. Without `stdin`, nothing changes.                                                                                                                                                                                                   |
+| 3.7.0: `Command.writeStdin(data, { abortSignal })` and `closeStdin({ abortSignal })`. Writes are queued in call order, chunked, resent with byte offsets so retries never duplicate; after a write that may be partial, later writes are refused (`closeStdin` still works).                                                                                                                                                                       | Followed on Runtime's process input (`:write` with `offset` and `eof`), which already resends by offset, so no byte is written twice. Writes are queued in call order. A failed write refuses later ones with upstream's message, unless the API rejected a single request with a 4xx, which applied none of it. A `Command` from `getCommand` reads its offset from the process. |
+| 3.7.0: `CommandFinished.writeStdin`/`closeStdin` always throw: the command has exited.                                                                                                                                                                                                                                                                                                                                                             | Followed with the same messages.                                                                                                                                                                                                                                                                                                                                                  |
+| 3.7.0: `stdin` may be a `Readable`, attached or detached. It is written with backpressure and stdin closes when it ends; the stream is never ended or destroyed. Attached: a piping failure kills the command and rejects `runCommand`. Detached: `wait()` rejects (and `stdinPipe` clears). The command exiting or no longer accepting input (404, `command_stdin_unavailable`) stops piping quietly. `Command.stdinPipe` is the (internal) pipe. | Followed. An attached command with a stream starts as a process and waits on its output, streaming to `stdout`/`stderr` writers as before. Reading pauses past 512 KiB waiting. Runtime's "input closed" answer (409 `stdin_closed`) or a 404 stops piping quietly, as upstream's does. `stdinPipe` is exposed the same way.                                                      |
+| 3.7.0: `SandboxUser.runCommand` passes `stdin`; 3.8.0 also passes `onStart`.                                                                                                                                                                                                                                                                                                                                                                       | Followed: both reach the sandbox's `runCommand` through the user's `sudo -u` wrapper.                                                                                                                                                                                                                                                                                             |
+| 3.8.0: `runCommand({ onStart })`, only when not detached (the type forbids it with `detached: true`; upstream ignores it there): called with the running `Command` as soon as it starts and awaited before `runCommand` resolves.                                                                                                                                                                                                                  | Followed with the same type. The command starts as a Runtime process so its `Command` (id, `kill`, `logs`) exists before it exits; output and truncation are reported as for any attached command.                                                                                                                                                                                |
+| `APIClient.writeCommandStdin` and its stdin retry policy (429 `Retry-After`, 502/503/504 resends, offset probes); `CommandStdinResponse` validator.                                                                                                                                                                                                                                                                                                | Internal; `APIClient` is not exported. Runtime's transport and offsets cover resends.                                                                                                                                                                                                                                                                                             |
+| `@vercel/oidc` 3.2.0 → 4.0.0 (now depending on `@vercel/cli-config` and `@vercel/cli-exec`).                                                                                                                                                                                                                                                                                                                                                       | The drop-in never uses Vercel OIDC: a Vercel or OIDC token still throws `AuthenticationError`. Only the oracle's lock changes.                                                                                                                                                                                                                                                    |
+| Declarations reorder existing status union members; README documents stdin; the package and internal version advance.                                                                                                                                                                                                                                                                                                                              | No adapter change.                                                                                                                                                                                                                                                                                                                                                                |
+
+`tests/vercel-3-8.test.ts` (12 cases) runs the real Runtime transport over
+controlled HTTP: piped spawn, write order and offsets, the `TypeError`,
+empty stdin by default, finished-command refusals, partial-write refusal and
+4xx recovery, an attached and a detached `Readable` (end, failure with kill,
+quiet stop on `stdin_closed`), `onStart` ordering and `SandboxUser`
+pass-through. Eleven fail before the adapter change (the twelfth, empty stdin
+by default, guards existing behaviour). They do not prove live-host
+behaviour; the provider remains `partial`. `compat-inventory.json` now counts
+`writeStdin`, `closeStdin`, `stdinPipe` and the `stdin`/`onStart` options
+present (and `CommandFinished`'s stdin calls refused, as upstream's are).
 
 ## JavaScript qualification, 8 October 2026
 

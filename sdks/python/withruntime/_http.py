@@ -26,7 +26,7 @@ MAX_BODY = 64 * 1024 * 1024
 #: no answer by then is talking to a server that is gone, such as a controller
 #: that died with the call in flight while its address moved to the new leader:
 #: a client that only waits sends nothing the new leader could refuse (the
-#: leader drill on vin-5, 4 October 2026). It is sent again under the same key.
+#: controller failover drill, 4 October 2026). It is sent again under the same key.
 ANSWER_START_SECONDS = 125.0
 
 
@@ -81,7 +81,7 @@ async def within(awaitable, timeout: float):
     arrives in the same loop turn as the awaited operation completes is
     swallowed (CPython gh-86296), so a cancelled stream read carries on and
     only fails when the next read times out. ``asyncio.timeout`` (3.11) has no
-    inner future to lose the cancel to; 3.10 waits on a task it can cancel."""
+    inner future to lose the cancel to; before 3.11 it waits on a task it can cancel."""
     import asyncio
     if hasattr(asyncio, "timeout"):
         async with asyncio.timeout(timeout):

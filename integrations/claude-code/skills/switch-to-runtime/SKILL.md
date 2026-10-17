@@ -19,7 +19,8 @@ In short, the guide has you:
    Blaxel often needs only its import changed to `withruntime/e2b`,
    `withruntime/daytona`, `withruntime/vercel` or `withruntime/blaxel` (Python
    `withruntime.e2b`, `withruntime.daytona`, `withruntime.vercel`,
-   `withruntime.blaxel`).
+   `withruntime.blaxel`). Morph's TypeScript client needs its import changed
+   to `withruntime/morph`.
    Agent frameworks have ready integrations: see topic `frameworks`.
 3. Connect with one approval (`runtime_connect`, or `npx -y withruntime login`)
    and run the project's own tests on the free trial with `funding: "trial"`.

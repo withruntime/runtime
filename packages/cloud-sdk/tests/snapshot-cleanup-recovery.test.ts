@@ -14,8 +14,13 @@ async function source(state: "ready" | "failed") {
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = new Request(input, init);
       const path = new URL(request.url).pathname;
-      if (path.endsWith(":pause")) current = "paused";
-      if (path.endsWith(":snapshot"))
+      // The server pauses a running source and answers before the capture
+      // is over, so the source is left paused for the SDK to wake.
+      if (path.endsWith(":snapshot")) {
+        current = "paused";
+        return Response.json({ id: "saved-disk", sourceSandboxId: ID, state: "capturing" });
+      }
+      if (path === "/v1/snapshots/saved-disk")
         return Response.json({
           id: "saved-disk",
           sourceSandboxId: ID,

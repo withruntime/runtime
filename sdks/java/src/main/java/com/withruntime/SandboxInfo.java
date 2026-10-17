@@ -110,6 +110,14 @@ public final class SandboxInfo extends JsonObject {
     return getBoolean("replayed");
   }
 
+  /**
+   * An opaque tag for the server it is on, like pl_3f9a0c1b2d4e5f60. Your sandboxes and snapshots
+   * with the same tag are on the same server. Null before it is placed.
+   */
+  public String placement() {
+    return getString("placement");
+  }
+
   /** getOrCreate answered a sandbox that already had the name. */
   public boolean reused() {
     return getBoolean("reused");

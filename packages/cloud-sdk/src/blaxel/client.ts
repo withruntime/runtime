@@ -30,6 +30,11 @@ export interface Config {
   workspace?: string;
   proxy?: string;
   clientCredentials?: string | { clientId: string; clientSecret: string };
+  /** Blaxel's product token for an integration built on the SDK
+   * (`<name>/<semver>`), which Blaxel appends to its User-Agent. Kept and
+   * checked as Blaxel does; never sent, as Runtime does not attribute traffic
+   * by it. */
+  integration?: string;
   [key: string]: unknown;
 }
 
@@ -39,6 +44,34 @@ const env = (name: string): string | undefined =>
 const isRuntimeKey = (key: string) => key.startsWith("rtcloud_");
 
 let configured: string | undefined;
+let integration: string | undefined;
+let warnedIntegration: string | undefined;
+
+/** Blaxel's check of an integration token: `<name>/<semver>`, lowercase name. */
+const INTEGRATION_TOKEN = /^[a-z0-9][a-z0-9._-]*\/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+/** Blaxel's `settings.integration`: the token given to `initialize` or set,
+ * then BL_INTEGRATION; `""` when none, or when it is not `<name>/<semver>`
+ * (warned once per value, as Blaxel does). */
+export function integrationToken(): string {
+  const value = integration ?? env("BL_INTEGRATION") ?? "";
+  if (!value) return "";
+  if (!INTEGRATION_TOKEN.test(value)) {
+    if (warnedIntegration !== value) {
+      warnedIntegration = value;
+      console.warn(
+        `Ignoring invalid Blaxel integration token ${JSON.stringify(value)}: expected <name>/<semver> with a lowercase name`,
+      );
+    }
+    return "";
+  }
+  return value;
+}
+
+/** Sets Blaxel's `settings.integration`; undefined goes back to BL_INTEGRATION. */
+export function setIntegrationToken(value: string | undefined): void {
+  integration = value;
+}
 
 /** Blaxel's `initialize(config)`: a Runtime key given as `apikey` is used from
  * then on. A Blaxel key is refused while RUNTIME_API_KEY is not set, and never
@@ -49,6 +82,7 @@ export function initialize(config: Config = {}): void {
       "Blaxel client credentials (clientCredentials)",
       "Use a Runtime key: set RUNTIME_API_KEY, or run `npx withruntime login` once.",
     );
+  if ("integration" in config) integration = config.integration;
   const key = config.apikey ?? config.apiKey;
   if (key === undefined || key === "") return;
   if (isRuntimeKey(key)) {
@@ -93,6 +127,8 @@ export function clientFor(options: RuntimeOptions = {}): Runtime {
 export function resetClients() {
   clients.clear();
   configured = undefined;
+  integration = undefined;
+  warnedIntegration = undefined;
 }
 
 /** Blaxel's default region, from BL_REGION. */

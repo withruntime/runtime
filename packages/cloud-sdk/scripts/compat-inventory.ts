@@ -144,7 +144,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "freestyle",
     language: "typescript",
-    upstream: { dir: "npm/freestyle@0.2.17/package", entry: "dist/index.d.ts" },
+    upstream: { dir: "npm/freestyle@0.2.20/package", entry: "dist/index.d.ts" },
     runtime: "packages/cloud-sdk/src/freestyle/index.ts",
     constructed: ["Freestyle"],
     // Domains and identities are Freestyle's hosting and IAM products;
@@ -168,9 +168,49 @@ export const SOURCES: readonly Source[] = [
     ],
   },
   {
+    provider: "morph",
+    language: "typescript",
+    upstream: { dir: "npm/morphcloud@0.0.20/package", entry: "dist/index.d.ts" },
+    runtime: "packages/cloud-sdk/src/morph/index.ts",
+    constructed: ["MorphCloudClient"],
+    outside: [],
+  },
+  {
+    provider: "morph-python",
+    language: "python",
+    // The package's root exports only the client; Morph's own examples import
+    // its classes from morphcloud.api, the module counted here.
+    upstream: { dir: "pypi/morphcloud@0.1.115", entry: "morphcloud/api.py" },
+    runtime: "sdks/python/withruntime/morph/api.py",
+    constructed: ["MorphCloudClient"],
+    // ApiClient and AsyncApiClient are its raw HTTP layer, copy_into_or_from_instance
+    // the SFTP helper behind upload and download; the rest are the models of
+    // the account's API keys, secrets, SSH keys and usage (UserAPI, refused).
+    outside: [
+      "ApiClient",
+      "AsyncApiClient",
+      "copy_into_or_from_instance",
+      "APIKey",
+      "CreateAPIKeyResponse",
+      "Secret",
+      "SecretList",
+      "CreateSecretRequest",
+      "UserSSHKey",
+      "ManagedSSHKeyStatus",
+      "ManagedSSHKey",
+      "ManagedSSHKeyList",
+      "ManagedSSHKeyCreateRequest",
+      "ManagedSSHKeyPatchRequest",
+      "ManagedSSHKeyError",
+      "UserInstanceUsage",
+      "UserSnapshotUsage",
+      "UserUsageOverview",
+    ],
+  },
+  {
     provider: "prime",
     language: "python",
-    upstream: { dir: "pypi/prime-sandboxes@0.4.1", entry: "prime_sandboxes" },
+    upstream: { dir: "pypi/prime-sandboxes@0.4.5", entry: "prime_sandboxes" },
     runtime: "sdks/python/withruntime/prime",
     constructed: ["APIClient", "AsyncAPIClient", "SandboxClient", "AsyncSandboxClient"],
     outside: ["Config"],
@@ -178,7 +218,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "modal",
     language: "typescript",
-    upstream: { dir: "npm/modal@0.11.0/package", entry: "dist/index.d.ts" },
+    upstream: { dir: "npm/modal@0.11.1/package", entry: "dist/index.d.ts" },
     runtime: "packages/cloud-sdk/src/modal/index.ts",
     constructed: ["ModalClient"],
     // The approved Modal scope is CPU sandboxes, not Functions, classes,
@@ -191,6 +231,7 @@ export const SOURCES: readonly Source[] = [
       "FunctionCallLogsManager",
       "FunctionCallService",
       "FunctionLogsManager",
+      "FunctionMetricsManager",
       "FunctionService",
       "FunctionTimeoutError",
       "Function_",
@@ -209,7 +250,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "modal-python",
     language: "python",
-    upstream: { dir: "pypi/modal@1.6.0", entry: "modal" },
+    upstream: { dir: "pypi/modal@1.6.2", entry: "modal" },
     runtime: "sdks/python/withruntime/modal",
     constructed: [],
     outside: [
@@ -259,7 +300,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "e2b",
     language: "typescript",
-    upstream: { dir: "npm/e2b@2.55.0/package", entry: "dist/index.d.ts" },
+    upstream: { dir: "npm/e2b@2.56.0/package", entry: "dist/index.d.ts" },
     runtime: "packages/cloud-sdk/src/e2b/index.ts",
     constructed: [],
     // ApiClient is the generated REST transport, ConnectionConfig its
@@ -269,7 +310,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "e2b-code-interpreter",
     language: "typescript",
-    upstream: { dir: "npm/%40e2b%2Fcode-interpreter@2.8.3/package", entry: "dist/index.d.ts" },
+    upstream: { dir: "npm/%40e2b%2Fcode-interpreter@2.9.0/package", entry: "dist/index.d.ts" },
     runtime: "packages/cloud-sdk/src/e2b/code-interpreter.ts",
     constructed: [],
     outside: ["ApiClient", "ConnectionConfig", "default"],
@@ -277,7 +318,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "e2b-python",
     language: "python",
-    upstream: { dir: "pypi/e2b@2.55.1", entry: "e2b" },
+    upstream: { dir: "pypi/e2b@2.56.0", entry: "e2b" },
     runtime: "sdks/python/withruntime/e2b",
     constructed: [],
     outside: ["ApiClient", "ConnectionConfig"],
@@ -285,7 +326,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "e2b-code-interpreter-python",
     language: "python",
-    upstream: { dir: "pypi/e2b-code-interpreter@2.10.5", entry: "e2b_code_interpreter" },
+    upstream: { dir: "pypi/e2b-code-interpreter@2.11.0", entry: "e2b_code_interpreter" },
     runtime: "sdks/python/withruntime/e2b/code_interpreter",
     constructed: [],
     outside: ["ApiClient", "ConnectionConfig"],
@@ -293,7 +334,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "daytona",
     language: "typescript",
-    upstream: { dir: "npm/%40daytona%2Fsdk@0.223.1/package", entry: "cjs/index.d.ts" },
+    upstream: { dir: "npm/%40daytona%2Fsdk@0.224.1/package", entry: "cjs/index.d.ts" },
     runtime: "packages/cloud-sdk/src/daytona/index.ts",
     constructed: ["Daytona"],
     outside: [],
@@ -301,7 +342,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "daytona-python",
     language: "python",
-    upstream: { dir: "pypi/daytona@0.223.1", entry: "daytona" },
+    upstream: { dir: "pypi/daytona@0.224.1", entry: "daytona" },
     runtime: "sdks/python/withruntime/daytona",
     constructed: ["Daytona", "AsyncDaytona"],
     outside: [],
@@ -309,7 +350,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "vercel",
     language: "typescript",
-    upstream: { dir: "npm/%40vercel%2Fsandbox@3.6.1/package", entry: "dist/index.d.ts" },
+    upstream: { dir: "npm/%40vercel%2Fsandbox@3.8.0/package", entry: "dist/index.d.ts" },
     runtime: "packages/cloud-sdk/src/vercel/index.ts",
     constructed: [],
     outside: [],
@@ -317,7 +358,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "vercel-python",
     language: "python",
-    upstream: { dir: "pypi/vercel-sandbox@0.9.0", entry: "vercel/sandbox" },
+    upstream: { dir: "pypi/vercel-sandbox@0.9.1", entry: "vercel/sandbox" },
     runtime: "sdks/python/withruntime/vercel",
     constructed: [],
     outside: [],
@@ -325,7 +366,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "blaxel",
     language: "typescript",
-    upstream: { dir: "npm/%40blaxel%2Fcore@0.3.25/package", entry: "dist/cjs/types/index.d.ts" },
+    upstream: { dir: "npm/%40blaxel%2Fcore@0.3.30/package", entry: "dist/cjs/types/index.d.ts" },
     runtime: "packages/cloud-sdk/src/blaxel/index.ts",
     constructed: [],
     // Blaxel's other products: agents, models, tools, jobs, MCP, hosted
@@ -354,7 +395,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "blaxel-python",
     language: "python",
-    upstream: { dir: "pypi/blaxel@0.4.13", entry: "blaxel/core" },
+    upstream: { dir: "pypi/blaxel@0.4.18", entry: "blaxel/core" },
     runtime: "sdks/python/withruntime/blaxel",
     constructed: [],
     outside: [],
@@ -637,8 +678,10 @@ export function typescriptSurface(entry: string, names: readonly string[] | null
 const PYTHON = String.raw`
 import ast, json, pathlib, sys
 root = pathlib.Path(sys.argv[1]); wanted = json.loads(sys.argv[2])
+# An entry that is one module (morphcloud/api.py) counts what that module defines.
+module = root if root.is_file() else None
 classes, functions, aliases, assigned, refused_exports = {}, {}, {}, {}, set()
-for path in sorted(root.rglob("*.py")):
+for path in [module] if module else sorted(root.rglob("*.py")):
     try: tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError: continue
     for node in tree.body:
@@ -656,6 +699,8 @@ for path in sorted(root.rglob("*.py")):
                 if (isinstance(target, ast.Name) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                         and node.value.func.id.lstrip("_") == "refused"):
                     refused_exports.add(target.id)
+if wanted is None and module:
+    wanted = [n for n in [*classes, *functions] if not n.startswith("_")]
 if wanted is None:
     init = ast.parse((root / "__init__.py").read_text(encoding="utf-8"))
     wanted = []

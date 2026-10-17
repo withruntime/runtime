@@ -1,4 +1,4 @@
-"""prime-sandboxes 0.4.1's network rules, bulk waits, logs, SSH and the
+"""prime-sandboxes 0.4.5's network rules, bulk waits, logs, SSH and the
 surfaces this adapter refuses, against the native SDK fake."""
 import asyncio
 import sys

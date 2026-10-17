@@ -45,6 +45,7 @@ const expected: Record<string, string> = {
   "withruntime/codesandbox": "CodeSandbox",
   "withruntime/sprites": "SpritesClient",
   "withruntime/freestyle": "Freestyle",
+  "withruntime/morph": "MorphCloudClient",
   "withruntime/modal": "ModalClient",
   "withruntime/cloudflare": "getSandbox",
   "withruntime/sandboxes": "sandboxes",

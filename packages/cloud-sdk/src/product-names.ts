@@ -1,5 +1,5 @@
-/** CLOUD.md section 4: one plural word per product on every interface (Marc,
- * 6 October 2026). The API path `/v1/<name>`, the SDK's `runtime.<name>`, the
+/** CLOUD.md section 4: one plural word per product on every interface
+ * (6 October 2026). The API path `/v1/<name>`, the SDK's `runtime.<name>`, the
  * CLI's `runtime <name>` and the MCP's `runtime_<name>` all use `name` below;
  * the CLI also takes `singular` as a typing shortcut, and nothing else does.
  *

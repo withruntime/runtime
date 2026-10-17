@@ -1,4 +1,4 @@
-"""Generated synchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.1."""
+"""Generated synchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.5."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -12,9 +12,10 @@ from .. import Runtime
 from .._errors import RuntimeError as SDKError
 from .._compat import runtime_key, CompatibilityError, Model, ENV_PATH, dockerfile, environment, positive, reject, values
 from .models import (CreateSandboxRequest, Sandbox, SandboxListResponse, CommandResponse, FileUploadResponse, ReadFileResponse, BackgroundJob, BackgroundJobStatus, BackgroundJobStatusSnapshot, SandboxStatusSnapshot, SandboxStatusLookupError,
-    BatchSandboxStatusResponse, BulkDeleteSandboxResponse, EgressPolicyStatus, SandboxEgressPolicy, _validate_egress_lists)
+    BatchSandboxStatusResponse, BulkDeleteSandboxResponse, EgressPolicyStatus, SandboxEgressPolicy, _validate_egress_lists,
+    SandboxCheckpoint, CheckpointLookupError, BatchCheckpointResponse, CheckpointDeleteError, DeleteSandboxCheckpointsResponse)
 
-from .exceptions import CommandTimeoutError, DownloadTimeoutError, UploadTimeoutError
+from .exceptions import APIError, CommandTimeoutError, DownloadTimeoutError, UploadTimeoutError
 from contextlib import contextmanager
 from .._request_scope import request_scope
 
@@ -77,6 +78,60 @@ def _egress_status(policy):
     return EgressPolicyStatus(policy=rules, generation=generation, applied_generation=generation, applied=True)
 
 
+#: A Runtime snapshot's state as a Prime checkpoint's. Only DURABLE restores.
+_CHECKPOINT_STATES = {"capturing": "PENDING", "ready": "DURABLE", "failed": "FAILED", "deleting": "DELETING",
+                      "deleted": "DELETING"}
+
+_LAN = ("Prime LAN networks are not supported: Runtime cannot limit which of your sandboxes reach each other "
+        "by network, tag or port. runtime.networks.private.set(enabled=True) lets all of your sandboxes reach "
+        "each other at <id>.sandbox.internal; leave it off to keep them apart")
+
+
+def _checkpoint(snapshot):
+    """A Runtime disk-only snapshot as Prime's filesystem checkpoint. Each one
+    stands alone, needing no other to restore: no parent, depth 1."""
+    labels = snapshot.get("labels") or {}
+    disk = (snapshot.get("shape") or {}).get("diskMiB")
+    created = snapshot.get("createdAt")
+    return SandboxCheckpoint(id=snapshot["id"], sandbox_id=snapshot["sourceSandboxId"], parent_id=None, team_id=None,
+        state=_CHECKPOINT_STATES.get(snapshot["state"], str(snapshot["state"]).upper()), depth=1,
+        docker_image=labels.get("compat.image", ""), disk_size_bytes=disk * 1024 * 1024 if disk else None,
+        stored_bytes=snapshot.get("storedBytes"), error=snapshot.get("error"), created_at=created,
+        updated_at=snapshot.get("readyAt") or created)
+
+
+def _validate_ids(values, name):
+    if not isinstance(values, list) or not values or len(values) > 100:
+        raise ValueError(f"{name} must contain between 1 and 100 entries")
+    if len(set(values)) != len(values):
+        raise ValueError(f"{name} must be unique")
+    if any(not isinstance(value, str) or not value or len(value) > 64 for value in values):
+        raise ValueError(f"{name} must contain IDs between 1 and 64 characters")
+
+
+#: The job's shell writes its PID first: a job that cannot (a full disk) never
+#: runs, and the launch says so. The subshell captures an explicit `exit`; the
+#: outer shell writes the status. Positional arguments keep paths and the user
+#: command apart from the source.
+_JOB = ('printf "%s\\n" "$$" > "$6" || exit 1; '
+        '(if [ -n "$5" ]; then cd -- "$5" || exit; fi; bash -c "$4") > "$1" 2> "$2"; printf "%s\\n" "$?" > "$3"')
+#: Waits up to 10 s for the job's PID file. 1: the job's process (gone or a
+#: zombie) ended without writing one. 2: none in time.
+_LAUNCH = ('i=0; while [ "$i" -lt 200 ]; do grep -qs . "$1" && exit 0; '
+           'if [ -n "$2" ] && { [ ! -d "/proc/$2" ] || grep -qs "^State:[[:space:]]*Z" "/proc/$2/status"; }; then '
+           'grep -qs . "$1" && exit 0; '
+           'echo "the job exited before it started" >&2; exit 1; fi; sleep 0.05; i=$((i + 1)); done; '
+           'echo "the job did not start within 10 s" >&2; exit 2')
+#: Prints the exit code, nothing while the job runs, or "lost" when it died
+#: without one. An exit file counts only once it has content (a full disk can
+#: leave it empty). The job is alive while its PID's cmdline still names its
+#: exit file, which rules out zombies and reused PIDs; the exit file is read
+#: again after, as the job writes it just before it exits. A job with no PID
+#: file, started by an older adapter, reads as running, as it did then.
+_STATUS = ('grep -s . "$1" && exit; [ -s "$2" ] || exit 0; '
+           'grep -qF -- "$1" "/proc/$(cat "$2")/cmdline" 2>/dev/null && exit; grep -s . "$1" || echo lost')
+
+
 def _validate_background_output_limits(concurrency, queue_size, cache_bytes):
     if concurrency <= 0:
         raise ValueError("background_job_output_concurrency must be positive")
@@ -103,9 +158,10 @@ class SandboxClient:
                 raise CompatibilityError(f"Prime {key} cannot yet retain its upstream behavior")
         cpu = positive(p["cpu_cores"], "cpu_cores", integral=True)
         memory = positive(p["memory_gb"] * 1024, "memory_gb", integral=True)
-        disk = positive(p["disk_size_gb"] * 1024, "disk_size_gb", integral=True)
+        checkpoint = p.get("checkpoint_id")
+        disk = None if checkpoint else positive(p["disk_size_gb"] * 1024, "disk_size_gb", integral=True)
         lifetime = positive(p["timeout_minutes"] * 60, "timeout_minutes", integral=True)
-        source = dockerfile(p["docker_image"])
+        source = None if checkpoint else dockerfile(p["docker_image"])
         env = p.get("environment_vars") or {}
         environment(json.dumps(env).encode())
         start = values(p["start_command"]) if p.get("start_command") else None
@@ -115,11 +171,22 @@ class SandboxClient:
                 raise ValueError("start_command.executable must be a nonempty string without NUL")
             if any(not isinstance(arg, str) or "\x00" in arg for arg in start.get("args", [])):
                 raise ValueError("start_command.args must contain strings without NUL")
-        image = self._runtime.images.build(dockerfile=source)
-        sb = self._runtime.sandboxes.create(name=p["name"], image=image["id"],
-            vcpu=cpu, memory_mib=memory, disk_mib=disk, timeout_seconds=lifetime,
+        if checkpoint:
+            # A checkpoint is a disk-only snapshot: the copy boots fresh from its
+            # files at the size asked, on a disk the size of the saved one.
+            snapshot = self._runtime.snapshots.get(checkpoint)
+            if snapshot.get("mode") != "disk":
+                raise CompatibilityError(f"{checkpoint} is a whole-machine snapshot, not a filesystem checkpoint; "
+                                         "start it with runtime.sandboxes.create(snapshot=...)")
+            image_name = (snapshot.get("labels") or {}).get("compat.image", "")
+            origin = {"snapshot": snapshot["id"]}
+        else:
+            image_name = p["docker_image"]
+            origin = {"image": (self._runtime.images.build(dockerfile=source))["id"], "disk_mib": disk}
+        sb = self._runtime.sandboxes.create(name=p["name"], **origin,
+            vcpu=cpu, memory_mib=memory, timeout_seconds=lifetime,
             idle_pause_seconds=0, on_lease_end="stop", region=p.get("region"), idempotency_key=p.get("idempotency_key"),
-            labels={"compat.provider": "prime", "compat.image": p["docker_image"],
+            labels={"compat.provider": "prime", **({"compat.image": image_name} if image_name else {}),
                     "compat.labels": json.dumps(p.get("labels") or [])},
             network={"internet": True, **({"allow": p["network_allowlist"]} if p.get("network_allowlist") is not None else {}),
                      **({"deny": p["network_denylist"]} if p.get("network_denylist") is not None else {})})
@@ -212,6 +279,101 @@ class SandboxClient:
             if error.status != 404:
                 raise
             return ""
+
+    def checkpoint(self, sandbox_id):
+        """A disk-only snapshot of the sandbox's files. A running sandbox is
+        paused for the capture and woken after, so the checkpoint comes back
+        DURABLE (or the call fails); it is kept while the account has credit."""
+        sb = self._runtime.sandboxes.get(sandbox_id)
+        image = (sb.info.get("labels") or {}).get("compat.image")
+        labels = {"compat.provider": "prime", **({"compat.image": image} if image else {})}
+        snapshot = sb.snapshot(mode="disk", labels=labels)
+        if snapshot.get("mode", "disk") != "disk":
+            raise CompatibilityError("Runtime did not confirm a filesystem-only checkpoint")
+        return _checkpoint({"labels": labels, **snapshot})
+
+    def get_checkpoint(self, checkpoint_id):
+        return _checkpoint(self._runtime.snapshots.get(checkpoint_id))
+
+    def get_checkpoints(self, checkpoint_ids):
+        _validate_ids(checkpoint_ids, "checkpoint_ids")
+        checkpoints, errors = [], []
+        for checkpoint_id in checkpoint_ids:
+            try:
+                checkpoints.append(_checkpoint(self._runtime.snapshots.get(checkpoint_id)))
+            except SDKError as error:
+                if error.status != 404:
+                    raise
+                errors.append(CheckpointLookupError(checkpoint_id=checkpoint_id, code="NOT_FOUND", message=str(error)))
+        return BatchCheckpointResponse(checkpoints=checkpoints, errors=errors)
+
+    def wait_for_checkpoint(self, checkpoint_id, timeout_seconds=300):
+        positive(timeout_seconds, "timeout_seconds")
+        deadline = time.monotonic() + timeout_seconds
+        delay = 0.5
+        while time.monotonic() < deadline:
+            checkpoint = self.get_checkpoint(checkpoint_id)
+            if checkpoint.state == "DURABLE":
+                return checkpoint
+            if checkpoint.state in ("FAILED", "DELETING"):
+                raise RuntimeError(f"Checkpoint {checkpoint_id} cannot become durable (state={checkpoint.state}): "
+                                   f"{checkpoint.error or 'no error details'}")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 1.5, 5.0)
+        raise TimeoutError(f"Checkpoint {checkpoint_id} did not become DURABLE within {timeout_seconds:g}s")
+
+    def list_checkpoints(self, sandbox_id, checkpoint_id=None):
+        """The sandbox's filesystem checkpoints, oldest first."""
+        self._runtime.sandboxes.get(sandbox_id)
+        result = []
+        for snapshot in self._runtime.snapshots.list(sandbox_id=sandbox_id):
+            if (snapshot.get("mode") == "disk" and snapshot.get("state") != "deleted"
+                    and checkpoint_id in (None, snapshot["id"])):
+                result.append(_checkpoint(snapshot))
+        return sorted(result, key=lambda checkpoint: checkpoint.created_at)
+
+    def delete_checkpoint(self, checkpoint_id):
+        self._runtime.snapshots.delete(checkpoint_id)
+        return None
+
+    def delete_sandbox_checkpoints(self, sandbox_id):
+        deleted, errors = [], []
+        for checkpoint in self.list_checkpoints(sandbox_id):
+            if checkpoint.state == "DELETING":
+                continue
+            try:
+                self._runtime.snapshots.delete(checkpoint.id)
+                deleted.append(checkpoint.id)
+            except SDKError as error:
+                if error.status not in (404, 409):
+                    raise
+                errors.append(CheckpointDeleteError(checkpoint_id=checkpoint.id,
+                    code="NOT_FOUND" if error.status == 404 else "CONFLICT", message=str(error)))
+        return DeleteSandboxCheckpointsResponse(deleted=deleted, errors=errors)
+
+    def create_lan_network(self, name, team_id=None):
+        raise CompatibilityError(_LAN)
+
+    def list_lan_networks(self, team_id=None):
+        raise CompatibilityError(_LAN)
+
+    def get_lan_network(self, network_id):
+        raise CompatibilityError(_LAN)
+
+    def delete_lan_network(self, network_id):
+        raise CompatibilityError(_LAN)
+
+    def set_lan_rules(self, network_id, rules):
+        raise CompatibilityError(_LAN)
+
+    def add_lan_member(self, network_id, sandbox_id, tags=None):
+        raise CompatibilityError(_LAN)
+
+    def remove_lan_member(self, network_id, sandbox_id):
+        raise CompatibilityError(_LAN)
 
     def create_ssh_session(self, sandbox_id, public_key, ttl_seconds=None):
         raise CompatibilityError("Prime SSH sessions on a public host and port are not supported; "
@@ -327,11 +489,22 @@ class SandboxClient:
         job = BackgroundJob(job_id=job_id, sandbox_id=sandbox_id,
             stdout_log_file=root + ".stdout.log", stderr_log_file=root + ".stderr.log", exit_file=root + ".exit")
         sb = self._runtime.sandboxes.get(sandbox_id)
-        # Positional arguments keep paths and user command separate from source.
-        # A subshell captures an explicit `exit`; the outer shell writes status.
-        script = '(if [ -n "$5" ]; then cd -- "$5" || exit; fi; bash -c "$4") > "$1" 2> "$2"; printf "%s\\n" "$?" > "$3"'
-        sb.spawn(["bash", "-c", script, "runtime-prime-job", job.stdout_log_file,
-            job.stderr_log_file, job.exit_file, command, working_dir or ""], env=self._environment(sb, env))
+        pid_file = root + ".pid"
+        process = sb.spawn(["bash", "-c", _JOB, "runtime-prime-job", job.stdout_log_file,
+            job.stderr_log_file, job.exit_file, command, working_dir or "", pid_file],
+            env=self._environment(sb, env))
+        # Answer once the job has started, as Prime does since 0.4.4.
+        pid = (getattr(process, "info", None) or {}).get("pid")
+        launch = sb.exec(["bash", "-c", _LAUNCH, "runtime-prime-launch", pid_file, str(pid or "")],
+                               timeout_ms=30_000)
+        if launch.exit_code != 0:
+            if launch.exit_code == 2:
+                try:
+                    process.kill("SIGKILL")
+                except Exception:  # noqa: BLE001 - the failed launch is what the caller hears
+                    pass
+            reason = (launch.stderr or "").strip() or "the job did not start"
+            raise APIError(f"Failed to launch background job {job_id}: {reason}")
         return job
 
     def get_background_job_status(self, sandbox_id, job, timeout=None):
@@ -340,14 +513,13 @@ class SandboxClient:
         if timeout is not None:
             raise CompatibilityError("Per-job retrieval deadlines are not yet supported")
         sb = self._runtime.sandboxes.get(sandbox_id)
+        response = sb.exec(["bash", "-c", _STATUS, "runtime-prime-status", job.exit_file,
+                                  "/tmp/job_" + job.job_id + ".pid"])
+        status = (response.stdout or "").strip()
+        if status == "lost":
+            raise APIError(f"Background job {job.job_id} exited without recording an exit code")
         try:
-            raw = sb.files.read(job.exit_file)
-        except SDKError as error:
-            if error.status != 404:
-                raise
-            raw = b""
-        try:
-            code = int(raw.strip())
+            code = int(status)
         except ValueError:
             code = None
         return BackgroundJobStatusSnapshot(sandbox_id=sandbox_id, job_id=job.job_id,
@@ -410,5 +582,6 @@ for _name in ("create", "get", "list", "delete", "wait_for_creation", "execute_c
               "upload_file", "download_file", "read_file", "start_background_job", "get_background_job_status",
               "get_background_job", "get_background_job_statuses", "get_background_jobs", "run_background_job",
               "get_sandbox_statuses", "bulk_delete", "bulk_wait_for_creation", "get_network", "set_network",
-              "get_logs"):
+              "get_logs", "checkpoint", "get_checkpoint", "get_checkpoints", "wait_for_checkpoint", "list_checkpoints",
+              "delete_checkpoint", "delete_sandbox_checkpoints"):
     setattr(SandboxClient, _name, translate(getattr(SandboxClient, _name)))

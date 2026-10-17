@@ -35,6 +35,34 @@ export type Preview = {
   spec: PreviewSpec;
   status?: string;
 };
+/** @blaxel/core 0.3.29's shorthand for `previews.create` and
+ * `createIfNotExists`: a port, with a name (`preview-<port>` when left out)
+ * and public (false when left out). */
+export type SandboxPreviewCreateConfiguration = {
+  port: number;
+  name?: string;
+  public?: boolean;
+};
+
+const isShorthand = (preview: Preview | SandboxPreviewCreateConfiguration): boolean =>
+  !("metadata" in preview || "spec" in preview);
+
+/** Blaxel's shorthand as the full shape, with Blaxel's checks and messages. */
+function normalizePreview(preview: Preview | SandboxPreviewCreateConfiguration): Preview {
+  if (!isShorthand(preview)) return preview as Preview;
+  const short = preview as SandboxPreviewCreateConfiguration;
+  if (!Number.isInteger(short.port) || short.port < 1 || short.port > 65535)
+    throw new RangeError("Preview port must be an integer between 1 and 65535");
+  if (short.name !== undefined && (typeof short.name !== "string" || short.name.length === 0))
+    throw new RangeError("Preview name must be a nonempty string");
+  if (short.public !== undefined && typeof short.public !== "boolean")
+    throw new RangeError("Preview public must be a boolean");
+  return {
+    metadata: { name: short.name ?? `preview-${short.port}` },
+    spec: { port: short.port, public: short.public ?? false },
+  };
+}
+
 export type PreviewToken = {
   metadata: { name: string; resourceName?: string; previewName?: string };
   spec: { readonly expired?: boolean; expiresAt?: string; readonly token?: string };
@@ -43,6 +71,9 @@ export type PreviewToken = {
 /** What the previews need from their sandbox. */
 export interface PreviewContext {
   readonly sandboxName: string;
+  /** The Runtime sandbox's id, when known: tokens made for a sandbox are
+   * never reused for another of the same name. */
+  readonly sandboxId?: string;
   run<T>(work: (runtime: RuntimeSandbox) => Promise<T>): Promise<T>;
   /** The sandbox's labels as last read. */
   labels(): Record<string, string>;
@@ -87,6 +118,9 @@ export class SandboxPreviewToken {
   constructor(previewToken: PreviewToken) {
     this.#token = previewToken;
   }
+  get name(): string {
+    return this.#token.metadata?.name ?? "";
+  }
   get value(): string {
     return this.#token.spec.token ?? "";
   }
@@ -98,6 +132,10 @@ export class SandboxPreviewToken {
     return at !== undefined && Date.parse(at) <= Date.now();
   }
 }
+
+/** The token createIfExpired made last, per sandbox and port, in this
+ * process: Runtime keeps no list of the tokens it signed. */
+const madeTokens = new Map<string, { token: SandboxPreviewToken; expiresAt: number }>();
 
 /** A preview's tokens. Runtime signs a token for a duration; it keeps no
  * list of the tokens issued. */
@@ -113,6 +151,9 @@ export class SandboxPreviewTokens {
   }
   get resourceName(): string {
     return this.#ctx.sandboxName;
+  }
+  #key(): string {
+    return `${this.#ctx.sandboxId ?? this.#ctx.sandboxName}:${this.#preview.spec.port}`;
   }
   /** A token bounded by `expiresAt`; native signing floors milliseconds and
    * caps it to the caller's session. Older servers refuse without a TTL fallback. */
@@ -142,6 +183,39 @@ export class SandboxPreviewTokens {
       spec: { token: got.token, expiresAt: got.tokenExpiresAt! },
     });
   }
+  /** Blaxel's (0.3.29): the latest token lasting at least `minValidity` ms
+   * more (an hour unless given) and not past `expiresAt` (a day from now
+   * unless given), else a new one until `expiresAt`. Blaxel picks among the
+   * preview's listed tokens; Runtime keeps no list, so the one reused is the
+   * token this call made last in this process for this sandbox's port, and a
+   * new process makes a new one. Arguments are checked as Blaxel does. */
+  async createIfExpired(
+    expiresAt?: Date,
+    minValidity: number = 3_600_000,
+  ): Promise<SandboxPreviewToken> {
+    const now = Date.now();
+    if (!Number.isFinite(minValidity) || minValidity < 0)
+      throw new RangeError("minValidity must be finite and non-negative");
+    const requested = expiresAt ?? new Date(now + 86_400_000);
+    const ceiling = requested instanceof Date ? requested.getTime() : Number.NaN;
+    if (!Number.isFinite(ceiling) || ceiling <= now || ceiling < now + minValidity)
+      throw new RangeError("expiresAt must be a valid future date at least minValidity from now");
+    if (this.#preview.spec.public === true)
+      throw new Error("Cannot create or reuse a token for a public preview");
+    const key = this.#key();
+    const kept = madeTokens.get(key);
+    if (
+      kept &&
+      kept.expiresAt > now &&
+      kept.expiresAt >= now + minValidity &&
+      kept.expiresAt <= ceiling
+    )
+      return kept.token;
+    const token = await this.create(requested);
+    const until = Date.parse(String(token.expiresAt));
+    if (Number.isFinite(until)) madeTokens.set(key, { token, expiresAt: until });
+    return token;
+  }
   list(): Promise<never> {
     return Promise.reject(
       new NotSupportedError(
@@ -155,6 +229,7 @@ export class SandboxPreviewTokens {
   async delete(_tokenName: string): Promise<{ message?: string }> {
     const port = this.#preview.spec.port!;
     await this.#ctx.run((runtime) => runtime.previews.rotate(port));
+    madeTokens.delete(this.#key());
     return { message: "Every token of this preview was revoked" };
   }
 }
@@ -175,6 +250,10 @@ export class SandboxPreview {
   }
   get spec(): PreviewSpec {
     return this.#preview.spec;
+  }
+  /** The preview's address (`spec.url`), or `""`. */
+  get url(): string {
+    return this.#preview.spec?.url ?? "";
   }
 }
 
@@ -216,8 +295,15 @@ export class SandboxPreviews {
     );
   }
 
-  /** Shares `spec.port`: public with `spec.public`, else behind a token. */
-  async create(preview: Preview, _force?: boolean): Promise<SandboxPreview> {
+  /** Shares `spec.port`: public with `spec.public`, else behind a token.
+   * Blaxel's shorthand `{ port, name?, public? }` is a private
+   * `preview-<port>` unless it says otherwise. */
+  async create(
+    input: Preview | SandboxPreviewCreateConfiguration,
+    _force?: boolean,
+  ): Promise<SandboxPreview> {
+    const preview =
+      input && typeof input === "object" ? normalizePreview(input) : (input as Preview);
     const spec = preview?.spec ?? {};
     const name = preview?.metadata?.name;
     const refusals: Array<[keyof PreviewSpec, string]> = [
@@ -267,13 +353,26 @@ export class SandboxPreviews {
     );
   }
 
-  /** The named preview, or a new one when there is none. */
-  async createIfNotExists(preview: Preview, force?: boolean): Promise<SandboxPreview> {
+  /** The named preview, or a new one when there is none. An existing
+   * preview is answered as it is: the shorthand's private default applies
+   * only to a new one. */
+  async createIfNotExists(
+    input: Preview | SandboxPreviewCreateConfiguration,
+    force?: boolean,
+  ): Promise<SandboxPreview> {
+    const preview = normalizePreview(input);
     try {
       return await this.get(preview.metadata.name);
     } catch (error) {
       if (!isNotFound(error)) throw error;
-      return this.create(preview, force);
+    }
+    try {
+      return await this.create(preview, force);
+    } catch (error) {
+      // Blaxel's race: another caller made it first.
+      if (!isShorthand(input) || (error as { status?: unknown } | null)?.status !== 409)
+        throw error;
+      return this.get(preview.metadata.name);
     }
   }
 

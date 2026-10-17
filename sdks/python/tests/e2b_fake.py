@@ -309,12 +309,16 @@ class _Info(dict):
     paid up to when it has a time limit, None when it has none."""
 
     limited = True
+    #: The end an update set, once one has (None: no limit).
+    limit_end: Any = ...
 
     def __contains__(self, key: object) -> bool:
         return key == "endsAt" or super().__contains__(key)
 
     def __getitem__(self, key: Any) -> Any:
         if key == "endsAt":
+            if self.limit_end is not ...:
+                return self.limit_end
             return super().get("expiresAt") if self.limited else None
         return super().__getitem__(key)
 
@@ -339,7 +343,7 @@ class FakeSandbox:
             "autoWake": fields.get("auto_wake", True),
             "stopReason": None, "createdAt": "2026-09-23T00:00:00.000Z",
             "timeoutSeconds": timeout, "expiresAt": _iso(time.time() + (timeout or 1800)),
-            "funding": world.funding})
+            "funding": world.funding, "persistent": bool(fields.get("persistent"))})
         # A persistent sandbox (a pilot's) has no time limit, whatever it asked.
         self.info.limited = bool(timeout) and not fields.get("persistent")
         self.files = FakeFiles(world, self)
@@ -423,6 +427,17 @@ class FakeSandbox:
     def wake(self, timeout_seconds: Optional[int] = None) -> "FakeSandbox":
         self._w.record("sandbox.wake", self.id, timeout_seconds)
         self.info["state"] = "running"
+        return self
+
+    def update(self, **settings: Any) -> "FakeSandbox":
+        """A new time limit from now, sooner or later; 0 takes it away
+        (0880_cloud_time_limit_set). The lease already paid for stays."""
+        import time
+        self._w.record("sandbox.update", self.id, settings)
+        if "timeout_seconds" in settings:
+            seconds = settings["timeout_seconds"]
+            self.info["timeoutSeconds"] = seconds
+            self.info.limit_end = None if seconds == 0 else _iso(time.time() + seconds)
         return self
 
     def extend(self, seconds: int) -> "FakeSandbox":

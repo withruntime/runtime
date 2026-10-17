@@ -147,6 +147,21 @@ with its token. A Blaxel key is never sent anywhere. Drives, codegen, schedules 
 `NotSupportedError` before anything happens, naming what to use instead.
 `BLAXEL.md` in this package lists every mapping and gap.
 
+## Code written for Morph Cloud
+
+`withruntime/morph` translates Morph's TypeScript client (`morphcloud`).
+Change the import:
+
+```ts no-run
+import { MorphCloudClient } from "withruntime/morph"; // was: from "morphcloud"
+```
+
+Instances become sandboxes, snapshots Runtime snapshots, metadata labels and
+HTTP services previews; `setup` caches by Morph's chain hash and `branch`
+copies memory and processes. `stop` deletes the sandbox, as Morph's does.
+SSH, reboot and a time limit set after start throw `CompatibilityError`
+naming the alternative. `COMPATIBILITY.md` lists every mapping.
+
 ## Agent frameworks
 
 `withruntime/openai-agents` is a sandbox client for the OpenAI Agents SDK's
@@ -182,6 +197,24 @@ The bridge serves Runtime's MCP tools on stdio over the saved connection; not
 connected yet, it offers `runtime_connect`, which walks you through the browser
 approval. Remote clients add `https://api.withruntime.com/mcp` and sign in through
 the browser, or send a bearer key.
+
+## How Runtime compares
+
+For typical agent work, Runtime costs 42% to 88% less than fourteen other
+sandbox providers at their published rates. These pages show the arithmetic,
+each with the rates it used and the date they were read:
+
+- [Best sandbox for AI agents](https://withruntime.com/compare/best-sandbox-for-ai-agents)
+- Alternatives to [E2B](https://withruntime.com/compare/e2b-alternatives),
+  [Daytona](https://withruntime.com/compare/daytona-alternatives),
+  [Modal](https://withruntime.com/compare/modal-alternatives) and
+  [Vercel Sandbox](https://withruntime.com/compare/vercel-sandbox-alternatives)
+- [E2B vs Daytona](https://withruntime.com/compare/e2b-vs-daytona), and
+  [every comparison](https://withruntime.com/compare)
+- [The agent sandbox price index](https://withruntime.com/pricing/agent-sandbox-price-index):
+  every provider's rates, also as CSV and JSON
+- [Sandbox cost calculator](https://withruntime.com/calculators/sandbox-cost-calculator)
+  and [Runtime's pricing](https://withruntime.com/pricing)
 
 ## Reliability and support
 

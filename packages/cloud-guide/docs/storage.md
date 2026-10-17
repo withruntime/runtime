@@ -81,6 +81,8 @@ runtime volumes backup-rm "${backup}"
   volume's `retentionDays`, 7 unless you set 1 to 365.
 - **On request:** `backup` makes one now and waits up to a minute for it to be
   ready. A backup can be kept for 1 to 365 days.
+- **Without credit**, a backup is kept at most seven days, whatever you ask
+  for, as snapshots and paused sandboxes are.
 - **The newest ready backup is kept** past its retention for as long as the
   volume exists, so a run of failed backups never leaves a volume with none.
   It goes once a newer one is ready, when you delete it, or at its retention's
@@ -89,6 +91,13 @@ runtime volumes backup-rm "${backup}"
   region, on whichever server has room. It is ready once every byte has been
   downloaded and checked; `restoredFrom` names the backup. The original volume
   is untouched.
+- **Proving a backup restores:** a `ready` backup has had every piece it
+  stores found in the object store at the size written (pieces it shares with
+  earlier backups were found there within the past week). Only a restore opens
+  every piece and checks its content, so to prove the data, restore it and
+  delete the restored volume once checked; it is charged by the GiB-hour only
+  while it exists. The restored volume counts toward your volume limit like
+  any other: 5 until the account has credit, 10,000 after ([limits](./limits)).
 - **Incremental:** only what changed since an earlier backup of the same
   volume is stored again, and empty space is not stored at all.
 - **Deleting a volume** keeps its backups until each one's retention ends, so

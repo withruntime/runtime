@@ -32,7 +32,9 @@ logger = logging.getLogger("withruntime")
 # longer shadows the guest's resolver, so Debian and Ubuntu images look up names.
 # runtime-builder/6 (9 October 2026): ENV expands the base image's variables, and
 # a step's HOME is its user's home.
-IMAGE_RECIPE = "runtime-builder/6"
+# runtime-builder/7 (15 October 2026): a WORKDIR's new directories are the
+# USER's, and root owns what COPY and ADD write unless --chown, as in Docker.
+IMAGE_RECIPE = "runtime-builder/7"
 
 
 def image_tag(key: str) -> str:

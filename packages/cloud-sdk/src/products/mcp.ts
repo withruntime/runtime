@@ -34,6 +34,8 @@ export type McpServerRequest =
 export type McpGateway = {
   running: boolean;
   port: number | null;
+  /** The URLs are a public preview: no link token, no expiry. */
+  public?: boolean;
   /** Send it as `Authorization: Bearer <token>`. */
   token?: string | null;
   headers?: Record<string, string>;
@@ -73,7 +75,13 @@ export function sandboxMcp(t: Transport, sandbox: Sandbox) {
   return {
     start: (
       servers: McpServerRequest[],
-      input: { port?: number; replace?: boolean } = {},
+      input: {
+        port?: number;
+        replace?: boolean;
+        /** URLs that never expire, guarded by the header alone, which is kept
+         * across starts until `stop()`. Paid accounts only. */
+        public?: boolean;
+      } = {},
       options?: RequestOptions,
     ) =>
       t.json<McpGateway>({ method: "POST", path: path(), body: { servers, ...input }, ...options }),

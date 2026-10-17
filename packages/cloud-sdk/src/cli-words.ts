@@ -28,6 +28,7 @@ const OPTIONS: Record<string, { flag: string; micros?: true }> = {
   funding: { flag: "--trial / --paid" },
   image: { flag: "--image" },
   snapshot: { flag: "--snapshot" },
+  spreadFrom: { flag: "--spread-from" },
   volumes: { flag: "--volume" },
   network: { flag: "--allow / --deny / --connect / --no-internet" },
   maxCostMicros: { flag: "--max-cost", micros: true },

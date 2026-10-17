@@ -34,6 +34,12 @@ export const VERSION_FILES: Record<Pkg, Spot[]> = {
   python: [
     { path: "sdks/python/pyproject.toml", pattern: /^version = "([^"]*)"$/gm, count: 1 },
     { path: "sdks/python/withruntime/_version.py", pattern: /^VERSION = "([^"]*)"$/gm, count: 1 },
+    // The package test's own witness, so a bump does not fail it.
+    {
+      path: "sdks/python/tests/test_package_typing.py",
+      pattern: /^VERSION = "([^"]*)"$/gm,
+      count: 1,
+    },
     { path: "packages/cloud-guide/docs/python.md", pattern: GUIDE, count: 1 },
   ],
   langchain: [

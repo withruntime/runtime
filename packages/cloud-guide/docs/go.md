@@ -784,12 +784,14 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `Retryable()` says whether trying the same call again may work.
 
-**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `Sandboxes.Create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
 Set `withruntime.WithWaitForCapacity` on the client, or `WaitForCapacity` on one
-create; zero fails at once.
+create, wake or restart; zero fails at once. A sandbox stays on its server, so a
+wake or restart refused with `no_capacity` is sent again with the same
+idempotency key until room frees. A fork never waits.
 
 ## Read-only keys and daily limits
 

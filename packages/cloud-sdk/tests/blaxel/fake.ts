@@ -18,6 +18,7 @@ const ours = (sandbox: FakeSandbox) => worldOf(sandbox) instanceof BlaxelWorld;
 const original = {
   waitFor: proto.waitFor as (this: FakeSandbox, ...args: unknown[]) => Promise<unknown>,
   fork: proto.fork as (this: FakeSandbox, ...args: unknown[]) => Promise<unknown>,
+  update: proto.update as (this: FakeSandbox, ...args: unknown[]) => Promise<unknown>,
 };
 type Event = { type: string; [key: string]: unknown };
 
@@ -79,6 +80,7 @@ processProto.kill = async function (this: FakeProcess, signal: string) {
 };
 
 proto.update = async function (this: FakeSandbox, settings: Record<string, unknown>) {
+  if (!ours(this)) return original.update.call(this, settings);
   worldOf(this).record("sandbox.update", this.id, settings);
   Object.assign(this.info, settings);
   return this;

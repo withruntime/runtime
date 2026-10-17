@@ -48,6 +48,14 @@ async function withStub(
     globalThis.fetch = original;
   }
 }
+const DELETED = {
+  id: SANDBOX,
+  kind: "sandbox",
+  name: null,
+  labels: {},
+  status: "deleted",
+  state: "stopping",
+};
 const env = { RUNTIME_API_KEY: "rk_cli", RUNTIME_API_URL: "https://api.example.test" };
 const out = (lines: string[], json = false) => ({
   json,
@@ -435,7 +443,7 @@ test("run surfaces failed cleanup instead of returning success", async () => {
       if (method === "POST" && path === "/v1/sandboxes") return INFO;
       if (path === `/v1/sandboxes/${SANDBOX}:exec`)
         return { stdout: "42\n", stderr: "", exitCode: 0, timedOut: false };
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`)
+      if (method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`)
         return Response.json(
           { error: { code: "permission_denied", message: "Stop refused" } },
           { status: 403 },
@@ -446,27 +454,7 @@ test("run surfaces failed cleanup instead of returning success", async () => {
         await run(["sandbox", "run", "--json", "--", "echo", "42"], env, out(lines, true)),
       ).toBe(1);
       expect(lines.join("\n")).toContain("cleanup_failed");
-      expect(lines.join("\n")).toContain(`sandboxes stop ${SANDBOX}`);
-    },
-  );
-});
-
-test("run waits for stopped state after cleanup is accepted", async () => {
-  let waited = false;
-  await withStub(
-    (method, path) => {
-      if (method === "POST" && path === "/v1/sandboxes") return INFO;
-      if (path === `/v1/sandboxes/${SANDBOX}:exec`)
-        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`) return { ...INFO, state: "stopping" };
-      if (method === "GET" && path === `/v1/sandboxes/${SANDBOX}`) {
-        waited = true;
-        return { ...INFO, state: "stopped" };
-      }
-    },
-    async (lines) => {
-      expect(await run(["sandbox", "run", "--", "true"], env, out(lines, true))).toBe(0);
-      expect(waited).toBe(true);
+      expect(lines.join("\n")).toContain(`sandboxes rm ${SANDBOX}`);
     },
   );
 });
@@ -477,7 +465,7 @@ test("run preserves a failed command's exit code while reporting cleanup failure
       if (method === "POST" && path === "/v1/sandboxes") return INFO;
       if (path === `/v1/sandboxes/${SANDBOX}:exec`)
         return { stdout: "", stderr: "command failed", exitCode: 7, timedOut: false };
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`)
+      if (method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`)
         return Response.json(
           { error: { code: "permission_denied", message: "Stop refused" } },
           { status: 403 },
@@ -500,7 +488,7 @@ test("run preserves execution errors and still attempts cleanup", async () => {
           { error: { code: "execution_failed", message: "Exec failed" } },
           { status: 500 },
         );
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`) {
+      if (method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`) {
         stopped = true;
         return Response.json(
           { error: { code: "permission_denied", message: "Stop refused" } },
@@ -520,37 +508,21 @@ test("run preserves execution errors and still attempts cleanup", async () => {
   );
 });
 
-test("run refuses to report cleanup success when the wait returns stopping", async () => {
-  await withStub(
-    (method, path) => {
-      if (method === "POST" && path === "/v1/sandboxes") return INFO;
-      if (path === `/v1/sandboxes/${SANDBOX}:exec`)
-        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
-      if (path === `/v1/sandboxes/${SANDBOX}:stop` || path === `/v1/sandboxes/${SANDBOX}`)
-        return { ...INFO, state: "stopping" };
-    },
-    async (lines) => {
-      expect(await run(["sandbox", "run", "--", "true"], env, out(lines, true))).toBe(1);
-      expect(lines.join("\n")).toContain("still stopping");
-    },
-  );
-});
-
-test("run retries a temporary stop failure, and keep leaves its sandbox alone", async () => {
+test("run retries a temporary delete failure, and keep leaves its sandbox alone", async () => {
   let stops = 0;
   await withStub(
     (method, path) => {
       if (method === "POST" && path === "/v1/sandboxes") return INFO;
       if (path === `/v1/sandboxes/${SANDBOX}:exec`)
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`) {
+      if (method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`) {
         stops++;
         return stops === 1
           ? Response.json(
               { error: { code: "temporarily_unavailable", message: "Retry" } },
               { status: 503 },
             )
-          : { ...INFO, state: "stopped" };
+          : DELETED;
       }
     },
     async (lines) => {
@@ -563,7 +535,7 @@ test("run retries a temporary stop failure, and keep leaves its sandbox alone", 
   );
 });
 
-test("Ctrl-C stops only its own sandbox once and exits 130 during concurrent completion", async () => {
+test("Ctrl-C deletes only its own sandbox once and exits 130 during concurrent completion", async () => {
   let execStarted!: () => void;
   const started = new Promise<void>((resolve) => {
     execStarted = resolve;
@@ -582,10 +554,10 @@ test("Ctrl-C stops only its own sandbox once and exits 130 during concurrent com
           completeExec = resolve;
         });
       }
-      if (path === `/v1/sandboxes/${SANDBOX}:stop`) {
+      if (request.method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`) {
         stops++;
         completeExec?.(Response.json({ stdout: "", stderr: "", exitCode: 0, timedOut: false }));
-        return Response.json({ ...INFO, state: "stopped" });
+        return Response.json(DELETED);
       }
       return new Response(null, { status: 404 });
     },
@@ -626,7 +598,7 @@ test("Ctrl-C stops only its own sandbox once and exits 130 during concurrent com
   }
 });
 
-test("run cleanup's absolute deadline cancels a stop that never answers", async () => {
+test("run cleanup's absolute deadline cancels a delete that never answers", async () => {
   const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
   const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
     originalTimeout(ms === 30_000 ? 10 : ms),
@@ -638,7 +610,7 @@ test("run cleanup's absolute deadline cancels a stop that never answers", async 
         if (method === "POST" && path === "/v1/sandboxes") return INFO;
         if (path === `/v1/sandboxes/${SANDBOX}:exec`)
           return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
-        if (path === `/v1/sandboxes/${SANDBOX}:stop`)
+        if (method === "DELETE" && path === `/v1/sandboxes/${SANDBOX}`)
           return new Promise((_resolve, reject) => {
             request.signal.addEventListener(
               "abort",

@@ -6,6 +6,7 @@ import math
 import asyncio
 import os
 import re
+import sys
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -217,23 +218,30 @@ class WriteEntry(TypedDict):
     data: Union[str, bytes, IO]
 
 
+# Python 3.9 has no kw_only, and refuses EntryInfo's fields after WriteInfo's
+# metadata default; there they take a default of None too. The SDK always
+# passes them by name.
+_KW_ONLY: Dict[str, Any] = {"kw_only": True} if sys.version_info >= (3, 10) else {}
+_AFTER_DEFAULT: Dict[str, Any] = {} if sys.version_info >= (3, 10) else {"default": None}
+
+
 @dataclass
 class WriteInfo:
     name: str
     type: Optional[FileType]
     path: str
-    metadata: Optional[Dict[str, str]] = field(default=None, kw_only=True)
+    metadata: Optional[Dict[str, str]] = field(default=None, **_KW_ONLY)
 
 
 @dataclass
 class EntryInfo(WriteInfo):
-    size: int
-    mode: int
-    permissions: str
-    owner: str
+    size: int = field(**_AFTER_DEFAULT)
+    mode: int = field(**_AFTER_DEFAULT)
+    permissions: str = field(**_AFTER_DEFAULT)
+    owner: str = field(**_AFTER_DEFAULT)
     """Owner name when supplied by the guest; empty on older guest images."""
-    group: str
-    modified_time: datetime
+    group: str = field(**_AFTER_DEFAULT)
+    modified_time: datetime = field(**_AFTER_DEFAULT)
     symlink_target: Optional[str] = None
 
 

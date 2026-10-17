@@ -1,4 +1,4 @@
-"""Execution deadlines retain modal 1.6.0's -1/EOF contract."""
+"""Execution deadlines retain modal 1.6's -1/EOF contract (1.6.0 to 1.6.2)."""
 import asyncio
 import importlib.metadata
 import os
@@ -42,7 +42,7 @@ class Deadlines(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_wait_poll_and_stream_timeout_match(self):
-        self.assertEqual(importlib.metadata.version('modal'), '1.6.0')
+        self.assertEqual(importlib.metadata.version('modal'), '1.6.2')
         from modal.container_process import _ContainerProcess
         from modal.exception import ExecTimeoutError
 

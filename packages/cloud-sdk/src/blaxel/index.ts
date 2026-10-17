@@ -4,11 +4,11 @@
  *   import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
  *
  * and set RUNTIME_API_KEY, or run `npx withruntime login` once. A Blaxel key
- * (BL_API_KEY) is never sent anywhere. Every name `@blaxel/core` 0.3.25
+ * (BL_API_KEY) is never sent anywhere. Every name `@blaxel/core` 0.3.30
  * exports can be imported; what Runtime cannot do the way Blaxel does throws
  * NotSupportedError, naming what to use. */
 import { RuntimeError } from "../errors.js";
-import { initialize, type Config } from "./client.js";
+import { initialize, integrationToken, setIntegrationToken, type Config } from "./client.js";
 import { NotSupportedError } from "./errors.js";
 import { CODEGEN, DRIVES, SCHEDULES, SYSTEM, unsupportedExport } from "./unsupported.js";
 
@@ -71,6 +71,7 @@ export {
   type PreviewMetadata,
   type PreviewSpec,
   type PreviewToken,
+  type SandboxPreviewCreateConfiguration,
 } from "./preview.js";
 export {
   Snapshot,
@@ -94,6 +95,21 @@ export {
   isGatewayTimeout,
   CredentialsError,
   NotSupportedError,
+  isBlaxelError,
+  getBlaxelErrorCode,
+  getBlaxelErrorStatus,
+  getBlaxelErrorMessage,
+  getBlaxelErrorRequestId,
+  type BlaxelGatewayErrorCode,
+  type BlaxelAuthErrorCode,
+  type BlaxelSandboxCreationErrorCode,
+  type BlaxelErrorCode,
+  type BlaxelErrorCodeValue,
+  type BlaxelApiErrorBody,
+  type BlaxelActionErrorBody,
+  type BlaxelPlatformErrorBody,
+  type BlaxelSandboxApiErrorBody,
+  type BlaxelErrorLike,
 } from "./errors.js";
 export {
   createPaginatedList,
@@ -179,11 +195,13 @@ export const logger = {
 };
 
 /** Blaxel's settings, as far as they mean anything on Runtime. `setConfig`
- * takes a Runtime key as `apikey`; anything else throws NotSupportedError. */
+ * takes a Runtime key as `apikey`; `integration` is kept but never sent;
+ * anything else throws NotSupportedError. */
 export const settings: {
   readonly env: string;
   readonly region: string | undefined;
   readonly workspace: string;
+  integration: string;
   setConfig(config: Config): void;
   authenticate(): Promise<void>;
   readonly [key: string]: unknown;
@@ -197,6 +215,14 @@ export const settings: {
     },
     get workspace() {
       return env.BL_WORKSPACE ?? "";
+    },
+    /* Blaxel's product token for an integration (0.3.29): checked and kept
+       as Blaxel does, never sent; Runtime does not attribute traffic by it. */
+    get integration(): string {
+      return integrationToken();
+    },
+    set integration(value: string | undefined) {
+      setIntegrationToken(value);
     },
     setConfig: (config: Config) => initialize(config),
     authenticate,
@@ -341,6 +367,7 @@ export const updateDrive = api("updateDrive");
 export const createDriveAccessToken = api("createDriveAccessToken");
 export const getDriveByExternalId = api("getDriveByExternalId");
 export const getDriveJwks = api("getDriveJwks");
+export const deleteDriveFolder = api("deleteDriveFolder");
 export const listAllEgressGateways = api("listAllEgressGateways");
 export const getEgressGatewayUsage = api("getEgressGatewayUsage");
 export const listAllEgressIps = api("listAllEgressIps");
@@ -433,6 +460,16 @@ export const getSandboxByExternalId = api("getSandboxByExternalId");
 export const listScheduleExecutions = api("listScheduleExecutions");
 export const listSchedules = api("listSchedules");
 export const getSandboxScheduleMetrics = api("getSandboxScheduleMetrics");
+/* @blaxel/core 0.3.30's workspace secrets, which Blaxel's proxy puts into a
+   sandbox's routing as {{SECRET:name}}. Runtime's secrets are bound to the
+   hosts they may reach, which Blaxel's calls do not name. */
+const SECRETS =
+  'Use Runtime secrets, which name the hosts a secret may reach: runtime.secrets.set(name, { value, hosts }) (`import { Runtime } from "withruntime"`); the egress proxy adds the value on HTTPS to those hosts and the sandbox never sees it.';
+const secretApi = (name: string) => unsupportedExport(`API function ${name}`, SECRETS);
+export const listSecrets = secretApi("listSecrets");
+export const upsertSecret = secretApi("upsertSecret");
+export const deleteSecret = secretApi("deleteSecret");
+export const deleteSecretByQuery = secretApi("deleteSecretByQuery");
 export const getWorkspaceServiceAccounts = api("getWorkspaceServiceAccounts");
 export const createWorkspaceServiceAccount = api("createWorkspaceServiceAccount");
 export const deleteWorkspaceServiceAccount = api("deleteWorkspaceServiceAccount");

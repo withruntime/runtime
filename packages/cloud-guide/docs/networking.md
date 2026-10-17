@@ -50,7 +50,9 @@ The API can issue a token with a relative `ttlSeconds` lifetime or an absolute
 `expiresAt` ISO timestamp. With both, the earlier deadline wins; tokens issued
 through a sandbox session also end when that session ends. An absolute deadline
 is never rounded past the time you requested. Read the returned `tokenExpiresAt`
-for its actual end time. See [private preview tokens](./api#private-preview-tokens)
+for its actual end time. Each create and read signs its own token, so a list
+shows a different token and `tokenExpiresAt` than the create did; the token you
+already hold keeps working until its own expiry or a rotate. See [private preview tokens](./api#private-preview-tokens)
 for the supported API and MCP inputs.
 
 ## Custom domains
@@ -94,6 +96,37 @@ woken by a visit, like a preview.
 - **Reports** reach Runtime through the `X-Runtime-Report` header on every
   answer and the abuse address, as for previews. Runtime can take a name down;
   it stops serving at once and stays down for every account.
+
+### On an App
+
+An App serves your domain through every deploy and rollback, with no
+certificate fetched on a visit: the name's certificate is issued, checked and
+served before you point the name at the App.
+
+```ts no-run
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const domain = await runtime.domains.add({ hostname: "example.com", appId: "<your App's id>" });
+console.log(domain.records);
+```
+
+The answer lists three records:
+
+| Record | Name                             | Value                      | What it does                               |
+| ------ | -------------------------------- | -------------------------- | ------------------------------------------ |
+| TXT    | `_runtime-challenge.example.com` | `runtime-verify=<token>`   | Proves the name is yours                   |
+| CNAME  | `_acme-challenge.example.com`    | `<token>.<challenge zone>` | Lets Runtime get and renew its certificate |
+| A      | `example.com`                    | the App's addresses        | Sends visitors to the App                  |
+
+Set the TXT and the `_acme-challenge` CNAME first, and verify. Within a few
+minutes `certificate.ready` turns true on `runtime.domains.get`: every Runtime
+router now serves a checked certificate for the name. Only then change the A
+record (or the CNAME, for a subdomain such as `www`), so the first visitor
+already gets HTTPS. Keep the `_acme-challenge` CNAME: renewals use it, at the
+latest 30 days before the certificate expires, from a second certificate
+authority if the first one fails. A deploy or a rollback never changes DNS or
+a certificate.
 
 ## TCP ports
 

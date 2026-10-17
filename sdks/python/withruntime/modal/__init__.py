@@ -1,4 +1,4 @@
-"""Modal CPU sandbox subset pinned to modal 1.6.0.
+"""Modal CPU sandbox subset pinned to modal 1.6.2.
 
 Uses Runtime credentials. Image recipes preserve the requested registry base.
 The server enforces Runtime's actual resource limits; no GPU is substituted.
@@ -25,7 +25,7 @@ from .volume import Volume
 from ._probe import Probe, from_label as _probe_from_label
 from ._tunnel import Tunnel, from_preview as _tunnel_from_preview
 
-UPSTREAM_VERSION = "1.6.0"
+UPSTREAM_VERSION = "1.6.2"
 
 __all__ = ["App", "CloudBucketMount", "ContainerProcess", "Error", "FilePatternMatcher", "Image", "Probe", "Proxy",
            "Sandbox", "SandboxSnapshot", "Secret", "Tunnel", "Volume"]
@@ -340,6 +340,12 @@ def _ready_timeout(timeout):
     return timeout
 
 
+def _ended(sb):
+    """When a stopped sandbox stopped, for the latest of a name."""
+    info = getattr(sb, "info", None) or {}
+    return info.get("endedAt") or info.get("createdAt") or ""
+
+
 CONNECT_TOKEN = ("Share the port as a private preview instead: the native sandbox's previews.create(port) "
                  "returns a url and a token, sent as the x-runtime-preview-token header")
 SNAPSHOT_DIRECTORY = "Runtime snapshots a whole disk: snapshot_filesystem(), then start a new sandbox from it"
@@ -397,12 +403,17 @@ class Sandbox:
         return Sandbox(runtime, sb, entry)
 
     @staticmethod
-    def from_name(app_name, name, *, environment_name=None, client=None):
+    def from_name(app_name, name, *, environment_name=None, include_terminated=False, client=None):
         from .exception import NotFoundError, ConflictError
         if environment_name is not None:
             raise CompatibilityError("Modal environment namespaces are not Runtime account namespaces")
         runtime = client or Runtime()
-        found = list(runtime.sandboxes.list(state=["running"], labels={"compat.provider": "modal", "modal.app": app_name, "modal.name": name}))
+        labels = {"compat.provider": "modal", "modal.app": app_name, "modal.name": name}
+        found = list(runtime.sandboxes.list(state=["running"], labels=labels))
+        if not found and include_terminated:
+            # modal 1.6.2: with none running, the one that stopped last.
+            stopped = list(runtime.sandboxes.list(state=["stopped"], include_stopped=True, labels=labels))
+            found = sorted(stopped, key=_ended, reverse=True)[:1]
         if not found:
             raise NotFoundError(f"No running sandbox named {name!r} in app {app_name!r}")
         if len(found) > 1:

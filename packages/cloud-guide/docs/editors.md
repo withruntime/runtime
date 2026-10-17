@@ -22,6 +22,24 @@ run as, with the same environment, the proxy settings and `sudo`.
 A sandbox whose image has no SSH server, such as a custom image, gets one:
 `runtime sandboxes ssh` installs `openssh-server` once and says so first.
 
+## Open it in VS Code, Cursor or Windsurf
+
+```bash no-run
+runtime sandboxes code <id>                         # VS Code, at /workspace
+runtime sandboxes code <id> --editor cursor         # Cursor
+runtime sandboxes code <id> --editor windsurf --path /srv/app
+```
+
+One command opens the sandbox's folder in your editor over SSH. It makes sure
+the sandbox has an SSH server, adds the `*.runtime` entry below to your SSH
+config the first time, and starts the editor on the sandbox. Without the
+editor's `code`, `cursor` or `windsurf` command on your PATH, it opens the
+editor's link instead; `--print` only prints that link, to open on another
+machine that has the entry. The editor needs its Remote - SSH extension, and
+its first connection installs the editor's server in the sandbox, which needs
+HTTPS out to the editor's download site. A paused sandbox wakes when the editor
+connects.
+
 ## VS Code, JetBrains and plain ssh
 
 Run this once on your machine:
@@ -35,8 +53,9 @@ every sandbox is the host `<id>.runtime`, or `<name>.runtime`, to anything that
 uses OpenSSH:
 
 - **ssh, scp and rsync:** `ssh web.runtime`, `scp app.tar web.runtime:`.
-- **VS Code:** install the Remote - SSH extension, run **Remote-SSH: Connect
-  to Host**, and enter `<id>.runtime`.
+- **VS Code, Cursor and Windsurf:** install the Remote - SSH extension, run
+  **Remote-SSH: Connect to Host**, and enter `<id>.runtime`, or use
+  `runtime sandboxes code` above.
 - **JetBrains Gateway:** add an SSH connection to host `<id>.runtime`, user
   `runtime`, authenticating with the OpenSSH config and agent.
 

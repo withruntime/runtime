@@ -69,12 +69,7 @@ export function clientFor(config: DaytonaConfig = {}): Runtime {
       "Daytona JWT sign-in (jwtToken, organizationId)",
       "Use a Runtime key: set RUNTIME_API_KEY, or run `npx withruntime login` once.",
     );
-  const target = config.target ?? env("DAYTONA_TARGET");
-  if (target !== undefined && target !== "" && target !== "us")
-    throw new NotSupportedError(
-      `The Daytona target "${target}"`,
-      'Runtime runs in one US region; remove target or use "us".',
-    );
+  refuseTarget(config.target ?? env("DAYTONA_TARGET"));
   if (config.withruntime?.client) return config.withruntime.client;
   const key = pickKey(config.apiKey);
   let client = clients.get(key ?? "");
@@ -83,6 +78,17 @@ export function clientFor(config: DaytonaConfig = {}): Runtime {
     clients.set(key ?? "", client);
   }
   return client;
+}
+
+/** Runtime runs in one US region: a Daytona target (the client's, or a
+ * create's own since @daytona/sdk 0.224) other than "us" is refused, and
+ * none or "" means that region. */
+export function refuseTarget(target: string | undefined) {
+  if (target !== undefined && target !== "" && target !== "us")
+    throw new NotSupportedError(
+      `The Daytona target "${target}"`,
+      'Runtime runs in one US region; remove target or use "us".',
+    );
 }
 
 /** Test hook: forget the cached clients. */

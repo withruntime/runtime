@@ -62,6 +62,11 @@ export type SandboxInfo = {
   /** The names of its own environment variables (`env`), on a create, an
    * update and a read of one sandbox. Values are never shown. */
   envNames?: string[];
+  /** On an update with labels by a key that may read secrets, when one of
+   * the account's egress secrets is scoped: true once every server running its sandboxes holds the change,
+   * so the next request uses the new scope; false while one has not
+   * confirmed (it takes it within 15 seconds). */
+  secretsEnforced?: boolean;
   /** On a create from an image with a start command: whether it started
    * (and was still running half a second later), became ready (readyMs),
    * timed out, or exited first (exitCode, and stderr's last lines). The create's answer
@@ -78,6 +83,11 @@ export type SandboxInfo = {
   };
   /** Present and true when getOrCreate answered a sandbox that already held the name. */
   reused?: boolean;
+  /** An opaque tag for the server it is on, like `pl_3f9a0c1b2d4e5f60`. Your
+   * sandboxes and snapshots with the same tag are on the same server. It is
+   * never the server's name, and other accounts see unrelated tags. Null
+   * before it is placed. Absent from older servers. */
+  placement?: string | null;
   [key: string]: unknown;
 };
 
@@ -138,6 +148,13 @@ export type CreateSandbox = {
   image?: string;
   /** A ready snapshot's id: the sandbox starts as a copy of it, with its shape. Not with image. */
   snapshot?: string;
+  /** One to 16 ids of your own sandboxes or snapshots. The new sandbox starts
+   * on a server none of them is on, and stays apart if its start is moved.
+   * With no other server that has room, the create answers 409 `no_capacity`
+   * and nothing is made or charged. A copy of a snapshot starts only where that
+   * snapshot is kept, so a `snapshot` with `spreadFrom` naming its server also
+   * answers `no_capacity`. */
+  spreadFrom?: string[];
   /** Up to four volumes: read-write ("rw", one sandbox at a time) or a
    * read-only "snapshot" copy. */
   volumes?: { volumeId: string; path: string; mode?: "rw" | "snapshot" }[];
@@ -408,6 +425,13 @@ export type SandboxSettings = {
   persistent?: boolean;
   /** Lifetime cap in microdollars; null removes it. */
   maxTotalCostMicros?: number | null;
+  /** A new time limit counted from now, 60 to 86400 seconds, sooner or later
+   * than the one it had; 0 takes the limit away. A paused sandbox counts it
+   * from its next wake. Not for a persistent sandbox. */
+  timeoutSeconds?: number;
+  /** What the end of its time limit does: pause, stop (keep the disk) or
+   * delete. */
+  onTimeout?: "pause" | "stop" | "delete";
 };
 
 /** A deleted sandbox, as `delete()` answers it the first time and every time

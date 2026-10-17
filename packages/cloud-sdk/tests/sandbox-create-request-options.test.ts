@@ -186,3 +186,17 @@ test("a replayed create whose sandbox has since stopped says so, not that it fai
     } else expect(error.message).toBe("Sandbox fixture is stopped, not running.");
   }
 });
+
+test("sandbox create sends spreadFrom in the request body", async () => {
+  const calls: Call[] = [];
+  const transport = {
+    waitForCapacityMs: 0,
+    json: async (call: Call) => {
+      calls.push(call);
+      return { id: "fixture", state: "running", placement: "pl_3f9a0c1b2d4e5f60" };
+    },
+  } as unknown as Transport;
+  const made = await new Sandboxes(transport).create({ spreadFrom: ["sbx_a", "sbx_b"] });
+  expect((calls[0]!.body as { spreadFrom: string[] }).spreadFrom).toEqual(["sbx_a", "sbx_b"]);
+  expect(made.info.placement).toBe("pl_3f9a0c1b2d4e5f60");
+});

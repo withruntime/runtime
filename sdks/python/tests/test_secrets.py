@@ -6,6 +6,7 @@ import json
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
 
 from withruntime import AsyncRuntime, NotFoundError, Runtime
 
@@ -104,7 +105,7 @@ class SecretsTest(unittest.TestCase):
 
 class UpstreamProxyStub(BaseHTTPRequestHandler):
     seen: list = []
-    proxy: dict | None = None
+    proxy: Optional[dict] = None
 
     def log_message(self, *args):
         pass

@@ -118,11 +118,13 @@ class Validation(unittest.TestCase):
             value = client.execute_command('box', 'echo hello', working_dir='/workspace', env={'A': 'B'}, **kwargs)
             self.assertEqual((value.stdout, value.stderr, value.exit_code), ('hello', '', 0))
             job = client.start_background_job('box', 'echo hello', working_dir='/workspace', env={'A': 'B'}, **kwargs)
-            self.assertEqual(calls[-1][1][4:8], [job.stdout_log_file, job.stderr_log_file, job.exit_file, 'echo hello'])
+            self.assertEqual(calls[-2][1][4:8], [job.stdout_log_file, job.stderr_log_file, job.exit_file, 'echo hello'])
+            # 0.4.4: the job answers once it has started.
+            self.assertEqual(calls[-1][1][3:5], ['runtime-prime-launch', '/tmp/job_' + job.job_id + '.pid'])
         # Each call drains output through its own fresh callback; compare the rest.
-        self.assertTrue(callable(calls[0][2]['on_stdout']) and callable(calls[2][2]['on_stdout']))
-        self.assertEqual(drop(calls[0]), drop(calls[2]))
-        self.assertEqual(calls[1][2], calls[3][2])
+        self.assertTrue(callable(calls[0][2]['on_stdout']) and callable(calls[3][2]['on_stdout']))
+        self.assertEqual(drop(calls[0]), drop(calls[3]))
+        self.assertEqual(calls[1][2], calls[4][2])
         self.assertEqual(calls[0][2]['env'], {'A': 'B'})
         class Process:
             async def output_bytes(self):
@@ -146,19 +148,19 @@ class Validation(unittest.TestCase):
                 value = await client.execute_command('box', 'echo hello', working_dir='/workspace', env={'A': 'B'}, **kwargs)
                 self.assertEqual((value.stdout, value.stderr, value.exit_code), ('hello', '', 0))
                 job = await client.start_background_job('box', 'echo hello', working_dir='/workspace', env={'A': 'B'}, **kwargs)
-                self.assertEqual(calls[-1][1][4:8], [job.stdout_log_file, job.stderr_log_file, job.exit_file, 'echo hello'])
+                self.assertEqual(calls[-2][1][4:8], [job.stdout_log_file, job.stderr_log_file, job.exit_file, 'echo hello'])
                 process = await client.open_process('box', 'echo hello', working_dir='/workspace', env={'A': 'B'}, **kwargs)
                 self.assertEqual(await process.wait(), 0)
                 await process.aclose()
-            self.assertEqual(drop(calls[0]), drop(calls[3]))
-            self.assertEqual(calls[1][2], calls[4][2])
-            self.assertEqual(calls[2], calls[5])
-            self.assertEqual(calls[2][2], {'cwd': '/workspace', 'env': {'A': 'B'}, 'stdin': 'pipe', 'output_encoding': 'base64'})
+            self.assertEqual(drop(calls[0]), drop(calls[4]))
+            self.assertEqual(calls[1][2], calls[5][2])
+            self.assertEqual(calls[3], calls[7])
+            self.assertEqual(calls[3][2], {'cwd': '/workspace', 'env': {'A': 'B'}, 'stdin': 'pipe', 'output_encoding': 'base64'})
         asyncio.run(run())
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_user_signatures_and_rpc_validation_match_review(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.1')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.5')
         from prime_sandboxes import SandboxClient as OfficialSync, AsyncSandboxClient as OfficialAsync
         from prime_sandboxes.rpc_command_session import build_command_session_start_request
         for runtime, official in ((SandboxClient, OfficialSync), (AsyncSandboxClient, OfficialAsync)):
@@ -257,7 +259,7 @@ class Validation(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_nested_request_response_and_validation_match(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.1')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.5')
         from prime_sandboxes import models as official
         for provider in (models, official):
             request = provider.CreateSandboxRequest(name='box', docker_image='python:3.13',
@@ -270,5 +272,12 @@ class Validation(unittest.TestCase):
             for entry in ('https://example.com/path', '*.bad.*.example', '2001:db8::1'):
                 with self.assertRaises(ValueError):
                     provider.CreateSandboxRequest(name='box', docker_image='python:3.13', network_allowlist=[entry])
+            # 0.4.2: a checkpoint restore takes neither image nor disk size; a build needs an image.
+            self.assertIsNone(provider.CreateSandboxRequest(name='box', checkpoint_id='cp').disk_size_gb)
+            self.assertEqual(provider.CreateSandboxRequest(name='box', docker_image='python:3.13').disk_size_gb, 5.0)
+            for fields in ({'checkpoint_id': 'cp', 'docker_image': 'python:3.13'}, {'checkpoint_id': 'cp', 'disk_size_gb': 10},
+                           {}, {'checkpoint_id': 'x' * 65}):
+                with self.subTest(fields=fields), self.assertRaises(ValueError):
+                    provider.CreateSandboxRequest(name='box', **fields)
         self.assertEqual(models.SandboxListResponse(sandboxes=[sandbox_data()], total=1, page=1, perPage=50, hasNext=False).model_dump(by_alias=True),
                          official.SandboxListResponse(sandboxes=[sandbox_data()], total=1, page=1, perPage=50, hasNext=False).model_dump(by_alias=True))

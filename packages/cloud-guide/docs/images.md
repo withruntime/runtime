@@ -61,9 +61,17 @@ What a Dockerfile can use:
   `a+x` or `u+x,go-w` for files from the build context), `WORKDIR`, `ENV`,
   `USER`, `SHELL` and `RUN --mount=type=cache`, which runs without the cache
   mount. As on Docker, an `ENV` beats an `ARG` of the same name, and an `ARG`
-  with no value and no build argument stays unset.
+  with no value and no build argument stays unset. As in Docker, root owns
+  what `COPY` and `ADD` write unless `--chown` names an owner, and the
+  directories a `WORKDIR` creates belong to the `USER` of the time, so
+  `USER node`, `WORKDIR /app`, `COPY . .`, `RUN npm ci` builds.
 - `CMD`, `ENTRYPOINT` and `HEALTHCHECK` become the image's start and ready
   commands (see below).
+- A stage `FROM` an image starts where that image says, as on Docker: in its
+  `WORKDIR`, as its `USER`, with its `CMD` and `ENTRYPOINT`. `FROM golang`
+  then `COPY main.go .` puts the file in `/go`. A base the API cannot read
+  (a private registry, or one that does not answer in 5 seconds) starts at
+  `/`, as root, with no start command, and the build's notes say so.
 
 A few forms are refused with a message that says what to do instead:
 `RUN --mount=type=secret`, `type=ssh` and `type=bind`, `ONBUILD`, `ADD` from a
@@ -205,8 +213,11 @@ do the same ([API](./api#sandboxes)).
 
 An image can say what runs when a sandbox starts from it, and when that
 sandbox counts as ready. A Dockerfile's `CMD` and `ENTRYPOINT` become the start
-command and its `HEALTHCHECK` becomes the ready check. You can set or change
-both with `start`:
+command and its `HEALTHCHECK` becomes the ready check. An image built from
+`image` alone starts what Docker runs: `{image: "redis:7"}` starts
+`docker-entrypoint.sh redis-server` in `/data`. A shell or a language's prompt
+as `CMD` (`bash`, `python3`) starts nothing, since it would exit at once. You
+can set or change both with `start`:
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -234,8 +245,10 @@ const sbx = await runtime.sandboxes.create({ image: "api" });
 console.log(sbx.info.start); // { state: "ready", readyMs: ... }
 ```
 
-The start command runs once, in the background, as the sandbox user, in the
-image's `WORKDIR` (or `start.cwd`). The create call answers when the ready
+The start command runs once per boot, in the background, as the sandbox user, in the
+image's `WORKDIR` (or `start.cwd`): at create, and again at each `:restart`
+and `:resize`, which boot from the disk with no process left running (a wake
+from a pause keeps memory, so its process runs on). The create call answers when the ready
 check passes: `readyPort` is being listened on, or `readyCommand` exits 0. It
 answers with `start.state` set to `ready`, `started` (no ready check, and
 still running 150 ms after it began), `timeout` (the check did not

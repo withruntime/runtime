@@ -81,8 +81,10 @@ class Transport:
                 raise RuntimeError("Stop failed", code="stop_failed", status=409)
             self.info = {**self.info, "state": "stopping" if self.pending_stop else "stopped"}
         elif path == f"/v1/sandboxes/{ID}:snapshot":
-            if self.info["state"] != "paused":
-                raise AssertionError("Capture must hold the source paused")
+            # Like the server: a running source is paused, captured and woken
+            # before the answer; the client never sends :pause or :wake itself.
+            if self.info["state"] not in ("running", "paused"):
+                raise AssertionError("Capture needs a running or paused source")
             taken = {"id": f"snapshot-{len(self.snapshots)}", "sourceSandboxId": ID,
                      "mode": self.returned_mode or body.get("mode", "memory"),
                      "state": "failed" if self.fail else "ready", "storedBytes": 1234,
@@ -151,6 +153,7 @@ class SyncContract(unittest.TestCase):
             self.assertIs(taken.delete(), taken)
             self.assertEqual(taken.status, "deleted")
         self.assertEqual(t.snapshots["snapshot-0"]["state"], "deleted")
+        self.assertFalse(any(path.endswith((":pause", ":wake")) for _, path, _ in t.calls))
 
     def test_disk_capture_source_stop_and_fresh_handle(self):
         t = Transport()

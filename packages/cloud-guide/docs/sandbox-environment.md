@@ -55,7 +55,10 @@ npx playwright install chromium
 - Variables you set with `env` at create (or change with `:update`) are in
   every command, background process, terminal, SSH session and the image's
   start command, for the sandbox's whole life, under each command's own `env`
-  ([API](./api#sandboxes)). Their values are never shown back.
+  ([API](./api#sandboxes)). Their values are never shown back. `:update`
+  works on a paused or stopped sandbox too. A change reaches commands and
+  processes started after it; a program already running, also through a pause
+  and wake, keeps the values it started with, so restart it to pick one up.
 
 `pip install` works without a virtual environment. As `runtime` it installs to
 `/workspace/.local` (whose `bin` is first on `PATH`); under `sudo` it installs to
@@ -191,6 +194,15 @@ account without credit), until the window ends. Credit added to an account witho
 running sandboxes to the paid amount, with what they have used kept.
 Inbound traffic is free; each account's first {{outbound-allowance}} out a month is free, then
 {{outbound-rate}} per GB (10⁹ bytes) ([pricing](./pricing#network-products)).
+
+**Connections.** A paid sandbox holds up to 512 outbound connections open at
+once, or 128 per vCPU when that is more, up to 1,024, and opens up to 100 new
+ones a second (25 per vCPU when that is more). A sandbox without credit holds 64
+per vCPU, up to 256, and opens 20 a second. Past the limit, a new connection gets
+`503 Service Unavailable` with `X-Runtime-Egress: too many open connections (512 of 512)`
+and `Retry-After: 1`, rather than a reset; first, though, a connection silent for
+a minute or more is closed to make room. Reuse connections (HTTP keep-alive
+pools) rather than opening one per request.
 
 Each sandbox has its own rules, set at create (`network`) or at any time after,
 applied at once, to open connections too:
@@ -336,3 +348,16 @@ docker compose up -d
 - A deleted sandbox is gone: `DELETE /v1/sandboxes/{id}`, `sandbox.delete()` or
   `runtime sandboxes rm <id>` stops it and deletes its disk and paused memory in
   any state. Its snapshots stay.
+
+### Pause, stop or delete
+
+|                             | Pause                                                                  | Stop                                                                   | Delete                               |
+| --------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ |
+| Memory and running programs | Kept                                                                   | Gone                                                                   | Gone                                 |
+| Files on its disk           | Kept                                                                   | Kept                                                                   | Gone                                 |
+| Comes back with             | `wake`: it carries on where it was                                     | `restart`: it boots fresh from its disk                                | Nothing; create a new one            |
+| Happens on its own          | When idle, and by default when its time, credit or free usage runs out | When its time, credit or free usage runs out, with `onTimeout: "stop"` | The same, with `onTimeout: "delete"` |
+| Billed                      | [Paused storage](./pricing#paused-storage) for its memory and disk     | Paused storage for its disk                                            | Nothing; its snapshots stay billed   |
+
+Pause when you will come back to the same work and want its programs still
+running. Stop when only the files matter. Delete when you are done.

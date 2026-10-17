@@ -1,11 +1,11 @@
-"""Sandbox request/value surface pinned to prime-sandboxes 0.4.1."""
+"""Sandbox request/value surface pinned to prime-sandboxes 0.4.5."""
 from dataclasses import dataclass, field
 from typing import Optional
 from .._compat import Model
 
 
 def _validate_egress_lists(allowlist, denylist):
-    """Reject the same malformed host/IPv4 rules as prime-sandboxes 0.4.1."""
+    """Reject the same malformed host/IPv4 rules as prime-sandboxes 0.4.5."""
     import ipaddress
     if allowlist is not None and denylist is not None:
         raise ValueError("network_allowlist and network_denylist are mutually exclusive")
@@ -57,11 +57,14 @@ class StartCommand:
 @dataclass
 class CreateSandboxRequest:
     name: str
-    docker_image: str
+    docker_image: Optional[str] = None
+    #: A filesystem checkpoint to restore (0.4.2): its files, without
+    #: docker_image or disk_size_gb, which come from the checkpoint.
+    checkpoint_id: Optional[str] = None
     start_command: Optional[StartCommand] = None
     cpu_cores: float = 1.0
     memory_gb: float = 1.0
-    disk_size_gb: float = 5.0
+    disk_size_gb: Optional[float] = None
     gpu_count: int = 0
     gpu_type: Optional[str] = None
     network_allowlist: Optional[list[str]] = None
@@ -77,6 +80,17 @@ class CreateSandboxRequest:
     idempotency_key: Optional[str] = None
 
     def __post_init__(self):
+        if self.checkpoint_id is not None and (not isinstance(self.checkpoint_id, str)
+                                               or not 1 <= len(self.checkpoint_id) <= 64):
+            raise ValueError("checkpoint_id must be between 1 and 64 characters")
+        if self.checkpoint_id:
+            if self.docker_image or self.disk_size_gb is not None:
+                raise ValueError("omit docker_image and disk_size_gb when restoring a checkpoint")
+        else:
+            if not self.docker_image:
+                raise ValueError("docker_image is required unless checkpoint_id is set")
+            if self.disk_size_gb is None:
+                self.disk_size_gb = 5.0
         if isinstance(self.start_command, dict):
             try:
                 self.start_command = StartCommand(**self.start_command)
@@ -341,3 +355,50 @@ class BatchBackgroundJobStatusResponse(_Value):
     _aliases = {}
     _dates = ()
     _nested = {'statuses': ('BackgroundJobStatusSnapshot', True), 'errors': ('BackgroundJobStatusLookupError', True)}
+
+
+class SandboxCheckpoint(_Value):
+    _required = ('id', 'sandbox_id', 'state', 'depth', 'docker_image', 'created_at', 'updated_at')
+    _defaults = {'parent_id': None, 'team_id': None, 'disk_size_bytes': None, 'stored_bytes': None, 'error': None}
+    _aliases = {}
+    _dates = ('created_at', 'updated_at')
+
+
+class CheckpointLookupError(_Value):
+    _required = ('checkpoint_id', 'code', 'message')
+    _defaults = {}
+    _aliases = {}
+    _dates = ()
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self['code'] != 'NOT_FOUND':
+            raise ValueError("Invalid checkpoint lookup error code")
+
+
+class BatchCheckpointResponse(_Value):
+    _required = ('checkpoints', 'errors')
+    _defaults = {}
+    _aliases = {}
+    _dates = ()
+    _nested = {'checkpoints': ('SandboxCheckpoint', True), 'errors': ('CheckpointLookupError', True)}
+
+
+class CheckpointDeleteError(_Value):
+    _required = ('checkpoint_id', 'code', 'message')
+    _defaults = {}
+    _aliases = {}
+    _dates = ()
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self['code'] not in ('NOT_FOUND', 'CONFLICT'):
+            raise ValueError("Invalid checkpoint delete error code")
+
+
+class DeleteSandboxCheckpointsResponse(_Value):
+    _required = ('deleted', 'errors')
+    _defaults = {}
+    _aliases = {}
+    _dates = ()
+    _nested = {'errors': ('CheckpointDeleteError', True)}

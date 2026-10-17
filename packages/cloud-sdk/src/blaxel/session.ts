@@ -57,8 +57,9 @@ function origins(headers: Record<string, string> = {}): string[] {
 }
 
 function seconds(expiresAt: Date | undefined): number {
-  const at = expiresAt ?? new Date(Date.now() + DAY_MS);
-  const left = Math.floor((at.getTime() - Date.now()) / 1000);
+  // Blaxel's default is a day; counted from a moment ago it would be a second short.
+  if (!expiresAt) return DAY_MS / 1000;
+  const left = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
   if (!Number.isFinite(left) || left < 60)
     throw responseError(400, "A session must last at least a minute.");
   if (left > DAY_MS / 1000 + 5)

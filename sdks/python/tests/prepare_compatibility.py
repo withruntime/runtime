@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import venv
@@ -17,8 +18,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("environment", type=Path, help="New or existing isolated virtualenv directory")
     args = parser.parse_args()
-    if sys.version_info < (3, 10):
-        parser.error("Python 3.10 or newer is required")
+    # e2b 2.56.0 and its pyqwest need 3.11; the drop-ins themselves keep 3.10,
+    # so CI runs this under 3.10 and it moves to a newer Python on the PATH.
+    if sys.version_info < (3, 11):
+        newer = next((found for name in ("python3.13", "python3.12", "python3.11", "python3")
+                      if (found := shutil.which(name)) and subprocess.run(
+                          [found, "-c", "import sys; sys.exit(sys.version_info < (3, 11))"]).returncode == 0),
+                     None)
+        if newer is None:
+            parser.error("Python 3.11 or newer is required (none found on the PATH)")
+        os.execv(newer, [newer, str(Path(__file__).resolve()), *sys.argv[1:]])
     validate_pins()
     target = args.environment.resolve()
     if target.exists() and any(target.iterdir()) and not (target / "pyvenv.cfg").is_file():

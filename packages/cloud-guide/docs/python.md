@@ -2,14 +2,15 @@
 
 One Python client for every Runtime Cloud product, sync and async, method for method.
 
-`withruntime` needs Python 3.10 or later and uses only the standard library. It
+`withruntime` needs Python 3.9 or later (the `python3` a Mac comes with is
+enough) and uses only the standard library. It
 imports in about 30 ms and keeps its connections open between calls.
 
 ```bash no-run
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.12.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.15.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -211,7 +212,7 @@ from withruntime import Sandbox
 
 with Sandbox.create() as sbx:
     server = sbx.spawn("python3 -m http.server 8000", cwd="/workspace")
-    print(server)  # Process(id=..., command=..., state='running', exit_code=None)
+    print(server)  # Process(id=..., sandbox_id=..., command=..., state='running', exit_code=None)
 
     repl = sbx.spawn(["python3", "-i", "-q"], stdin="pipe")
     repl.write("print(sum([125, 250, 375]))\n")
@@ -534,14 +535,17 @@ with Runtime() as runtime:
         sbx.exec(["python3", "-c", "print(42)"], idempotency_key=f"job-{job}-step-1")
 ```
 
-**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
+A sandbox's `wake` and `restart` wait the same way when their own server is
+full (`no_capacity`): a sandbox stays on its server, so the wake is sent again
+with the same idempotency key until room frees. A fork never waits.
 
 - When the wait runs out, the refusal is raised as it came.
-- Set `wait_for_capacity` (seconds) on the client or on one create. `0` fails at
-  once.
+- Set `wait_for_capacity` (seconds) on the client or on one create, wake or
+  restart. `0` fails at once, as in `sbx.wake(wait_for_capacity=0)`.
 - From withruntime 0.7.0, `on_capacity_wait(refusal, seconds)` on one create is
   called before each wait,
   to tell a person why nothing has happened yet.
@@ -580,7 +584,7 @@ with Runtime() as runtime:
 ```
 
 Past the limit, a create, wake, extension or renewal fails with a
-`RuntimeError` whose `code` is `spending_limit_reached` (HTTP 402), and it is
+`RuntimeAPIError` whose `code` is `spending_limit_reached` (HTTP 402), and it is
 not retried. A read-only key asking to change anything gets
 `PermissionDeniedError`. See [security](./security).
 
@@ -773,7 +777,7 @@ A preview is private by default: open `urlWithToken`, or send `token` as the
 `x-runtime-preview-token` header. `visibility="public"` gives an address anyone
 can open, on a paid sandbox only; a sandbox without credit's previews stay private.
 
-`embed_origins=["https://app.example.com"]` on `create` names the sites that
+`embed_origins=["https://app.example.com"]` on `sbx.previews.create` names the sites that
 may show the preview in an iframe (up to {{embed-origins}}); any other site's
 iframe is refused. `sbx.previews.rotate(3000)` refuses every token issued for
 the port so far and returns a new one; `sbx.previews.delete(3000)` stops sharing it. A preview's
@@ -833,11 +837,31 @@ sees a placeholder, and the egress proxy puts the value into its HTTPS
 requests to the secret's own hosts. The servers keep to the sandbox's network
 rules; a host the rules refuse is a warning, never a change.
 
+With `public=True` the URLs carry no link token and never expire, so an agent
+can be set up with them once. The header still guards every request and is
+kept: a start after a restart, or with `replace=True`, hands out the same one,
+until `stop()` forgets it. It needs an account with a kept top-up. A sandbox
+with no time limit pauses when idle with its servers in memory, and the next
+request wakes it.
+
+```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+box = runtime.sandboxes.get_or_create("mcp", idle_pause_seconds=300)
+gateway = box.mcp.start([{"id": "fetch"}], public=True, replace=True)
+print(gateway["servers"][0]["url"], gateway["headers"])  # the same after every start
+```
+
 ## Domains, TCP ports, addresses, the tunnel and your own proxy
 
 They need a kept top-up, and a dedicated address credit; see [networking](./networking).
 
 ```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+sbx = runtime.sandboxes.create(name="web")
 domain = runtime.domains.add("app.example.com", sandbox_id=sbx.id, port=3000)
 print(domain["records"])  # the TXT and CNAME to set; then runtime.domains.verify(...)
 db = runtime.ports.open(sandbox_id=sbx.id, port=5432)

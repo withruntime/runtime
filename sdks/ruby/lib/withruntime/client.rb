@@ -33,7 +33,7 @@ module WithRuntime
     # +timeout+: seconds for each call, retries included (300).
     # +max_retries+: of transport failures, 429, 502, 503 and 504 (4).
     # +max_connections+: calls in flight at once; streams do not count (32).
-    # +wait_for_capacity+: seconds a sandbox create keeps retrying, with the
+    # +wait_for_capacity+: seconds a sandbox create, wake or restart keeps retrying, with the
     # same key and input, when the slots without credit, quota or region are full (120; 0 fails at once).
     def initialize(api_key: nil, base_url: nil, timeout: 300, max_retries: 4, max_connections: 32,
                    wait_for_capacity: 120, env: ENV, in_sandbox: -> { Credentials.in_runtime_sandbox? })

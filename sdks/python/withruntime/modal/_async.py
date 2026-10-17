@@ -296,12 +296,18 @@ async def exit(self, *args):
     await terminate(self)
 
 
-async def from_name(app_name, name, *, environment_name=None, client=None):
+async def from_name(app_name, name, *, environment_name=None, include_terminated=False, client=None):
+    from . import _ended
     from .exception import NotFoundError, ConflictError
     if environment_name is not None:
         raise CompatibilityError("Modal environment namespaces are not Runtime account namespaces")
     runtime = client or AsyncRuntime()
-    found = [sb async for sb in await runtime.sandboxes.list(state=["running"], labels={"compat.provider": "modal", "modal.app": app_name, "modal.name": name})]
+    labels = {"compat.provider": "modal", "modal.app": app_name, "modal.name": name}
+    found = [sb async for sb in await runtime.sandboxes.list(state=["running"], labels=labels)]
+    if not found and include_terminated:
+        stopped = [sb async for sb in await runtime.sandboxes.list(state=["stopped"], include_stopped=True,
+                                                                   labels=labels)]
+        found = sorted(stopped, key=_ended, reverse=True)[:1]
     if not found:
         raise NotFoundError(f"No running sandbox named {name!r} in app {app_name!r}")
     if len(found) > 1:

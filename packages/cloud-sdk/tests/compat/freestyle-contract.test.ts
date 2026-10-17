@@ -1,10 +1,11 @@
-/** freestyle 0.2.17's PTY sessions, Linux users, firewall rules, errors and
+/** freestyle 0.2.20's PTY sessions, Linux users, firewall rules, errors and
  * snapshot updates on Runtime, against simulated native clients. */
 import { describe, expect, test } from "bun:test";
 import type { Runtime } from "../../src/client.js";
 import { ConnectionError, NotFoundError } from "../../src/errors.js";
 import {
   CompatibilityError,
+  connectXterm,
   Freestyle,
   FreestyleApiError,
   FreestyleTransportError,
@@ -14,6 +15,7 @@ import {
   Vm,
   VmPty,
   VpcNamespace,
+  type XtermTerminal,
 } from "../../src/freestyle/index.js";
 import type { ProcessInfo } from "../../src/types.js";
 import type { Sandbox } from "../../src/sandbox.js";
@@ -25,8 +27,13 @@ function guest() {
   const processes: ProcessInfo[] = [];
   const calls: string[] = [];
   const execs: { command: unknown; options: Record<string, unknown> }[] = [];
-  const terminals: { processId: string; closed: boolean; finish: (code: number | null) => void }[] =
-    [];
+  const terminals: {
+    processId: string;
+    closed: boolean;
+    finish: (code: number | null) => void;
+    emit?: (data: Uint8Array) => void;
+    sent: string[];
+  }[] = [];
   const sandbox = {
     id: VM,
     async spawn(command: string, options: { pty?: { cols: number; rows: number } }) {
@@ -48,12 +55,24 @@ function guest() {
       calls.push(`attach ${options.processId}`);
       let finish!: (code: number | null) => void;
       const exited = new Promise<number | null>((resolve) => (finish = resolve));
-      const record = { processId: options.processId, closed: false, finish };
+      const record = {
+        processId: options.processId,
+        closed: false,
+        finish,
+        emit: options.onData,
+        sent: [] as string[],
+      };
       terminals.push(record);
       return {
         exited,
-        write: (data: string | Uint8Array) => calls.push(`write ${String(data)}`),
-        resize: (cols: number, rows: number) => calls.push(`resize ${cols}x${rows}`),
+        write: (data: string | Uint8Array) => {
+          record.sent.push(`write ${String(data)}`);
+          calls.push(`write ${String(data)}`);
+        },
+        resize: (cols: number, rows: number) => {
+          record.sent.push(`resize ${cols}x${rows}`);
+          calls.push(`resize ${cols}x${rows}`);
+        },
         close: () => {
           record.closed = true;
           finish(null);
@@ -62,14 +81,22 @@ function guest() {
     },
     processes: {
       list: async () => processes,
-      get: async (id: string) => ({
-        kill: async (signal: string) => {
-          calls.push(`kill ${id} ${signal}`);
-          const info = processes.find((p) => p.id === id)!;
-          info.state = "killed";
-          info.exitCode = 137;
-        },
-      }),
+      get: async (id: string) => {
+        calls.push(`process ${id}`);
+        const info = processes.find((p) => p.id === id);
+        if (!info)
+          throw new NotFoundError({ message: "no process", code: "not_found", status: 404 });
+        return {
+          state: info.state,
+          exitCode: info.exitCode,
+          kill: async (signal: string) => {
+            calls.push(`kill ${id} ${signal}`);
+            const info = processes.find((p) => p.id === id)!;
+            info.state = "killed";
+            info.exitCode = 137;
+          },
+        };
+      },
     },
     async exec(command: unknown, options: Record<string, unknown>) {
       execs.push({ command, options });
@@ -217,6 +244,183 @@ describe("PTY sessions", () => {
     for (const bad of [{ slug: "123" }, { slug: "Bad" }, { cols: 0 }, { linuxUser: "a b" }])
       await expect(pty.open(bad)).rejects.toBeInstanceOf(TypeError);
     expect(touched).toBe(false);
+  });
+});
+
+describe("PTY connections (freestyle 0.2.18)", () => {
+  const until = async (check: () => boolean) => {
+    // reconnect() without options waits Freestyle's first backoff, 400ms ± 30%.
+    for (const end = Date.now() + 3_000; !check() && Date.now() < end;) await Bun.sleep(2);
+    expect(check()).toBe(true);
+  };
+
+  test("reconnect reattaches the same shell after a dropped connection, at its last size", async () => {
+    const g = guest();
+    const states: string[] = [];
+    const data: string[] = [];
+    const session = await new VmPty(async () => g.sandbox).open({
+      slug: "main",
+      reconnect: { initialDelayMs: 1 },
+      onStateChange: (state) => states.push(state),
+      onData: (bytes) => data.push(new TextDecoder().decode(bytes)),
+    });
+    expect(session.state).toBe("connected");
+    await session.ready;
+    session.resize({ cols: 132, rows: 50 });
+    g.terminals[0]!.finish(null); // the connection drops; the shell runs on
+    await until(() => g.terminals.length === 2 && session.state === "connected");
+    expect(states).toEqual(["connected", "reconnecting", "connected"]);
+    expect(g.terminals[1]!.processId).toBe("proc-1");
+    expect(g.processes).toHaveLength(1);
+    expect(g.terminals[1]!.sent).toEqual(["resize 132x50"]);
+    // Output of the retired connection is dropped; the new one's arrives.
+    g.terminals[0]!.emit!(new TextEncoder().encode("stale"));
+    g.terminals[1]!.emit!(new TextEncoder().encode("fresh"));
+    expect(data).toEqual(["fresh"]);
+    session.write("ls\n");
+    expect(g.terminals[1]!.sent).toContain("write ls\n");
+    session.detach();
+  });
+
+  test("without reconnect a drop closes the session; writes throw; reconnect() reattaches", async () => {
+    const g = guest();
+    const closes: unknown[] = [];
+    const session = await new VmPty(async () => g.sandbox).open({
+      onClose: (info) => closes.push(info),
+    });
+    g.terminals[0]!.finish(null);
+    await until(() => session.state === "closed");
+    expect(closes).toEqual([{ wasClean: false, code: 1006, reason: "Connection lost" }]);
+    expect(() => session.write("x")).toThrow("PTY is not connected");
+    expect(() => session.signal("sigint")).toThrow("PTY is not connected");
+    session.reconnect();
+    await until(() => session.state === "connected");
+    expect(g.terminals).toHaveLength(2);
+    session.detach();
+    expect(closes).toEqual([
+      { wasClean: false, code: 1006, reason: "Connection lost" },
+      { wasClean: true, code: 1000, reason: "Detached" },
+    ]);
+    expect(session.state).toBe("closed");
+    session.detach();
+    expect(closes).toHaveLength(2);
+  });
+
+  test("a session that is gone ends recovery with NOT_FOUND instead of retrying", async () => {
+    const g = guest();
+    const errors: unknown[] = [];
+    const session = await new VmPty(async () => g.sandbox).open({
+      reconnect: { initialDelayMs: 1 },
+      onError: (error) => errors.push(error),
+    });
+    g.processes.length = 0; // its sandbox was recreated: the process no longer exists
+    g.terminals[0]!.finish(null);
+    await until(() => session.state === "closed");
+    expect(errors[0]).toBeInstanceOf(FreestyleApiError);
+    expect(errors[0]).toMatchObject({ status: 404 });
+    expect(g.terminals).toHaveLength(1);
+  });
+
+  test("a shell killed by a signal ends as exited, without an exit code", async () => {
+    const g = guest();
+    const events: unknown[] = [];
+    const session = await new VmPty(async () => g.sandbox).open({
+      reconnect: true,
+      onExit: (code) => events.push(["exit", code]),
+      onClose: (info) => events.push(["close", info.code]),
+    });
+    g.processes[0]!.state = "killed";
+    g.terminals[0]!.finish(null);
+    await until(() => session.state === "exited");
+    expect(events).toEqual([["close", 1000]]);
+    expect(g.terminals).toHaveLength(1);
+  });
+
+  test("timers are checked like Freestyle's, before the sandbox is touched", async () => {
+    let touched = false;
+    const pty = new VmPty(async () => {
+      touched = true;
+      return guest().sandbox;
+    });
+    for (const bad of [
+      { connectTimeoutMs: 0 },
+      { connectTimeoutMs: Number.NaN },
+      { reconnect: { timeoutMs: Infinity } },
+      { reconnect: { maxDelayMs: -1 } },
+      { reconnect: { initialDelayMs: 2 ** 31 } },
+    ])
+      await expect(pty.open(bad)).rejects.toBeInstanceOf(RangeError);
+    await expect(pty.attach({ session: 1, connectTimeoutMs: -5 })).rejects.toBeInstanceOf(
+      RangeError,
+    );
+    await expect(pty.open({ reconnect: { jitter: 1 } } as object)).rejects.toBeInstanceOf(
+      CompatibilityError,
+    );
+    expect(touched).toBe(false);
+  });
+
+  test("a first connection that does not come up within connectTimeoutMs fails", async () => {
+    const g = guest();
+    let closedLate = false;
+    (g.sandbox as unknown as { terminal: unknown }).terminal = () =>
+      new Promise((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              exited: new Promise(() => {}),
+              close: () => (closedLate = true),
+            }),
+          30,
+        ),
+      );
+    const error = await new VmPty(async () => g.sandbox)
+      .open({ connectTimeoutMs: 5 })
+      .catch((e: unknown) => e);
+    expect((error as Error).message).toBe("PTY handshake timed out");
+    await until(() => closedLate);
+  });
+
+  test("connectXterm resets the screen, mutes replayed queries and detaches on dispose", async () => {
+    const g = guest();
+    const writes: unknown[] = [];
+    const handlers: { disposed: boolean }[] = [];
+    let input!: (data: string) => void;
+    const handler = () => {
+      const h = { disposed: false, dispose: () => (h.disposed = true) };
+      handlers.push(h);
+      return h;
+    };
+    const terminal: XtermTerminal = {
+      cols: 100,
+      rows: 30,
+      write: (data, callback) => {
+        writes.push(typeof data === "string" ? data : new TextDecoder().decode(data));
+        callback?.();
+      },
+      onData: (listener) => {
+        input = listener;
+        return handler();
+      },
+      onResize: () => handler(),
+      parser: { registerCsiHandler: handler, registerDcsHandler: handler },
+    };
+    const vm = new Vm(g.runtime, VM);
+    const xterm = await connectXterm({ pty: vm.pty, terminal, slug: "main" });
+    const { session } = xterm;
+    expect(g.processes[0]!.command).toBe(
+      ": freestyle-pty slug=main user= cols=100 rows=30; exec bash -l",
+    );
+    expect(writes[0]).toBe("\x1bc");
+    expect(handlers.filter((h) => !h.disposed)).toHaveLength(8 + 2); // 8 muted + input + resize
+    g.terminals[0]!.emit!(new TextEncoder().encode("$ "));
+    expect(writes).toContain("$ ");
+    await until(() => handlers.slice(0, 8).every((h) => h.disposed));
+    input("pwd\r");
+    expect(g.terminals[0]!.sent).toContain("write pwd\r");
+    xterm.dispose();
+    expect(session.state).toBe("closed");
+    expect(g.terminals[0]!.closed).toBe(true);
+    expect(g.calls.some((c) => c.startsWith("kill"))).toBe(false);
   });
 });
 

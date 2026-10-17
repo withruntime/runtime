@@ -158,7 +158,7 @@ export async function mcpCommand(
   };
   switch (action) {
     case "start": {
-      const args = parse(rest, ["replace"], ["secret", "env", "option", "port"]);
+      const args = parse(rest, ["replace", "public"], ["secret", "env", "option", "port"]);
       if (!args.positional.length)
         throw usage("Name the servers: runtime sandboxes mcp <id> start github fetch");
       const scoped = (name: string) => {
@@ -182,6 +182,7 @@ export async function mcpCommand(
       const gw = await sbx.mcp.start(servers, {
         ...(integer(args, "port") ? { port: integer(args, "port")! } : {}),
         ...(has(args, "replace") ? { replace: true } : {}),
+        ...(has(args, "public") ? { public: true } : {}),
       });
       print(
         `${show(gw)}\nServers are installing; \`${me} sandboxes mcp ${sbx.id}\` shows when they are ready.`,

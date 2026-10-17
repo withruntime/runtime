@@ -184,7 +184,10 @@ These limits are protection, not quotas, and a refusal costs nothing.
 - **Per key:** about 50 requests a second, in bursts of up to 200, with 128
   served at once. Past that, a request waits its turn for up to five seconds
   before it is refused. A key may have as many served at once as its
-  organization (below) when that is more; its rate stays the same.
+  organization (below) when that is more, and its rate and burst grow by
+  the same share: an organization holding 40 sandboxes has 432 in flight,
+  so each of its keys may send about 170 a second in bursts of 675, and at
+  most 400 a second in bursts of 1,600.
 - **Per address, for keys not yet seen to work:** until a request on a key
   has been accepted once, requests on it, and on wrong or missing keys, also
   count against the address they come from: about 50 a second in bursts of
@@ -232,20 +235,20 @@ minutes more. A command it started keeps running in the sandbox.
 
 ## Sandboxes
 
-| Method and path                        | What it does                                                                                                                    |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /v1/sandboxes`                   | Create. Every field optional.                                                                                                   |
-| `GET /v1/sandboxes`                    | List: `state`, `name`, `label=key:value` (repeat), `includeStopped`, `limit`, `cursor`                                          |
-| `GET /v1/sandboxes/{id}`               | Read; `waitFor` and `timeoutSeconds` wait for a state                                                                           |
-| `POST /v1/sandboxes/{id}:stop`         | Stop. Answers at once, where compute billing ends; a kept disk is written out after                                             |
-| `DELETE /v1/sandboxes/{id}`            | Delete for good, in any state (see "Deleting a sandbox" below)                                                                  |
-| `POST /v1/sandboxes/{id}:pause`        | Answers once the processors stop, where compute billing ends; memory and files are then saved                                   |
-| `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; for one with a time limit, `timeoutSeconds` sets the new one                                          |
-| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before its time limit; a sandbox with none answers at once, unchanged                                   |
-| `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` keeps a paused or stopped sandbox 1 to 365 days; `null`, the default, while you have credit                      |
-| `POST /v1/sandboxes/{id}:restart`      | Start a stopped sandbox again from its kept disk                                                                                |
-| `POST /v1/sandboxes/{id}:update`       | Change `name`, `labels`, `env`, `autoWake`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`, `tailscale` (`null` leaves) |
-| `POST /v1/sandboxes/{id}:switch-image` | Move it to another image, keeping `/workspace` (see "Switching its image" below)                                                |
+| Method and path                        | What it does                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/sandboxes`                   | Create. Every field optional.                                                                                                                                  |
+| `GET /v1/sandboxes`                    | List: `state`, `name`, `label=key:value` (repeat), `includeStopped`, `limit`, `cursor`                                                                         |
+| `GET /v1/sandboxes/{id}`               | Read; `waitFor` and `timeoutSeconds` wait for a state                                                                                                          |
+| `POST /v1/sandboxes/{id}:stop`         | Stop. Answers at once, where compute billing ends; a kept disk is written out after                                                                            |
+| `DELETE /v1/sandboxes/{id}`            | Delete for good, in any state (see "Deleting a sandbox" below)                                                                                                 |
+| `POST /v1/sandboxes/{id}:pause`        | Answers once the processors stop, where compute billing ends; memory and files are then saved                                                                  |
+| `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; for one with a time limit, `timeoutSeconds` sets the new one                                                                         |
+| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before its time limit; a sandbox with none answers at once, unchanged                                                                  |
+| `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` keeps a paused or stopped sandbox 1 to 365 days; `null`, the default, while you have credit                                                     |
+| `POST /v1/sandboxes/{id}:restart`      | Start a stopped sandbox again from its kept disk                                                                                                               |
+| `POST /v1/sandboxes/{id}:update`       | Change `name`, `labels`, `env`, `autoWake`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`, `tailscale` (`null` leaves), `timeoutSeconds`, `onTimeout` |
+| `POST /v1/sandboxes/{id}:switch-image` | Move it to another image, keeping `/workspace` (see "Switching its image" below)                                                                               |
 
 The create body:
 
@@ -272,10 +275,16 @@ The create body:
 | `network`                 | every public port (paid), 80 and 443 (without credit) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                                                                                                                     |
 | `image`, `volumes`        | none                                                  | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`: `mode` `"rw"` (default) or `"snapshot"`, a read-only copy of the volume for any number of sandboxes, unrelated to sandbox snapshots ([storage](./storage#attaching-a-volume)). An image with a start command answers once its ready check passes, in `start` |
 | `snapshot`                | none                                                  | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                                                                                                                       |
+| `spreadFrom`              | none                                                  | One to 16 ids of your own sandboxes or snapshots: it starts on a server none of them is on (see "Keeping copies on several servers" below). Not with an id this key may not read: that is `400 invalid_request`                                                                                                                                                    |
 | `tailscale`               | none                                                  | Paid only: `{authKeySecret, hostname?, tags?}` joins your Tailscale network once it runs (see "On your tailnet" below)                                                                                                                                                                                                                                             |
 
 Sizes are limits you ask for. The server checks their combinations against
 account limits and the host's measured capacity.
+
+**Placement.** Every sandbox and every snapshot answer has `placement`: an
+opaque tag such as `pl_3f9a0c1b2d4e5f60`, or `null` before it is placed. Your
+sandboxes and snapshots with the same tag are on the same server. It is never
+the server's name, and another account's tags are unrelated to yours.
 
 **Wake on request.** A paused sandbox with `autoWake` wakes by itself when a
 command, file, process, terminal, desktop or interpreter call reaches it, and
@@ -310,7 +319,13 @@ credit or a limit stops its funding.
 **A time limit.** `timeoutSeconds` from 60 to 86,400 (24 hours) at create sets
 one: the sandbox pauses or stops then, as `onTimeout` says, busy or not.
 `:extend` moves it later, up to 24 hours ahead of now (the SDKs' `keepAlive`
-does it for you), and `endsAt` answers the new end. A wake starts the limit
+does it for you), and `endsAt` answers the new end. `:update` with
+`timeoutSeconds` sets a new limit counted from now, sooner or later than the
+old one, or gives one to a sandbox made without; `0` takes the limit away, and
+`onTimeout` changes what its end does. A paused sandbox counts the new limit
+from its next wake. A change of `onTimeout` that falls in the last stretch the
+sandbox has already paid for can end it up to about two minutes after the end
+asked, never before. A wake starts the limit
 again from the wake: the sandbox's own length, or the `timeoutSeconds` the wake
 names. An extend of a sandbox with no time limit answers at once and changes
 nothing, so older code that extends keeps working. A persistent sandbox has no
@@ -325,7 +340,8 @@ billed as any sandbox's, and a stop keeps it as any stop does. `:update` with
 **A stop keeps the disk; only a delete removes it.** A stopped sandbox reads
 `diskKept: true`, is listed with the live ones, and is billed for its disk as
 [paused storage](./pricing#paused-storage) until you delete it. `:restart`
-starts it again from that disk, its memory gone. A read-write volume stays
+starts it again from that disk, its memory gone, and runs its image's start
+command again, reported in `start` as at create. A read-write volume stays
 attached to it until it is deleted, so delete it before attaching the volume
 elsewhere. One created with `onTimeout: "delete"` has its disk deleted when
 its time limit ends. A raw HTTP client
@@ -585,9 +601,19 @@ With `expiresAt` alone, the token ends by that deadline. With both fields, it
 ends by the earlier of the requested lifetime and deadline. Existing relative
 lifetimes keep their rounding; an absolute deadline rounds down to whole seconds
 and is never exceeded. Read `tokenExpiresAt` from the response rather than
-calculating it yourself. A preview token read through a sandbox session also
+calculating it yourself. A connection the token opened, such as a WebSocket or
+a long download, ends when the token expires; open it again with a fresh token.
+A preview token read through a sandbox session also
 ends by that session's expiry. With less than a minute left, the session receives
 no fresh token. Sessions still cannot create or rotate previews, or use MCP.
+
+A token is not stored on the preview, and neither is its expiry. Every create
+and every read signs its own token for that answer: a list, or a read without
+`ttlSeconds` or `expiresAt`, signs one that lasts a day. So a create that asked
+for a week and a list just after it show the same preview id with different
+tokens and different `tokenExpiresAt` values, and both tokens work, each until
+its own `tokenExpiresAt`. A later read never shortens or extends a token you
+already hold; only `:rotate` (or a key's removal) ends it early.
 
 ## Other products
 
@@ -641,6 +667,56 @@ Runtime publishes the verified compressed allocation; temporary raw files
 are not charged. While compression is pending, `backedUp` is false and
 `durability.state` is `none`. Its off-server copy is queued after compression.
 See [snapshot storage](./storage#snapshots-survive-their-server).
+
+### Keeping copies on several servers
+
+A copy of a memory snapshot starts on the server that holds the snapshot. A
+server starts at most 4 copies a minute of one account's snapshot while that
+account's sandboxes there are busy on CPU; more are refused with
+`account_busy_here`. To start copies on several servers, keep several warm
+sources on different servers.
+
+`spreadFrom` lists 1 to 16 ids of your own sandboxes or snapshots. The new
+sandbox starts on a server none of them is on, and stays apart if its start is
+moved. With no other server that has room, the create answers 409
+`no_capacity` (its message names `spreadFrom`), and nothing is made or
+charged. An id that is not a sandbox or snapshot this key may read is
+`400 invalid_request`. A copy of a snapshot can start only where that snapshot
+is kept, so `snapshot` with a `spreadFrom` that names the snapshot's server is
+`no_capacity` too. Compare `placement` tags to see which of yours share a
+server.
+
+Three warm sources apart, then copies round-robin:
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const a = await runtime.sandboxes.create();
+const b = await runtime.sandboxes.create({ spreadFrom: [a.id] });
+const c = await runtime.sandboxes.create({ spreadFrom: [a.id, b.id] });
+
+const snapshots = [];
+for (const source of [a, b, c]) snapshots.push(await source.snapshot());
+
+for (let i = 0; i < 12; i++) {
+  await runtime.sandboxes.create({ snapshot: snapshots[i % 3]!.id });
+}
+```
+
+```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+a = runtime.sandboxes.create()
+b = runtime.sandboxes.create(spread_from=[a.id])
+c = runtime.sandboxes.create(spread_from=[a.id, b.id])
+
+snapshots = [source.snapshot() for source in (a, b, c)]
+
+for i in range(12):
+    runtime.sandboxes.create(snapshot=snapshots[i % 3]["id"])
+```
 
 Wakes and copies run on the source's server.
 
@@ -725,6 +801,8 @@ longest unsettled first, and only sandboxes paid from credit (a trial's are
 not). Storage (a paused sandbox's memory and disk, a stopped sandbox's disk,
 images, snapshots, volumes and volume backups) is paid an hour at a time, and
 each hour is in the export within a minute of its end, usually seconds.
+Pending holds, the credit set aside for work still running (`heldMicros` in
+`GET /v1/usage`), are not in the export; a hold becomes a row when it settles.
 
 `finalThrough` is a UTC timestamp before which nothing can still change: no row
 with `settledAt` earlier than it can still appear, and rows never change once

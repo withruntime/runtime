@@ -11,7 +11,9 @@ export type Upstream = {
   version: string;
   artifacts: Record<string, string>;
   /** A newer release reviewed and declined because it is not the API Runtime
-   * implements. npm only; the pin stays the supported version. */
+   * implements. npm only; the pin stays the supported version. `artifacts`
+   * holds its integrity, and may also hold earlier declined releases on its
+   * line (between the pin and it), each still held to its reviewed bytes. */
   unsupported?: { version: string; artifacts: Record<string, string>; reason: string };
   /** Authentic artifacts/source reviewed, but installed consumer qualification
    * is deferred. This is monitoring evidence, never support for this version. */
@@ -243,7 +245,8 @@ export function compareLatestReview(
 /** For a pin with a reviewed `unsupported` release, read the registry's full
  * version list: pass only while `latest` is that exact reviewed release, the
  * pinned release is unchanged and not deprecated, and nothing stable was
- * published between the two (a fix on the supported line is review work). */
+ * published between the two (a fix on the supported line is review work)
+ * except earlier declined releases recorded with their unchanged bytes. */
 export function compareSupportedLine(
   pin: Upstream,
   raw: unknown,
@@ -267,11 +270,14 @@ export function compareSupportedLine(
       status: "review",
       message: `Pinned ${pin.version}; ${declined.version} was reviewed, but latest is now ${latest}. Review it before updating the lock.`,
     };
-  if (integrity(latest) !== declined.artifacts[latest])
-    return {
-      status: "review",
-      message: `${latest}: published artifacts changed since the review. Inspect before updating the lock.`,
-    };
+  // Every declined release recorded (latest, and earlier ones on its line)
+  // must still carry the bytes that were reviewed.
+  for (const version of Object.keys(declined.artifacts).sort(Bun.semver.order).reverse())
+    if (integrity(version) !== declined.artifacts[version])
+      return {
+        status: "review",
+        message: `${version}: published artifacts changed since the review. Inspect before updating the lock.`,
+      };
   const pinned = versions[pin.version];
   if (pinned === undefined)
     return { status: "review", message: `Pinned ${pin.version} is no longer published.` };
@@ -290,6 +296,7 @@ export function compareSupportedLine(
   const between = Object.keys(versions).filter(
     (version) =>
       stable(version) &&
+      declined.artifacts[version] === undefined &&
       Bun.semver.order(version, pin.version) > 0 &&
       Bun.semver.order(version, declined.version) < 0,
   );
@@ -402,13 +409,22 @@ export function validateLock(value: unknown): CompatibilityLock {
       if (pin.unsupported !== undefined) {
         const declined = object(pin.unsupported);
         const declinedVersion = string(declined.version);
+        const declinedArtifacts = hashed(declined.artifacts);
         if (
           pin.registry !== "npm" ||
           !stable(version) ||
           !stable(declinedVersion) ||
           Bun.semver.order(declinedVersion, version) <= 0 ||
           !string(declined.reason).trim() ||
-          Object.keys(hashed(declined.artifacts)).join() !== declinedVersion
+          declinedArtifacts[declinedVersion] === undefined ||
+          Object.keys(declinedArtifacts).some(
+            (earlier) =>
+              earlier !== declinedVersion &&
+              (!stable(earlier) ||
+                Bun.semver.order(earlier, version) <= 0 ||
+                Bun.semver.order(earlier, declinedVersion) >= 0 ||
+                !/^sha512-\S+$/.test(string(declinedArtifacts[earlier]))),
+          )
         )
           throw new Error(`Invalid unsupported release for ${name}`);
       }
@@ -513,10 +529,18 @@ export async function checkUpstreams(
   );
 }
 
+// `bun check-upstream.ts [lock.json]`: the package's lock by default. The
+// nightly Runtime job runs a copy of this file beside a copy of the lock
+// (agents/upstreams.ts), so it needs nothing else from the repository.
 if (import.meta.main) {
   try {
     const lock = validateLock(
-      JSON.parse(readFileSync(new URL("../compatibility-lock.json", import.meta.url), "utf8")),
+      JSON.parse(
+        readFileSync(
+          process.argv[2] ?? new URL("../compatibility-lock.json", import.meta.url),
+          "utf8",
+        ),
+      ),
     );
     const findings = await checkUpstreams(lock);
     for (const item of findings)

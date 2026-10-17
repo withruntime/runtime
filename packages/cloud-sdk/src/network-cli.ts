@@ -8,7 +8,7 @@ import { named } from "./cli-name.js";
 import { generateWireGuardKeyPair } from "./wireguard.js";
 
 /* The CLI's network products, each its own product under `runtime <product>`
- * (AGENTS.md: the top level holds only what spans products):
+ * (the top level holds only what spans products):
  *
  *   runtime domains add|verify|ls|get|rm     your own hostname for a sandbox's port, with HTTPS
  *   runtime ports   open|ls|close            a public TCP port to a sandbox's port
@@ -280,11 +280,11 @@ export async function networkProductCommand(
         print(
           all.length
             ? table([
-                ["HOSTNAME", "STATE", "SANDBOX", "PORT"],
+                ["HOSTNAME", "STATE", "SERVES", "PORT"],
                 ...all.map((d) => [
                   d.hostname,
                   d.disabled ? "taken down" : d.state,
-                  d.sandboxId,
+                  d.sandboxId ?? `app ${d.appId ?? ""}`,
                   String(d.port),
                 ]),
               ])

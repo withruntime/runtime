@@ -11,6 +11,7 @@ from withruntime._sync_client import Sandbox
 class CaptureTransport:
     def __init__(self, capture, wake_error=None, state="running"):
         self.capture, self.wake_error, self.state = capture, wake_error, state
+        self.polls = 0
         self.calls = []
         self.wake_deadline = "unset"
 
@@ -24,8 +25,16 @@ class CaptureTransport:
                 raise self.wake_error
             self.state = "running"
         elif path.endswith(":snapshot"):
+            # The server pauses a running source for the capture. A capture
+            # still going when it answers leaves the source paused, which is
+            # what the client's wake recovers; an error raised here is one
+            # that came after the pause.
+            was_running = self.state == "running"
+            self.state = "paused"
             if isinstance(self.capture, BaseException):
                 raise self.capture
+            return {**self.capture, "state": "capturing"} if was_running else self.capture
+        elif path.startswith("/v1/snapshots/"):
             return self.capture
         return {"id": "source", "state": self.state}
 

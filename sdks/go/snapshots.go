@@ -35,6 +35,10 @@ type Snapshot struct {
 	ReadyAt      *time.Time      `json:"readyAt"`
 	ExpiresAt    *time.Time      `json:"expiresAt"`
 	Raw          json.RawMessage `json:"-"`
+
+	// Placement is an opaque tag for the server it is kept on; the same tag
+	// as a sandbox of yours means the same server. Nil before it is placed.
+	Placement *string `json:"placement"`
 }
 
 // UnmarshalJSON keeps the raw answer alongside the typed fields.

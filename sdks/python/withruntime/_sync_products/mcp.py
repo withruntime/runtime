@@ -38,12 +38,16 @@ class SandboxMcp:
         return f"/v1/sandboxes/{self._sandbox.id}/mcp"
 
     def start(self, servers: list[dict[str, Any]], *, port: Optional[int] = None,
-                    replace: bool = False) -> dict[str, Any]:
+                    replace: bool = False, public: bool = False) -> dict[str, Any]:
+        """public: URLs that never expire, guarded by the header alone, which
+        is kept across starts until stop(). Paid accounts only."""
         body: dict[str, Any] = {"servers": servers}
         if port is not None:
             body["port"] = port
         if replace:
             body["replace"] = True
+        if public:
+            body["public"] = True
         return self._t.json("POST", self._path(), body=body)
 
     def get(self) -> dict[str, Any]:

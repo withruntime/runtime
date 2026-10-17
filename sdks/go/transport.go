@@ -60,7 +60,7 @@ func newKey() string {
 // attempt with no answer by then is talking to a server that is gone, such as
 // a controller that died with the call in flight while its address moved to
 // the new leader: a client that only waits sends nothing the new leader could
-// refuse (the leader drill on vin-5, 4 October 2026). It is sent again under
+// refuse (a controller failover drill, 4 October 2026). It is sent again under
 // the same key.
 var answerStart = 125 * time.Second
 

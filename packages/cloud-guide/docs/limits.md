@@ -7,7 +7,13 @@ agent that no one using Runtime normally meets. An account without credit has
 smaller limits, which adding credit lifts at once.
 
 Your own account's limits, with how much of each you use, are on the
-[Limits page of the console](https://withruntime.com/account/limits).
+[Limits page of the console](https://withruntime.com/account/limits). A key
+reads the same numbers from `GET /v1/limits` (`runtime.limits.get()` in the
+SDK), in its `account` list: each row's `limit` (such as
+`sandbox.memory_mib`), `max` and `used`, so an agent can see a limit coming
+before a create is refused, and hold back new work while it is near. A key
+limited to a compartment, or a worker key another key made, sees only its own
+sandboxes, so its `account` is null.
 
 ## When you meet one
 

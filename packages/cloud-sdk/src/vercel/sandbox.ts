@@ -1,4 +1,4 @@
-import type { Writable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import type { Runtime } from "../client.js";
 import { extensionSeconds, LeaseKeeper, LEASE_MAX_SECONDS } from "../compat/lease.js";
 import { RuntimeError } from "../errors.js";
@@ -11,7 +11,14 @@ import {
   type RuntimeSandbox,
   type WithRuntime,
 } from "./client.js";
-import { Command, CommandFinished, exitCodeOf, type LogOutputLine } from "./command.js";
+import {
+  Command,
+  CommandFinished,
+  exitCodeOf,
+  pipeStdin,
+  waitWithStdinPipe,
+  type LogOutputLine,
+} from "./command.js";
 import { APIError, guard, NotSupportedError, StreamError, translate } from "./errors.js";
 import { FileSystem } from "./filesystem.js";
 import {
@@ -113,7 +120,7 @@ export interface CreateSandboxParams extends Credentials {
   withruntime?: WithRuntime;
 }
 
-export interface RunCommandParams {
+interface RunCommandParamsBase {
   cmd: string;
   args?: string[];
   cwd?: string;
@@ -121,11 +128,28 @@ export interface RunCommandParams {
   /** Runs the command under `sudo`, which needs no password. */
   sudo?: boolean;
   detached?: boolean;
+  /** `true` keeps stdin open for `writeStdin` and `closeStdin` (needs
+   * `detached: true`). A `Readable` is written to stdin, which closes when it
+   * ends; the stream is never ended or destroyed. If piping fails, an
+   * attached command is killed and `runCommand` rejects; a detached one's
+   * `wait()` rejects. Unset or false: stdin is empty. */
+  stdin?: boolean | Readable;
   stdout?: Writable;
   stderr?: Writable;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
+
+export type RunCommandParams = RunCommandParamsBase &
+  (
+    | { onStart?: never }
+    | {
+        detached?: false;
+        /** Called with the Command as soon as it starts, before it exits;
+         * awaited before `runCommand` resolves. */
+        onStart?: (command: Command) => void | Promise<void>;
+      }
+  );
 
 export interface SandboxRoute {
   port: number;
@@ -676,6 +700,12 @@ export class Sandbox {
       typeof commandOrParams === "string"
         ? { cmd: commandOrParams, ...(args ? { args } : {}), ...opts }
         : commandOrParams;
+    if (params.stdin === true && !params.detached)
+      throw new TypeError(
+        "`stdin: true` requires `detached: true`, otherwise the command would wait for input that can never be written",
+      );
+    const stdinStream =
+      typeof params.stdin === "object" && params.stdin !== null ? params.stdin : null;
     const argv = [
       ...(params.sudo ? ["sudo", "--preserve-env"] : []),
       params.cmd,
@@ -697,8 +727,13 @@ export class Sandbox {
     };
     const startedAt = Date.now();
     const vercelCwd = params.cwd === undefined ? HOME : toVercelPath(params.cwd);
+    const spawn = () =>
+      this.#withResume(
+        (runtime) => runtime.spawn(argv, { ...common, ...(params.stdin ? { stdin: "pipe" } : {}) }),
+        params,
+      );
     if (params.detached) {
-      const process = await this.#withResume((runtime) => runtime.spawn(argv, common), params);
+      const process = await spawn();
       const command = new Command({
         id: process.id,
         cwd: vercelCwd,
@@ -706,8 +741,37 @@ export class Sandbox {
         sandboxName: this.name,
         process,
       });
+      if (stdinStream) command.stdinPipe = pipeStdin(command, stdinStream, params.signal);
       if (params.stdout || params.stderr) void pipe(command, params);
       return command;
+    }
+    if (stdinStream || params.onStart) {
+      // Started as a process so its Command exists before it exits: for
+      // onStart, and as the target of the piped stdin.
+      const process = await spawn();
+      const command = new Command({
+        id: process.id,
+        cwd: vercelCwd,
+        startedAt,
+        sandboxName: this.name,
+        process,
+        onLine: (line) =>
+          (line.stream === "stdout" ? params.stdout : params.stderr)?.write(line.data),
+      });
+      const stdinPipe = stdinStream && pipeStdinOrKill(command, stdinStream, params.signal);
+      const finished = waitWithStdinPipe(
+        command.wait(params.signal ? { signal: params.signal } : {}),
+        stdinPipe,
+      );
+      // The command can fail while onStart is pending or after it throws.
+      finished.catch(() => {});
+      try {
+        await params.onStart?.(command);
+        return await finished;
+      } catch (error) {
+        if (params.signal?.aborted) await command.kill("SIGTERM").catch(() => {});
+        throw error;
+      }
     }
     const lines: LogOutputLine[] = [];
     const record = (stream: "stdout" | "stderr", writer?: Writable) => (data: string) => {
@@ -1178,6 +1242,18 @@ export function retentionDays(ms: number): number {
     );
   if (ms === 0) return 365;
   return Math.min(365, Math.max(1, Math.ceil(ms / 86_400_000)));
+}
+
+/** Pipes stdin for a command the caller waits on, killing the command if
+ * piping fails, since the caller has no handle to stop it otherwise. */
+function pipeStdinOrKill(command: Command, stream: Readable, signal?: AbortSignal) {
+  const stdinPipe = pipeStdin(command, stream, signal);
+  const done = stdinPipe.done.catch((error: unknown) => {
+    command.kill().catch(() => {});
+    throw error;
+  });
+  done.catch(() => {});
+  return { done, stop: () => stdinPipe.stop() };
 }
 
 async function pipe(command: Command, params: RunCommandParams) {

@@ -194,7 +194,7 @@ describe("Modal client", () => {
   test("reports its version, the default environment, and fails after close", async () => {
     const { runtime } = fakeRuntime();
     const modal = modalOf(runtime);
-    expect(modal.version()).toBe("0.11.0");
+    expect(modal.version()).toBe("0.11.1");
     expect(modal.environmentName()).toBe("");
     expect(() => modal.environmentName("prod")).toThrow(CompatibilityError);
     modal.close();

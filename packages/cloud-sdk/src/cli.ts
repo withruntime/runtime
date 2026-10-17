@@ -49,7 +49,7 @@ Usage: runtime <product> <command> [options]      runtime <command> [options]
 
 Start
   sandboxes run [--keep] [create options] -- <command>
-                                               A fresh sandbox runs one command, then stops
+                                               A fresh sandbox runs one command, then is deleted
 
 Account
   login [--agent-name <name>] [--no-browser] [--wait]
@@ -113,6 +113,8 @@ Account
 Connect
   sandboxes ssh <id|name> [-- <command...>]    Log in over SSH; \`runtime sandboxes ssh help\` for editors
   sandboxes ssh config [--install]             Make \`ssh <id|name>.runtime\` work (VS Code, JetBrains)
+  sandboxes code <id|name> [--editor vscode|cursor|windsurf]
+                                               Open it in VS Code, Cursor or Windsurf over SSH
   sandboxes port-forward <id|name> <port|local:remote>...
                                                Forward local ports to ports in a sandbox
 
@@ -148,14 +150,17 @@ const SANDBOX_HELP = `runtime sandboxes <command>
 
   Every <id> below can also be the sandbox's name.
 
-  run [--keep] [create options] -- <command>                  A fresh sandbox runs one command, then stops
+  run [--keep] [create options] -- <command>                  A fresh sandbox runs one command, then is deleted
   ssh <id|name> [-- <command...>] | ssh config [--install]    Log in over SSH, also from VS Code and JetBrains
+  code <id|name> [--editor vscode|cursor|windsurf] [--path /workspace] [--print]
+                                                              Open it in your editor over SSH, in one step
   port-forward <id|name> <port|local:remote>...               Forward local ports to ports in it
   create [--name n] [--label k=v]... [--env K=V]... [--vcpu 2] [--memory 4096] [--disk 4096]
          [--cpu shared|reserved] [--cpu-floor <thousandths>] [--max-cost <usd>] [--max-total-cost <usd>]
          [--timeout <60-86400>] [--on-timeout pause|stop|delete] [--no-wait]
          [--no-internet] [--allow <host>]... [--deny <host>]... [--connect <host:port>]...
          [--image <name:tag|imageId> | --snapshot <snapshotId>] [--volume <volumeId>:/data[:snapshot]]...
+         [--spread-from <id>]...
          [--idle-pause <seconds>] [--no-auto-wake] [--persistent] [--get-or-create]
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
@@ -188,6 +193,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
+              [--timeout <60-86400 from now>|0] [--on-timeout pause|stop|delete]
                                               Change its settings; persistent keeps it running until stopped
   snapshot <id> [--name n] [--retention days|credit] Keep its whole machine; prints the snapshot id
   mount <id> <s3|r2|gcs>://<bucket>[/prefix] <path> [--secret NAME] [--region r]
@@ -205,8 +211,9 @@ const SANDBOX_HELP = `runtime sandboxes <command>
                                               Print file changes as they happen, until Ctrl-C
   mcp catalog                                 MCP servers a sandbox can run (licence, settings, hosts)
   mcp <id> start <server>... [--secret SERVER.SETTING=SECRET]... [--env SERVER.NAME=value]...
-                             [--option SERVER.NAME=value]... [--port 8765] [--replace]
+                             [--option SERVER.NAME=value]... [--port 8765] [--replace] [--public]
                                               Start them; prints each URL and the header to send
+                                              (--public: URLs that never expire, paid only)
   mcp <id> [status] | mcp <id> stop           Their state and fresh URLs; stop them
   preview <id> <port> [--public] [--ttl <s>]  Share a port at an HTTPS address (--public: paid only)
   preview rotate <id> <port>                  Refuse every token given out for a private port so
@@ -287,7 +294,7 @@ function parse(
         string | undefined,
       ];
       // A plural of an option is the option once per comma: --hosts a,b is
-      // --host a --host b (13 October 2026: Marc's first try at a secret).
+      // --host a --host b (13 October 2026: a user's first try at a secret).
       const plural =
         !known.has(typed) &&
         typed.endsWith("s") &&
@@ -477,6 +484,7 @@ const SANDBOX_MOVED = ["run", "ssh", "port-forward", "forward"];
 const SANDBOX_VERBS = [
   "run",
   "ssh",
+  "code",
   "port-forward",
   "create",
   "ls",
@@ -646,7 +654,7 @@ export async function run(
   if (words.warning) out.error(`Warning: ${named(words.warning)}`);
   const [first, ...remaining] = words.argv;
   // Sandbox is one product of several, so its commands live under it
-  // (AGENTS.md, 23 September 2026): `runtime sandboxes run`, `sandbox ssh` and
+  // (23 September 2026): `runtime sandboxes run`, `sandbox ssh` and
   // `sandbox port-forward`. The old top-level forms were removed, not aliased.
   if (first && SANDBOX_MOVED.includes(first))
     throw usage(
@@ -654,7 +662,7 @@ export async function run(
     );
   const nested =
     (first === "sandbox" || first === "sandboxes" || first === "sbx") &&
-    SANDBOX_MOVED.includes(remaining[0] ?? "");
+    [...SANDBOX_MOVED, "code"].includes(remaining[0] ?? "");
   const command = nested ? remaining[0]! : first;
   const rest = nested ? remaining.slice(1) : remaining;
   // `runtime sandboxes create --help` is how an agent asks what a command takes:
@@ -706,7 +714,7 @@ export async function run(
         : `Runtime Cloud ${VERSION}. ${start}
 
   ${me} sandboxes run -- python3 < invoice.py
-                                   Run a local invoice script, then stop the sandbox
+                                   Run a local invoice script, then delete the sandbox
   ${me} sandboxes create                 A sandbox that stays; prints its id
   ${me} sandboxes exec <id> -- <command> Run in it
   ${me} help                             Everything else
@@ -737,15 +745,16 @@ export async function run(
       out,
     );
     let cleanup: Promise<boolean> | undefined;
-    // SIGINT and normal completion share one stop. Keep an absolute deadline
-    // across the stop retries and final state check, so cleanup cannot hang.
+    // SIGINT and normal completion share one delete, with an absolute
+    // deadline across its retries, so cleanup cannot hang. A delete, not a
+    // stop: a stopped sandbox keeps its disk, billed, and an account without
+    // credit keeps at most 10, so ten runs that only stopped refused the
+    // eleventh (no_credit_kept_limit, 0685). --keep is how to keep one.
     const stop = () =>
       (cleanup ??= (async () => {
         const signal = AbortSignal.timeout(30_000);
         try {
-          await sbx.stop({ wait: false, signal });
-          if (sbx.state !== "stopped") await sbx.waitFor("stopped", { timeoutSeconds: 25, signal });
-          if (sbx.state !== "stopped") throw new Error(`Sandbox is still ${sbx.state}.`);
+          await sbx.delete({ signal });
           return true;
         } catch (error) {
           out.error(
@@ -753,8 +762,8 @@ export async function run(
               new RuntimeError({
                 code: "cleanup_failed",
                 status: 0,
-                message: `Could not confirm that sandbox ${sbx.id} stopped. ${error instanceof Error ? error.message : String(error)}`,
-                hint: `Check it and retry cleanup with: ${me} sandboxes stop ${sbx.id}`,
+                message: `Could not confirm that sandbox ${sbx.id} was deleted. ${error instanceof Error ? error.message : String(error)}`,
+                hint: `Check it and retry cleanup with: ${me} sandboxes rm ${sbx.id}`,
                 cause: error,
               }),
               out.json,
@@ -1170,6 +1179,10 @@ export async function run(
   if (command === "ssh") {
     product = "ssh";
     return (await import("./ssh.js")).sshCommand(rest, env, out, () => client(env), me);
+  }
+  if (nested && command === "code") {
+    product = "ssh";
+    return (await import("./ssh.js")).editorCommand(rest, env, out, () => client(env), me);
   }
   if (command === "port-forward" || command === "forward") {
     product = "ssh";
@@ -2106,6 +2119,8 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           "auto-wake",
           "persistent",
           "max-total-cost",
+          "timeout",
+          "on-timeout",
         ],
       );
       const sbx = await get(args.positional[0]);
@@ -2115,6 +2130,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         if (value !== "on" && value !== "off") throw usage(`--${name} takes on or off.`);
         return value === "on";
       };
+      const onTimeout = flag(args, "on-timeout")
+        ? oneOf(args, "on-timeout", ["pause", "stop", "delete"] as const)
+        : undefined;
       const cost = flag(args, "max-total-cost");
       if (cost !== undefined && cost !== "none" && !/^\d+(\.\d{1,6})?$/.test(cost))
         throw usage("--max-total-cost takes dollars, such as 25 or 2.50, or none.");
@@ -2136,10 +2154,14 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           : {
               maxTotalCostMicros: cost === "none" ? null : usdMicros(args, "max-total-cost")!,
             }),
+        ...(integer(args, "timeout") !== undefined
+          ? { timeoutSeconds: integer(args, "timeout")! }
+          : {}),
+        ...(onTimeout === undefined ? {} : { onTimeout }),
       };
       if (!Object.keys(settings).length)
         throw usage(
-          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent or --max-total-cost.",
+          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent, --max-total-cost, --timeout or --on-timeout.",
         );
       await sbx.update(settings);
       print(describe(sbx.info), sbx.info);
@@ -2521,7 +2543,7 @@ function attachment(spec: string): { volumeId: string; path: string; mode: "rw" 
  * A terminal: one line, not shown. */
 /** A pasted secret as the header it becomes: no line breaks (a token copied
  * from a terminal arrives wrapped), no bracketed-paste markers, no space at
- * either end. 13 October 2026: Marc's pasted Claude token was refused as
+ * either end. 13 October 2026: a user's pasted Claude token was refused as
  * "not visible ASCII". A header cannot hold a line break, so none is lost. */
 export function cleanSecret(raw: string): string {
   return raw
@@ -3009,8 +3031,8 @@ Every key is also at https://withruntime.com/account/keys.
 `;
 
 /* `runtime keys`: a key made from the terminal, by this machine's key with no
-   browser (Marc, 14 October 2026, agent swarms), or approved in the browser
-   (Marc, 23 September 2026; ARCHITECTURE.md section 10, "Keys from the
+   browser (14 October 2026), or approved in the browser
+   (23 September 2026; ARCHITECTURE.md section 10, "Keys from the
    terminal"). Only the options the keys page offers. */
 /* `runtime account`: the accounts this machine is connected to, and which one
    every command uses (ARCHITECTURE.md section 3.9). Each is its own saved
@@ -3208,7 +3230,7 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
     dailyLimitMicros: limit === undefined ? null : dailyLimitMicros(limit),
   };
   /* A key on this machine makes the new one itself, with no browser: an
-     agent with no person, a swarm's coordinator (Marc, 14 October 2026). */
+     agent with no person, a swarm's coordinator (14 October 2026). */
   const saved = has(args, "browser")
     ? null
     : env.RUNTIME_API_KEY || (await connectionStore(env).read())?.key || null;
@@ -4207,6 +4229,7 @@ const CREATE_VALUES = [
   "connect",
   "image",
   "snapshot",
+  "spread-from",
   "volume",
   "env",
 ];
@@ -4232,6 +4255,17 @@ function createInput(args: Args): CreateSandbox & { wait?: boolean } {
   return {
     ...(flag(args, "image") ? { image: flag(args, "image")! } : {}),
     ...(flag(args, "snapshot") ? { snapshot: flag(args, "snapshot")! } : {}),
+    ...(args.flags.has("spread-from")
+      ? {
+          spreadFrom: args.flags
+            .get("spread-from")!
+            .flatMap((value) => value.split(","))
+            .map((id) => {
+              if (!id.trim()) throw usage("--spread-from needs a non-empty value.");
+              return id.trim();
+            }),
+        }
+      : {}),
     ...(args.flags.has("volume") ? { volumes: args.flags.get("volume")!.map(attachment) } : {}),
     ...(has(args, "no-internet") || rules.length
       ? {

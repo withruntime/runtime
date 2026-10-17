@@ -91,7 +91,31 @@ replaces the Morph calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
-Runtime:
+Or keep your Morph code and change one import:
+
+```ts no-run
+import { MorphCloudClient } from "withruntime/morph"; // was "morphcloud"
+const client = new MorphCloudClient();
+const snapshot = await client.snapshots.create({ vcpus: 2, memory: 4096, diskSize: 8192 });
+const ready = await snapshot.setup("pip install pandas"); // cached after the first run
+const instance = await client.instances.start({ snapshotId: ready.id });
+console.log((await instance.exec("python3 -c 'import pandas; print(pandas.__version__)'")).stdout);
+const { instances } = await instance.branch(4); // four copies, memory included
+```
+
+In Python, change `morphcloud` to `withruntime.morph`:
+
+```python no-run
+from withruntime.morph import MorphCloudClient  # was: from morphcloud import MorphCloudClient
+client = MorphCloudClient()
+snapshot = client.snapshots.create(vcpus=2, memory=4096, disk_size=8192)
+ready = snapshot.setup("pip install pandas")  # cached after the first run
+with client.instances.start(ready.id) as instance:
+    print(instance.exec("python3 -c 'import pandas; print(pandas.__version__)'").stdout)
+    branched, copies = instance.branch(4)  # four copies, memory included
+```
+
+Runtime's own SDK:
 
 ```ts
 import { Sandbox } from "withruntime";

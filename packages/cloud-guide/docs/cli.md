@@ -37,8 +37,8 @@ runtime sandboxes run -- python3 - < invoice.py
 runtime sandboxes run --keep --vcpu 2 -- nproc   # keeps it, and prints how to run more
 ```
 
-`run` creates a sandbox, runs the command, prints its output, stops the sandbox
-and exits with the command's exit code. It takes the same options as
+`run` creates a sandbox, runs the command, prints its output, deletes the
+sandbox and exits with the command's exit code. It takes the same options as
 `sandbox create`, with one difference: `--timeout <seconds>` limits the command,
 as it does for `exec` (exit code 124 when it runs out), not the sandbox.
 `--keep` leaves the sandbox running for more commands.
@@ -340,12 +340,16 @@ runtime secrets set GITHUB_TOKEN --host api.github.com < token.txt
 runtime sandboxes mcp "${id}" start github fetch --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN
 runtime sandboxes mcp "${id}" start github --secret github.GITHUB_PERSONAL_ACCESS_TOKEN=GITHUB_TOKEN \
   --option github.toolsets=repos,issues --replace                 # a catalog option; --replace stops the running set first
+runtime sandboxes mcp "${id}" start fetch --public --replace         # URLs that never expire, the same header at every start
 runtime sandboxes mcp "${id}"                                       # state, URLs and the header to send
 runtime sandboxes mcp "${id}" stop
 ```
 
 `start` prints each server's URL, the `Authorization` header every request
-needs, and the `claude mcp add` line for each. `runtime mcp` is something else:
+needs, and the `claude mcp add` line for each. With `--public` (an account
+with a kept top-up) the URLs carry no link token and never expire, and the
+header stays the same at every start, after a restart too, until `stop`: set
+an agent up with them once. `runtime mcp` is something else:
 this CLI's own MCP server, on standard input.
 
 A preview's address is under `runtimehost.com`, the domain for everything
@@ -414,6 +418,7 @@ paid sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
 runtime sandboxes ssh "${id}"                          # a shell, as the sandbox user
 runtime sandboxes ssh "${id}" -- make test             # one command; exits with its code
 runtime sandboxes ssh config --install                 # `ssh <id>.runtime` from ssh, VS Code or JetBrains
+runtime sandboxes code "${id}" --editor cursor          # open it in Cursor (or vscode, windsurf)
 runtime sandboxes port-forward "${id}" 5432            # localhost:5432 here is port 5432 in the sandbox
 runtime sandboxes port-forward "${id}" 3000 15432:5432 # several at once, local:remote
 ```
@@ -444,6 +449,7 @@ base=$(runtime sandboxes create --image "${img}")
 runtime sandboxes fork "${base}" --count 3              # three running copies of it
 snap=$(runtime sandboxes snapshot "${base}" --name ready)
 runtime sandboxes create --snapshot "${snap}"           # a copy, any time later
+other=$(runtime sandboxes create --spread-from "${base}")   # starts on a server "${base}" is not on
 runtime images ls; runtime volumes ls; runtime snapshots ls
 runtime images get data; runtime volumes get "${vol}"; runtime snapshots get "${snap}"
 runtime snapshots extend "${snap}" <days>              # keep it longer

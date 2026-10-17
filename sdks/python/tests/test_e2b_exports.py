@@ -1,6 +1,6 @@
-"""Every name e2b 2.55.1 exports (its ``__all__``, read 9 October 2026) imports
+"""Every name e2b 2.56.0 exports (its ``__all__``, read 15 October 2026) imports
 from withruntime.e2b, and from withruntime.e2b.code_interpreter as
-e2b_code_interpreter 2.10.5 re-exports them: an import that fails stops code
+e2b_code_interpreter 2.11.0 re-exports them: an import that fails stops code
 written for E2B before it runs a line. Until then 79 were missing. The modules
 E2B defines them in import too: until 6 October 2026, 31 of 36 did not."""
 import importlib
@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import withruntime.e2b as e2b  # noqa: E402
 import withruntime.e2b.code_interpreter as code_interpreter  # noqa: E402
 
-E2B_2_55_1 = """
+E2B_2_56_0 = """
 ALL_TRAFFIC ApiClient ApiParams AsyncCommandHandle AsyncSandbox AsyncSandboxPaginator AsyncSecret
 AsyncSecretPaginator AsyncSnapshotPaginator AsyncTemplate AsyncVolume AsyncWatchHandle AuthenticationException
 BuildException BuildInfo BuildStatusReason CommandExitException CommandHandle CommandResult ConnectionConfig
@@ -35,8 +35,8 @@ VolumeNotFoundException VolumePathNotFoundException WatchHandle WriteInfo client
 get_signature wait_for_file wait_for_port wait_for_process wait_for_timeout wait_for_url
 """.split()
 
-# The modules e2b 2.55.1's own __init__ imports those names from, and
-# e2b_code_interpreter 2.10.5's: code that imports a name from where E2B defines
+# The modules e2b 2.56.0's own __init__ imports those names from, and
+# e2b_code_interpreter 2.11.0's: code that imports a name from where E2B defines
 # it (``from e2b.exceptions import TimeoutException``) keeps working when only
 # ``e2b`` becomes ``withruntime.e2b``. Leaves out api, client and sandbox._git,
 # which are E2B's HTTP internals and a private module.
@@ -86,11 +86,11 @@ E2B_PATHS = {
 
 class Exports(unittest.TestCase):
     def test_every_e2b_name_imports(self):
-        self.assertEqual([name for name in E2B_2_55_1 if not hasattr(e2b, name)], [])
-        self.assertEqual([name for name in E2B_2_55_1 if name not in e2b.__all__], [])
+        self.assertEqual([name for name in E2B_2_56_0 if not hasattr(e2b, name)], [])
+        self.assertEqual([name for name in E2B_2_56_0 if name not in e2b.__all__], [])
 
     def test_the_code_interpreter_re_exports_them(self):
-        names = [*E2B_2_55_1, "RunCodeLanguage"]
+        names = [*E2B_2_56_0, "RunCodeLanguage"]
         self.assertEqual([name for name in names if not hasattr(code_interpreter, name)], [])
         self.assertEqual([name for name in names if name not in code_interpreter.__all__], [])
 

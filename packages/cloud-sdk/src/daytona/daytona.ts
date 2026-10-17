@@ -3,6 +3,7 @@ import type { Image as RuntimeImage } from "../products/images.js";
 import type { Volume as RuntimeVolume } from "../products/volumes.js";
 import {
   clientFor,
+  refuseTarget,
   type DaytonaConfig,
   type RuntimeCreate,
   type RuntimeSandbox,
@@ -98,6 +99,9 @@ export type CreateSandboxBaseParams = {
   spot?: boolean;
   linkedSandbox?: string;
   secrets?: Record<string, string>;
+  /** The region for this create, over the client's target: "us" (Runtime's
+   * one region) or none; any other is refused. */
+  target?: string;
   /** Runtime-only: an explicit client, or fields for this create. */
   withruntime?: WithRuntime;
 };
@@ -706,6 +710,7 @@ function refuseCreate(params: CreateSandboxBaseParams & { resources?: Resources 
       "GPUs",
       "Runtime runs sandboxes on CPUs; remove gpu and gpuType from resources.",
     );
+  refuseTarget(params.target);
   if (params.volumes?.some((mount) => mount.subpath))
     throw new NotSupportedError("Mounting part of a volume (subpath)", "Mount the whole volume.");
   if (params.kvm)

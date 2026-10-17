@@ -284,11 +284,26 @@ type LifecycleOptions struct {
 	// NoWait returns once the change is accepted rather than settled.
 	NoWait         bool
 	IdempotencyKey string
+	// WaitForCapacity replaces the client's for this Wake or Restart; a
+	// pointer to 0 fails at once when its server is full. Other calls ignore it.
+	WaitForCapacity *time.Duration
 }
 
 func (s *Sandbox) lifecycle(ctx context.Context, verb string, opts *LifecycleOptions, body map[string]any, settle bool) error {
 	if opts == nil {
 		opts = &LifecycleOptions{}
+	}
+	// A wake or restart refused for room ran nothing and is sent again with
+	// the same key. 16 October 2026 06:11 UTC the product check's wake was
+	// refused no_capacity in 36 ms on its full server, where a create would
+	// have waited; a wake or restart stays on its server, so it waits there
+	// for room. Stop, pause, extend and fork never wait.
+	room := time.Duration(0)
+	if verb == "wake" || verb == "restart" {
+		room = s.c.waitForCapacity
+		if opts.WaitForCapacity != nil {
+			room = max(0, *opts.WaitForCapacity)
+		}
 	}
 	wait := 60
 	if opts.NoWait || !settle {
@@ -304,6 +319,7 @@ func (s *Sandbox) lifecycle(ctx context.Context, verb string, opts *LifecycleOpt
 		body:   body,
 		wait:   wait,
 		key:    opts.IdempotencyKey,
+		room:   room,
 	}, &info); err != nil {
 		return err
 	}
@@ -442,7 +458,9 @@ func (s *Sandbox) Pause(ctx context.Context, opts *LifecycleOptions) error {
 
 // Wake carries on a paused sandbox, with its memory and processes, on its own
 // host. timeout, when not zero, is its new time limit for a sandbox that has
-// one; a sandbox with none keeps running while it works.
+// one; a sandbox with none keeps running while it works. When its server is
+// full (no_capacity) it waits for room as Create does, up to the client's
+// WaitForCapacity or opts.WaitForCapacity, with the same idempotency key.
 func (s *Sandbox) Wake(ctx context.Context, timeout time.Duration, opts *LifecycleOptions) error {
 	body := map[string]any{}
 	if timeout > 0 {
@@ -464,7 +482,7 @@ func (s *Sandbox) SetRetention(ctx context.Context, days int, opts *LifecycleOpt
 }
 
 // Restart starts a stopped persistent sandbox again from its disk. Memory is
-// not kept.
+// not kept. Like Wake, it waits for room on a full server.
 func (s *Sandbox) Restart(ctx context.Context, opts *LifecycleOptions) error {
 	return s.lifecycle(ctx, "restart", opts, nil, true)
 }
@@ -523,8 +541,10 @@ type SnapshotOptions struct {
 
 // Snapshot keeps this sandbox's whole machine (files, memory, running
 // processes) to start new sandboxes from, with CreateOptions.Snapshot. A
-// running sandbox is paused for the moment it takes, then woken; a paused one
-// stays paused. A sandbox with volumes cannot be snapshotted.
+// running sandbox is paused by the server for the moment it takes and woken
+// once the capture is over (one still capturing when the call answers stays
+// paused until it is ready); a paused one stays paused. A sandbox with volumes
+// cannot be snapshotted.
 func (s *Sandbox) Snapshot(ctx context.Context, opts *SnapshotOptions) (*Snapshot, error) {
 	if opts == nil {
 		opts = &SnapshotOptions{}
@@ -545,26 +565,16 @@ func (s *Sandbox) Snapshot(ctx context.Context, opts *SnapshotOptions) (*Snapsho
 			return nil, err
 		}
 	}
-	running := s.State() == "running"
-	if running {
-		if err := s.Pause(ctx, nil); err != nil {
-			return nil, err
-		}
-	}
+	// The server pauses a running sandbox itself: a client pause and wake
+	// would be two more round trips.
 	var snapshot Snapshot
-	err := s.c.do(ctx, &call{
+	if err := s.c.do(ctx, &call{
 		method: http.MethodPost,
 		path:   s.path(":snapshot"),
 		body:   opts,
 		wait:   10,
 		key:    opts.IdempotencyKey,
-	}, &snapshot)
-	if running {
-		if wakeErr := s.Wake(ctx, 0, nil); err == nil && wakeErr != nil {
-			return &snapshot, wakeErr
-		}
-	}
-	if err != nil {
+	}, &snapshot); err != nil {
 		return nil, err
 	}
 	return &snapshot, nil

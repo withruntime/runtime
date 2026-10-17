@@ -36,6 +36,7 @@ type MCPServerRequest struct {
 type MCPGateway struct {
 	Running      bool              `json:"running"`
 	Port         *int              `json:"port"`
+	Public       bool              `json:"public"`
 	Token        *string           `json:"token"`
 	Headers      map[string]string `json:"headers"`
 	URLExpiresAt *time.Time        `json:"urlExpiresAt"`
@@ -56,10 +57,13 @@ func (s *MCPService) Catalog(ctx context.Context) ([]MCPCatalogEntry, error) {
 
 type SandboxMCP struct{ sandbox *Sandbox }
 type MCPStartOptions struct {
-	Servers        []MCPServerRequest `json:"servers"`
-	Port           int                `json:"port,omitempty"`
-	Replace        bool               `json:"replace,omitempty"`
-	IdempotencyKey string             `json:"-"`
+	Servers []MCPServerRequest `json:"servers"`
+	Port    int                `json:"port,omitempty"`
+	Replace bool               `json:"replace,omitempty"`
+	// Public serves URLs that never expire, guarded by the header alone,
+	// which is kept across starts until Stop. Paid accounts only.
+	Public         bool   `json:"public,omitempty"`
+	IdempotencyKey string `json:"-"`
 }
 
 func (s *SandboxMCP) Start(ctx context.Context, input MCPStartOptions) (*MCPGateway, error) {

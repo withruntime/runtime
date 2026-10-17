@@ -22,7 +22,7 @@ const lock = {
   providers: [{ id: "example", status: "partial", upstreams: [npm] }],
 };
 
-test("the manifest keeps all eleven approved providers and hashes every upstream", () => {
+test("the manifest keeps all twelve approved providers and hashes every upstream", () => {
   const current = validateLock(
     JSON.parse(readFileSync(new URL("../compatibility-lock.json", import.meta.url), "utf8")),
   );
@@ -36,6 +36,7 @@ test("the manifest keeps all eleven approved providers and hashes every upstream
       "codesandbox",
       "sprites",
       "freestyle",
+      "morph",
       "prime",
       "modal",
       "cloudflare",
@@ -233,13 +234,59 @@ test("a pin with a reviewed major reads the abbreviated version list, still with
   );
   expect(broken[0]!.status).toBe("unavailable");
 });
-test("the Cloudflare pin stays on the 0.x API it implements, with 1.0.0 recorded as reviewed", () => {
+test("an earlier declined release on the same line stays reviewed, held to its bytes", () => {
+  const later: Upstream = {
+    ...held,
+    unsupported: {
+      version: "1.0.1",
+      artifacts: { "1.0.0": "sha512-reviewed", "1.0.1": "sha512-next" },
+      reason: "1.0 is a different API",
+    },
+  };
+  const both = { ...line, "1.0.1": { integrity: "sha512-next" } };
+  expect(compareSupportedLine(later, registry(both, "1.0.1")).status).toBe("current");
+  // Without the earlier release recorded, it is an unreviewed release in between.
+  expect(
+    compareSupportedLine(
+      { ...later, unsupported: { ...later.unsupported!, artifacts: { "1.0.1": "sha512-next" } } },
+      registry(both, "1.0.1"),
+    ).status,
+  ).toBe("review");
+  // The earlier release republished with other bytes is review work.
+  expect(
+    compareSupportedLine(
+      later,
+      registry({ ...both, "1.0.0": { integrity: "sha512-other" } }, "1.0.1"),
+    ).message,
+  ).toContain("1.0.0: published artifacts changed");
+  // A fix on the supported line is still caught.
+  expect(
+    compareSupportedLine(
+      later,
+      registry({ ...both, "0.12.11": { integrity: "sha512-f" } }, "1.0.1"),
+    ).status,
+  ).toBe("review");
+  const withPin = (pin: unknown) =>
+    validateLock({ ...lock, providers: [{ ...lock.providers[0], upstreams: [pin] }] });
+  expect(() => withPin(later)).not.toThrow();
+  for (const artifacts of [
+    { "0.12.9": "sha512-x", "1.0.1": "sha512-next" },
+    { "1.0.2": "sha512-x", "1.0.1": "sha512-next" },
+    { "1.0.0-rc.2": "sha512-x", "1.0.1": "sha512-next" },
+    { "1.0.0": "sha512-x" },
+  ])
+    expect(() =>
+      withPin({ ...later, unsupported: { ...later.unsupported!, artifacts } }),
+    ).toThrow();
+});
+test("the Cloudflare pin stays on the 0.x API it implements, with 1.0.1 recorded as reviewed", () => {
   const current = validateLock(
     JSON.parse(readFileSync(new URL("../compatibility-lock.json", import.meta.url), "utf8")),
   );
   const pin = current.providers.find((p) => p.id === "cloudflare")!.upstreams[0]!;
   expect(pin.version.startsWith("0.")).toBe(true);
-  expect(pin.unsupported?.version).toBe("1.0.0");
+  expect(pin.unsupported?.version).toBe("1.0.1");
+  expect(Object.keys(pin.unsupported?.artifacts ?? {})).toEqual(["1.0.0", "1.0.1"]);
 });
 
 const reviewNpm: Upstream = {

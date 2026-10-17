@@ -15,7 +15,7 @@ import { RuntimeError } from "./errors.js";
 import { RENAMED_FIELDS, fieldUse } from "./product-renames.js";
 import type { CreateSandbox, DeletedSandbox, FeedbackKind, SandboxInfo, Usage } from "./types.js";
 
-export type { CreateOptions } from "./machine.js";
+export type { CreateOptions, LifecycleOptions } from "./machine.js";
 
 export type RuntimeOptions = {
   /** Default: the RUNTIME_API_KEY environment variable. */

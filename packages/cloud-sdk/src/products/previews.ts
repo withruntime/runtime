@@ -10,9 +10,12 @@ export type Preview = {
   /** `https://<port>-<sandbox>.<preview domain>/`. A private preview also
    * needs the token. */
   url: string;
-  /** Private previews: a fresh signed token. Send it as the
-   * `x-runtime-preview-token` header. */
+  /** Private previews: a token signed for this answer. Send it as the
+   * `x-runtime-preview-token` header. Every create and read signs its own;
+   * one signed before keeps working until its own expiry or a rotate. */
   token: string | null;
+  /** When this answer's token stops working. Not stored on the preview: a
+   * later read signs another token and leaves this one as it is. */
   tokenExpiresAt: string | null;
   /** Private previews: a link that carries the token once, for a browser. */
   urlWithToken: string | null;
@@ -53,7 +56,7 @@ export function sandboxPreviews(t: Transport, sandbox: Sandbox) {
      * shared already. */
     create: (port: number, input: CreatePreview = {}, options?: RequestOptions) =>
       t.json<Preview>({ method: "POST", path: base(), body: { port, ...input }, ...options }),
-    /** Every shared port, each private one with a fresh token. */
+    /** Every shared port, each private one with a fresh token that lasts a day; tokens signed before keep their own expiry. */
     list: async (options?: RequestOptions) =>
       (await t.json<{ data: Preview[] }>({ method: "GET", path: base(), ...options })).data,
     /** One preview, with a fresh private token. `expiresAt` bounds its expiry

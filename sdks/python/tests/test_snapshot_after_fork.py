@@ -16,6 +16,7 @@ SANDBOX = "11111111-2222-4333-8444-555555555555"
 class Stub(BaseHTTPRequestHandler):
     state = "resuming"
     seen: list = []
+    capture_over = True
 
     def log_message(self, *args):
         pass
@@ -42,9 +43,16 @@ class Stub(BaseHTTPRequestHandler):
         if url.path.endswith(":wake"):
             Stub.state = "running"
         if url.path.endswith(":snapshot"):
-            if Stub.state != "paused":
+            if Stub.state not in ("running", "paused"):
                 return self._reply(409, {"error": {"code": "sandbox_not_paused", "message": "not paused"}})
+            if Stub.state == "running" and Stub.capture_over is False:
+                # Capture not over within the server's wait: source left paused.
+                Stub.state = "paused"
+                return self._reply(202, {"id": "snap-1", "state": "capturing"})
+            # A running source is paused, captured and woken by the server.
             return self._reply(201, {"id": "snap-1", "state": "ready"})
+        if url.path == "/v1/snapshots/snap-1":
+            return self._reply(200, {"id": "snap-1", "state": "ready"})
         return self._reply(200, {"id": SANDBOX, "state": Stub.state, "status": "active"})
 
     do_GET = do_POST = _route
@@ -61,21 +69,34 @@ class SnapshotAfterFork(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
 
-    def test_resuming_is_waited_for_then_paused_snapshotted_and_woken(self):
-        Stub.state, Stub.seen = "resuming", []
+    def test_resuming_is_waited_for_then_snapshotted_in_one_call(self):
+        Stub.state, Stub.seen, Stub.capture_over = "resuming", [], True
         runtime = Runtime(api_key="rk_test", base_url=self.url, max_retries=0)
         sbx = runtime.sandboxes.get(SANDBOX)
         self.assertEqual(sbx.snapshot()["id"], "snap-1")
         order = [entry for entry in Stub.seen if "waitFor" in entry or ":" in entry.split("/")[-1]]
         self.assertEqual(order, [
             f"GET /v1/sandboxes/{SANDBOX}?waitFor=running",
-            f"POST /v1/sandboxes/{SANDBOX}:pause",
             f"POST /v1/sandboxes/{SANDBOX}:snapshot",
-            f"POST /v1/sandboxes/{SANDBOX}:wake",
         ])
 
+    def test_capture_still_running_leaves_source_paused_and_the_client_wakes_it(self):
+        Stub.state, Stub.seen, Stub.capture_over = "resuming", [], False
+        runtime = Runtime(api_key="rk_test", base_url=self.url, max_retries=0)
+        sbx = runtime.sandboxes.get(SANDBOX)
+        self.assertEqual(sbx.snapshot()["id"], "snap-1")
+        order = [entry for entry in Stub.seen if "waitFor" in entry or ":" in entry.split("/")[-1]
+                 or entry.endswith("snapshots/snap-1")]
+        self.assertEqual(order, [
+            f"GET /v1/sandboxes/{SANDBOX}?waitFor=running",
+            f"POST /v1/sandboxes/{SANDBOX}:snapshot",
+            "GET /v1/snapshots/snap-1",
+            f"POST /v1/sandboxes/{SANDBOX}:wake",
+        ])
+        self.assertEqual(Stub.state, "running")
+
     def test_pausing_is_waited_for_and_left_paused(self):
-        Stub.state, Stub.seen = "pausing", []
+        Stub.state, Stub.seen, Stub.capture_over = "pausing", [], True
         runtime = Runtime(api_key="rk_test", base_url=self.url, max_retries=0)
         sbx = runtime.sandboxes.get(SANDBOX)
         self.assertEqual(sbx.snapshot()["id"], "snap-1")

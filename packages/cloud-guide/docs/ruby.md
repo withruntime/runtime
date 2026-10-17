@@ -373,11 +373,14 @@ client's own retries. Transport failures, 429, 502, 503 and 504 are retried
 with the same key, so a retry never makes two sandboxes or runs a command
 twice. `retryable?` says whether trying the same call again may work.
 
-**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. Pass `wait_for_capacity:` (seconds) to the client or to one
-create; zero fails at once.
+create, wake or restart; zero fails at once, as in
+`sandbox.wake(wait_for_capacity: 0)`. A sandbox stays on its server, so a wake
+or restart refused with `no_capacity` is sent again with the same idempotency
+key until room frees. A fork never waits.
 
 An owner, admin or developer can make a read-only key and set a daily spending
 limit on a key at [API keys](https://withruntime.com/account/keys).

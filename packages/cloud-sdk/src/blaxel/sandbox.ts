@@ -480,6 +480,7 @@ export class SandboxInstance {
     });
     this.previews = new SandboxPreviews({
       sandboxName: this.name,
+      sandboxId: this.#rt.id,
       run,
       labels: () => this.#rt.info.labels,
       setLabels: (changes) => this.#setLabels(changes),

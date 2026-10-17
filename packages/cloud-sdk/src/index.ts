@@ -17,6 +17,7 @@ export {
   FeedbackApi,
   SupportApi,
   type CreateOptions,
+  type LifecycleOptions,
   type RuntimeOptions,
   type SupportReply,
 } from "./client.js";
@@ -31,7 +32,7 @@ export {
 } from "./sandbox.js";
 export { Tunnel, TunnelStream, type PortForward } from "./tunnel.js";
 export { Page } from "./page.js";
-export type { KeyLimits } from "./products/limits.js";
+export type { AccountLimit, KeyLimits } from "./products/limits.js";
 export type { AuditEvent, AuditPage } from "./products/audit.js";
 export type {
   UsageExportQuery,

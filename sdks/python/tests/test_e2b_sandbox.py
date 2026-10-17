@@ -108,8 +108,7 @@ class Create(Base):
         self.assertAlmostEqual(info.end_at.timestamp(), time.time() + 600, delta=5)
         self.assertEqual(info.lifecycle.on_timeout, "kill")
         sbx.set_timeout(1200)
-        seconds = self.world.called("sandbox.extend")[-1][1]
-        self.assertTrue(599 <= seconds <= 602, seconds)
+        self.assertEqual(self.world.called("sandbox.update")[-1], (sbx.sandbox_id, {"timeout_seconds": 1200}))
         # An explicit on_timeout "kill" deletes too, with or without a timeout.
         self.create(lifecycle={"on_timeout": "kill"})
         self.assertEqual((self.last_create()["timeout_seconds"], self.last_create()["on_lease_end"]), (300, "delete"))
@@ -132,6 +131,7 @@ class Create(Base):
         sbx.set_timeout(600)
         Sandbox.connect(sbx.sandbox_id, timeout=600, client=self.world.client())
         self.assertEqual(self.world.called("sandbox.extend"), [])
+        self.assertEqual(self.world.called("sandbox.update"), [])
         # Its end is E2B's furthest, a day ahead, not where it is paid up to:
         # 5 October 2026, a pilot's read minutes ahead and looked about to end.
         import time
@@ -143,11 +143,12 @@ class Create(Base):
         self.assertEqual(sbx.get_info().end_at.isoformat().replace("+00:00", "Z")[:19],
                          self.fake(sbx).info["expiresAt"][:19])
 
-    def test_set_timeout_cannot_bring_the_end_sooner(self):
+    def test_set_timeout_brings_the_end_sooner(self):
+        import time
         sbx = self.create(timeout=600)
-        with self.assertRaises(NotSupportedException) as caught:
-            sbx.set_timeout(60)
-        self.assertIn("kill()", str(caught.exception))
+        sbx.set_timeout(60)
+        self.assertEqual(self.world.called("sandbox.update"), [(sbx.sandbox_id, {"timeout_seconds": 60})])
+        self.assertAlmostEqual(sbx.get_info().end_at.timestamp(), time.time() + 60, delta=5)
 
     def test_maps_timeout_metadata_internet_and_lifecycle(self):
         self.create(timeout=120, metadata={"job": "x"}, allow_internet_access=False,
@@ -544,12 +545,11 @@ class Lifecycle(Base):
     def test_set_timeout(self):
         sbx = self.create(timeout=120)
         sbx.set_timeout(600)
-        seconds = self.world.called("sandbox.extend")[0][1]
-        self.assertTrue(479 <= seconds <= 482, seconds)
-        with self.assertRaises(NotSupportedException):
-            sbx.set_timeout(60)
+        sbx.set_timeout(90.5)
         Sandbox.set_timeout(sbx.sandbox_id, 900, client=self.world.client())
-        self.assertEqual(len(self.world.called("sandbox.extend")), 2)
+        self.assertEqual([settings for _, settings in self.world.called("sandbox.update")],
+                         [{"timeout_seconds": 600}, {"timeout_seconds": 91}, {"timeout_seconds": 900}])
+        self.assertEqual(self.world.called("sandbox.extend"), [])
 
     def test_info_pause_connect(self):
         sbx = self.create(metadata={"a": "b"})

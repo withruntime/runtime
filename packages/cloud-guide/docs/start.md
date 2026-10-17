@@ -41,7 +41,7 @@ every Runtime product. New accounts get [{{included-machine}} every month](./inc
 Paste this into your coding agent:
 
 > Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
-> follow it to the end. When it asks for my approval, show me the link and code.
+> follow it.
 
 The agent connects and, if the project uses another sandbox provider, moves
 every call to Runtime and keeps going until your real job runs there. It
@@ -74,12 +74,13 @@ The first time, it connects this machine:
 2. You sign in with Google or by email (type the six-digit code the email
    gives you, or click its link if you already have an account), check the
    code and choose **Connect agent**.
-3. A fresh sandbox runs the command, prints the invoice total, 750, and stops.
+3. A fresh sandbox runs the command, prints the invoice total, 750, and is
+   deleted.
 
-Exit code zero means the command succeeded. Confirm cleanup with
-`npx withruntime sandboxes ls --json`, and delete the test sandbox
-(`npx withruntime sandboxes rm <id>`) if it is still there: a stopped one keeps
-its disk, billed until it is deleted. Later commands reuse the connection.
+Exit code zero means the command succeeded. Nothing is left behind to pay for:
+`npx withruntime sandboxes ls --json` no longer lists the test sandbox (an
+older CLI only stopped it: if it is still listed, delete it with
+`npx withruntime sandboxes rm <id>`). Later commands reuse the connection.
 
 An agent running it shows you the link and code. If you approve after the
 command stopped waiting (50 seconds when no one is at a terminal), the agent
@@ -185,7 +186,7 @@ maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
 Runtime's, and shows how to work out your monthly saving from measured usage.
 Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after changing one
 import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
-`withruntime/blaxel`.
+`withruntime/blaxel`; Morph's TypeScript client, to `withruntime/morph`.
 `npx withruntime compare --from <provider>` prints what you save, and
 credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 

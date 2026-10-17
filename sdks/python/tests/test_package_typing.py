@@ -13,7 +13,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.12.0"
+VERSION = "0.15.0"
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
@@ -61,7 +61,7 @@ class PackageTyping(unittest.TestCase):
     def test_package_metadata_and_runtime_version_agree(self):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertRegex(project, rf'(?m)^version = "{re.escape(VERSION)}"$')
-        self.assertRegex(project, r'(?m)^requires-python = ">=3\.10"$')
+        self.assertRegex(project, r'(?m)^requires-python = ">=3\.9"$')
         values = [
             ast.literal_eval(node.value)
             for node in ast.parse((ROOT / "withruntime" / "_version.py").read_text()).body

@@ -1,4 +1,4 @@
-"""Prime Intellect sandbox compatibility, pinned to prime-sandboxes 0.4.1.
+"""Prime Intellect sandbox compatibility, pinned to prime-sandboxes 0.4.5.
 
 Change ``from prime_sandboxes import ...`` to ``from withruntime.prime import ...``.
 Authentication uses RUNTIME_API_KEY or ``runtime login``.
@@ -8,7 +8,7 @@ from .models import (CreateSandboxRequest, StartCommand, Sandbox, CommandRespons
 from ._async import AsyncSandboxClient as _AsyncSandboxClient, _validate_guest_user, _validate_background_output_limits
 from ._sync import SandboxClient, CommandTimeoutError
 
-UPSTREAM_VERSION = "0.4.1"
+UPSTREAM_VERSION = "0.4.5"
 
 from .. import Runtime as _Runtime, AsyncRuntime as _AsyncRuntime
 from .._compat import CompatibilityError as _CompatibilityError, refused as _refused, runtime_key as _runtime_key
@@ -121,6 +121,14 @@ TeamImageOwner = _refused("Prime", "TeamImageOwner", _IMAGES)
 from .models import (SandboxStatus, SandboxStatusSnapshot, SandboxStatusLookupError, BatchSandboxStatusResponse,
     BackgroundJobStatusSnapshot, BackgroundJobStatusLookupError, BatchBackgroundJobStatusResponse,
     BulkDeleteSandboxRequest, BulkDeleteSandboxResponse, SandboxEgressPolicy, EgressPolicyStatus,
-    SSHSession, AdvancedConfigs, SandboxLogsResponse)
+    SSHSession, AdvancedConfigs, SandboxLogsResponse, SandboxCheckpoint, CheckpointLookupError,
+    BatchCheckpointResponse, CheckpointDeleteError, DeleteSandboxCheckpointsResponse)
+
+# Prime's LAN networks (0.4.5): named networks of tagged members with directed port rules.
+_PRIVATE = ("Runtime cannot limit which of your sandboxes reach each other; runtime.networks.private.set(enabled=True) "
+            "lets all of them reach each other at <id>.sandbox.internal")
+LanNetwork = _refused("Prime", "LanNetwork", _PRIVATE)
+LanNetworkMember = _refused("Prime", "LanNetworkMember", _PRIVATE)
+LanRule = _refused("Prime", "LanRule", _PRIVATE)
 
 from .exceptions import PaymentRequiredError, APITimeoutError

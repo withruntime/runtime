@@ -264,6 +264,8 @@ export class FakeSandbox {
     labels: Record<string, string>;
     expiresAt: string;
   };
+  /** The end an update set, once one has (null: no limit). */
+  limitEnd: string | null | undefined;
   readonly fileMap = new Map<string, Uint8Array>();
   /** Runtime refuses a public share, whatever the funding reads. */
   refusePublic = false;
@@ -300,13 +302,15 @@ export class FakeSandbox {
       // As the API answers since 0300: no timeoutSeconds is no time limit,
       // shown as 0 with no end, and the lease renews itself.
       timeoutSeconds: input.timeoutSeconds ?? 0,
+      persistent: input.persistent === true,
       // The API's answer names neither the image nor the snapshot.
     };
     // A limited one ends where it is paid up to; one with none never does,
     // and neither does a persistent one, as a pilot's are (0254).
     const limited = Boolean(input.timeoutSeconds) && input.persistent !== true;
     Object.defineProperty(this.info, "endsAt", {
-      get: () => (limited ? this.info.expiresAt : null),
+      get: () =>
+        this.limitEnd !== undefined ? this.limitEnd : limited ? this.info.expiresAt : null,
       enumerable: true,
     });
   }
@@ -611,6 +615,20 @@ export class FakeSandbox {
     // One with no time limit answers at once and changes nothing (0300).
     if (this.info.endsAt === null) return this;
     this.info.expiresAt = new Date(Date.parse(this.info.expiresAt) + seconds * 1000).toISOString();
+    return this;
+  }
+  /** A new time limit from now, sooner or later; 0 takes it away
+   * (0880_cloud_time_limit_set). The lease already paid for stays. */
+  async update(settings: { timeoutSeconds?: number; onTimeout?: string }) {
+    this.world.record("sandbox.update", this.id, settings);
+    if (settings.timeoutSeconds !== undefined) {
+      this.info.timeoutSeconds = settings.timeoutSeconds;
+      this.limitEnd =
+        settings.timeoutSeconds === 0
+          ? null
+          : new Date(Date.now() + settings.timeoutSeconds * 1000).toISOString();
+    }
+    if (settings.onTimeout !== undefined) this.info.onTimeout = settings.onTimeout;
     return this;
   }
   async fork(options: { count?: number }) {

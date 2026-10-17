@@ -124,13 +124,28 @@ public final class Sandbox implements AutoCloseable {
   }
 
   private Sandbox lifecycle(String verb, Map<String, Object> body, boolean settle, String key) {
-    info =
-        new SandboxInfo(
-            t.object(
-                new Transport.Call("POST", path(":" + verb))
-                    .body(body == null ? Map.of() : body)
-                    .waitSeconds(settle ? 60 : 0)
-                    .key(key)));
+    return lifecycle(verb, body, settle, key, null);
+  }
+
+  // A wake or restart refused for room (no_capacity and the like) ran nothing and is sent again
+  // with the same key until the client's waitForCapacity runs out. 16 October 2026 06:11 UTC the
+  // product check's wake was refused no_capacity in 36 ms on its full server, where a create would
+  // have waited; a wake or restart stays on its server, so it waits there for room. Stop, pause,
+  // extend and fork never wait. {@code waitForCapacity} replaces the client's; ZERO fails at once.
+  private Sandbox waitingLifecycle(String verb, Map<String, Object> body, Duration waitForCapacity) {
+    Duration room = waitForCapacity != null ? waitForCapacity : t.waitForCapacity;
+    return lifecycle(verb, body, true, null, room.isNegative() ? Duration.ZERO : room);
+  }
+
+  private Sandbox lifecycle(
+      String verb, Map<String, Object> body, boolean settle, String key, Duration room) {
+    Transport.Call call =
+        new Transport.Call("POST", path(":" + verb))
+            .body(body == null ? Map.of() : body)
+            .waitSeconds(settle ? 60 : 0)
+            .key(key);
+    if (room != null) call.room(room);
+    info = new SandboxInfo(t.object(call));
     return this;
   }
 
@@ -145,16 +160,28 @@ public final class Sandbox implements AutoCloseable {
     return lifecycle("pause", null, true, null);
   }
 
-  /** Carries on a paused sandbox, with its memory and processes. */
+  /**
+   * Carries on a paused sandbox, with its memory and processes. When its server is full
+   * (no_capacity) it waits for room as {@code create} does, up to the client's waitForCapacity.
+   */
   public Sandbox wake() {
-    return lifecycle("wake", null, true, null);
+    return wake(null, null);
   }
 
   /**
    * Carries on a paused sandbox; {@code lease} is its new time limit, for a sandbox that has one.
    */
   public Sandbox wake(Duration lease) {
-    return lifecycle("wake", Map.of("timeoutSeconds", lease.toSeconds()), true, null);
+    return wake(lease, null);
+  }
+
+  /**
+   * Carries on a paused sandbox; {@code lease} (null for none) is its new time limit, and {@code
+   * waitForCapacity} replaces the client's wait for room on a full server (ZERO fails at once).
+   */
+  public Sandbox wake(Duration lease, Duration waitForCapacity) {
+    return waitingLifecycle(
+        "wake", lease == null ? null : Map.of("timeoutSeconds", lease.toSeconds()), waitForCapacity);
   }
 
   /**
@@ -170,9 +197,17 @@ public final class Sandbox implements AutoCloseable {
     return lifecycle("retention", Map.of("days", days), false, null);
   }
 
-  /** Starts a stopped persistent sandbox again from its disk. Memory is not kept. */
+  /**
+   * Starts a stopped persistent sandbox again from its disk. Memory is not kept. Waits for room on
+   * a full server like {@link #wake()}.
+   */
   public Sandbox restart() {
-    return lifecycle("restart", null, true, null);
+    return restart(null);
+  }
+
+  /** As {@link #restart()}, with {@code waitForCapacity} replacing the client's (ZERO fails at once). */
+  public Sandbox restart(Duration waitForCapacity) {
+    return waitingLifecycle("restart", null, waitForCapacity);
   }
 
   /**
@@ -265,8 +300,9 @@ public final class Sandbox implements AutoCloseable {
 
   /**
    * Keeps this sandbox's whole machine as a snapshot to start new sandboxes from. A running sandbox
-   * is paused for the moment it takes, then woken; a paused one stays paused. A sandbox with
-   * volumes cannot be snapshotted.
+   * is paused by the server for the moment it takes and woken once the capture is over (one still
+   * capturing when the call answers stays paused until it is ready); a paused one stays paused. A
+   * sandbox with volumes cannot be snapshotted.
    */
   public Snapshot snapshot(SnapshotOptions options) {
     refresh();
@@ -275,18 +311,14 @@ public final class Sandbox implements AutoCloseable {
     Duration settle = Duration.ofSeconds(ApiDefaults.WAIT_FOR_TIMEOUT_SECONDS);
     if ("resuming".equals(state()) || "starting".equals(state())) waitFor("running", settle);
     else if ("pausing".equals(state())) waitFor("paused", settle);
-    boolean running = "running".equals(state());
-    if (running) pause();
-    try {
-      return new Snapshot(
-          t.object(
-              new Transport.Call("POST", path(":snapshot"))
-                  .body(options.toMap())
-                  .waitSeconds(10)
-                  .key(options.idempotencyKey)));
-    } finally {
-      if (running) wake();
-    }
+    // The server pauses a running sandbox itself: a client pause and wake would be two more
+    // round trips.
+    return new Snapshot(
+        t.object(
+            new Transport.Call("POST", path(":snapshot"))
+                .body(options.toMap())
+                .waitSeconds(10)
+                .key(options.idempotencyKey)));
   }
 
   /** CPU and memory over a range: 15m, 1h, 6h, 24h, 7d or 30d (null is the default). */

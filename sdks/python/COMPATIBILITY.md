@@ -17,11 +17,12 @@ interchangeable. Remaining implementation work is tracked in the repository's
 
 | Provider        | Upstream distribution examined                | Replacement imports                                                                                                                                             |
 | --------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| E2B             | `e2b==2.55.1`, `e2b-code-interpreter==2.10.5` | `from withruntime.e2b import Sandbox, AsyncSandbox`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox`                                       |
+| E2B             | `e2b==2.56.0`, `e2b-code-interpreter==2.11.0` | `from withruntime.e2b import Sandbox, AsyncSandbox`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox`                                       |
 | Runloop         | `runloop-api-client==2.0.0`                   | `from withruntime.runloop import Runloop, AsyncRunloop`; `from withruntime.runloop.sdk import RunloopSDK, AsyncRunloopSDK`                                      |
-| Prime Intellect | `prime-sandboxes==0.4.0`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
+| Prime Intellect | `prime-sandboxes==0.4.5`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
 | Fly Sprites     | `sprites-py==0.7.2`                           | `from withruntime.sprites import SpritesClient, AsyncSpritesClient, SpriteConfig`; filesystem, client, sprite, types, exec and exceptions submodules also exist |
-| Modal CPU       | `modal==1.6.0`                                | `from withruntime import modal`; `from withruntime.modal import Sandbox, Image, Secret, App`                                                                    |
+| Modal CPU       | `modal==1.6.2`                                | `from withruntime import modal`; `from withruntime.modal import Sandbox, Image, Secret, App`                                                                    |
+| Morph Cloud     | `morphcloud==0.1.115`                         | `from withruntime.morph import MorphCloudClient`; `from withruntime.morph.api import Instance, Snapshot, ApiError` and the other `morphcloud.api` names         |
 
 CodeSandbox and Cloudflare's sandbox SDKs use TypeScript. Freestyle's current VM
 SDK also uses TypeScript; its older Python `freestyle==0.0.17` package has a
@@ -31,13 +32,14 @@ for those SDKs.
 
 ## Implemented and exercised surfaces
 
-| Provider           | Exercised sandbox behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Current contract boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runloop high level | Sync/async creation, reconnect, list, shutdown, disk-retaining suspend/restart and waits, files, foreground callbacks, background results/state/kill, and named Bash sessions retaining environment, cwd, functions, aliases and options; upstream `ExecutionResult` construction and properties; blocking disk snapshots, status/update/delete/list and disk clones                                                                                                                                | Interactive stdin on named shells is refused. Suspend first requests paid disk retention; a trial refusal leaves the process running. Tunnel/SSH and asynchronous disk capture are not mapped. Not every request/response field or polling option is covered.                                                                                                                                                                                                               |
-| Runloop REST style | Devbox create/retrieve/list/await, execute sync/async, file transfers, shutdown/suspend/resume/keepalive; execution retrieve/wait/kill and channel iterators; disk snapshot status/update/delete/list                                                                                                                                                                                                                                                                                               | Runtime image and snapshot IDs are required. Upstream resource IDs do not identify Runtime resources. Non-sandbox vendor services are outside this interface.                                                                                                                                                                                                                                                                                                               |
-| Prime Intellect    | Sync/async create/get/list/delete, status batches, bulk delete, foreground execution, binary files/read windows, background start/status/results/batches/wait, concrete response models and mapped API errors; async `open_process` byte streams, stdin, signals, canceled waits and close                                                                                                                                                                                                          | GPU, impersonation, advanced network/secrets, SSH sessions and startup logs are not mapped. Nondefault stability/build-wait, transfer deadlines and custom background worker limits are refused. Response models preserve tested fields/defaults/aliases, not every Pydantic validation/coercion.                                                                                                                                                                           |
-| Fly Sprites        | Sync/async create/get/list/destroy/delete, CPU/RAM/disk config, metadata and replacement labels, prefix/cursor pagination, command argv and the vendor's command options, buffered binary output, live byte sinks, TTY, attach to native byte-mode sessions, session list; filesystem/path operations including `copy_to` and `replace`; URL auth (public or sprite) as a port 8080 preview; checkpoints as disk snapshots; domain network policy; upgrade; the vendor's dataclasses and exceptions | Live sinks/TTY/attach require the native byte-output capability. Buffered commands use owned guest files and work without it. A checkpoint is a Runtime disk snapshot (files, not running processes). Refused by name: provider runtime selection, `private_access`, services, network presets (`include`) and an allow rule inside a denied wildcard, checkpoint history filters, in-place restore, control multiplexing, the vendor's HTTP client and Fly token exchange. |
-| Modal CPU          | Sync/`.aio` create/from_id/from_name/list/tags, exec/wait/poll/terminate, binary/text process streams, line iteration, stdin, filesystem read/write/copy/stat/list/remove/mkdir/watch; registry image recipes, pip/apt lists, env/workdir, inline secrets and app metadata; disk-only filesystem snapshots returning reusable `Image` objects                                                                                                                                                       | Binary processes require the native byte-output capability. Access/file-target/indefinite filesystem watch requires the expanded native watch capability. Snapshot TTL supports whole days from 1 to 365; other TTLs are refused. Atomic name uniqueness, GPU, volumes, tunnels, remote named secrets and all image options are not mapped. `App.lookup` is Runtime app metadata, not a Modal service lookup.                                                               |
+| Provider           | Exercised sandbox behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Current contract boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runloop high level | Sync/async creation, reconnect, list, shutdown, disk-retaining suspend/restart and waits, files, foreground callbacks, background results/state/kill, and named Bash sessions retaining environment, cwd, functions, aliases and options; upstream `ExecutionResult` construction and properties; blocking disk snapshots, status/update/delete/list and disk clones                                                                                                                                                                                | Interactive stdin on named shells is refused. Suspend first requests paid disk retention; a trial refusal leaves the process running. Tunnel/SSH and asynchronous disk capture are not mapped. Not every request/response field or polling option is covered.                                                                                                                                                                                                                                                                            |
+| Runloop REST style | Devbox create/retrieve/list/await, execute sync/async, file transfers, shutdown/suspend/resume/keepalive; execution retrieve/wait/kill and channel iterators; disk snapshot status/update/delete/list                                                                                                                                                                                                                                                                                                                                               | Runtime image and snapshot IDs are required. Upstream resource IDs do not identify Runtime resources. Non-sandbox vendor services are outside this interface.                                                                                                                                                                                                                                                                                                                                                                            |
+| Prime Intellect    | Sync/async create/get/list/delete, status batches, bulk delete, foreground execution, binary files/read windows, background start/status/results/batches/wait (a job that cannot start fails its launch; one that died without an exit code is an APIError), filesystem checkpoints as disk-only snapshots (checkpoint, get, batches, wait, list, delete one or all, create from `checkpoint_id`), network rules, logs, concrete response models and mapped API errors; async `open_process` byte streams, stdin, signals, canceled waits and close | GPU, impersonation, advanced configs/secrets, SSH sessions on a public host, Prime's raw API routes, its image registry and LAN networks are refused with Runtime's alternative (LAN: `runtime.networks.private`, which cannot limit members, tags or ports). Nondefault stability probes and custom background worker limits are refused. A checkpoint pauses a running sandbox for its capture and stands alone (no parent, depth 1). Response models preserve tested fields/defaults/aliases, not every Pydantic validation/coercion. |
+| Fly Sprites        | Sync/async create/get/list/destroy/delete, CPU/RAM/disk config, metadata and replacement labels, prefix/cursor pagination, command argv and the vendor's command options, buffered binary output, live byte sinks, TTY, attach to native byte-mode sessions, session list; filesystem/path operations including `copy_to` and `replace`; URL auth (public or sprite) as a port 8080 preview; checkpoints as disk snapshots; domain network policy; upgrade; the vendor's dataclasses and exceptions                                                 | Live sinks/TTY/attach require the native byte-output capability. Buffered commands use owned guest files and work without it. A checkpoint is a Runtime disk snapshot (files, not running processes). Refused by name: provider runtime selection, `private_access`, services, network presets (`include`) and an allow rule inside a denied wildcard, checkpoint history filters, in-place restore, control multiplexing, the vendor's HTTP client and Fly token exchange.                                                              |
+| Modal CPU          | Sync/`.aio` create/from_id/from_name/list/tags, exec/wait/poll/terminate, binary/text process streams, line iteration, stdin, filesystem read/write/copy/stat/list/remove/mkdir/watch; registry image recipes, pip/apt lists, env/workdir, inline secrets and app metadata; disk-only filesystem snapshots returning reusable `Image` objects                                                                                                                                                                                                       | Binary processes require the native byte-output capability. Access/file-target/indefinite filesystem watch requires the expanded native watch capability. Snapshot TTL supports whole days from 1 to 365; other TTLs are refused. Atomic name uniqueness, GPU, volumes, tunnels, remote named secrets and all image options are not mapped. `App.lookup` is Runtime app metadata, not a Modal service lookup.                                                                                                                            |
+| Morph Cloud        | Snapshot create/get/list/list_paginated/delete, metadata, retention, wait, and cached `setup`/`exec`/`upload`/`download`/`build` chains by Morph's own chain hash; instance start/boot/get/list/list_paginated/stop/cleanup, pause/resume, memory snapshots, `branch`, HTTP services as previews, streamed `exec`, metadata, wake-on, a later time-limit end, file upload/download, context managers; every `a`-prefixed twin                                                                                                                       | Refused, naming Runtime's way: SSH clients and keys, `as_container`, `reboot`, devboxes, volumes, the package index and `user` (API keys, secrets, SSH keys). `set_ttl` only moves a time limit later; a snapshot's TTL is whole days. Commands run as `runtime` with sudo, not root.                                                                                                                                                                                                                                                    |
 
 E2B's expanded tests cover sync/async file and command request deadlines, file
 stream ownership and idle timeouts, PTY byte output/resize/input, and interpreter
@@ -144,6 +146,115 @@ The native byte-output, file metadata, expanded watcher, disk-capture and interp
 detach changes must be released
 before the corresponding adapters can use them against hosted Runtime. Local
 contract results do not assert that an existing host has those capabilities.
+
+## Modal Python, 16 October 2026
+
+The supported pin moves from `modal` 1.6.0 to 1.6.2, and the
+`latestReview` that held 1.6.1 for qualification is gone: the drop-in follows
+both. The 1.6.0, 1.6.1 and 1.6.2 sdists and wheels were fetched into an empty
+directory, every file matched its lock hash or PyPI SHA-256, and each wheel's
+`modal`, `modal_proto` and `modal_version` matched its sdist; they were
+compared file by file (public stubs class by class), nothing installed or run.
+
+- 1.6.1 (reviewed 3 October): sandbox v2 calls carry a per-sandbox token,
+  server sessions retry their start, the CLI gains endpoint commands, sidecars
+  take `include_oidc_identity_token` and `proxy`, and `protobuf` <8 and
+  `synchronicity` ~=0.12.6 are allowed. Nothing the drop-in serves changes:
+  it speaks no Modal wire protocol and offers no sidecars.
+- 1.6.2, `Sandbox.from_name(..., include_terminated=True)` returns the most
+  recent terminated sandbox of that name when none runs. Followed, sync and
+  `.aio`: a running one still wins, otherwise the stopped one with the latest
+  end time.
+- 1.6.2, `modal.sandbox` becomes a package: `modal.sandbox` exports
+  `Sandbox` and `Probe`, and `modal.sandbox.sandbox` holds `Sandbox`,
+  `SandboxFilesystem` and `SandboxSnapshot`; `modal.sandbox_fs` and
+  `modal.snapshot` are gone. `withruntime.modal.sandbox` and
+  `withruntime.modal.sandbox.sandbox` now exist with those names (no
+  sidecars); the old module names stay for code written for 1.6.0.
+- 1.6.2, secrets on a sandbox or an exec are sent as ordered sources,
+  applied in the order given with `env` last, instead of secret ids beside one
+  merged dictionary. The drop-in already applies `Secret.from_dict`,
+  `from_local_environ` and `from_dotenv` in order with `env` last, and refuses
+  named secrets.
+- Not followed, outside the CPU sandbox scope or with nothing to follow:
+  Python 3.15 support (the image recipes take any 3.x), Function and Server
+  `metrics` and `autoscaler`, `Workspace.service_users`, environment name
+  checks, metrics types in `modal.types`, Volume and Mount upload telemetry,
+  agent detection for Codex, Qwen Code and Muse, and CLI changes.
+
+`tests/test_modal_1_6_2.py` fails on the old drop-in (3 tests).
+`tests/compatibility-requirements.txt` pins the 1.6.2 wheel and
+`synchronicity` 0.12.6, and the official contracts import 1.6.2's module paths
+(`modal.sandbox._sandbox`, `modal.sandbox._filesystem`); those contracts were
+not rerun against the new wheel. `compat-inventory.json` records 277 present,
+208 refused and 0 missing of 485.
+
+## Morph Cloud Python, 15 October 2026
+
+`morphcloud` 0.1.115 (PyPI, 1 September 2026) is Morph's main SDK, richer
+than its TypeScript one (`withruntime/morph`). Its wheel and sdist match their
+PyPI SHA-256 in the compatibility lock. The inventory counts `morphcloud.api`,
+the module Morph's own examples import from (`morph-python`): of 458 items,
+294 are present and 164 refused, none missing. It maps as the TypeScript
+adapter does, with the same labels and digest names, so each language finds
+the other's snapshots:
+
+- An instance is a sandbox, a snapshot a Runtime snapshot, metadata labels.
+  `stop` deletes the sandbox, as Morph's stop deletes the instance.
+- `snapshots.create` boots the image at its size and keeps its disk;
+  `instances.boot` starts such a disk snapshot at any size, and resizes a copy
+  of a running machine. A snapshot's `ttl_seconds` is whole days (1 to 365).
+- `setup`, `exec`, `upload`, `download` and `build` cache by Morph's own chain
+  hash, so a shell step's digest is the one Morph computes, and `build`
+  reuses `setup`'s snapshots.
+- `ttl_seconds` at start is the time limit (60 to 86400); `set_ttl` moves its
+  end later through `extend`, and refuses to add, remove or shorten one.
+- `wake_on_ssh` and `wake_on_http` are Runtime's `auto_wake`, so they must
+  agree.
+- The `a`-prefixed twins run the same call on a worker thread, as Morph's own
+  `asetup`, `aupload` and `abuild` do.
+- Errors from Runtime are Morph's `ApiError` (`status_code`, `error_code`,
+  `detail`), with the Runtime error as the cause.
+
+`tests/test_compat_python_morph.py` runs every call against a fake client;
+`scripts/morph_live.py --run` runs them against the real API.
+
+## E2B Python, 15 October 2026
+
+`e2b` 2.55.1 → 2.56.0 and `e2b-code-interpreter` 2.10.5 → 2.11.0 were read
+from their sdists and wheels, each wheel's source matching its sdist and every
+file its PyPI SHA-256. Neither package's `__init__.py` changed. `e2b` replaces
+its internal connection balancer with pyqwest 0.12's own per-address limit
+(`E2B_STREAMS_PER_CONNECTION` is gone) and, like the interpreter, now requires
+Python 3.11; details in [E2B.md](../../packages/cloud-sdk/E2B.md), "e2b
+2.56.0". The drop-in mirrors none of it and keeps Python 3.10.
+`tests/compatibility-requirements.txt` pins the new wheels and `pyqwest`
+0.12.0, so the official contracts run on Python 3.11 (`prepare_compatibility.py`
+refuses older); they passed (18) there and on 3.12.
+
+## Blaxel Python, 16 October 2026
+
+`blaxel` 0.4.17 → 0.4.18 was read from its sdist and wheel, the wheel's source
+matching its sdist and both files their PyPI SHA-256; nothing was installed or
+run. Its one public addition, workspace secrets (`SecretInstance`,
+`SyncSecretInstance`, `SecretAPIError`, `blaxel.core.secret`), imports and is
+refused, naming `runtime.secrets.set(name, value=..., hosts=[...])`; see
+[BLAXEL.md](../../packages/cloud-sdk/BLAXEL.md), "0.3.30 and 0.4.18".
+`tests/test_blaxel_0_4_18.py` fails without the change.
+
+## Blaxel Python, 15 October 2026
+
+`blaxel` 0.4.13 → 0.4.17 (0.4.14 to 0.4.16 between) was read from its sdist
+and wheel, the wheel's source matching its sdist and both files their PyPI
+SHA-256; nothing was installed or run. The changes and what the drop-in does
+with each are in [BLAXEL.md](../../packages/cloud-sdk/BLAXEL.md), "0.3.29 and
+0.4.17": every API error is now a `BlaxelError` with `status`, `code`,
+`request_id` and `retryable`, and `is_blaxel_error` checks one; previews take
+the `{"port": ...}` shorthand (`SandboxPreviewCreateConfiguration`), and
+`tokens.create_if_expired`, `preview.url` and `token.name` exist, sync and
+async; `settings.integration` is kept, never sent. `tests/test_blaxel_0_4_17.py`
+fails without the change. `blaxel` is not in `tests/compatibility-requirements.txt`;
+the pin is in `compatibility-lock.json`.
 
 ## E2B Python, 9 October 2026
 

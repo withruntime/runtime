@@ -84,6 +84,11 @@ class LifecycleSettingsTest(unittest.TestCase):
             runtime.sandboxes.create(snapshot_id="snap-1", wait=False)
         self.assertEqual(self.posts("/v1/sandboxes")[0], {"snapshot": "snap-1"})
 
+    def test_create_sends_spread_from(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.sandboxes.create(spread_from=["a", "b"], wait=False)
+        self.assertEqual(self.posts("/v1/sandboxes")[0], {"spreadFrom": ["a", "b"]})
+
     def test_update_sends_only_what_changes(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             sbx = runtime.sandboxes.get(ID)

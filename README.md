@@ -51,6 +51,23 @@ saved on this machine. A new account starts on a free trial with no card. The
   [Daytona](https://withruntime.com/docs/daytona-alternative)
 - [Pricing](https://withruntime.com/docs/pricing)
 
+## How Runtime compares
+
+Pages that answer what people ask when choosing a sandbox, each with the
+providers' published rates and the date they were read:
+
+- [Best sandbox for AI agents](https://withruntime.com/compare/best-sandbox-for-ai-agents)
+- Alternatives to [E2B](https://withruntime.com/compare/e2b-alternatives),
+  [Daytona](https://withruntime.com/compare/daytona-alternatives),
+  [Modal](https://withruntime.com/compare/modal-alternatives) and
+  [Vercel Sandbox](https://withruntime.com/compare/vercel-sandbox-alternatives)
+- [E2B vs Daytona](https://withruntime.com/compare/e2b-vs-daytona), and
+  [every comparison](https://withruntime.com/compare)
+- [The agent sandbox price index](https://withruntime.com/pricing/agent-sandbox-price-index):
+  every provider's rates, also as CSV and JSON
+- [Sandbox cost calculator](https://withruntime.com/calculators/sandbox-cost-calculator)
+  and [Runtime's pricing](https://withruntime.com/pricing)
+
 ## Tests
 
 `bun test` in `packages/cloud-sdk` and `python3 -m unittest discover -s tests`

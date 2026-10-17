@@ -92,7 +92,7 @@ export function machinePage<M, Info>(
 
 /** One machine: its record and the verbs every machine product shares. */
 /** Machines `create` made, which the end of an `await using` block deletes
- * (Marc, 6 October 2026: deleted unless the code passes `keep: true`). One
+ * (6 October 2026: deleted unless the code passes `keep: true`). One
  * from `get`, or an existing one `getOrCreate` found, is only stopped. */
 const deleteAtBlockEnd = new WeakSet<object>();
 
@@ -174,10 +174,10 @@ export abstract class Machine<
     return deleteMachine<Deleted>(this.#product, this.#t, this.id, options);
   }
   /** Carries on a paused sandbox; for one with a time limit,
-   * `timeoutSeconds` is its new one. */
-  async wake(
-    options: RequestOptions & { wait?: boolean; timeoutSeconds?: number } = {},
-  ): Promise<this> {
+   * `timeoutSeconds` is its new one. A wake stays on its server; when that
+   * server is full for now (`no_capacity`) it waits for room as `create`
+   * does, up to `waitForCapacityMs` (the client's, two minutes by default). */
+  async wake(options: LifecycleOptions & { timeoutSeconds?: number } = {}): Promise<this> {
     const { timeoutSeconds, ...rest } = options;
     try {
       return await this.#lifecycle(
@@ -195,15 +195,17 @@ export abstract class Machine<
       return this;
     }
   }
-  /** More time before its time limit ends (at most an hour ahead of now). A
+  /** More time before its time limit ends (at most 24 hours ahead of now). A
    * sandbox with no time limit needs none: the call answers at once and
-   * changes nothing. */
+   * changes nothing. To set the end sooner, or give one with no limit a limit,
+   * `update({ timeoutSeconds })`. */
   async extend(seconds: number, options: RequestOptions = {}): Promise<this> {
     return this.#lifecycle("extend", { ...options, wait: false }, { seconds });
   }
-  /** Changes its name, labels, automatic wake, idle pause or persistence;
-   * fields left out stay as they are. `persistent: true` keeps it running
-   * while credit lasts (paid only). */
+  /** Changes its name, labels, automatic wake, idle pause, time limit, end
+   * action or persistence; fields left out stay as they are. `persistent:
+   * true` keeps it running while credit lasts (paid only). `timeoutSeconds`
+   * ends it that long from now, sooner or later than before (0: no limit). */
   async update(settings: Settings, options: RequestOptions = {}): Promise<this> {
     return this.#lifecycle("update", { ...options, wait: false }, { ...settings } as Record<
       string,
@@ -351,18 +353,25 @@ export abstract class Machine<
     await this.refresh(request());
     // Straight after a fork or a wake the sandbox is still `resuming`, and
     // after a pause still `pausing`: wait for where it is going, or a
-    // snapshot of it is refused as not paused (user lane, 23 September 2026).
+    // snapshot of it is refused as not paused (23 September 2026).
     if (this.state === "resuming" || this.state === "starting")
       await this.waitFor("running", request());
     else if (this.state === "pausing") await this.waitFor("paused", request());
     running = this.state === "running";
     // Check before entering cleanup: an abort during refresh must not pause or wake.
-    const pauseOptions = running ? request() : undefined;
+    request();
     let captured: Snapshot | undefined;
     let primary: unknown;
     let failed = false;
+    /** Whether the server may have left a running source paused: it answered
+     * before the capture was over, or not at all. */
+    let leftPaused = running;
     try {
-      if (running) await this.pause(pauseOptions);
+      // One call: the server pauses a running source for the capture, and
+      // wakes it before it answers a capture that is over (ready or failed).
+      // Pausing, snapshotting and waking it from here took four calls: a
+      // repeat snapshot of a 4 GiB sandbox took 1.96 s at the median against
+      // 1.19 s for this one (15 October 2026).
       let snapshot = await this.#t.json<Snapshot>({
         method: "POST",
         path: this.#path(":snapshot"),
@@ -372,6 +381,7 @@ export abstract class Machine<
         ...request(),
       });
       captured = snapshot;
+      leftPaused = running && snapshot.state === "capturing";
       // Prefer: wait is bounded on the server. A capture still in progress
       // must keep its source paused, or the worker refuses it after we wake.
       while (snapshot.state === "capturing") {
@@ -407,9 +417,18 @@ export abstract class Machine<
     }
     // A capture still running needs its source paused: the worker fails one
     // whose source woke. The timeout says so and leaves the wake to the caller.
-    if (running && !late) {
+    if (leftPaused && !late) {
       try {
-        await this.wake();
+        // A call that failed may have been refused before anything paused
+        // (pausable: false, volumes): only a source that is paused is woken.
+        if (failed && captured === undefined) await this.refresh();
+        if (
+          !failed ||
+          captured !== undefined ||
+          this.state === "paused" ||
+          this.state === "pausing"
+        )
+          await this.wake();
       } catch (wakeError) {
         const recovery = {
           ...(captured ? { snapshotId: captured.id } : {}),
@@ -431,15 +450,28 @@ export abstract class Machine<
     if (failed) throw primary;
     return captured!;
   }
-  /** Starts a stopped persistent sandbox again from its disk (memory is not kept). */
-  async restart(options: RequestOptions & { wait?: boolean } = {}): Promise<this> {
+  /** Starts a stopped persistent sandbox again from its disk (memory is not
+   * kept), waiting for room on a full server as `wake` does. Its image's
+   * start command runs again, reported in `info.start`. */
+  async restart(options: LifecycleOptions = {}): Promise<this> {
     return this.#lifecycle("restart", options);
   }
   async #lifecycle(
     verb: string,
-    options: RequestOptions & { wait?: boolean },
+    options: LifecycleOptions,
     body: Record<string, unknown> = {},
   ): Promise<this> {
+    // A wake or restart refused for room ran nothing and is sent again with
+    // the same key (api.md, "A refusal is not kept"). Until 17 October 2026
+    // only create waited: the product check's wake was refused no_capacity
+    // in 36 ms on 16 October, where a create would have waited for room.
+    const room =
+      verb === "wake" || verb === "restart"
+        ? {
+            waitForCapacityMs: options.waitForCapacityMs ?? this.#t.waitForCapacityMs,
+            ...(options.onCapacityWait ? { onCapacityWait: options.onCapacityWait } : {}),
+          }
+        : {};
     this.#keep(
       await this.#t.json<Info>({
         method: "POST",
@@ -447,6 +479,7 @@ export abstract class Machine<
         body,
         wait: options.wait === false ? 0 : 60,
         ...requestOnly(options),
+        ...room,
       }),
     );
     return this;
@@ -477,6 +510,16 @@ export type CreateOptions = RequestOptions & {
   waitForCapacityMs?: number;
   /** Called before each wait, with the refusal and the milliseconds until the
    * next try: to tell a person why nothing has happened yet. */
+  onCapacityWait?: (refusal: RuntimeError, waitMs: number) => void;
+};
+
+/** How `wake` and `restart` wait when the sandbox's server is full for now. */
+export type LifecycleOptions = RequestOptions & {
+  wait?: boolean;
+  /** How long to keep retrying `no_capacity` and the like. Default: the
+   * client's, two minutes; 0 fails at once. */
+  waitForCapacityMs?: number;
+  /** Called before each wait, with the refusal and the milliseconds until the next try. */
   onCapacityWait?: (refusal: RuntimeError, waitMs: number) => void;
 };
 

@@ -45,7 +45,11 @@ The details:
   for: never from matched, referral, startup or any other granted credit, or
   the month's free usage. It is added as credit on the 1st of each month
   (UTC) for the month before, for {{referral-share-months}} months from their first matched
-  payment. While they have a payment in dispute, no share is added for them.
+  payment. While they have a payment in dispute, no share is added for them;
+  once the dispute is won the share catches up, and once it is lost the
+  next month's share is not added (that use was paid with the disputed
+  money) and the months after it are. While none of their matched payments
+  stands (all refunded or disputed), no share is added for them.
 - The page your link opens says "You're invited", with the offer and the way
   to sign up. It never names who invited them: your company's name is not on
   it.

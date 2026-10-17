@@ -127,7 +127,8 @@ const SWITCHED_OFF = new Set([
   "runtime volumes attachment",
   "runtime volumes detach",
   "--shared",
-  "--path",
+  // volumes attach's --path is switched off with it; `sandboxes code --path`
+  // is named in editors.md, and this check reads options by their name alone.
 ]);
 
 test("the guide reader reads shorthand under a named command, and only there", () => {

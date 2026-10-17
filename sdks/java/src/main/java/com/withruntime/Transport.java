@@ -309,8 +309,8 @@ final class Transport {
    * Caddy answers 503 itself past that, and a longer call gets its 200 at 90 s and then its JSON
    * (runtime-late-answer). An attempt with no answer by then is talking to a server that is gone,
    * such as a controller that died with the call in flight while its address moved to the new
-   * leader: a client that only waits sends nothing the new leader could refuse (the leader drill on
-   * vin-5, 4 October 2026). It is sent again under the same key.
+   * leader: a client that only waits sends nothing the new leader could refuse (a controller
+   * failover drill, 4 October 2026). It is sent again under the same key.
    */
   static Duration answerStart = Duration.ofSeconds(125);
 

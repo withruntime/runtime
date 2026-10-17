@@ -359,10 +359,10 @@ describe("exports", () => {
     readFileSync(join(import.meta.dir, "blaxel-exports.json"), "utf8"),
   ) as string[];
 
-  test("every value @blaxel/core 0.3.25 exports can be imported", () => {
+  test("every value @blaxel/core 0.3.30 exports can be imported", () => {
     const missing = names.filter((name) => !(name in blaxel));
     expect(missing).toEqual([]);
-    expect(names.length).toBe(265);
+    expect(names.length).toBe(275);
   });
 
   test("the ones Runtime has no counterpart for throw NotSupportedError naming the alternative on use", async () => {

@@ -29,6 +29,7 @@ const adapters = [
   "codesandbox",
   "sprites",
   "freestyle",
+  "morph",
   "modal",
   "cloudflare",
 ];

@@ -979,16 +979,13 @@ def _resume(runtime: Any, timeout: Optional[int], on_resume: str) -> None:
 
 
 def _extend_to(runtime: Any, timeout: float) -> None:
-    core.check_timeout(timeout)
-    if core.no_limit(runtime.info):
+    """The end ``timeout`` seconds from now, sooner or later, as the server's
+    new time limit; what the end does stays as created. A persistent sandbox
+    (a pilot's, kept running by the server) has none to set."""
+    seconds = core.timeout_seconds(timeout)
+    if runtime.info.get("persistent") is True:
         return
-    later = core.seconds_later(runtime.info, timeout)
-    if later < -1:
-        raise NotSupportedException("Ending a sandbox sooner than its time limit (a shorter set_timeout)",
-                                    "Runtime cannot bring a time limit forward. Call kill() when the work is done.")
-    # A second's difference is the clocks and the trip, not a new end.
-    if later > 1:
-        _guard("sandbox", lambda: runtime.extend(math.ceil(later)))
+    _guard("sandbox", lambda: runtime.update(timeout_seconds=seconds))
 
 
 def _run_as(sandbox: Any, user: Optional[str]) -> Optional[str]:

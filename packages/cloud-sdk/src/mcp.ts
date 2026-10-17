@@ -240,11 +240,16 @@ export async function serveMcp(
     }
   }
 
-  /** Starts forwarding with this key and tells the client its tools changed. */
+  /** Starts forwarding with this key and tells the client its tools changed.
+   * The client read CONNECT_INSTRUCTIONS on its own initialize and will not
+   * read instructions again, so the hosted server's (limits, safe writes,
+   * cleanup, the task) come back in this answer, or an agent's first session
+   * never sees them. Not every client re-lists tools when told; a restart of
+   * this server finds the saved key and serves them at once. */
   async function connected(found: string, agentName?: string) {
     key = found;
     pending = undefined;
-    await post(
+    const { messages } = await post(
       JSON.stringify({
         jsonrpc: "2.0",
         id: "runtime-connect",
@@ -254,7 +259,15 @@ export async function serveMcp(
     );
     await post(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
     write({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
-    return `Connected${agentName ? ` as ${agentName}` : ""}. Runtime's tools are available now: list the tools again, then start with runtime_sandboxes_create.`;
+    const instructions = messages
+      .map((reply) => (reply as { result?: { instructions?: unknown } }).result?.instructions)
+      .find((words): words is string => typeof words === "string" && words.length > 0);
+    return [
+      `Connected${agentName ? ` as ${agentName}` : ""}. Runtime's tools are available now: list the tools again, then start with runtime_sandboxes_create. If they do not appear, restart this MCP server (or the client): the connection is saved, so it connects at once.`,
+      ...(instructions
+        ? ["", "Runtime's instructions, to follow from here:", "", instructions]
+        : []),
+    ].join("\n");
   }
 
   /** Not connected yet: answer the client here, with the tools that connect. */

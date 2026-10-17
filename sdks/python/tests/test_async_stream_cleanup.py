@@ -97,7 +97,7 @@ class AsyncStreamCleanupTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_buffered_stream_close_then_transport_close_does_not_repool_later(self):
         stream = self.transport.events('GET', '/events')
-        self.assertEqual(await anext(stream), {'event': 1})
+        self.assertEqual(await stream.__anext__(), {'event': 1})
         await stream.aclose()
         await self.transport.close()
         await self.assert_peer_closed()
@@ -107,7 +107,7 @@ class AsyncStreamCleanupTest(unittest.IsolatedAsyncioTestCase):
     async def test_partial_stream_close_immediately_closes_peer_without_pool_close(self):
         self.partial = True
         stream = self.transport.events('GET', '/events')
-        self.assertEqual(await anext(stream), {'event': 1})
+        self.assertEqual(await stream.__anext__(), {'event': 1})
         await stream.aclose()
         await self.assert_peer_closed()
 
@@ -115,13 +115,13 @@ class AsyncStreamCleanupTest(unittest.IsolatedAsyncioTestCase):
         self.body, self.partial = b'not-json\n', True
         stream = self.transport.events('GET', '/events')
         with self.assertRaises(ValueError):
-            await anext(stream)
+            await stream.__anext__()
         await self.assert_peer_closed()
 
     async def test_cancelled_pending_read_closes_peer(self):
         self.body, self.partial = b'{"unfinished":', True
         stream = self.transport.events('GET', '/events')
-        pending = asyncio.create_task(anext(stream))
+        pending = asyncio.create_task(stream.__anext__())
         await self.accepted.wait()
         pending.cancel()
         with self.assertRaises(asyncio.CancelledError):
@@ -169,7 +169,7 @@ class AsyncStreamCleanupTest(unittest.IsolatedAsyncioTestCase):
         self.transport.events = retain_stream
         stream = AsyncSandbox(self.transport, {"id": "fixture"}).exec_stream(["echo", "hello"])
         try:
-            self.assertEqual((await anext(stream))["data"], "hello")
+            self.assertEqual((await stream.__anext__())["data"], "hello")
             await stream.aclose()
             await self.assert_peer_closed()
         finally:
@@ -196,7 +196,7 @@ class AsyncStreamCleanupTest(unittest.IsolatedAsyncioTestCase):
             else:
                 stream = AsyncProcess(self.transport, "fixture", {"id":"process"}).output()
             try:
-                self.assertEqual((await anext(stream))["data"], "hello")
+                self.assertEqual((await stream.__anext__())["data"], "hello")
                 await stream.aclose()
                 await self.assert_peer_closed()
             finally:

@@ -8,7 +8,7 @@ change. For a project with no sandbox yet, start with [Get started](./start).
 ## Give your agent one instruction
 
 > Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
-> follow it to the end. When it asks for my approval, show me the link and code.
+> follow it.
 
 The agent follows the steps below and keeps going until your real job runs on
 Runtime. It ends with your monthly saving in dollars and what is left for you
@@ -22,7 +22,7 @@ It tests without credit, asks before going on once the free usage is used, and n
   minimum.
 - **The calls map one to one.** Create, exec, files and stop have direct
   equivalents (table below). Code written for E2B, Daytona, Vercel Sandbox or
-  Blaxel runs after changing one import.
+  Blaxel, Morph and others runs after changing one import.
 - **Pause keeps memory.** A paused sandbox wakes where it left off, kept while a
   paid account has credit. A fork copies a running sandbox with its memory
   and processes.
@@ -135,6 +135,20 @@ Runtime handles differently, such as drives or schedules, throws
   the same name: `npx withruntime images build --dockerfile Dockerfile --name <name>`.
 - Blaxel's preview token header (`X-Blaxel-Preview-Token`) and parameter
   (`?bl_preview_token=`) are accepted.
+
+**From Morph:** change `from "morphcloud"` to `from "withruntime/morph"`
+(Python: `morphcloud` to `withruntime.morph` in the imports, so
+`from withruntime.morph import MorphCloudClient`).
+`MorphCloudClient`'s snapshots, instances, `setup`, `branch`, `pause`,
+`resume`, `exec` and `exposeHttpService` work as they are; metadata become
+labels. `stop` deletes the sandbox, as on Morph. Give `ttlSeconds` at
+`instances.start` (60 to 86400): Runtime cannot add a time limit later. An
+HTTP service with `auth_mode: "api_key"` is a private preview: send its token
+(`instance.native.previews.get(port)`) as `x-runtime-preview-token`. Morph's
+SSH calls refuse; use `npx withruntime sandboxes ssh <id>`. In Python,
+`set_ttl` moves a time limit later but never adds or shortens one, and a
+snapshot's `ttl_seconds` is whole days. Commands run as the user `runtime`
+(with `sudo`), not root, so write to `/workspace` or `/tmp`.
 
 **From E2B:** change `from "e2b"` to `from "withruntime/e2b"` (Python
 `from withruntime.e2b import ...`, SDK 0.4.0 and later). Errors stay E2B's:

@@ -114,7 +114,7 @@ test("waitForCapacityMs: 0 fails at once, on the client or on one call", async (
   expect(second.keys).toHaveLength(1);
 });
 
-test("a request that can never fit is not waited for, and only a create waits", async () => {
+test("a request that can never fit is not waited for, and a fork never waits", async () => {
   const never = refusing([
     { code: "no_credit_running_limit", details: { field: "count", concurrent: 8 } },
   ]);
@@ -170,4 +170,65 @@ test("Sandbox.create takes the create options, as runtime.sandboxes.create does"
     Sandbox.create({}, { client: client(fetcher), waitForCapacityMs: 0 }),
   ).rejects.toBeInstanceOf(ConflictError);
   expect(keys).toHaveLength(1);
+});
+
+/* 16 October 2026, 06:11 UTC: the product check's wake was refused
+   no_capacity in 36 ms on its full server, where a create would have waited.
+   A wake or restart stays on its server, so it waits there for room. */
+function fullServer(refusals: number) {
+  const keys: (string | null)[] = [];
+  const fetcher = (async (_url: string, init: RequestInit) => {
+    if (init.method === "GET") return Response.json({ ...running, state: "paused" });
+    keys.push(new Headers(init.headers).get("idempotency-key"));
+    if (refusals-- <= 0) return Response.json(running);
+    return Response.json(
+      { error: { code: "no_capacity", status: 409, message: "full", retryAfterMs: 5 } },
+      { status: 409 },
+    );
+  }) as unknown as typeof fetch;
+  return { fetcher, keys };
+}
+
+test("a wake and a restart on a full server wait for room with the same key", async () => {
+  for (const verb of ["wake", "restart"] as const) {
+    const { fetcher, keys } = fullServer(2);
+    const waits: string[] = [];
+    const sbx = await client(fetcher).sandboxes.get("sbx");
+    await sbx[verb]({ onCapacityWait: (refusal) => waits.push(refusal.code) });
+    expect(sbx.state).toBe("running");
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+    expect(waits).toEqual(["no_capacity", "no_capacity"]);
+  }
+});
+
+test("a wake with waitForCapacityMs 0, on the client or the call, fails at once", async () => {
+  for (const [onClient, onCall] of [
+    [0, undefined],
+    [undefined, 0],
+  ] as const) {
+    const { fetcher, keys } = fullServer(1);
+    const sbx = await client(fetcher, onClient).sandboxes.get("sbx");
+    await expect(
+      sbx.wake(onCall === undefined ? {} : { waitForCapacityMs: onCall }),
+    ).rejects.toMatchObject({ code: "no_capacity" });
+    expect(keys).toHaveLength(1);
+  }
+});
+
+test("a wait for room moves the call's deadline on, and never spends the caller's own timeoutMs", async () => {
+  // Two waits of 40 ms each, against a call given 30 ms: the waits are the
+  // room's, so the wake still lands.
+  let refusals = 2;
+  const fetcher = (async (_url: string, init: RequestInit) => {
+    if (init.method === "GET") return Response.json({ ...running, state: "paused" });
+    if (refusals-- <= 0) return Response.json(running);
+    return Response.json(
+      { error: { code: "no_capacity", status: 409, message: "full", retryAfterMs: 40 } },
+      { status: 409 },
+    );
+  }) as unknown as typeof fetch;
+  const sbx = await client(fetcher).sandboxes.get("sbx");
+  await sbx.wake({ timeoutMs: 30 });
+  expect(sbx.state).toBe("running");
 });

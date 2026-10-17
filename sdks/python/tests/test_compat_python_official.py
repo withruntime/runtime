@@ -133,6 +133,13 @@ class Official(Base):
             "Sandbox": {"id": "box", "name": "contract", "dockerImage": "python:3.12", "cpuCores": 1., "memoryGB": 2., "diskSizeGB": 8.,
                 "diskMountPath": "/workspace", "gpuCount": 0, "status": "RUNNING", "timeoutMinutes": 60,
                 "createdAt": "2026-09-29T00:00:00+00:00", "updatedAt": "2026-09-29T00:00:00+00:00"},
+            # 0.4.2 and 0.4.3: filesystem checkpoints.
+            "SandboxCheckpoint": {"id": "cp", "sandbox_id": "box", "state": "DURABLE", "depth": 1, "docker_image": "python:3.12",
+                "stored_bytes": 4096, "created_at": "2026-10-15T00:00:00+00:00", "updated_at": "2026-10-15T00:00:00+00:00"},
+            "CheckpointLookupError": {"checkpoint_id": "cp", "code": "NOT_FOUND", "message": "missing"},
+            "BatchCheckpointResponse": {"checkpoints": [], "errors": [{"checkpoint_id": "cp", "code": "NOT_FOUND", "message": "missing"}]},
+            "CheckpointDeleteError": {"checkpoint_id": "cp", "code": "CONFLICT", "message": "busy"},
+            "DeleteSandboxCheckpointsResponse": {"deleted": ["a"], "errors": [{"checkpoint_id": "cp", "code": "NOT_FOUND", "message": "gone"}]},
         }
         for name, data in fixtures.items():
             a = getattr(official_models, name)(**data)
@@ -350,7 +357,7 @@ class Official(Base):
 
     def test_modal_actual_filesystem_binary_write_read_validation_and_missing_file(self):
         import json
-        from modal.sandbox_fs import _SandboxFilesystem as OfficialFilesystem
+        from modal.sandbox._filesystem import _SandboxFilesystem as OfficialFilesystem
         from withruntime.modal._fs_async import AsyncFilesystem
         from withruntime._errors import RuntimeError as NativeError
         class Read:
@@ -641,7 +648,7 @@ class Official(Base):
         finally: official.close()
 
     def test_modal_official_filesystem_snapshot_returns_hydrated_image_with_exact_ttl(self):
-        from modal.sandbox import _Sandbox as OfficialSandbox
+        from modal.sandbox._sandbox import _Sandbox as OfficialSandbox
         from withruntime.modal import Sandbox as RuntimeSandbox
         from test_compat_python_disk_snapshots import World
         async def run():

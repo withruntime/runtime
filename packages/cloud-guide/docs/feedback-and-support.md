@@ -83,6 +83,11 @@ and the support agent can look them up for you.
 
 Never put API keys, passwords or private file contents in a report.
 
+An account that has never added credit files up to 5 reports a day through
+the API, MCP, CLI or SDKs; the sixth answers `429 rate_limited` until midnight
+UTC. Accounts that have added credit are not limited. The support agent sends
+an organization 40 messages a day before it adds credit and 500 after.
+
 ## Get support
 
 **Runtime's support agent answers in the same call, with your account in view.**

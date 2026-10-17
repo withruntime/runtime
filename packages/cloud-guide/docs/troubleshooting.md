@@ -121,8 +121,9 @@ Node from nodejs.org reads no such file, so it starts either way.
 - A fork asking for more copies than an account without credit runs at once never fits; ask for
   fewer.
 - An SDK create waits for a slot by itself, for up to two minutes by default
-  (`waitForCapacityMs` in JavaScript, `wait_for_capacity` in Python), and then
-  returns the refusal. The error's `retryable` is `true`, for a loop of your
+  (`waitForCapacityMs` in JavaScript, `wait_for_capacity` in Python, Ruby), and then
+  returns the refusal. A wake and a restart wait the same way for room on their
+  own server; a fork never waits. The error's `retryable` is `true`, for a loop of your
   own.
 - Once the account holds prepaid credit, it runs more at once, with nothing
   to change.
@@ -180,7 +181,7 @@ that reads `pause_failed` lost its memory and kept its files.
 | `spending_limit`     | An owner-set spending limit, usually this agent's daily one                                                                                                                                                                                                | See what is left with `GET /v1/limits` or `runtime limits`                                                                                       |
 | `authority_revoked`  | The key or agent that made it was revoked or removed                                                                                                                                                                                                       | Connect the agent again or make a new key, then create a new sandbox                                                                             |
 | `startup_failed`     | It stopped before it was ready to run commands                                                                                                                                                                                                             | If it starts from your image, check the image's start and ready commands; otherwise report the sandbox id                                        |
-| `account_busy_here`  | It can start only on the server that holds its snapshot or image, and your own sandboxes there were short of CPU, so it did not start. Nothing ran in it                                                                                                   | Start it again in a minute, or once some of your sandboxes there are done                                                                        |
+| `account_busy_here`  | It can start only on the server that holds its snapshot or image, and your own sandboxes there were short of CPU, so it did not start. Nothing ran in it                                                                                                   | Start it again in a minute, or once some of your sandboxes there are done; keep sources on separate servers with `spreadFrom`                    |
 | `service_unready`    | A service on our side that it needs was unavailable, so it could not keep running                                                                                                                                                                          | Create a new one, and report the sandbox id if it happens again                                                                                  |
 | `pause_failed`       | Read on a paused sandbox: the pause could not keep its memory, so the programs that were running are gone, and its files are kept                                                                                                                          | Wake it: it starts fresh from its disk and reads `memoryRestored: false`. Report the sandbox id                                                  |
 | `host_stopped`       | Its machine ended it without a stop being asked for. While it was starting or waking that is our fault; once it was running it can also be a shutdown or crash inside the sandbox                                                                          | Check whether your program shut the machine down; otherwise create a new one and report the sandbox id                                           |
@@ -267,6 +268,9 @@ place: for more room, create a sandbox with a larger `diskMiB`.
   a Debian or Ubuntu base, such as `python:3.12-slim`, built before 30
   September 2026: the image kept its own `/etc/resolv.conf`. Build it again;
   every image built since uses Runtime's resolver ([images](./images)).
+- `API rate limit exceeded for <address>` from `api.github.com`: calls
+  without a token share a limit with everyone on that address. Store a GitHub
+  token as a secret ([shared addresses and per-address limits](./egress#shared-addresses-and-per-address-limits)).
 - Do not disable security protections to make a migration appear successful.
 
 ## A secret's placeholder reaches the server unchanged

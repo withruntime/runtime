@@ -19,5 +19,11 @@ class AsyncLimits:
         hours, and ``remainingMicros`` (None for no limit); and ``trial``, the
         machine time the account can still run without credit, in milliseconds
         (``availableMs``, with ``offer`` and ``renewsAt``), or None when it has
-        none."""
+        none; and ``account``, every limit the account is held to with what it
+        uses of each now, or None when they can't be read: a list of
+        ``{"limit", "label", "unit", "max", "used"}``. ``limit`` is
+        ``<kind>.<dimension>`` (``sandbox.count``, ``sandbox.memory_mib``,
+        ``volume.count``...), ``unit`` is ``"count"`` or ``"mib"``. A create
+        past one fails ``quota_exceeded``, and ``details.limit`` names the
+        row."""
         return await self._t.json("GET", "/v1/limits")

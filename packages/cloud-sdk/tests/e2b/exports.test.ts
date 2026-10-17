@@ -4,13 +4,13 @@ import * as e2b from "../../src/e2b/index";
 import { translate } from "../../src/e2b/errors";
 import { RuntimeError } from "../../src/errors";
 
-/* Every name `e2b` 2.55.0 and `@e2b/code-interpreter` 2.8.3 export, read from
-   their published builds on 9 October 2026 (2.55.0 added DockerfileSyntaxError
-   to 2.53.1's). An import of any of them must
-   resolve after the switch, or code written for E2B fails to load before it
+/* Every name `e2b` 2.56.0 and `@e2b/code-interpreter` 2.9.0 export, read from
+   their published builds on 15 October 2026 (2.55.0 added DockerfileSyntaxError
+   to 2.53.1's; 2.56.0's declarations are 2.55.0's byte for byte). An import
+   of any of them must resolve after the switch, or code written for E2B fails to load before it
    runs a line: until then GitAuthError, VolumeError, SecretPaginator and
    eighteen more were missing. */
-const E2B_2_55_0 = [
+const E2B_2_56_0 = [
   "ALL_TRAFFIC",
   "ApiClient",
   "AuthenticationError",
@@ -63,16 +63,16 @@ const E2B_2_55_0 = [
   "waitForURL",
 ];
 /* The code interpreter's own names, beside everything e2b exports but ALL_TRAFFIC. */
-const CODE_INTERPRETER_2_8_3 = E2B_2_55_0.filter((name) => name !== "ALL_TRAFFIC");
+const CODE_INTERPRETER_2_9_0 = E2B_2_56_0.filter((name) => name !== "ALL_TRAFFIC");
 
-test("withruntime/e2b exports every name e2b 2.55.0 does", () => {
+test("withruntime/e2b exports every name e2b 2.56.0 does", () => {
   const ours = new Set(Object.keys(e2b));
-  expect(E2B_2_55_0.filter((name) => !ours.has(name))).toEqual([]);
+  expect(E2B_2_56_0.filter((name) => !ours.has(name))).toEqual([]);
 });
 
-test("withruntime/e2b/code-interpreter exports every name @e2b/code-interpreter 2.8.3 does", () => {
+test("withruntime/e2b/code-interpreter exports every name @e2b/code-interpreter 2.9.0 does", () => {
   const ours = new Set(Object.keys(codeInterpreter));
-  expect(CODE_INTERPRETER_2_8_3.filter((name) => !ours.has(name))).toEqual([]);
+  expect(CODE_INTERPRETER_2_9_0.filter((name) => !ours.has(name))).toEqual([]);
 });
 
 test("the new errors keep E2B's parents, so a catch written for E2B still catches", () => {

@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.14.0. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.16.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -105,7 +105,9 @@ idle, until you stop it or credit or the [free usage](./included-usage) runs out
 `timeoutSeconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: at the
 end it pauses (the default) or stops, as `onLeaseEnd` says, busy or not.
 `sbx.info.endsAt` is when it will stop or pause by itself, or `null` when it
-never will; `sbx.extend(seconds)` moves it later. `network` narrows
+never will; `sbx.extend(seconds)` moves it later, and
+`sbx.update({ timeoutSeconds, onTimeout })` sets a new one from now, sooner or
+later (`0` removes it). `network` narrows
 what it can reach from its first start; see [the sandbox environment](./sandbox-environment).
 
 `env` sets variables for every command, background process, terminal, SSH
@@ -647,14 +649,18 @@ same key; streamed output is never replayed after it reaches your code.
 reading the response and automatic retries. `timeoutMs: 0` disables that
 deadline; an `AbortSignal` you pass still cancels the call.
 
-**A create waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
 (`no_capacity`), `sandboxes.create` waits and sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
+A sandbox's `wake` and `restart` wait the same way when their own server is
+full (`no_capacity`): a sandbox stays on its server, so the wake is sent again
+with the same idempotency key until room frees. A fork never waits.
 
 - When the wait runs out, the refusal is thrown as it came.
 - The wait is added to `timeoutMs`, not taken from it.
-- Set `waitForCapacityMs` on the client or on one create. `0` fails at once.
+- Set `waitForCapacityMs` on the client or on one create, wake or restart.
+  `0` fails at once, as in `await sbx.wake({ waitForCapacityMs: 0 })`.
 - From withruntime 0.7.0, `onCapacityWait(refusal, waitMs)` on one create is
   called before each wait,
   to tell a person why nothing has happened yet. The CLI prints the refusal
@@ -1141,6 +1147,31 @@ The servers run as the sandbox's user behind its own network rules: a host
 the rules refuse is a warning, never a change. Your own stdio server runs the
 same way: `{ name: "mine", command: ["python3", "server.py"] }`.
 
+### A URL to configure an agent with once
+
+With `public: true` the URLs carry no link token and never expire, so an
+agent, or a teammate's MCP client, can be set up with them once. The
+`Authorization` header still guards every request, and it is kept: a start
+after the sandbox restarted, or with `replace`, hands out the same one.
+`stop()` forgets it, and the next start makes a new one. Like any public
+preview, it needs an account with a kept top-up.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+// No time limit: idle, it pauses with the servers in memory, and the next
+// request wakes it, waiting the moment that takes rather than failing.
+const sbx = await runtime.sandboxes.getOrCreate("mcp", { idlePauseSeconds: 300 });
+const gateway = await sbx.mcp.start([{ id: "fetch" }], { public: true, replace: true });
+console.log(gateway.servers[0]?.url, gateway.headers); // the same after every start
+```
+
+A stopped sandbox does not wake on a request: `sbx.restart()` starts it
+again, and the same start gives the same URL and header. For your own name,
+point a [domain](./networking) at the gateway's port (8765 unless you chose
+another).
+
 ## Domains, TCP ports, addresses, the tunnel and your own proxy
 
 Paid accounts only; see [networking](./networking).
@@ -1259,6 +1290,7 @@ import { Sandbox } from "withruntime/e2b"; // was: from "e2b"
 import { Daytona } from "withruntime/daytona"; // was: from "@daytona/sdk"
 import { Sandbox as VercelSandbox } from "withruntime/vercel"; // was: from "@vercel/sandbox"
 import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
+import { MorphCloudClient } from "withruntime/morph"; // was: from "morphcloud"
 ```
 
 Sandboxes get the old provider's defaults, and a call Runtime cannot honour

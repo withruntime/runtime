@@ -1442,7 +1442,7 @@ class PreviewTokenExpiryShape(unittest.TestCase):
         from blaxel.core.sandbox.sync.preview import SyncSandboxPreviewToken as OfficialSync
         from blaxel.core.client.models.preview_token import PreviewToken as OfficialToken
         from blaxel.core.client.models.preview_token_spec import PreviewTokenSpec as OfficialSpec
-        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.13')
+        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.18')
         expiry = '2026-10-01T00:00:00.123Z'
         def async_consumer(token):
             return token.value, token.expires_at.endswith('Z'), token.expires_at
@@ -1508,7 +1508,7 @@ class PaginationMetadata(unittest.TestCase):
     def test_pinned_official_unchanged_pagination_consumers(self):
         import importlib
         import importlib.metadata
-        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.13')
+        self.assertEqual(importlib.metadata.version('blaxel'), '0.4.18')
         def sync_consumer(pages, model):
             seen = []
             meta = model(has_more=True, next_cursor='before')

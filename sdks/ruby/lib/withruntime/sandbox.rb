@@ -19,6 +19,12 @@ module WithRuntime
     # free, up to +wait_for_capacity+ seconds (the client's, two minutes by default).
     #
     #   runtime.sandboxes.create(labels: { team: "search" }, timeout_seconds: 900)
+    #
+    # +spread_from: [id, ...]+ (one to 16 ids of your own sandboxes or snapshots)
+    # starts it on a server none of them is on. With no other server that has
+    # room, the create raises +no_capacity+ and nothing is made or charged.
+    # +sbx.info.placement+ is an opaque tag for its server: the same tag means
+    # the same server.
     def create(wait: true, idempotency_key: nil, wait_for_capacity: nil, **fields)
       room = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
       info = @t.json("POST", "/v1/sandboxes", body: Fields.body(fields), wait: wait ? 60 : 0,
@@ -118,8 +124,12 @@ module WithRuntime
 
     # Carries on a paused sandbox, with its memory and processes;
     # +timeout_seconds+ is its new time limit, for a sandbox that has one.
-    def wake(wait: true, timeout_seconds: nil, idempotency_key: nil)
-      lifecycle("wake", timeout_seconds ? { "timeoutSeconds" => timeout_seconds } : {}, wait, idempotency_key)
+    # When its server has no room (+no_capacity+) it waits for room, as +create+
+    # does, up to +wait_for_capacity+ seconds (the client's, two minutes by
+    # default; 0 fails at once), sending the same idempotency key each time.
+    def wake(wait: true, timeout_seconds: nil, idempotency_key: nil, wait_for_capacity: nil)
+      lifecycle("wake", timeout_seconds ? { "timeoutSeconds" => timeout_seconds } : {}, wait, idempotency_key,
+                room: room_for(wait_for_capacity))
     end
 
     # Moves a sandbox's time limit on, at most an hour ahead of now. A sandbox
@@ -130,7 +140,10 @@ module WithRuntime
     def set_retention(days, idempotency_key: nil) = lifecycle("retention", { "days" => days }, false, idempotency_key)
 
     # Starts a stopped persistent sandbox again from its disk. Memory is not kept.
-    def restart(wait: true, idempotency_key: nil) = lifecycle("restart", {}, wait, idempotency_key)
+    # Waits for room like +wake+ when its server is full.
+    def restart(wait: true, idempotency_key: nil, wait_for_capacity: nil)
+      lifecycle("restart", {}, wait, idempotency_key, room: room_for(wait_for_capacity))
+    end
 
     # Changes name, labels, auto_wake, idle_pause_seconds, persistent or
     # max_total_cost_micros; fields left out stay as they are, and
@@ -203,8 +216,10 @@ module WithRuntime
     end
 
     # Keeps this sandbox's whole machine as a snapshot to start new sandboxes
-    # from. A running sandbox is paused for the moment it takes, then woken; a
-    # paused one stays paused. A sandbox with volumes cannot be snapshotted.
+    # from. A running sandbox is paused by the server for the moment it takes
+    # and woken once the capture is over (one still capturing when the call
+    # answers stays paused until it is ready); a paused one stays paused. A
+    # sandbox with volumes cannot be snapshotted.
     def snapshot(name: nil, labels: nil, retention_days: nil, idempotency_key: nil)
       refresh
       # Straight after a fork or a wake the sandbox is still resuming, and
@@ -213,15 +228,11 @@ module WithRuntime
       if %w[resuming starting].include?(state) then wait_for("running")
       elsif state == "pausing" then wait_for("paused")
       end
-      running = state == "running"
-      pause if running
-      begin
-        Record.new(@t.json("POST", path(":snapshot"),
-                           body: Fields.body(name: name, labels: labels, retention_days: retention_days),
-                           wait: 10, key: idempotency_key))
-      ensure
-        wake if running
-      end
+      # The server pauses a running sandbox itself: a client pause and wake
+      # would be two more round trips.
+      Record.new(@t.json("POST", path(":snapshot"),
+                         body: Fields.body(name: name, labels: labels, retention_days: retention_days),
+                         wait: 10, key: idempotency_key))
     end
 
     # CPU and memory over a range: 15m, 1h, 6h, 24h, 7d or 30d.
@@ -367,10 +378,12 @@ module WithRuntime
 
     private
 
-    def lifecycle(verb, body, wait, key)
-      @info = Record.new(@t.json("POST", path(":#{verb}"), body: body, wait: wait ? 60 : 0, key: key))
+    def lifecycle(verb, body, wait, key, room: 0)
+      @info = Record.new(@t.json("POST", path(":#{verb}"), body: body, wait: wait ? 60 : 0, key: key, room: room))
       self
     end
+
+    def room_for(wait_for_capacity) = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
 
     def command_body(command, cwd, env, stdin, timeout)
       body = command.is_a?(Array) ? { "argv" => command.map(&:to_s) } : { "command" => command.to_s }

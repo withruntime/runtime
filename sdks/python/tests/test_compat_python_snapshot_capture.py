@@ -7,12 +7,19 @@ from withruntime._errors import RuntimeError
 
 
 class SnapshotCapture(unittest.TestCase):
-    def fixture(self, state="running", result="ready", mode="disk"):
+    def fixture(self, state="running", result="ready", mode="disk", direct=False):
         events = []
         class Transport:
             def json(self, method, path, **kwargs):
                 events.append((method, path, kwargs))
                 if path.endswith(":snapshot"):
+                    # The server pauses a running source itself. Answering
+                    # "capturing" leaves it paused for the client to wake;
+                    # answering "ready" directly means it already woke it.
+                    if direct and self.state == "running":
+                        return {"id": "snap", "state": result, "mode": mode, "error": "fixture failure"}
+                    if self.state == "running":
+                        self.state = "paused"
                     return {"id": "snap", "state": "capturing", "mode": mode}
                 if path.startswith("/v1/snapshots/"):
                     return {"id": "snap", "state": result, "mode": mode, "error": "fixture failure"}
@@ -30,9 +37,36 @@ class SnapshotCapture(unittest.TestCase):
         with patch("withruntime._sync_client.sleep"):
             result = Sandbox(transport, {"id": "owned", "state": "running"}).snapshot(mode="disk")
         self.assertEqual(result["state"], "ready")
-        self.assertEqual([path for _, path, _ in events], ["/v1/sandboxes/owned", "/v1/sandboxes/owned:pause",
+        self.assertEqual([path for _, path, _ in events], ["/v1/sandboxes/owned",
             "/v1/sandboxes/owned:snapshot", "/v1/snapshots/snap", "/v1/sandboxes/owned:wake"])
-        self.assertEqual(events[2][2]["body"]["mode"], "disk")
+        self.assertEqual(events[1][2]["body"]["mode"], "disk")
+
+    def test_direct_answer_sends_no_pause_and_no_wake(self):
+        for result, mode in (("ready", "disk"), ("failed", "disk")):
+            transport, events = self.fixture(result=result, mode=mode, direct=True)
+            box = Sandbox(transport, {"id": "owned", "state": "running"})
+            if result == "ready":
+                box.snapshot(mode="disk")
+            else:
+                with self.assertRaises(RuntimeError) as error:
+                    box.snapshot(mode="disk")
+                self.assertEqual(error.exception.code, "snapshot_failed")
+            self.assertEqual([path for _, path, _ in events],
+                             ["/v1/sandboxes/owned", "/v1/sandboxes/owned:snapshot"])
+            self.assertEqual(transport.state, "running")
+
+    def test_refusal_before_pause_does_not_wake_a_running_source(self):
+        transport, events = self.fixture()
+        inner = transport.json
+        def refuse(method, path, **kwargs):
+            if path.endswith(":snapshot"):
+                events.append((method, path, kwargs))
+                raise RuntimeError("Not pausable.", code="not_pausable", status=409)
+            return inner(method, path, **kwargs)
+        transport.json = refuse
+        with self.assertRaises(RuntimeError):
+            Sandbox(transport, {"id": "owned", "state": "running"}).snapshot(mode="disk")
+        self.assertFalse(any(path.endswith(":wake") for _, path, _ in events))
 
     def test_refusal_failed_capture_and_wrong_mode_preserve_source_state(self):
         for initial in ("running", "paused"):

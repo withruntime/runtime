@@ -7,7 +7,7 @@ import re
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -761,6 +761,11 @@ class SandboxPreviewToken:
         self.preview_token = preview_token
 
     @property
+    def name(self) -> str:
+        name = getattr(getattr(self.preview_token, "metadata", None), "name", None)
+        return name if isinstance(name, str) else ""
+
+    @property
     def value(self) -> str:
         return (self.preview_token.spec.token if self.preview_token.spec else "") or ""
 
@@ -770,8 +775,17 @@ class SandboxPreviewToken:
 
 
 class SandboxPreviewTokens:
+    # The token create_if_expired made last, per sandbox and port, in this
+    # process: Runtime keeps no list of the tokens it signed.
+    _made: Dict[str, Any] = {}
+
     def __init__(self, preview: "SandboxPreview") -> None:
         self._preview = preview
+
+    def _key(self) -> str:
+        runtime = self._preview._sandbox.withruntime
+        owner = getattr(runtime, "id", None) or self.resource_name
+        return f"{owner}:{self._preview.spec.port}"
 
     @property
     def preview_name(self) -> str:
@@ -808,6 +822,31 @@ class SandboxPreviewTokens:
                                           resource_name=self.resource_name, resource_type="sandbox"),
             spec=PreviewTokenSpec(token=got["token"], expires_at=returned, expired=False)))
 
+    def create_if_expired(self, expires_at: Optional[datetime] = None,
+                                min_validity: timedelta = timedelta(hours=1)) -> SandboxPreviewToken:
+        """blaxel 0.4.17's: the latest token lasting ``min_validity`` more and
+        not past ``expires_at`` (a day from now when None; naive means UTC),
+        else a new one until ``expires_at``. Blaxel picks among the preview's
+        listed tokens; Runtime keeps no list, so the one reused is the token
+        this call made last in this process for this sandbox's port."""
+        now_at = datetime.now(timezone.utc)
+        ceiling, minimum = core.token_bounds(expires_at, min_validity, now_at)
+        if getattr(self._preview.spec, "public", None) is True:
+            raise ValueError("Cannot create or reuse a token for a public preview")
+        key = self._key()
+        kept = SandboxPreviewTokens._made.get(key)
+        if kept is not None:
+            token, until = kept
+            if now_at < until and minimum <= until <= ceiling:
+                return token
+        token = self.create(ceiling)
+        try:
+            until = datetime.fromisoformat(str(token.preview_token.spec.expires_at).replace("Z", "+00:00"))
+            SandboxPreviewTokens._made[key] = (token, until.astimezone(timezone.utc))
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            pass
+        return token
+
     list = staticmethod(core.unsupported(
         "Listing a preview's tokens", "Runtime keeps no list of tokens: keep the ones you create."))
     delete = staticmethod(core.unsupported(
@@ -834,6 +873,11 @@ class SandboxPreview:
     @property
     def spec(self) -> Any:
         return self.preview.spec
+
+    @property
+    def url(self) -> str:
+        url = getattr(self.preview.spec, "url", None)
+        return url if isinstance(url, str) else ""
 
 
 _PREVIEW_REFUSED = {
@@ -878,8 +922,11 @@ class SandboxPreviews:
                 for one in _guard("sandbox", lambda: runtime.previews.list())]
 
     def create(self, preview: Any) -> SandboxPreview:
-        """Shares ``spec.port``: private unless ``spec.public``."""
-        model = Preview.from_dict(preview) if isinstance(preview, dict) else preview
+        """Shares ``spec.port``: private unless ``spec.public``. Blaxel's
+        shorthand (``{"port": ..., "name": ..., "public": ...}`` or a
+        SandboxPreviewCreateConfiguration) is a private ``preview-<port>``
+        unless it says otherwise."""
+        model = core.normalize_preview(preview)
         spec = model.spec or PreviewSpec()
         for field_name, alternative in _PREVIEW_REFUSED.items():
             if getattr(spec, field_name):
@@ -895,14 +942,23 @@ class SandboxPreviews:
         return self._model(reply, name)
 
     def create_if_not_exists(self, preview: Any) -> SandboxPreview:
-        model = Preview.from_dict(preview) if isinstance(preview, dict) else preview
+        """The named preview, or a new one. An existing preview is answered as
+        it is: the shorthand's private default applies only to a new one."""
+        shorthand = core.is_preview_shorthand(preview)
+        model = core.normalize_preview(preview)
         name = (model.metadata.name if model.metadata else "") or f"port-{(model.spec or PreviewSpec()).port}"
         try:
             return self.get(name)
         except SandboxAPIError as error:
             if error.status_code != 404:
                 raise
-        return self.create(model)
+        try:
+            return self.create(model)
+        except SandboxAPIError as error:
+            # Blaxel's race, for the shorthand: another caller made it first.
+            if not shorthand or error.status_code != 409:
+                raise
+            return self.get(name)
 
     def _port(self, preview_name: str) -> int:
         for port, name in self._names().items():

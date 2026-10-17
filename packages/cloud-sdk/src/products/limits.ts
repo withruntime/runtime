@@ -19,10 +19,25 @@ export type KeyLimits = {
   /** Machine time the account can still run without credit, the same
    * figures as `usage.get()`'s `trial`, or null when it has none. */
   trial: Usage["trial"];
+  /** Every limit the account is held to, with what it uses of each now: the
+   * numbers a create past one is refused `quota_exceeded` by (its
+   * `details.limit` names the row). Null when they can't be read. */
+  account: AccountLimit[] | null;
 };
 
-/** `runtime.limits.get()`: whether this key is read-only, and what its agent
- * may still spend today. An owner sets the limit at
+/** One of the account's limits, as https://withruntime.com/account/limits shows it. */
+export type AccountLimit = {
+  /** `<kind>.<dimension>`: sandbox.count, sandbox.vcpu, sandbox.memory_mib, volume.count… */
+  limit: string;
+  label: string;
+  /** What `max` and `used` count: things, or MiB. */
+  unit: "count" | "mib";
+  max: number;
+  used: number;
+};
+
+/** `runtime.limits.get()`: whether this key is read-only, what its agent
+ * may still spend today, and the account's limits with what it uses of each. An owner sets the limit at
  * https://withruntime.com/account/keys; a key can read it, never change it.
  * Past it, a create, wake, extension or renewal fails with
  * `spending_limit_reached` (HTTP 402). */

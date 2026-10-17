@@ -19,6 +19,8 @@ import {
   execOptions,
   only,
   refuse,
+  refusal,
+  refused,
   region,
   type ClientOptions,
   type Refused,
@@ -101,7 +103,11 @@ export class App {
     readonly name?: string,
     readonly environmentName?: string,
   ) {}
+  declare readonly info: RefusedAsync;
 }
+refuse("Modal", "App", App, {
+  info: "a Runtime app is a label on its sandboxes, with no lifecycle, Functions or Servers: list them with client.sandboxes.list({ appId: app.appId })",
+});
 export class AppService {
   constructor(private readonly client: ModalClient) {}
   async fromName(name: string, params: { createIfMissing?: boolean; environment?: string } = {}) {
@@ -171,10 +177,18 @@ export class VolumeService {
     const page = await modal(() => this.client.runtime.volumes.list({ name, limit: 100 }));
     return page.data.find((v) => v.name === name && v.state !== "deleted");
   }
-  async fromName(name: string, params: { createIfMissing?: boolean; environment?: string } = {}) {
+  async fromName(
+    name: string,
+    params: { createIfMissing?: boolean; environment?: string; version?: 1 | 2 } = {},
+  ) {
     this.client.open();
-    only("Modal volume", params, ["createIfMissing", "environment"]);
+    only("Modal volume", params, ["createIfMissing", "environment", "version"]);
     if (params.environment) throw new CompatibilityError("Modal", "named Modal environments");
+    if (params.version !== undefined)
+      throw new CompatibilityError(
+        "Modal",
+        "VolumeFS versions; a Runtime volume has one format, so omit version",
+      );
     const found = await this.find(name);
     if (found) return new Volume(found.id, name);
     if (params.createIfMissing)
@@ -441,6 +455,34 @@ export class SandboxSnapshotService {
   }
 }
 
+// Environments ------------------------------------------------------------------
+
+const NO_ENVIRONMENTS =
+  "Runtime has no Modal environments: an account's sandboxes share one namespace, grouped by app name (client.apps.fromName) and tags";
+/** `client.environments` (modal 0.11.1): refused, as `environment` options are. */
+export class EnvironmentService {
+  declare readonly fromName: RefusedAsync;
+  declare readonly objects: Refused;
+}
+refuse("Modal", "EnvironmentService", EnvironmentService, { fromName: NO_ENVIRONMENTS });
+Object.defineProperty(EnvironmentService.prototype, "objects", {
+  configurable: true,
+  get(): never {
+    throw refusal("Modal", "EnvironmentService.objects", NO_ENVIRONMENTS);
+  },
+});
+export const Environment: Refused = refused("Modal", "Environment", NO_ENVIRONMENTS);
+export const EnvironmentAppsService: Refused = refused(
+  "Modal",
+  "EnvironmentAppsService",
+  NO_ENVIRONMENTS,
+);
+export const EnvironmentObjectsService: Refused = refused(
+  "Modal",
+  "EnvironmentObjectsService",
+  NO_ENVIRONMENTS,
+);
+
 // Client ------------------------------------------------------------------------
 
 export type ModalClientParams = ClientOptions & {
@@ -468,6 +510,7 @@ export class ModalClient {
   readonly cloudBucketMounts = new CloudBucketMountService();
   readonly sandboxSnapshots: SandboxSnapshotService;
   readonly proxies = new ProxyService();
+  readonly environments = new EnvironmentService();
   #closed = false;
   constructor(options: ModalClientParams = {}) {
     if (
@@ -516,7 +559,7 @@ export class ModalClient {
   }
   /** The Modal SDK version whose interface this adapter implements. */
   version(): string {
-    return "0.11.0";
+    return "0.11.1";
   }
   close() {
     // The transport owns no background connection; later calls fail as Modal's do.
@@ -745,20 +788,35 @@ export class SandboxService {
       this.client,
     );
   }
-  async fromName(appName: string, name: string, params: { environment?: string } = {}) {
+  /** The running sandbox of that name; with includeTerminated, when none
+   * runs, the one that stopped last (modal 0.11.1). */
+  async fromName(
+    appName: string,
+    name: string,
+    params: { environment?: string; includeTerminated?: boolean } = {},
+  ) {
     this.client?.open();
-    only("Modal sandbox name", params, ["environment"]);
+    only("Modal sandbox name", params, ["environment", "includeTerminated"]);
     if (params.environment) throw new CompatibilityError("Modal", ENVIRONMENTS);
-    const s = (await all(this.runtime, "modal")).find(
-      (s) =>
-        s.info.labels["modal.app"] === appName &&
-        s.info.labels["modal.name"] === name &&
-        s.state === "running",
+    const named = (await all(this.runtime, "modal")).filter(
+      (s) => s.info.labels["modal.app"] === appName && s.info.labels["modal.name"] === name,
     );
+    const ended = (s: NativeSandbox) => s.info.endedAt ?? s.info.createdAt ?? "";
+    const s =
+      named.find((s) => s.state === "running") ??
+      (params.includeTerminated
+        ? named
+            .filter((s) => s.state === "stopped")
+            .sort((a, b) => ended(b).localeCompare(ended(a)))[0]
+        : undefined);
     if (!s) throw new NotFoundError(`Sandbox ${name} not found`);
     return this.fromId(s.id);
   }
-  experimentalFromName(appName: string, name: string, params: { environment?: string } = {}) {
+  experimentalFromName(
+    appName: string,
+    name: string,
+    params: { environment?: string; includeTerminated?: boolean } = {},
+  ) {
     return this.fromName(appName, name, params);
   }
   /** A new sandbox continuing a memory snapshot: its files, memory and

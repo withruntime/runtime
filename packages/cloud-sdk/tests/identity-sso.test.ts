@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { run } from "../src/cli";
 import { Runtime } from "../src/client";
 import { Sandbox, identityToken, RuntimeError } from "../src/index";
@@ -88,6 +91,45 @@ test("a refusal carries the API's code and message; outside a sandbox there is n
   try {
     const missing = await identityToken({ audience: "x" }).catch((e: unknown) => e);
     expect((missing as RuntimeError).code).toBe("identity_unavailable");
+  } finally {
+    sandboxMarker.path = marker;
+  }
+});
+
+test("a long-running process whose request token changed asks again with the guest file's current one", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "identity-"));
+  const file = join(dir, "environment.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      RUNTIME_ID_TOKEN_REQUEST_URL: "https://api.withruntime.com/v1/identity/token",
+      RUNTIME_ID_TOKEN_REQUEST_TOKEN: "rtid1.current.token",
+    }),
+  );
+  process.env.RUNTIME_ID_TOKEN_REQUEST_URL = "https://api.withruntime.com/v1/identity/token";
+  process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN = "rtid1.old.token";
+  const marker = sandboxMarker.path;
+  sandboxMarker.path = file;
+  try {
+    const seen = stub((request) =>
+      request.headers.get("authorization") === "Bearer rtid1.current.token"
+        ? Response.json(TOKEN)
+        : new Response("Use this sandbox's current RUNTIME_ID_TOKEN_REQUEST_TOKEN", {
+            status: 403,
+          }),
+    );
+    expect((await identityToken({ audience: "runtime-hub" })).token).toBe("h.p.s");
+    expect(seen.map((r) => r.headers.get("authorization"))).toEqual([
+      "Bearer rtid1.old.token",
+      "Bearer rtid1.current.token",
+    ]);
+    // The same token in both: one refusal is the answer, not asked twice.
+    process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN = "rtid1.current.token";
+    const again = stub(() => Response.json({ error: { code: "forbidden" } }, { status: 403 }));
+    expect(((await identityToken({ audience: "x" }).catch((e) => e)) as RuntimeError).code).toBe(
+      "forbidden",
+    );
+    expect(again).toHaveLength(1);
   } finally {
     sandboxMarker.path = marker;
   }

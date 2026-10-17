@@ -11,6 +11,7 @@ from withruntime import AsyncRuntime, Runtime
 LIMITS = {
     "access": "full",
     "daily": {"limitMicros": "25000000", "usedMicros": "3100000", "remainingMicros": "21900000", "window": "24h"},
+    "account": [{"limit": "sandbox.count", "label": "Sandboxes", "unit": "count", "max": 20, "used": 3}],
 }
 
 
@@ -46,7 +47,9 @@ class LimitsTest(unittest.TestCase):
 
     def test_sync_get(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
-            self.assertEqual(runtime.limits.get()["daily"]["remainingMicros"], "21900000")
+            limits = runtime.limits.get()
+            self.assertEqual(limits["daily"]["remainingMicros"], "21900000")
+            self.assertEqual(limits["account"][0]["limit"], "sandbox.count")
         self.assertEqual(Stub.seen, [("GET", "/v1/limits")])
 
     def test_async_get(self):

@@ -237,3 +237,239 @@ export function codeOf(error: unknown): string | undefined {
   if (error instanceof ResponseError) return error.runtimeCode;
   return undefined;
 }
+
+/* @blaxel/core 0.3.29's error helpers (common/error-types), over the errors
+   this package throws. They read what an error already carries and never
+   throw. On Runtime a ResponseError's `code` is its HTTP status, as above, and
+   its request id is Runtime's (`requestId`), read when no Blaxel header has
+   one. */
+
+/** Codes Blaxel's edge gateway returns. */
+export type BlaxelGatewayErrorCode =
+  | "ROUTE_NOT_FOUND"
+  | "WORKLOAD_NOT_FOUND"
+  | "WORKSPACE_NOT_FOUND"
+  | "WORKLOAD_UNAVAILABLE"
+  | "WORKLOAD_FAILED"
+  | "ROUTING_UNAVAILABLE"
+  | "AUTHENTICATION_REQUIRED"
+  | "AUTHENTICATION_FAILED"
+  | "TOKEN_REVOKED"
+  | "FORBIDDEN"
+  | "BAD_REQUEST"
+  | "USAGE_LIMIT_EXCEEDED"
+  | "POLICY_VIOLATION"
+  | "UPSTREAM_CONNECT_FAILED"
+  | "UPSTREAM_CONNECT_TIMEOUT"
+  | "UPSTREAM_ERROR"
+  | "UPSTREAM_TIMEOUT"
+  | "GATEWAY_INTERNAL_ERROR";
+/** Blaxel's authentication codes from sandbox creation and fork. */
+export type BlaxelAuthErrorCode =
+  | "TOKEN_REVOKED"
+  | "UNAUTHORIZED"
+  | "UNAUTHORIZED_WORKSPACE"
+  | "AUTHENTICATION_UNAVAILABLE"
+  | "WORKSPACE_REQUIRED";
+/** Blaxel's codes for creating or forking a sandbox. */
+export type BlaxelSandboxCreationErrorCode =
+  | "READ_FAILED"
+  | "PARSE_FAILED"
+  | "VALIDATION_FAILED"
+  | "VALIDATION_ERROR"
+  | "INVALID_INPUT"
+  | "INVALID_IMAGE"
+  | "IMAGE_NOT_FOUND"
+  | "UPLOAD_NOT_SUPPORTED"
+  | "UNSUPPORTED_GENERATION"
+  | "KERNEL_GENERATION_MISMATCH"
+  | "INVALID_PORTS"
+  | "INVALID_REGION"
+  | "REGION_MISMATCH"
+  | "INVALID_VOLUME"
+  | "INVALID_VOLUME_COUNT"
+  | "INVALID_VOLUME_REGION"
+  | "VOLUME_ALREADY_ATTACHED"
+  | "VOLUME_PROVIDER_MISMATCH"
+  | "VOLUME_NOT_FOUND"
+  | "WORKSPACE_NOT_FOUND"
+  | "ACCOUNT_NOT_FOUND"
+  | "SANDBOX_ALREADY_EXISTS"
+  | "SANDBOX_DELETION_IN_PROGRESS"
+  | "SANDBOX_DELETED"
+  | "VOLUME_DELETED"
+  | "CREATION_TIMEOUT"
+  | "QUOTA_EXCEEDED"
+  | "RATE_LIMIT_EXCEEDED"
+  | "WORKSPACE_RATE_LIMIT_EXCEEDED"
+  | "SERVICE_UNAVAILABLE"
+  | "DATABASE_ERROR"
+  | "LOCK_ACQUISITION_FAILED"
+  | "VOLUME_LOOKUP_FAILED"
+  | "BUILD_TRIGGER_ERROR"
+  | "PRESIGNED_URL_ERROR"
+  | "UPLOAD_UNAVAILABLE"
+  | "DEPLOYMENT_FAILED"
+  | "CLUSTER_GATEWAY_ERROR"
+  | "LOCKDOWN_ERROR"
+  | "PROXY_CONFIG_ERROR"
+  | "VALIDATED_DATA_ERROR"
+  | "WORKSPACE_DATA_MISSING"
+  | "CALLBACK_SEND_FAILED"
+  | "FORK_FAILED"
+  | "HANDLER_ERROR"
+  | "INTERNAL_ERROR"
+  | "UNKNOWN_ERROR";
+export type BlaxelErrorCode =
+  BlaxelGatewayErrorCode | BlaxelAuthErrorCode | BlaxelSandboxCreationErrorCode;
+export type BlaxelErrorCodeValue = BlaxelErrorCode | (string & Record<never, never>) | number;
+export type BlaxelApiErrorBody = { error: string; code: number };
+export type BlaxelActionErrorBody = {
+  code: BlaxelSandboxCreationErrorCode | BlaxelAuthErrorCode | (string & Record<never, never>);
+  message: string;
+  status_code: number;
+  reason?: string;
+  step?: string;
+  workspace?: string;
+  sandbox_name?: string;
+  timestamp?: string;
+  cause?: string;
+  details?: Record<string, unknown>;
+};
+export type BlaxelPlatformErrorBody = {
+  error: {
+    code: BlaxelGatewayErrorCode | (string & Record<never, never>);
+    message: string;
+    status: number;
+    origin?: "platform";
+    retryable?: boolean;
+    dispatch_state?: "not_dispatched" | "dispatched_unknown";
+    safe_to_retry_request?: boolean;
+    action?: string;
+    do_not?: string;
+    docs_url?: string;
+    timestamp?: string;
+  };
+};
+export type BlaxelSandboxApiErrorBody = { error: string };
+export type BlaxelErrorLike =
+  | ResponseError
+  | SandboxCreationTimeoutError
+  | BlaxelApiErrorBody
+  | Pick<BlaxelActionErrorBody, "code" | "message" | "status_code">
+  | { error: Pick<BlaxelPlatformErrorBody["error"], "code" | "message" | "status"> };
+
+function readProperty(value: unknown, key: string): unknown {
+  try {
+    return typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const isCode = (value: unknown): value is string | number =>
+  (typeof value === "string" && value.length > 0) ||
+  (typeof value === "number" && Number.isFinite(value));
+const isStatus = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+
+/** True for an error this package throws for an API failure (ResponseError,
+ * SandboxGatewayError, SandboxCreationTimeoutError) or a raw Blaxel error body
+ * (`{ error, code }`, `{ code, message, status_code }`,
+ * `{ error: { code, message, status } }`). False for plain errors, strings and
+ * NotSupportedError, which is a refusal made here, not an API failure. Never
+ * throws. */
+export function isBlaxelError(err: unknown): err is BlaxelErrorLike {
+  try {
+    if (err instanceof Error)
+      return err instanceof ResponseError || err instanceof SandboxCreationTimeoutError;
+    if (typeof err !== "object" || err === null || Array.isArray(err)) return false;
+    const error = readProperty(err, "error");
+    if (typeof error === "string") return isStatus(readProperty(err, "code"));
+    if (
+      typeof readProperty(err, "code") === "string" &&
+      typeof readProperty(err, "message") === "string" &&
+      isStatus(readProperty(err, "status_code"))
+    )
+      return true;
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      !Array.isArray(error) &&
+      typeof readProperty(error, "code") === "string" &&
+      typeof readProperty(error, "message") === "string" &&
+      isStatus(readProperty(error, "status"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function errorCandidates(err: unknown): unknown[] {
+  const bodies = [err, readProperty(err, "error"), readProperty(err, "data")];
+  return bodies.flatMap((body) => [body, readProperty(body, "error")]);
+}
+
+function readHeader(err: unknown, name: string): string | undefined {
+  try {
+    const headers = readProperty(readProperty(err, "response"), "headers");
+    const get = readProperty(headers, "get");
+    if (typeof get !== "function") return undefined;
+    const value: unknown = Reflect.apply(get, headers, [name]);
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The error's code, then its body's, then the X-Blaxel-Error-Code header. A
+ * ResponseError from Runtime answers its HTTP status (its `code`); Runtime's
+ * own code is `runtimeCode`. Never throws. */
+export function getBlaxelErrorCode(err: unknown): BlaxelErrorCodeValue | undefined {
+  for (const candidate of errorCandidates(err)) {
+    const code = readProperty(candidate, "code");
+    if (isCode(code)) return code;
+  }
+  return readHeader(err, "x-blaxel-error-code");
+}
+
+/** The HTTP status: the error's, its response's, then its body's (`status`,
+ * `status_code` or a numeric `code`). Never throws. */
+export function getBlaxelErrorStatus(err: unknown): number | undefined {
+  const status = readProperty(err, "status");
+  if (isStatus(status)) return status;
+  const responseStatus = readProperty(readProperty(err, "response"), "status");
+  if (isStatus(responseStatus)) return responseStatus;
+  for (const candidate of errorCandidates(err))
+    for (const key of ["status", "status_code", "code"]) {
+      const value = readProperty(candidate, key);
+      if (isStatus(value)) return value;
+    }
+  return undefined;
+}
+
+/** The error's message, else its body's message or error text. Never throws. */
+export function getBlaxelErrorMessage(err: unknown): string | undefined {
+  for (const candidate of errorCandidates(err)) {
+    const message = typeof candidate === "string" ? candidate : readProperty(candidate, "message");
+    if (typeof message === "string" && message.length > 0) return message;
+  }
+  return undefined;
+}
+
+/** Blaxel's request id headers (X-Cf-Request-Id, X-Amz-Cf-Id, CF-Ray) on the
+ * error's response, else the Runtime request id a ResponseError carries
+ * (`requestId`). Never throws. */
+export function getBlaxelErrorRequestId(err: unknown): string | undefined {
+  for (const name of ["x-cf-request-id", "x-amz-cf-id", "cf-ray"]) {
+    const value = readHeader(err, name);
+    if (value !== undefined) return value;
+  }
+  try {
+    const runtime = err instanceof ResponseError ? err.requestId : undefined;
+    return typeof runtime === "string" && runtime.length > 0 ? runtime : undefined;
+  } catch {
+    return undefined;
+  }
+}

@@ -101,7 +101,8 @@ export class SandboxUser {
     return this.#sandbox.runCommand({
       cmd: wrapped.cmd,
       args: wrapped.args,
-      ...(params.detached ? { detached: true } : {}),
+      ...(params.detached ? { detached: true } : { onStart: params.onStart }),
+      ...(params.stdin ? { stdin: params.stdin } : {}),
       ...(params.stdout ? { stdout: params.stdout } : {}),
       ...(params.stderr ? { stderr: params.stderr } : {}),
       ...(params.signal ? { signal: params.signal } : {}),

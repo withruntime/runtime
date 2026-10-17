@@ -8,6 +8,8 @@ import time
 import unittest
 
 from withruntime import AsyncRuntime, ConflictError, Runtime
+from withruntime import _async_client as _async_module
+from withruntime import _sync_client as _sync_module
 
 RUNNING = json.dumps({"id": "sbx", "kind": "sandbox", "state": "running", "status": "active"}).encode()
 
@@ -73,6 +75,26 @@ def create(refusals, client_options=None, **create_options):
     return runs
 
 
+def lifecycle(verb, refusals, client_options=None, **options):
+    """Runs one wake or restart on a known sandbox, sync and async."""
+    runs = []
+    for is_async in (False, True):
+        wire = Wire(refusals, is_async)
+        client = {"api_key": "rk", "base_url": "https://api.example.test", **(client_options or {})}
+        runtime = AsyncRuntime(**client) if is_async else Runtime(**client)
+        runtime._t._http = wire
+        sandbox = (_async_module.AsyncSandbox if is_async else _sync_module.Sandbox)(runtime._t, {"id": "sbx", "state": "paused"})
+        try:
+            if is_async:
+                outcome = asyncio.run(getattr(sandbox, verb)(**options))
+            else:
+                outcome = getattr(sandbox, verb)(**options)
+        except Exception as error:  # noqa: BLE001 - the outcome under test
+            outcome = error
+        runs.append((wire, outcome))
+    return runs
+
+
 class CapacityWait(unittest.TestCase):
     def test_a_full_trial_is_waited_out_with_the_same_key_and_input(self):
         busy = refusal("no_credit_running_limit", details={"sandboxIds": ["a"], "concurrent": 8})
@@ -124,6 +146,31 @@ class CapacityWait(unittest.TestCase):
         for wire, outcome, _ in create([never]):
             self.assertEqual(getattr(outcome, "code", None), "no_credit_running_limit")
             self.assertEqual(len(wire.keys), 1)
+
+    def test_a_wake_or_restart_waits_out_a_full_server_with_one_key(self):
+        for verb in ("wake", "restart"):
+            for wire, outcome in lifecycle(verb, [refusal("no_capacity")] * 2):
+                self.assertEqual(outcome.id, "sbx", verb)
+                self.assertEqual(len(wire.keys), 3, verb)
+                self.assertEqual(len(set(wire.keys)), 1, verb)
+                self.assertIsNotNone(wire.keys[0], verb)
+                self.assertTrue(all(t.endswith(f"/sbx:{verb}") for t in wire.targets), verb)
+
+    def test_a_wake_says_why_it_waits(self):
+        heard = []
+        for _, outcome in lifecycle("wake", [refusal("no_capacity")] * 2,
+                                    on_capacity_wait=lambda error, seconds: heard.append((error.code, seconds))):
+            self.assertEqual(outcome.id, "sbx")
+        self.assertEqual(heard, [("no_capacity", 0.005)] * 4)
+
+    def test_zero_fails_a_wake_or_restart_at_once_on_the_client_or_on_one_call(self):
+        for verb in ("wake", "restart"):
+            for wire, outcome in lifecycle(verb, [refusal("no_capacity")], {"wait_for_capacity": 0}):
+                self.assertEqual(getattr(outcome, "code", None), "no_capacity", verb)
+                self.assertEqual(len(wire.keys), 1, verb)
+            for wire, outcome in lifecycle(verb, [refusal("no_capacity")], wait_for_capacity=0):
+                self.assertEqual(getattr(outcome, "code", None), "no_capacity", verb)
+                self.assertEqual(len(wire.keys), 1, verb)
 
     def test_only_a_create_waits(self):
         # A fork's failure names copies that started, and its key replays that

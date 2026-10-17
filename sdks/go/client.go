@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.2.0"
+const Version = "0.4.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"

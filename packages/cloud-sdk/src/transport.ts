@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.14.0";
+export const VERSION = "0.16.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -91,14 +91,17 @@ export type Call = RequestOptions & {
   /** How long to keep retrying, with the same key and input, a refusal that
    * clears when a sandbox stops or a host frees room (WAITS_FOR_ROOM): a
    * full slots without credit, a full quota, a full region. Then the refusal is thrown as
-   * it came. Only a create sets it; 0 or absent fails at once. */
+   * it came. A create, wake or restart sets it; 0 or absent fails at once. */
   waitForCapacityMs?: number;
   /** Called each time a call waits for room, with the refusal it is waiting
    * out and how long it will sleep before sending the call again. */
   onCapacityWait?: (refusal: RuntimeError, waitMs: number) => void;
-  /** Internal: when the call's own deadline ends (performance.now()), set
-   * once the call is prepared; absent when it has none. */
-  deadlineAt?: number;
+  /** Internal: when the call's own deadline ends now (performance.now()),
+   * set once the call is prepared; absent when it has none. */
+  deadlineAt?: () => number;
+  /** Internal: moves the call's deadline on by a wait for room, so a wait
+   * for capacity never spends the caller's own `timeoutMs`. */
+  extendDeadline?: (ms: number) => void;
 };
 
 /** How long an answer that ran nothing (NOTHING_RAN) is retried for a call
@@ -111,8 +114,8 @@ const NOTHING_RAN_MS = 300_000;
  * with no answer by then is talking to a server that is gone, such as a
  * controller that died with the call in flight while its address moved to
  * the new leader: a client that only waits sends nothing the new leader could
- * refuse, so it waited out the whole deadline and failed (the leader drill on
- * vin-5, 4 October 2026). It is sent again under the same key. */
+ * refuse, so it waited out the whole deadline and failed (a controller
+ * failover drill, 4 October 2026). It is sent again under the same key. */
 export const ANSWER_START_MS = 125_000;
 
 export function apiOrigin(value: string): string {
@@ -250,11 +253,37 @@ const KEPT_FOR_CALLS = 8;
 /** AbortSignal.timeout in whole milliseconds, rounded up, never under 1.
  * Node throws ERR_OUT_OF_RANGE on a fraction (Bun accepts one), so a
  * customer's timeoutMs of 1500.5 would be a RangeError instead of a request;
- * the live promise probe broke this way on 9 October 2026 (d3cd4bfbd). Every
+ * the live promise probe broke this way on 9 October 2026. Every
  * deadline the SDK makes from a customer's or a computed value goes through
  * this. */
 export function timeoutSignal(ms: number): AbortSignal {
   return AbortSignal.timeout(Math.max(1, Math.ceil(ms)));
+}
+/** A deadline `ms` from now that `extend` moves later; it aborts with a
+ * TimeoutError, as AbortSignal.timeout does. */
+function movableDeadline(ms: number) {
+  const controller = new AbortController();
+  let at = performance.now() + ms;
+  let timer: ReturnType<typeof setTimeout>;
+  const arm = () => {
+    timer = setTimeout(
+      () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
+      Math.max(1, Math.ceil(at - performance.now())),
+    );
+    // Never keeps a process alive by itself, as AbortSignal.timeout does not.
+    (timer as { unref?: () => void }).unref?.();
+  };
+  arm();
+  return {
+    signal: controller.signal,
+    at: () => at,
+    extend: (by: number) => {
+      if (controller.signal.aborted || by <= 0) return;
+      at += by;
+      clearTimeout(timer);
+      arm();
+    },
+  };
 }
 export class Transport {
   readonly baseUrl: string;
@@ -352,22 +381,29 @@ export class Transport {
    * signal through every retry and the complete response body. */
   #prepare(call: Call): Call {
     const timeoutMs = call.timeoutMs ?? this.#timeoutMs;
-    const roomMs = Math.max(0, call.waitForCapacityMs ?? 0);
-    const deadline = timeoutMs === 0 ? undefined : timeoutSignal(timeoutMs + roomMs);
+    // The deadline is the caller's timeoutMs plus only the time actually
+    // spent waiting for room (WAITS_FOR_ROOM), which moves it on as it waits:
+    // a wake given timeoutMs 20 on a server that never answers still ends at
+    // 20 ms, not two minutes later (lifecycle-deadlines.test.ts).
+    const deadline = timeoutMs === 0 ? undefined : movableDeadline(timeoutMs);
     const signal = deadline
       ? call.signal
-        ? AbortSignal.any([call.signal, deadline])
-        : deadline
+        ? AbortSignal.any([call.signal, deadline.signal])
+        : deadline.signal
       : call.signal;
-    return {
+    const prepared: Call = {
       ...call,
       timeoutMs: 0,
-      ...(timeoutMs === 0 ? {} : { deadlineAt: performance.now() + timeoutMs + roomMs }),
       ...(signal ? { signal } : {}),
       ...(call.method !== "GET"
         ? { idempotencyKey: call.idempotencyKey ?? crypto.randomUUID() }
         : {}),
     };
+    if (deadline) {
+      prepared.deadlineAt = deadline.at;
+      prepared.extendDeadline = deadline.extend;
+    }
+    return prepared;
   }
 
   #connectionError(call: Call, cause: unknown): ConnectionError {
@@ -440,7 +476,9 @@ export class Transport {
     const retry = call.retry ?? true;
     let attempt = 0;
     // An answer that ran nothing is sent again until the call's deadline.
-    const idleUntil = call.deadlineAt ?? performance.now() + NOTHING_RAN_MS;
+    // Read at each use: a wait for room moves the call's deadline on.
+    const idleFallback = performance.now() + NOTHING_RAN_MS;
+    const idleUntil = () => call.deadlineAt?.() ?? idleFallback;
     let idleAttempt = 0;
     // The last try never left, and was sent again at once.
     let resentAtOnce = false;
@@ -534,6 +572,7 @@ export class Transport {
           inCallback = true;
           call.onCapacityWait?.(error, pause);
           inCallback = false;
+          call.extendDeadline?.(pause);
           await this.#retryAfter(error, pause, signal, gate);
           continue;
         }
@@ -552,7 +591,7 @@ export class Transport {
             error.retryAfterMs ?? (Number.isFinite(header) && header > 0 ? header * 1000 : 250);
           const pause =
             Math.min(30_000, base * 2 ** Math.min(idleAttempt++, 3)) * (0.9 + Math.random() * 0.2);
-          if (pause >= idleUntil - performance.now()) throw error;
+          if (pause >= idleUntil() - performance.now()) throw error;
           await this.#retryAfter(error, pause, signal, gate);
           continue;
         }

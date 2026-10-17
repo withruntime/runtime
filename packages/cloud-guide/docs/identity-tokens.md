@@ -72,6 +72,29 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
 | `region`       | Where the sandbox runs                                 |
 | `exp`, `iat`   | When it expires and when it was issued                 |
 
+A scheduled job's run also says which job it is:
+
+| Claim              | What it is                                                   |
+| ------------------ | ------------------------------------------------------------ |
+| `job_id`           | The job's id                                                 |
+| `job_name`         | Its name                                                     |
+| `job_version`      | Its version, which grows with each change                    |
+| `job_run_id`       | This run                                                     |
+| `job_made_by`      | The agent or person that made it                             |
+| `job_made_by_kind` | `agent` or `person`                                          |
+| `job_vouched_by`   | The owner or admin who vouched for it, while it is unchanged |
+
+An owner or admin vouches for a job on its page in the console, signed in. No
+API key can. Only runs that start after the vouch carry the name. Any change
+to the job's command, schedule or size clears the vouch, even if the job is
+later put back as it was, until someone vouches again. A job that uses secrets cannot be vouched
+for. If anything other than the job
+reached a run's sandbox (a command or file call, a preview, a port or
+domain, a snapshot, or an attached volume), that run's tokens name no job at
+all, since what runs there may not be the job's. The next run starts fresh. A token that names a voucher lives five minutes at most, whatever you ask for. So an API that does something only a person should allow can accept a
+job's call only when `job_vouched_by` is there, as Runtime's own billing jobs
+do.
+
 `sub` is built for trust policies: `org:<org-id>:*` matches every sandbox of
 your organization, and `org:<org-id>:image:api-worker:*` only those made from
 the image `api-worker`. No part of it can contain a colon.

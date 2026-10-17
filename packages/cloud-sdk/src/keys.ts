@@ -10,7 +10,7 @@ import { describeRoute, envFetch } from "./proxy.js";
 
 /* `runtime keys create`: an API key for somewhere with no browser, a CI runner
    above all, asked for from a terminal and approved by an account owner in the
-   browser. Marc, 23 September 2026; ARCHITECTURE.md section 10, "Keys from the
+   browser. 23 September 2026; ARCHITECTURE.md section 10, "Keys from the
    terminal". It is the connection request `runtime login` makes, carrying the
    keys page's terms, and the website issues it through the keys page's own
    path. The key is sealed to a key pair made here and never written to disk;
