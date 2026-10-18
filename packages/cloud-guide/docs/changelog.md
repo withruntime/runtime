@@ -10,6 +10,24 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 18 October 2026
 
+- **One deletion email a day, not one per pause.** A sandbox with
+  `:retention` days of its own is a day or so from deletion after each idle
+  pause, and its owners were emailed a warning on every pause, though using
+  it again cancels the deletion. Warnings for dates you set this way are now
+  emailed at most once a day for the account, listing every sandbox due, and
+  never once a sandbox has woken or paused again since; the email says its
+  own retention chose the date, and `null` keeps it while you have credit. See [pricing](./pricing#paused-storage).
+- **A secret that could not be added is no longer silent.** When a request to
+  a secret's host leaves your sandbox without the secret because our server
+  could not add it at that moment, the sandbox now gets a
+  `sandbox.secret_not_applied` event with reason `withheld`, saying the fault
+  is ours and what to do. See [events](./observability#events).
+- **A sandbox out of memory still answers.** When a sandbox's programs fill
+  its memory, Linux now ends one of them for memory, as the guide says,
+  instead of the whole sandbox slowing until commands, reads and kills time
+  out. Your programs share its memory less a small reserve for the sandbox's
+  own services. See
+  [when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory).
 - **Fetch a web page in under a second with a paused browser.** The guides
   show how to keep spare browsers paused, charged only for storage, and wake
   one per page: wake to page done measured 0.56 to 0.81 seconds. Python's
@@ -22,6 +40,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   Downloads over open connections, installs, clones, storage, CDNs and AI APIs
   are never counted. See [connections to one site](./egress#connections-to-one-site).
 
+- **Identity tokens from any running sandbox.** A program with no
+  `RUNTIME_ID_TOKEN_REQUEST_*` variables, such as one started before they were
+  set or a sandbox kept from older guest software, now gets a token too:
+  `Sandbox.identityToken()` (TypeScript 0.17.3), Python's
+  `Sandbox.identity_token()` (0.16.2) and `runtime sandboxes identity-token`
+  ask the sandbox's host for them, and the docs show the same with curl alone.
+  See [identity tokens](./identity-tokens).
 - **No 429 for a busy key right after an update of Runtime.** A key whose
   account runs many sandboxes may send up to 8 times the ordinary rate. Just
   after Runtime updated its servers, its first requests met the ordinary
@@ -183,6 +208,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   usage export leaves out: credit held for work still running is not in it,
   and becomes a row once it settles. See
   [export settled usage](./api#export-settled-usage).
+- **HTTP/2 to the hosts your secrets name.** A sandbox's HTTPS requests to a
+  host that one of your secrets names now go over HTTP/2 when your client and
+  the host both offer it, as they already did to every other host. Concurrent
+  calls to that host share one connection instead of each taking one of the
+  sandbox's connections, and gRPC works there too. Each request is still
+  checked on its own: its host, its rules and where the value goes. See
+  [security](./security).
 - **A restart runs the image's start command again.** A sandbox from an
   image with a start command (a Dockerfile `CMD`, or `start` in
   `images.build`) now runs it again after a stop and `:restart`, a `:resize`,

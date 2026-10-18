@@ -132,7 +132,11 @@ The version counts, not its date: JavaScript 0.11.1 and 0.11.2 and Python
   confirmed resume or deletion. Compute has no one-minute minimum.
 
 A paused sandbox on a paid account is kept as long as the account has credit,
-until you delete it, or for 1–365 days if you set them with `:retention`. When
+until you delete it, or for 1–365 days if you set them with `:retention`. Those
+days count from each pause, and using the sandbox ends the count, so with
+`:retention` at 1 an idle pause is a day from deletion: for dates you set
+this way, the warning email below goes at most once a day for the account,
+listing every sandbox due, and only while its deletion is still due. `null` keeps it while you have credit again. When
 credit runs out it is kept seven more days, with a notice first, and a top-up
 before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free.
 `:retention` on a sandbox made without credit answers `retention_unavailable`:
@@ -349,7 +353,8 @@ owe money. Nothing is lost straight away:
 
 - The item is kept for **seven days**. An account notice tells you the date, and
   a second notice warns you a day before it. Notices go to your account inbox
-  (`runtime_notices` in MCP).
+  (`runtime_notices` in MCP), and the day-before warning is also emailed to the
+  account's owners, from Runtime, one email for everything it covers.
 - Add credit within those seven days and charging starts again from then. The
   days it went unpaid are written off: they are never charged, now or later.
 - After seven days unpaid, the item is deleted. A volume that a sandbox still

@@ -28,11 +28,9 @@ token = Sandbox.identity_token("sts.amazonaws.com")
 print(len(token))
 ```
 
-Or with curl, the way GitHub Actions does it. A new sandbox made from the
-current default image has these two variables ready for its first accepted
-command, valid while it runs. A [scheduled job](./jobs)'s run has them in its
-command's environment too, so a job can get tokens the same ways. Retained
-older-image sandboxes keep their original guest software:
+Or with curl, the way GitHub Actions does it. Commands in a running sandbox
+have these two variables, and a [scheduled job](./jobs)'s run has them in its
+command's environment too, so a job can get tokens the same ways:
 
 ```bash no-run
 curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
@@ -55,7 +53,20 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
   fork's programs keep the source's. A program that runs a long time, or was
   copied, reads the current one again from
   `http://runtime.internal/v1/environment` (JSON, with both variables); the
-  JavaScript and Python SDKs do this for you when a token they hold is refused.
+  JavaScript and Python SDKs do this for you when a token they hold is refused,
+  or when the process has no variables at all.
+- A program that has neither variable (one started before they were set, or
+  a sandbox kept from older guest software) reads them the same way. The host
+  answers every running sandbox, whatever its image or age, so this needs
+  nothing installed but curl:
+
+```bash no-run
+token=$(curl -s http://runtime.internal/v1/environment |
+  sed -n 's/.*"RUNTIME_ID_TOKEN_REQUEST_TOKEN": *"\([^"]*\)".*/\1/p')
+curl -H "Authorization: Bearer $token" \
+  "http://runtime.internal/v1/identity/token?audience=sts.amazonaws.com"
+```
+
 - Use the supplied `RUNTIME_ID_TOKEN_REQUEST_URL`. It points to Runtime's
   internal token relay, which accepts only this sandbox's current request
   token. You do not need to allow access to the host's public address.
@@ -192,8 +203,10 @@ export async function sandboxOf(token) {
 
 ## Limits
 
-- Tokens are for sandboxes today, a job's runs included. Code outside a
-  sandbox has nothing to ask with, and no API key can get one.
+- Tokens are for running sandboxes, a job's runs included. Code outside a
+  sandbox has nothing to ask with, and no API key can get one: a key that
+  leaked could then pass for any of your sandboxes. A paused sandbox asks once
+  something wakes it, such as a command or a request to its preview.
 - Microsoft Entra ID's federated credentials match an exact subject, and every
   sandbox's subject is different, so Azure is not supported yet. Tell us with
   `npx withruntime feedback "identity tokens: Azure"` if you need it.

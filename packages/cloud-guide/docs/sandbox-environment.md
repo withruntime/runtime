@@ -121,7 +121,10 @@ made new for each copy, but not all of it.
 ### When a program runs out of memory
 
 A sandbox that runs out of memory stays up: Linux's out-of-memory killer ends
-the program using the most, and the rest keeps running. A program ended that
+the program using the most, and the rest keeps running. Your programs share
+the sandbox's memory less a reserve for its own services (a sixteenth of it,
+128 MiB at least and 256 MiB at most), so while they fill it, commands, file
+reads and kills still answer. A program ended that
 way exits with -9 (137 from a shell) and often prints nothing. Runtime says
 why: the command's result, its process (read, get or list) and the stream's
 `exit` event carry `outOfMemory`:

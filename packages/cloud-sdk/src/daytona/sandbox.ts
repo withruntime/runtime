@@ -376,7 +376,8 @@ export class Sandbox {
   }
 
   /** Runtime has no archive tier: a stopped sandbox stays paused, kept for
-   * its retention (30 days paid, 7 without credit, or autoDeleteInterval). */
+   * its retention (while the account has credit, 7 days without, or
+   * autoDeleteInterval rounded up to whole days). */
   async archive(): Promise<void> {
     await this.stop();
   }

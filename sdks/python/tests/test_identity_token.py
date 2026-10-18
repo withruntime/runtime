@@ -114,6 +114,31 @@ class IdentityTokenTest(unittest.TestCase):
             ("/v1/identity/token", "Bearer rtid1.statement.sig"),
         ])
 
+    def test_a_sandbox_whose_programs_lack_the_variables_asks_its_host(self):
+        # An older guest: no variables in the process, a file without them.
+        import tempfile
+        os.environ.pop("RUNTIME_ID_TOKEN_REQUEST_TOKEN", None)
+        url = os.environ.pop("RUNTIME_ID_TOKEN_REQUEST_URL")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as file:
+            json.dump({"SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt"}, file)
+        self.addCleanup(os.unlink, file.name)
+        withruntime._ENVIRONMENT_FILE = file.name
+        Stub.current = {"RUNTIME_ID_TOKEN_REQUEST_URL": url, "RUNTIME_ID_TOKEN_REQUEST_TOKEN": "rtid1.statement.sig"}
+        self.assertEqual(Sandbox.identity_token("sts.amazonaws.com"), "header.payload.signature")
+        self.assertEqual([(path, auth) for path, _, auth in Stub.seen], [
+            ("/v1/environment", None),
+            ("/v1/identity/token", "Bearer rtid1.statement.sig"),
+        ])
+
+    def test_outside_a_sandbox_nothing_is_asked_over_the_network(self):
+        os.environ.pop("RUNTIME_ID_TOKEN_REQUEST_TOKEN", None)
+        Stub.current = {"RUNTIME_ID_TOKEN_REQUEST_URL": os.environ["RUNTIME_ID_TOKEN_REQUEST_URL"],
+                        "RUNTIME_ID_TOKEN_REQUEST_TOKEN": "rtid1.statement.sig"}
+        with self.assertRaises(RuntimeError) as caught:
+            Sandbox.identity_token("sts.amazonaws.com")
+        self.assertEqual(caught.exception.code, "identity_unavailable")
+        self.assertEqual(Stub.seen, [])
+
     def test_outside_a_sandbox_there_is_nothing_to_ask_with(self):
         os.environ.pop("RUNTIME_ID_TOKEN_REQUEST_TOKEN", None)
         if os.path.exists("/run/runtime/environment.json"):

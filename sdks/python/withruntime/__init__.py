@@ -106,8 +106,13 @@ def _identity_token(audience: str, lifetime_seconds: Optional[int], timeout: flo
 
     url = _os.environ.get("RUNTIME_ID_TOKEN_REQUEST_URL")
     token = _os.environ.get("RUNTIME_ID_TOKEN_REQUEST_TOKEN")
-    if not url or not token:
-        url, token = _file_credentials()
+    if (not url or not token) and _os.path.exists(_ENVIRONMENT_FILE):
+        # A process started without them (a server started before the guest
+        # wrote its environment, a sandbox whose guest software predates the
+        # variables) asks the host, which answers every running sandbox
+        # whatever its image or age, then the guest's file. Only inside a
+        # sandbox: elsewhere nothing is asked over the network.
+        url, token = _current_credentials(timeout)
     if not url or not token:
         raise RuntimeError("Identity tokens are issued only inside a Runtime sandbox (RUNTIME_ID_TOKEN_REQUEST_TOKEN is not set).",
                            code="identity_unavailable")

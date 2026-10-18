@@ -139,6 +139,47 @@ test("a request token gone stale (a renewed lease, an App copy restored from its
   ]);
 });
 
+test("a sandbox whose programs lack the variables (older guest software) asks its host for them; outside one nothing is asked", async () => {
+  delete process.env.RUNTIME_ID_TOKEN_REQUEST_URL;
+  delete process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
+  // An older guest's file: the egress CA paths, no request token.
+  const dir = mkdtempSync(join(tmpdir(), "identity-"));
+  const file = join(dir, "environment.json");
+  writeFileSync(file, JSON.stringify({ SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt" }));
+  const marker = sandboxMarker.path;
+  sandboxMarker.path = file;
+  try {
+    const seen = stub((request) =>
+      request.url === "http://runtime.internal/v1/environment"
+        ? Response.json({
+            RUNTIME_ID_TOKEN_REQUEST_URL: "http://runtime.internal/v1/identity/token",
+            RUNTIME_ID_TOKEN_REQUEST_TOKEN: "rtid1.host.sig",
+          })
+        : request.headers.get("authorization") === "Bearer rtid1.host.sig"
+          ? Response.json(TOKEN)
+          : Response.json({ error: { code: "identity-bearer" } }, { status: 403 }),
+    );
+    const { lines, out } = output();
+    expect(
+      await run(["sandbox", "identity-token", "--audience", "sts.amazonaws.com"], {}, out),
+    ).toBe(0);
+    expect(lines).toEqual(["h.p.s"]);
+    expect(seen.map((r) => [r.url.split("?")[0], r.headers.get("authorization")])).toEqual([
+      ["http://runtime.internal/v1/environment", null],
+      ["http://runtime.internal/v1/identity/token", "Bearer rtid1.host.sig"],
+    ]);
+
+    // Not in a sandbox: no guest file, so no call at all.
+    sandboxMarker.path = join(dir, "missing.json");
+    const none = stub(() => Response.json(TOKEN));
+    const missing = await identityToken({ audience: "x" }).catch((e: unknown) => e);
+    expect((missing as RuntimeError).code).toBe("identity_unavailable");
+    expect(none).toHaveLength(0);
+  } finally {
+    sandboxMarker.path = marker;
+  }
+});
+
 test("a long-running process whose request token changed asks again with the guest file's current one", async () => {
   const dir = mkdtempSync(join(tmpdir(), "identity-"));
   const file = join(dir, "environment.json");

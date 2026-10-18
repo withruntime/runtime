@@ -1,3 +1,4 @@
+import { me } from "./cli-name.js";
 import { RuntimeError } from "./errors.js";
 import type { ProductName } from "./product-names.js";
 import { cliWords } from "./product-renames.js";
@@ -56,6 +57,18 @@ function issueWords(path: string, message: string): string {
  * a hint that names the options rather than the request's fields. Anything
  * else is left as the API said it. */
 export function cliRefusal(error: RuntimeError): { message: string; hint?: string } {
+  // A beta's refusal names the support tool an agent calls; here, the command.
+  if (error.code === "product_in_beta") {
+    const product = typeof error.details?.product === "string" ? error.details.product : "";
+    const open = (error.hint ?? "").replace(
+      /;?\s*ask Runtime support \(runtime_support\) to join it\.?$/,
+      ".",
+    );
+    return {
+      message: error.message,
+      hint: `${open ? `${open} ` : ""}Ask to join: ${me} support "Please add us to the ${product || "product"} beta"`,
+    };
+  }
   const issues = error.details?.issues;
   if (error.code === "invalid_request" && Array.isArray(issues) && issues.length) {
     const lines = (issues as Array<{ path?: unknown; message?: unknown }>)

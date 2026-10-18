@@ -95,8 +95,14 @@ export type ListBuilds = {
   name?: string;
   label?: string[];
   state?: BuildState[];
+  /** Only this connected repository's builds. */
+  repositoryId?: string;
+  /** Only builds of this commit, by its full sha. */
+  commit?: string;
 };
-export type ListRepositories = Omit<ListBuilds, "state"> & { state?: Repository["state"][] };
+export type ListRepositories = Omit<ListBuilds, "state" | "repositoryId" | "commit"> & {
+  state?: Repository["state"][];
+};
 export type BuildLine = {
   cursor: string | null;
   at: number;
@@ -418,6 +424,14 @@ export function builds(t: Transport) {
         t.json<Repository>({
           method: "DELETE",
           path: `/v1/repositories/${encodeURIComponent(id)}`,
+          ...options,
+        }),
+      /** A link to install Runtime's GitHub App, open for 15 minutes: a
+       * private repository builds once its owner installs it. */
+      installGithub: (options?: RequestOptions) =>
+        t.json<{ url: string; expiresAt: string }>({
+          method: "POST",
+          path: "/v1/repositories/github:install",
           ...options,
         }),
     },

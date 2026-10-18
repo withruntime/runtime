@@ -228,6 +228,11 @@ or value. `reason` is one of:
 | `not_in_credential_header` | It went to the secret's host in the path or query (`place` is `target`) or in the `place` header  |
 | `rule_not_matched`         | It went in a credential header, but none of the secret's `rules` allows that method and path      |
 | `by_address`               | HTTPS went to an IP address, asking for one of the secret's hosts. Use the host name in the URL   |
+| `withheld`                 | HTTPS went to the secret's host, but its server could not add the secret then. Runtime's fault    |
+
+`withheld` is sent for a connection to the secret's host whether or not it
+carried the placeholder, since Runtime does not read inside a connection it
+could not add the secret to. Try again, and write to support if it repeats.
 
 Runtime does not read inside HTTPS to a host no secret names, so a placeholder
 sent there sends no event: check the host against `npx withruntime secrets ls`.

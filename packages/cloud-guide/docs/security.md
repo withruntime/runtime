@@ -94,7 +94,8 @@ whole life: it stops there, with `stopReason` `lifetime_cap`.
 
 Set a limit above what the agent's paused sandboxes cost in a day. If storage
 for a paused sandbox cannot be paid for, it is treated like storage on an empty
-balance: you are notified, and after seven days unpaid it is deleted.
+balance: you are notified, by an account notice and an email to the account's
+owners a day before, and after seven days unpaid it is deleted.
 
 ## Compartments
 
@@ -319,8 +320,9 @@ deletes it there. The value is typed once and never shown again.
   command returns it, and a sandbox never holds it: not in its environment, its
   memory or its disk, so a prompt injection or a stolen sandbox cannot leak it.
 - Plain HTTP never carries a secret, and request bodies are never rewritten.
-  Requests to a secret's hosts go over HTTP/1.1, WebSockets included; gRPC,
-  which needs HTTP/2, works to every other host.
+  Requests to a secret's hosts go over HTTP/2 when your client and the host
+  both offer it, so a program's calls to one host share one connection, and
+  over HTTP/1.1 otherwise; WebSockets and gRPC work.
 - To reach those hosts the proxy opens the HTTPS connection itself and checks
   the real server's certificate. Sandboxes trust Runtime's certificate for
   those hosts already; Python, Node, curl and git pick it up through

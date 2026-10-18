@@ -297,7 +297,9 @@ check, in order, the four things that decide whether a request carries a
    went round the sandbox's proxy (raw sockets and some HTTP libraries ignore
    `HTTPS_PROXY`), or the host is in its `NO_PROXY`. The sandbox's own
    `NO_PROXY` lists only loopback and private addresses, so a secret's host is
-   there only if your code added it.
+   there only if your code added it. If the server could not add the secret
+   at that moment, a `withheld` event says so: that is Runtime's fault, not
+   your code's.
 4. Pinned certificates. A client with its own certificate list needs
    `/usr/local/share/ca-certificates/runtime-egress.crt` added to it.
 

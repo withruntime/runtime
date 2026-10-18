@@ -19,8 +19,23 @@ async function requestCredentials(): Promise<Credentials | null> {
   const url = process.env.RUNTIME_ID_TOKEN_REQUEST_URL;
   const token = process.env.RUNTIME_ID_TOKEN_REQUEST_TOKEN;
   if (url && token) return { url, token };
-  // A process started before the guest wrote its environment still finds it.
-  return fileCredentials();
+  // A process started without them (a server started before the guest wrote
+  // its environment, a sandbox whose guest software predates the variables)
+  // asks the host, which answers every running sandbox whatever its image or
+  // age, then the guest's file. Only inside a sandbox: elsewhere nothing is
+  // asked over the network.
+  if (!(await exists(sandboxMarker.path))) return null;
+  return currentCredentials();
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    const { access } = await import("node:fs/promises");
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function fileCredentials(): Promise<Credentials | null> {

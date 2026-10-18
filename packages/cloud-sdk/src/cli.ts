@@ -135,6 +135,8 @@ Products
   images     Custom images from a Dockerfile, any public or private image, or a package list
   volumes    Persistent disks to attach to sandboxes
   jobs       A command in a fresh sandbox, once or on a cron schedule, with its logs
+  apps       Your web server from an image or a build, copies started by requests (beta)
+  builds     A connected repository's commits built into what an App deploys (beta)
   domains    Your own hostname for a sandbox's port, with HTTPS
   ports      A public TCP port to a sandbox: databases, game servers
   ips        A dedicated outbound address, for allow-lists
@@ -407,9 +409,11 @@ const kit = {
   has,
   integer,
   pairs,
+  envPairs,
   need: (value: string | undefined, what: string) => need(value, what),
   table: (rows: string[][]) => table(rows),
   usage: (message: string) => usage(message),
+  unknown: (what: string, word: string, choices: readonly string[]) => unknown(what, word, choices),
 };
 export type CliKit = typeof kit;
 
@@ -475,6 +479,8 @@ const COMMANDS = [
   "images",
   "volumes",
   "jobs",
+  "apps",
+  "builds",
   "domains",
   "ports",
   "ips",
@@ -493,6 +499,8 @@ const OWN_HELP = [
   "images",
   "volumes",
   "jobs",
+  "apps",
+  "builds",
   "keys",
   "webhooks",
   "webhook",
@@ -1244,6 +1252,14 @@ export async function run(
   if (command === "job" || command === "jobs") {
     product = "job";
     return jobCommand(rest, env, out);
+  }
+  if (command === "app" || command === "apps") {
+    product = "apps";
+    return (await import("./apps-cli.js")).appsCommand(rest, env, out, () => client(env), kit);
+  }
+  if (command === "build" || command === "builds") {
+    product = "builds";
+    return (await import("./apps-cli.js")).buildsCommand(rest, out, () => client(env), kit);
   }
   // WireGuard is inside networks: `runtime networks wireguard peer add`.
   const wireguard = command === "networks" && rest[0] === "wireguard";

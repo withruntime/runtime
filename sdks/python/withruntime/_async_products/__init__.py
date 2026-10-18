@@ -15,8 +15,10 @@ auth, retries, idempotency keys and typed errors.
 """
 from typing import Any
 
+from .apps import AsyncApps, AsyncFunctions
 from .audit import AsyncAudit
 from .browser import AsyncBrowser
+from .builds import AsyncBuilds
 from .desktop import AsyncDesktop
 from .images import AsyncImages
 from .jobs import AsyncJobs
@@ -41,6 +43,9 @@ SANDBOX: dict[str, Any] = {}
 CLIENT["images"] = AsyncImages
 CLIENT["volumes"] = AsyncVolumes
 CLIENT["jobs"] = AsyncJobs
+CLIENT["apps"] = AsyncApps
+CLIENT["functions"] = AsyncFunctions
+CLIENT["builds"] = AsyncBuilds
 CLIENT["referrals"] = AsyncReferrals
 CLIENT["billing"] = AsyncBilling
 CLIENT["limits"] = AsyncLimits

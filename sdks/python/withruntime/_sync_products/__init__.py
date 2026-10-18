@@ -1,8 +1,10 @@
 """GENERATED from _async_products/__init__.py by scripts/generate_sync.py. Do not edit."""
 from typing import Any
 
+from .apps import Apps, Functions
 from .audit import Audit
 from .browser import Browser
+from .builds import Builds
 from .desktop import Desktop
 from .images import Images
 from .jobs import Jobs
@@ -27,6 +29,9 @@ SANDBOX: dict[str, Any] = {}
 CLIENT["images"] = Images
 CLIENT["volumes"] = Volumes
 CLIENT["jobs"] = Jobs
+CLIENT["apps"] = Apps
+CLIENT["functions"] = Functions
+CLIENT["builds"] = Builds
 CLIENT["referrals"] = Referrals
 CLIENT["billing"] = Billing
 CLIENT["limits"] = Limits
