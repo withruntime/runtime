@@ -20,11 +20,14 @@ class Limits:
         hours, and ``remainingMicros`` (None for no limit); and ``trial``, the
         machine time the account can still run without credit, in milliseconds
         (``availableMs``, with ``offer`` and ``renewsAt``), or None when it has
-        none; and ``account``, every limit the account is held to with what it
+        none; ``account``, every limit the account is held to with what it
         uses of each now, or None when they can't be read: a list of
         ``{"limit", "label", "unit", "max", "used"}``. ``limit`` is
         ``<kind>.<dimension>`` (``sandbox.count``, ``sandbox.memory_mib``,
         ``volume.count``...), ``unit`` is ``"count"`` or ``"mib"``. A create
         past one fails ``quota_exceeded``, and ``details.limit`` names the
-        row."""
+        row; and ``credit``: ``availableMicros``, ``dailyPaceMicros`` and
+        ``runwayDays`` (None while nothing is spent), ``lowBelowDays``, ``state``
+        (``ok``, ``low`` or ``empty``) and ``addedBy`` (``owner``, or ``agent``
+        when no person pays and the agent adds credit itself with a top-up)."""
         return self._t.json("GET", "/v1/limits")

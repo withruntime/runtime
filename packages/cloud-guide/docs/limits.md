@@ -80,18 +80,19 @@ once.
 These keep one sandbox or one host healthy, whatever the account pays. They
 are refused with their own words, and support can raise most of them.
 
-| Limit                                      | Number                        |
-| ------------------------------------------ | ----------------------------- |
-| Previews one sandbox shares                | 16 ports                      |
-| TCP ports                                  | 5 a sandbox, 20 an account    |
-| Custom domains                             | 50 an account, 20 added a day |
-| Peers on a private network                 | 16                            |
-| Image registry credentials                 | 20                            |
-| Secrets with rules for sandboxes' requests | 50                            |
-| Webhooks                                   | 16                            |
-| OpenTelemetry exports                      | 3                             |
-| Watches sending file changes at once       | 16                            |
-| Image builds at once                       | 1 without credit, 4 with      |
+| Limit                                      | Number                                                                                                     |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Previews one sandbox shares                | 16 ports                                                                                                   |
+| TCP ports                                  | 5 a sandbox, 20 an account                                                                                 |
+| Custom domains                             | 50 an account, 20 added a day                                                                              |
+| Peers on a private network                 | 16                                                                                                         |
+| Image registry credentials                 | 20                                                                                                         |
+| Secrets with rules for sandboxes' requests | 50                                                                                                         |
+| Webhooks                                   | 16                                                                                                         |
+| OpenTelemetry exports                      | 3                                                                                                          |
+| Watches sending file changes at once       | 16                                                                                                         |
+| Image builds at once                       | 1 without credit, 4 with                                                                                   |
+| New connections to one site                | 20 a second a sandbox, 100 an account on one server ([outbound traffic](./egress#connections-to-one-site)) |
 
 API requests are limited per key and per account; a request past one is
 `rate_limited` with a `Retry-After` ([API](./api)).

@@ -28,6 +28,7 @@
  *   sig=<Ed25519 signature of the lines above, base64>
  */
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   type KeyObject,
@@ -161,4 +162,13 @@ export function readPublicKey(path: string): KeyObject | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A public key's fingerprint: SHA-256 of its DER, in hex. The follower
+ * reports its pin's (follow-deploy.ts signPub), so the hub asks a signer
+ * whose key the followers check releases with (agents/signer.ts). */
+export function fingerprint(key: KeyObject): string {
+  return createHash("sha256")
+    .update(key.export({ type: "spki", format: "der" }))
+    .digest("hex");
 }

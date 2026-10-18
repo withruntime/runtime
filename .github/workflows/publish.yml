@@ -34,8 +34,8 @@ concurrency:
 
 env:
   # The hub's release signer's public key (/etc/release-signer/release-sign.pub,
-  # pinned on Marc's Mac by agents/install-signer.sh). A new signer key means
-  # a new line here.
+  # pinned on vin-1 by agents/install-signer.sh, the host job signer-install,
+  # which prints it). A new signer key means a new line here.
   RELEASE_SIGN_PUB: |
     -----BEGIN PUBLIC KEY-----
     MCowBQYDK2VwAyEAcqHpPZc8FIhBBb7LQZU86rx/QNZHwDZQSm+6tWzx7Ws=

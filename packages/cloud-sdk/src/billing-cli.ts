@@ -2,7 +2,7 @@ import type { Runtime } from "./client.js";
 import { RuntimeError } from "./errors.js";
 import { named } from "./cli-name.js";
 import type { AutoTopUp, Topup } from "./products/billing.js";
-import type { claimWalletAccount, openWalletAccount } from "./wallet.js";
+import type { claimWalletAccount, openWalletAccount, rekeyWalletAccount } from "./wallet.js";
 
 /* `runtime billing`: add credit without a browser, in stablecoins.
  *
@@ -38,6 +38,8 @@ export const BILLING_HELP = `runtime billing <command>
                             Opens an account and its first top-up. Prints a claim code,
                             shown once. --wait saves the key here once the money lands.
   claim <code> [--wait]     Exchange a paid account's claim code for its key, saved here
+  claim <code> --new-key    Lost the key? Replace it with the claim code. The new key is
+                            saved here; every other key stops working.
 
   $10 to $10,000 a top-up; $500 in an account's first week. By card:
   https://withruntime.com/account/billing
@@ -82,11 +84,21 @@ function describe(topup: Topup): string {
 export type WalletDeps = {
   open: typeof openWalletAccount;
   claim: typeof claimWalletAccount;
+  /** Replaces a lost key with the claim code. */
+  rekey: typeof rekeyWalletAccount;
   /** Saves a claimed key as this machine's connection, as `login --with-key` does. */
   save: (key: string, orgId: string) => Promise<void>;
 };
 
-const FLAGS = new Set(["wait", "new-account", "accept-terms", "below", "amount", "monthly"]);
+const FLAGS = new Set([
+  "wait",
+  "new-account",
+  "accept-terms",
+  "below",
+  "amount",
+  "monthly",
+  "new-key",
+]);
 
 export async function billingCommand(
   argv: string[],
@@ -107,6 +119,10 @@ export async function billingCommand(
   }
   if ((verb === "topup" && has("new-account")) || verb === "claim") {
     if (!wallet) throw usage("Wallet accounts are not available here.");
+    if (has("new-key")) {
+      if (verb !== "claim") throw usage("--new-key is for `billing claim <code> --new-key`.");
+      return rekeyCommand(value, out, wallet);
+    }
     return walletCommand(verb, value, has("accept-terms"), wait, out, sleep, wallet);
   }
   if (verb === "auto-top-up") return autoTopUpCommand(value, args, out, client);
@@ -214,6 +230,19 @@ function dollarsOf(value: string | undefined): number {
   if (!value || !Number.isFinite(usd) || usd <= 0)
     throw usage("Say how many dollars of credit to buy, such as `billing topup 20`.");
   return usd;
+}
+
+/** `claim <code> --new-key`: the key was lost; the claim code makes a new one. */
+async function rekeyCommand(code: string | undefined, out: Out, wallet: WalletDeps) {
+  if (!code) throw usage("Give the claim code.");
+  const replaced = await wallet.rekey(code);
+  await wallet.save(replaced.apiKey, replaced.orgId);
+  out.write(
+    out.json
+      ? JSON.stringify({ status: "replaced", orgId: replaced.orgId, connected: true })
+      : "Replaced. This machine is connected with the new key, saved and not shown. Every other key of this account no longer works.",
+  );
+  return 0;
 }
 
 /** `topup <usd> --new-account` and `claim <code>`: an account with no key. */

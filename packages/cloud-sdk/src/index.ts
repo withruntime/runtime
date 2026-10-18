@@ -165,8 +165,10 @@ export { identityToken, type IdentityToken } from "./identity.js";
 export {
   openWalletAccount,
   claimWalletAccount,
+  rekeyWalletAccount,
   type OpenedWalletAccount,
   type WalletClaim,
+  type WalletRekey,
   type WalletOptions,
 } from "./wallet.js";
 export type { Topup } from "./products/billing.js";

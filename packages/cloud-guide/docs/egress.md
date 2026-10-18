@@ -43,6 +43,31 @@ A fine-grained token with read access to public repositories is enough. For
 other account shares can hold a
 [dedicated outbound address](/docs/networking#dedicated-outbound-addresses).
 
+## Connections to one site
+
+A sandbox opens up to 20 new connections a second to one site, after a burst
+of 200, and an account's sandboxes on one server up to 100 a second together,
+after a burst of 1,000. A site is its registered name: `www.example.com` and
+`api.example.com` count together. The addresses a connection reaches count
+too, by network (a /24, or a /64), at two and a half times those figures, so a
+site's addresses asked for by number share its count. On HTTPS, a connection
+whose TLS hello names another site than the one it asked for counts for that
+site as well. Only new connections count, never bytes, so a download or a
+stream over a connection already open is never slowed.
+
+Package registries, code hosts, container registries, storage APIs (S3, R2,
+Google Cloud Storage), model hubs, AI APIs and Runtime's own sites have their
+own far higher figures: 200 a second for a sandbox and 2,000 for an account on
+one server. An install, a clone or a download from many sandboxes at once
+never meets them. A site hosted on a provider's servers (an S3 website,
+CloudFront, GitHub Pages) counts as a site of its own.
+
+Past a count, the connection is refused with `429 Too Many Requests`,
+`Retry-After: 1` and the header `X-Runtime-Egress: rate-limited:destination-sandbox`
+(or `-org` for the account's), with a sentence naming the site. Reuse
+connections (HTTP keep-alive, one client per process) or wait and retry. If
+your work needs more to one site, write to support@withruntime.com.
+
 ## Signed requests
 
 An account can have its sandboxes sign their HTTP requests as Runtime's,
@@ -66,8 +91,9 @@ hosting network. It is off until the account turns it on.
   scanner does has its network turned off.
 - **Private addresses.** Private, internal and link-local addresses are
   refused, whoever asks.
-- **Floods.** Each sandbox has limits on connections opened a second, on
-  upload speed and on bytes a day; each account has limits on top.
+- **Floods.** Each sandbox has limits on connections opened a second, to any
+  site and to one site, on upload speed and on bytes a day; each account has
+  limits on top.
 
 Every outbound connection is recorded against the sandbox and the account that
 made it, so a report with an address and a time finds its sender.

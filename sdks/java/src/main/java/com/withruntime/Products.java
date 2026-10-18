@@ -68,7 +68,11 @@ public final class Products {
       this.t = transport;
     }
 
-    /** access, and daily: limitMicros, usedMicros, remainingMicros and window. */
+    /**
+     * access; daily: limitMicros, usedMicros, remainingMicros and window; trial; and credit:
+     * availableMicros, dailyPaceMicros, runwayDays, lowBelowDays, state (ok, low or empty) and
+     * addedBy (owner, or agent when no person pays and the agent adds credit itself).
+     */
     public JsonObject get() {
       return new JsonObject(t.object(new Transport.Call("GET", "/v1/limits")));
     }

@@ -31,8 +31,10 @@ class Browser:
         """Starts Chromium and returns its CDP address as ``cdpUrl``, private,
         for Playwright's connect_over_cdp, browser-use or Stagehand as it is.
         ``headless=False`` shows it on the sandbox's desktop with a live view
-        (``streamUrl``). The first start in a sandbox installs Chromium, about
-        a minute; this waits for that, up to 10 minutes."""
+        (``streamUrl``). A start in a new sandbox takes
+        about 1 to 2 seconds: Chromium comes from the host. A sandbox from a
+        custom image that is not Ubuntu 24.04 x86_64 installs it on the first
+        start, about a minute; this waits for that, up to 10 minutes."""
         body = {k: v for k, v in {"headless": headless, "width": width,
                                   "height": height}.items() if v is not None}
         deadline = time.monotonic() + 600

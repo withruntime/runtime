@@ -105,6 +105,74 @@ export const SandboxState = {
 } as const;
 export type SandboxState = (typeof SandboxState)[keyof typeof SandboxState];
 
+/* Daytona's other enums, re-exported by @daytona/sdk from its API client, so
+   code importing them loads. A GPU type on create is refused (Runtime runs
+   sandboxes on CPUs); the sort field and direction drive daytona.list. */
+export const GpuType = {
+  H100: "H100",
+  H200: "H200",
+  B200: "B200",
+  B300: "B300",
+  RTX_PRO_6000: "RTX-PRO-6000",
+  RTX_4090: "RTX-4090",
+  RTX_5090: "RTX-5090",
+  MI355X: "MI355X",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type GpuType = (typeof GpuType)[keyof typeof GpuType];
+export const SnapshotState = {
+  BUILDING: "building",
+  PENDING: "pending",
+  PULLING: "pulling",
+  SNAPSHOTTING: "snapshotting",
+  ACTIVE: "active",
+  INACTIVE: "inactive",
+  ERROR: "error",
+  BUILD_FAILED: "build_failed",
+  REMOVING: "removing",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type SnapshotState = (typeof SnapshotState)[keyof typeof SnapshotState];
+export const SandboxListSortField = {
+  NAME: "name",
+  CPU: "cpu",
+  MEMORY_GIB: "memoryGib",
+  DISK_GIB: "diskGib",
+  LAST_ACTIVITY_AT: "lastActivityAt",
+  CREATED_AT: "createdAt",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type SandboxListSortField = (typeof SandboxListSortField)[keyof typeof SandboxListSortField];
+export const SandboxListSortDirection = {
+  ASC: "asc",
+  DESC: "desc",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type SandboxListSortDirection =
+  (typeof SandboxListSortDirection)[keyof typeof SandboxListSortDirection];
+export const SandboxClass = {
+  LINUX_VM: "linux-vm",
+  CONTAINER: "container",
+  WINDOWS: "windows",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type SandboxClass = (typeof SandboxClass)[keyof typeof SandboxClass];
+export const ListSecretsPaginatedSortEnum = {
+  NAME: "name",
+  CREATED_AT: "createdAt",
+  UPDATED_AT: "updatedAt",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type ListSecretsPaginatedSortEnum =
+  (typeof ListSecretsPaginatedSortEnum)[keyof typeof ListSecretsPaginatedSortEnum];
+export const ListSecretsPaginatedOrderEnum = {
+  ASC: "asc",
+  DESC: "desc",
+  UNKNOWN_DEFAULT_OPEN_API: "11184809",
+} as const;
+export type ListSecretsPaginatedOrderEnum =
+  (typeof ListSecretsPaginatedOrderEnum)[keyof typeof ListSecretsPaginatedOrderEnum];
+
 /** A stand-in for a Daytona export Runtime has no counterpart for. Importing
  * it works; using it throws NotSupportedError naming the alternative. */
 function unsupportedExport(name: string, alternative: string) {

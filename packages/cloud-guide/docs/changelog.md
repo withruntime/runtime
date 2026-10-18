@@ -8,8 +8,44 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 18 October 2026
+
+- **Fetch a web page in under a second with a paused browser.** The guides
+  show how to keep spare browsers paused, charged only for storage, and wake
+  one per page: wake to page done measured 0.56 to 0.81 seconds. Python's
+  guide gains its browser section. See
+  [A page in under a second](./javascript#a-page-in-under-a-second).
+- **Connection limit per site: 429 Too Many Requests from the egress proxy.**
+  A sandbox opens up to 20 new connections a second to one site, and an
+  account's sandboxes on one server up to 100 together, after a burst. Past
+  it the connection is refused with `429` and a sentence naming the site.
+  Downloads over open connections, installs, clones, storage, CDNs and AI APIs
+  are never counted. See [connections to one site](./egress#connections-to-one-site).
+
+- **No 429 for a busy key right after an update of Runtime.** A key whose
+  account runs many sandboxes may send up to 8 times the ordinary rate. Just
+  after Runtime updated its servers, its first requests met the ordinary
+  rate instead, for the moment it took to recognise the key, so a burst
+  sent then was answered `429 rate_limited`. Those requests now wait that
+  moment, at most two seconds, and are served at the key's own rate.
+- **Daytona's GPU and sort enums import from the drop-ins.** The Daytona
+  drop-ins follow Daytona 0.225.0 and the Prime Sandboxes one follows 0.4.6.
+  `GpuType`, `SandboxClass` and the list sort enums now import from
+  `withruntime/daytona` and `withruntime.daytona`, and the sort enums sort
+  `list`. A Python create that asks for a GPU type now gets a plain error,
+  as TypeScript already did, instead of a CPU sandbox. Prime's new
+  `lan_network_id` on create is refused before a sandbox is made, naming
+  Runtime's private network. See [Migrate](./migrate).
+
 ## 17 October 2026
 
+- **Browser starts in about 1 to 2 seconds in a new sandbox.** The browser
+  now comes ready on the sandbox's host instead of being downloaded and
+  installed on its first start, which took up to a minute: `browser.start()`
+  in a brand-new sandbox now returns in about 1 to 2 seconds. A custom image
+  that is not Ubuntu 24.04 x86_64 still installs it once on its first start
+  (withruntime 0.17.2, and 0.16.1 for Python). See
+  [A browser over CDP](./javascript#a-browser-over-cdp).
 - **Give a sandbox a key without typing it into a command.** In the CLI,
   `--env NAME` with no `=` sends that variable's value from your own shell, as
   `docker run -e NAME` does, on `create`, `update`, `exec` and `run`
@@ -98,6 +134,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   two-step sign-in, key limits and compartments, the data processing addendum
   and the uptime promise, each free on every account with no enterprise plan
   or seat fee. See [pricing](./pricing#security-and-team-features).
+- **Retrying a create refused for no room.** The API guide now says a
+  request refused before it ran, such as a create answered `no_capacity`, is
+  not replayed: retrying with the same `Idempotency-Key` runs it again, and
+  the create reference names the refusal and its `Retry-After`. See
+  [retries and idempotency](./api#retries-and-idempotency).
 - **Identity tokens in long-running programs.** A program that runs for a
   long time inside a sandbox, such as a server or an agent, now keeps getting
   identity tokens after the sandbox's request token changes: the TypeScript
@@ -148,6 +189,12 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   or a `getOrCreate` that restarts it, and reports it in `start` as a create
   does. Before, the server it started was gone until started by hand. See
   [images](./images).
+
+- **Identity tokens in scheduled jobs, documented.** The [jobs](./jobs) and
+  [identity tokens](./identity-tokens) guides now say that a job's run has
+  `RUNTIME_ID_TOKEN_REQUEST_URL` and `RUNTIME_ID_TOKEN_REQUEST_TOKEN`, as any
+  sandbox does, so a job can get a token for AWS, Google Cloud or your own API
+  with no stored key.
 
 ## 15 October 2026
 
@@ -404,6 +451,17 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   create past one is refused `quota_exceeded` by: sandboxes at once, their
   vCPUs and memory, volumes and the rest. An agent can watch them and hold
   back before it is refused. See [Limits](./limits).
+- **Agent-only wallet accounts top up, watch their credit and recover a lost
+  key.** On an account an agent opened with a wallet and no person pays for,
+  an out-of-credit answer now tells the agent to add credit itself with
+  `npx withruntime billing topup <usd>` (`details.addCredit.by` is `agent`).
+  `GET /v1/limits` gains `credit`: the balance, the daily pace, the days it
+  lasts and whether it is `ok`, `low` or `empty`. Webhooks can subscribe to
+  `credit.low` and `credit.empty`. A lost key is replaced with the claim code
+  (`runtime billing claim <code> --new-key`), which revokes every other key; at
+  most 3 times a day, logged in the audit log, until a person takes the
+  account over. See [pay with stablecoins](./pricing#pay-with-stablecoins),
+  [limits](./api#limits) and [events](./observability#events).
 
 - **Swarm worker keys stay inside their own sandboxes.** A key made by
   another key with reach `agent` now gets `403 forbidden` on the account's own

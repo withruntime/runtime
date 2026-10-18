@@ -1,4 +1,4 @@
-"""Native asynchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.5."""
+"""Native asynchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.6."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -153,6 +153,9 @@ class AsyncSandboxClient:
 
     async def create(self, request: CreateSandboxRequest):
         p = values(request)
+        if p.get("lan_network_id") is not None:
+            # 0.4.6 joins the LAN once the sandbox runs; refuse before making one.
+            raise CompatibilityError(_LAN)
         for key in ("gpu_count", "gpu_type", "team_id", "advanced_configs", "secrets", "idle_timeout_minutes"):
             if p.get(key):
                 raise CompatibilityError(f"Prime {key} cannot yet retain its upstream behavior")

@@ -30,8 +30,9 @@ print(len(token))
 
 Or with curl, the way GitHub Actions does it. A new sandbox made from the
 current default image has these two variables ready for its first accepted
-command, valid while it runs. Retained older-image sandboxes keep
-their original guest software:
+command, valid while it runs. A [scheduled job](./jobs)'s run has them in its
+command's environment too, so a job can get tokens the same ways. Retained
+older-image sandboxes keep their original guest software:
 
 ```bash no-run
 curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
@@ -191,8 +192,8 @@ export async function sandboxOf(token) {
 
 ## Limits
 
-- Tokens are for sandboxes today. Code outside a sandbox has nothing to ask
-  with, and no API key can get one.
+- Tokens are for sandboxes today, a job's runs included. Code outside a
+  sandbox has nothing to ask with, and no API key can get one.
 - Microsoft Entra ID's federated credentials match an exact subject, and every
   sandbox's subject is different, so Azure is not supported yet. Tell us with
   `npx withruntime feedback "identity tokens: Azure"` if you need it.

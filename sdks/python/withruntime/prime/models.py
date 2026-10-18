@@ -1,11 +1,11 @@
-"""Sandbox request/value surface pinned to prime-sandboxes 0.4.5."""
+"""Sandbox request/value surface pinned to prime-sandboxes 0.4.6."""
 from dataclasses import dataclass, field
 from typing import Optional
 from .._compat import Model
 
 
 def _validate_egress_lists(allowlist, denylist):
-    """Reject the same malformed host/IPv4 rules as prime-sandboxes 0.4.5."""
+    """Reject the same malformed host/IPv4 rules as prime-sandboxes 0.4.6."""
     import ipaddress
     if allowlist is not None and denylist is not None:
         raise ValueError("network_allowlist and network_denylist are mutually exclusive")
@@ -78,6 +78,10 @@ class CreateSandboxRequest:
     region: Optional[str] = None
     advanced_configs: Optional[dict] = None
     idempotency_key: Optional[str] = None
+    #: Join this LAN network with these tags once running (0.4.6); refused by
+    #: create, as every LAN call is.
+    lan_network_id: Optional[str] = None
+    lan_tags: Optional[list[str]] = None
 
     def __post_init__(self):
         if self.checkpoint_id is not None and (not isinstance(self.checkpoint_id, str)
@@ -103,6 +107,8 @@ class CreateSandboxRequest:
         if self.gpu_count == 0 and self.gpu_type is not None:
             raise ValueError("gpu_type requires gpu_count greater than 0")
         _validate_egress_lists(self.network_allowlist, self.network_denylist)
+        if self.lan_tags is not None and self.lan_network_id is None:
+            raise ValueError("lan_tags requires lan_network_id")
         if self.idle_timeout_minutes is not None and (self.idle_timeout_minutes < 1 or
                 self.timeout_minutes > 0 and self.idle_timeout_minutes > self.timeout_minutes):
             raise ValueError("idle_timeout_minutes must be positive and no greater than timeout_minutes")

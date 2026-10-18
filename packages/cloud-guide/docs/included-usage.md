@@ -173,7 +173,9 @@ Each of these answers says what was refused and the limit, then, in its
 `hint` and in `details.addCredit`, the one way past it: the account's owner
 adds credit, and credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
 ([how refusals look](./api#responses-and-errors)). An agent tells its person
-which limit it met; it never adds credit on its own.
+which limit it met; it never adds credit on its own, unless the account is one
+it opened with a wallet and no person pays for, where the hint tells it to add
+credit itself ([pay with stablecoins](./pricing)).
 
 These codes were named `trial_busy`, `trial_capacity`, `invalid_trial`,
 `trial_domain_limit`, `trial_build_limit`, `trial_exhausted` and

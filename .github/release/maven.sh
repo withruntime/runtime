@@ -1,7 +1,6 @@
 #!/bin/sh
 # The publish workflow's Maven Central step (publish.yml), at the public
-# mirror's root: the Java SDK built with the JDK alone, as
-# sdks/java/scripts/publish.sh does on Marc's Mac, each file signed and
+# mirror's root: the Java SDK built with the JDK alone, each file signed and
 # summed, the bundle uploaded to the Central Portal to publish once it
 # validates, and its state followed until it is published or fails.
 #

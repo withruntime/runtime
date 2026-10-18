@@ -343,6 +343,8 @@ type KeyLimits struct {
 	// each now: a create past one fails quota_exceeded, and Details["limit"]
 	// names the row. Nil when they can't be read.
 	Account []AccountLimit `json:"account"`
+	// Credit is the prepaid credit left and how long it lasts.
+	Credit *KeyCredit `json:"credit,omitempty"`
 }
 
 // AccountLimit is one of the account's limits, as
@@ -356,4 +358,20 @@ type AccountLimit struct {
 	Unit string  `json:"unit"`
 	Max  float64 `json:"max"`
 	Used float64 `json:"used"`
+}
+
+// KeyCredit is an account's prepaid credit. Money is integer microdollars in
+// strings.
+type KeyCredit struct {
+	AvailableMicros string `json:"availableMicros"`
+	// DailyPaceMicros is a day's spend at this month's pace, nil when nothing is spent.
+	DailyPaceMicros *string `json:"dailyPaceMicros"`
+	// RunwayDays is how many days the credit lasts at that pace, nil when nothing is spent.
+	RunwayDays   *float64 `json:"runwayDays"`
+	LowBelowDays float64  `json:"lowBelowDays"`
+	// State is "ok", "low" or "empty".
+	State string `json:"state"`
+	// AddedBy is "owner", or "agent" when no person pays and the agent adds
+	// credit itself with a top-up.
+	AddedBy string `json:"addedBy"`
 }

@@ -3,7 +3,7 @@
   "dependencies": {
     "e2b": "2.56.0",
     "@e2b/code-interpreter": "2.9.0",
-    "@daytona/sdk": "0.224.1",
+    "@daytona/sdk": "0.225.0",
     "@vercel/sandbox": "3.8.0",
     "@blaxel/core": "0.3.30"
   },

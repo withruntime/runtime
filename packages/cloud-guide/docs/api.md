@@ -101,7 +101,22 @@ an agent can tell its person plainly what to do. It answers with one of
   holds the match's days and dollars.
 
 An agent never adds or spends credit on its own: it tells the owner which
-limit it met. `connect_not_allowed` for an organization whose port access
+limit it met. The one exception is an account the agent opened itself with a
+wallet, that no person pays for ([pay with stablecoins](./pricing)): there the
+`hint` says to add credit yourself, with `npx withruntime billing topup <usd>`
+or `POST /v1/billing/topups` and the account's own key, and
+`details.addCredit` is `{"by": "agent", "command": ..., "api": ...,
+"givenCreditCounts": ...}` with no `url`. `GET /v1/limits` says which kind of
+account a key is on (`credit.addedBy`).
+
+Such an account's claim code is its way back if its key is lost:
+`npx withruntime billing claim <code> --new-key`, or
+`POST https://withruntime.com/api/wallet/rekey` with `{"claimCode": "..."}`,
+answers a new key, shown once, and every other key of the account stops working at once.
+A claim code replaces its key at most three times in 24 hours, each time in
+the account's audit log (`wallet.key_replaced`), and only until a person takes
+the account over; after that, its people make keys on the website. Keep the
+claim code as secret as the key. `connect_not_allowed` for an organization whose port access
 Runtime turned off has no `addCredit`, since credit does not change it.
 
 **A 5xx says whose fault it is.** A message that says the fault is ours, not
@@ -173,6 +188,14 @@ key for 24 hours:
   resource for a fresh token. A first answer over 32 KiB is not kept: its
   replay answers 409 `operation_conflict`, and nothing runs again.
 - The same key with a different body is refused with 422 `idempotency_key_reused`.
+- A refusal is not kept. A request refused before anything ran (`no_capacity`,
+  `busy`, a limit) leaves its key unused, so the same key sent again runs the
+  request afresh, and only an answer that did the work is replayed. A create
+  refused `no_capacity` and retried with its key once there is room starts the
+  sandbox; the next retry with that key replays it.
+- `no_capacity` is 409 on a create (`POST /v1/sandboxes`, a fork, a restart
+  or a wake) and 503 on a public port or a dedicated address. A client that
+  retries only 5xx must also retry a 409 `no_capacity`, with the same key.
 - A new key is new work.
 
 The SDKs send a key on every change and retry transport failures, 429, 502, 503
@@ -841,7 +864,15 @@ hundred resources in `GET /v1/usage`.
     "remainingMicros": "21900000",
     "window": "24h"
   },
-  "trial": null
+  "trial": null,
+  "credit": {
+    "availableMicros": "42500000",
+    "dailyPaceMicros": "6100000",
+    "runwayDays": 6,
+    "lowBelowDays": 5,
+    "state": "ok",
+    "addedBy": "owner"
+  }
 }
 ```
 
@@ -854,6 +885,18 @@ hundred resources in `GET /v1/usage`.
 - Past the limit, a create, wake, extension or renewal fails with 402
   `spending_limit_reached` and charges nothing.
 - `trial` is the machine time the account can run without credit, the same figures as `GET /v1/usage`, in milliseconds, or null when the account has none, as here. `availableMs` is what a new sandbox without credit can still use. `offer` is `monthly` for the free usage, or `hours` for an account given free hours before 5 October 2026, which keeps what is left of them; `renewsAt` is when the next month starts, and an account that has never paid has its free machine time once, until `freeUntil` on its `allowances` rows. The field keeps its older name so code that reads it goes on working.
+
+- `credit` is the account's credit: `availableMicros` left now (as
+  `GET /v1/usage`'s `available`), `dailyPaceMicros`, a day at this month's
+  pace (last month's while this one is under three days old; null when
+  nothing is spent), and `runwayDays`, the whole days it lasts at that pace,
+  as the console's Home says it. `state` is `low` under `lowBelowDays` days
+  and `empty` at none: running paid sandboxes then pause and new ones are
+  refused. The `credit.low` and `credit.empty` [webhooks](./observability)
+  are sent at the same moments. `addedBy` is `owner` (a person adds credit,
+  on the website) or `agent`: the account was opened with a wallet and no
+  person pays for it, so its own agent adds credit with
+  `npx withruntime billing topup <usd>` before `runwayDays` reaches 0.
 
 A limit is set, changed or removed only on the website, at
 [API keys](https://withruntime.com/account/keys): by the member who made the key,

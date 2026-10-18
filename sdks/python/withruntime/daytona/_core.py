@@ -231,6 +231,44 @@ class SandboxState(str, Enum):
     DESTROYED = "destroyed"
 
 
+# Daytona's other API-client enums that the daytona package exports, so code
+# importing them loads. A GPU type on create is refused (Runtime runs sandboxes
+# on CPUs); the sort field and direction drive Daytona.list.
+class GpuType(str, Enum):
+    H100 = "H100"
+    H200 = "H200"
+    B200 = "B200"
+    B300 = "B300"
+    RTX_PRO_6000 = "RTX-PRO-6000"
+    RTX_4090 = "RTX-4090"
+    RTX_5090 = "RTX-5090"
+    MI355X = "MI355X"
+    UNKNOWN_DEFAULT_OPEN_API = "unknown_default_open_api"
+
+
+class SandboxClass(str, Enum):
+    LINUX_VM = "linux-vm"
+    CONTAINER = "container"
+    WINDOWS = "windows"
+    UNKNOWN_DEFAULT_OPEN_API = "unknown_default_open_api"
+
+
+class SandboxListSortField(str, Enum):
+    NAME = "name"
+    CPU = "cpu"
+    MEMORYGIB = "memoryGib"
+    DISKGIB = "diskGib"
+    LASTACTIVITYAT = "lastActivityAt"
+    CREATEDAT = "createdAt"
+    UNKNOWN_DEFAULT_OPEN_API = "unknown_default_open_api"
+
+
+class SandboxListSortDirection(str, Enum):
+    ASC = "asc"
+    DESC = "desc"
+    UNKNOWN_DEFAULT_OPEN_API = "unknown_default_open_api"
+
+
 @dataclass
 class DaytonaConfig:
     """Daytona's client options. ``api_key`` must be a Runtime key
@@ -1078,8 +1116,10 @@ def refuse_create(params: CreateSandboxBaseParams) -> None:
     if params.auto_stop_interval and params.auto_pause_interval:
         raise DaytonaValidationError("At most one of auto_stop_interval and auto_pause_interval may be non-zero.")
     resources = getattr(params, "resources", None)
-    if resources is not None and resources.gpu:
-        raise NotSupportedError("GPUs", "Runtime runs sandboxes on CPUs; remove gpu from resources.")
+    # gpu_type alone asks for a GPU too (Daytona sends it whatever gpu says):
+    # one value or a list, such as GpuType.B200 (0.225.0).
+    if resources is not None and (resources.gpu or resources.gpu_type not in (None, "", [], ())):
+        raise NotSupportedError("GPUs", "Runtime runs sandboxes on CPUs; remove gpu and gpu_type from resources.")
     if params.kvm:
         raise NotSupportedError("Nested virtualization (kvm)",
                                 "Remove it: Runtime sandboxes are microVMs without /dev/kvm inside.")

@@ -10,7 +10,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.16.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.16.1. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -795,6 +795,29 @@ to a whole second; with `ttl_seconds`, the earlier deadline wins. A session's
 expiry also limits its preview reads. Use the returned `tokenExpiresAt` as
 the actual deadline. The matching server feature is required: an older server
 refuses the absolute field rather than falling back to a relative lifetime.
+
+## A browser over CDP
+
+`sbx.browser.start()` runs Chromium in the sandbox and returns `cdpUrl`, the
+private address Playwright's `connect_over_cdp`, browser-use and Stagehand
+connect to. Chromium comes from the host, so a start in a new sandbox takes
+about 1 to 2 seconds and installs nothing:
+
+```python check
+from withruntime import Sandbox
+
+with Sandbox.create(vcpu=1, memory_mib=2048) as sbx:
+    cdp_url = sbx.browser.start()["cdpUrl"]
+    # playwright: browser = p.chromium.connect_over_cdp(cdp_url)
+```
+
+For a page in well under a second, keep spare browsers paused: a paused
+sandbox is charged only for its storage and wakes in about 0.1 s with
+Chromium running. `spare.pause()` after `browser.start()`, then per page
+`spare.wake()`, a new browser context, the page, and `spare.pause()` again.
+Open each page in its own context so nothing passes between pages. Heavy apps
+need 2 GiB; 1 GiB suits light pages and scraping at half the memory charge.
+[JavaScript](./javascript#a-page-in-under-a-second) has the measured times.
 
 ## A sandbox from a browser
 

@@ -1,4 +1,4 @@
-"""Prime Intellect sandbox compatibility, pinned to prime-sandboxes 0.4.5.
+"""Prime Intellect sandbox compatibility, pinned to prime-sandboxes 0.4.6.
 
 Change ``from prime_sandboxes import ...`` to ``from withruntime.prime import ...``.
 Authentication uses RUNTIME_API_KEY or ``runtime login``.
@@ -8,7 +8,7 @@ from .models import (CreateSandboxRequest, StartCommand, Sandbox, CommandRespons
 from ._async import AsyncSandboxClient as _AsyncSandboxClient, _validate_guest_user, _validate_background_output_limits
 from ._sync import SandboxClient, CommandTimeoutError
 
-UPSTREAM_VERSION = "0.4.5"
+UPSTREAM_VERSION = "0.4.6"
 
 from .. import Runtime as _Runtime, AsyncRuntime as _AsyncRuntime
 from .._compat import CompatibilityError as _CompatibilityError, refused as _refused, runtime_key as _runtime_key

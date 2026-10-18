@@ -71,7 +71,9 @@ export type WebhookEventType =
   | "egress_secret.updated"
   | "egress_secret.deleted"
   | "upstream_proxy.set"
-  | "upstream_proxy.removed";
+  | "upstream_proxy.removed"
+  | "credit.low"
+  | "credit.empty";
 /** An event as /v1/events lists it and a webhook delivers it. */
 export type RuntimeEvent = {
   id: string;

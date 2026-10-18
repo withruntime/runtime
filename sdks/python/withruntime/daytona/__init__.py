@@ -24,9 +24,10 @@ from ._core import (CodeLanguage, CodeRunParams, Command, CreateSandboxBaseParam
                     DaytonaTimeoutError, DaytonaUnprocessableEntityError,
                     DaytonaValidationError, ExecuteResponse, ExecutionArtifacts, ExecutionError, ExecutionResult,
                     FileDownloadRequest, FileDownloadResponse, FileInfo, FileUpload, GitCommitResponse, GitStatus,
-                    Image, InterpreterContext, ListBranchResponse, ListSandboxesQuery, Match, NotSupportedError,
+                    GpuType, Image, InterpreterContext, ListBranchResponse, ListSandboxesQuery, Match, NotSupportedError,
                     OutputMessage, PaginatedSnapshots, PortPreviewUrl, PtyResult, PtySessionInfo, PtySize,
-                    ReplaceResult, Resources, SandboxState, ScreenshotOptions, ScreenshotRegion,
+                    ReplaceResult, Resources, SandboxClass, SandboxListSortDirection, SandboxListSortField,
+                    SandboxState, ScreenshotOptions, ScreenshotRegion,
                     SearchFilesResponse, Session, SessionCommandLogsResponse, SessionExecuteRequest,
                     SessionExecuteResponse, Snapshot, Volume, VolumeMount)
 from ._core import unsupported as _unsupported
@@ -63,7 +64,8 @@ __all__ = [
     "CreateSnapshotParams", "ExecuteResponse", "ExecutionArtifacts", "ExecutionError", "ExecutionResult",
     "FileDownloadRequest", "FileDownloadResponse", "FileInfo", "FileUpload", "GitCommitResponse", "GitStatus", "Image",
     "InterpreterContext", "ListBranchResponse", "ListSandboxesQuery", "Match", "OutputMessage", "PaginatedSnapshots",
-    "PortPreviewUrl", "ReplaceResult", "Resources", "SandboxState", "SearchFilesResponse", "Session",
+    "PortPreviewUrl", "ReplaceResult", "Resources", "GpuType", "SandboxClass", "SandboxListSortDirection",
+    "SandboxListSortField", "SandboxState", "SearchFilesResponse", "Session",
     "SessionCommandLogsResponse", "SessionExecuteRequest", "SessionExecuteResponse", "Snapshot", "Volume",
     "VolumeMount", "DaytonaError", "DaytonaAuthenticationError", "DaytonaAuthorizationError", "DaytonaBadGatewayError",
     "DaytonaBadRequestError", "DaytonaCommandAlreadyCompletedError", "DaytonaConflictError", "DaytonaConnectionError",

@@ -337,7 +337,12 @@ turns it off. `runtime_account_get` in MCP shows it. Only a person saves the car
 While your sandboxes run on paid credit, each owner of the account is told,
 in the account inbox and by email, when the balance will last under five days
 at this month's pace, and again when it has run out: once each, and again
-after the next top-up. Usage & billing shows the same warning.
+after the next top-up. Usage & billing shows the same warning. The account's
+webhooks are told at the same two moments, with `credit.low` and
+`credit.empty` ([events](./observability)), and `GET /v1/limits` says the
+credit left and the days it lasts (`credit.runwayDays`), so an agent can add
+credit in time, which is how an account opened with a wallet, with no person
+to email, hears it.
 
 Storage charges stop at zero, and your balance never goes below it. You never
 owe money. Nothing is lost straight away:

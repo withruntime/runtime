@@ -33,6 +33,15 @@ export type WalletClaim =
       next?: string;
     };
 
+export type WalletRekey = {
+  status: "replaced";
+  orgId: string;
+  /** The new key, shown once. The old one no longer works. */
+  apiKey: string;
+  /** The id of the key this replaced, or null when there was none to revoke. */
+  revokedKeyId: string | null;
+};
+
 function origin(options: WalletOptions): string {
   const env = typeof process === "undefined" ? {} : process.env;
   return apiOrigin(options.authUrl ?? env.RUNTIME_AUTH_URL ?? "https://withruntime.com");
@@ -87,4 +96,15 @@ export async function claimWalletAccount(
 ): Promise<WalletClaim> {
   const [, claim] = await post<WalletClaim>(options, "/api/wallet/claim", { claimCode });
   return claim;
+}
+
+/** Replaces a lost API key with a new one, using the account's claim code. The
+ *  account's every other key stops working. Refused (409) when the first key was never claimed or
+ *  a person took the account over, and (429) past 3 times in 24 hours. */
+export async function rekeyWalletAccount(
+  claimCode: string,
+  options: WalletOptions = {},
+): Promise<WalletRekey> {
+  const [, rekey] = await post<WalletRekey>(options, "/api/wallet/rekey", { claimCode });
+  return rekey;
 }

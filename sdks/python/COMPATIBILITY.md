@@ -19,7 +19,7 @@ interchangeable. Remaining implementation work is tracked in the repository's
 | --------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | E2B             | `e2b==2.56.0`, `e2b-code-interpreter==2.11.0` | `from withruntime.e2b import Sandbox, AsyncSandbox`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox`                                       |
 | Runloop         | `runloop-api-client==2.0.0`                   | `from withruntime.runloop import Runloop, AsyncRunloop`; `from withruntime.runloop.sdk import RunloopSDK, AsyncRunloopSDK`                                      |
-| Prime Intellect | `prime-sandboxes==0.4.5`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
+| Prime Intellect | `prime-sandboxes==0.4.6`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
 | Fly Sprites     | `sprites-py==0.7.2`                           | `from withruntime.sprites import SpritesClient, AsyncSpritesClient, SpriteConfig`; filesystem, client, sprite, types, exec and exceptions submodules also exist |
 | Modal CPU       | `modal==1.6.2`                                | `from withruntime import modal`; `from withruntime.modal import Sandbox, Image, Secret, App`                                                                    |
 | Morph Cloud     | `morphcloud==0.1.115`                         | `from withruntime.morph import MorphCloudClient`; `from withruntime.morph.api import Instance, Snapshot, ApiError` and the other `morphcloud.api` names         |
@@ -146,6 +146,19 @@ The native byte-output, file metadata, expanded watcher, disk-capture and interp
 detach changes must be released
 before the corresponding adapters can use them against hosted Runtime. Local
 contract results do not assert that an existing host has those capabilities.
+
+## Prime Intellect, 18 October 2026
+
+prime-sandboxes 0.4.5 → 0.4.6: the wheel and sdist matched the lock (0.4.5)
+and PyPI (0.4.6); the wheel's source is byte for byte its sdist's; nothing was
+installed or run. Requirements are unchanged. `CreateSandboxRequest` gains
+`lan_network_id` and `lan_tags` (tags need a network, a `ValueError`), and
+`create` then joins the sandbox to that LAN network once it runs, in
+`wait_for_creation` or `bulk_wait_for_creation`. The drop-in takes both fields
+and refuses a create with a network before any sandbox is made, with the LAN
+refusal naming `runtime.networks.private`; before, the unknown field was a
+`TypeError`. The rest is an HTTP/2 pool for Prime's own command transport, not
+part of the drop-in. `tests/test_prime_0_4_6.py` fails without the change.
 
 ## Modal Python, 16 October 2026
 

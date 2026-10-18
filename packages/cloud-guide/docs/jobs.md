@@ -65,6 +65,11 @@ results back there.
   it, and it ends `failed` with the reason `timeout`. A timeout as long as the
   run's paid time (`durationSeconds`) falls 15 seconds before that time ends,
   so the run's exit and output are kept and a retry you set still runs.
+- **It can prove which sandbox it is.** The command's environment has
+  `RUNTIME_ID_TOKEN_REQUEST_URL` and `RUNTIME_ID_TOKEN_REQUEST_TOKEN`, as in
+  any sandbox, so `Sandbox.identityToken()` (`identity_token()` in Python) or
+  curl gets an [identity token](./identity-tokens) for AWS, Google Cloud or
+  your own API with no stored key. The token names the run's sandbox.
 - **Output is kept.** A run keeps its last {{job-log-kept}} of standard output
   and standard error together; `logsTruncated` says when earlier output was
   dropped.

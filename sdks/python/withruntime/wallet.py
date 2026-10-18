@@ -4,6 +4,8 @@
     opened = open_wallet_account(20, accept_terms=True)
     # send exactly opened["amount"] to one of opened["networks"], then, once paid:
     key = claim_wallet_account(opened["claimCode"])["apiKey"]
+    # a lost key: replace it with the claim code (3 times in 24 hours)
+    key = rekey_wallet_account(opened["claimCode"])["apiKey"]
 
 Opening one means agreeing to https://withruntime.com/legal/terms, so ask the
 person you work for first. The claim code is shown once and is the only way to
@@ -60,3 +62,11 @@ def claim_wallet_account(claim_code: str, *, auth_url: Optional[str] = None, tim
     """Once the top-up is paid, ``{"status": "paid", "apiKey": ...}``, once.
     Before that, the top-up's ``status``; call again."""
     return _post(auth_url, "/api/wallet/claim", {"claimCode": claim_code}, timeout)
+
+
+def rekey_wallet_account(claim_code: str, *, auth_url: Optional[str] = None, timeout: float = 30.0) -> dict[str, Any]:
+    """Replaces a lost API key using the claim code: ``{"status": "replaced",
+    "orgId": ..., "apiKey": ..., "revokedKeyId": ...}``. Every other key of
+    the account stops working. Refused (409) when the first key was never claimed or a person took
+    the account over, and (429) past 3 times in 24 hours."""
+    return _post(auth_url, "/api/wallet/rekey", {"claimCode": claim_code}, timeout)

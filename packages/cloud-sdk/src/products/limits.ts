@@ -23,6 +23,24 @@ export type KeyLimits = {
    * numbers a create past one is refused `quota_exceeded` by (its
    * `details.limit` names the row). Null when they can't be read. */
   account: AccountLimit[] | null;
+  /** The account's prepaid credit and how long it lasts. */
+  credit: {
+    /** Credit left to spend now, in microdollars. */
+    availableMicros: string;
+    /** What the account spends in a day at this month's pace, or null when
+     * nothing has been spent yet. */
+    dailyPaceMicros: string | null;
+    /** Days the credit lasts at that pace, or null when nothing is being spent. */
+    runwayDays: number | null;
+    /** `state` is "low" when the runway is under this many days. */
+    lowBelowDays: number;
+    /** ok: enough. low: under `lowBelowDays` of runway. empty: none left. */
+    state: "ok" | "low" | "empty";
+    /** owner: a person pays for this account. agent: it was opened with a
+     * wallet and no person pays, so its own agent adds credit with
+     * `runtime billing topup <usd>`. */
+    addedBy: "owner" | "agent";
+  };
 };
 
 /** One of the account's limits, as https://withruntime.com/account/limits shows it. */

@@ -164,6 +164,8 @@ proxy.
 | `egress_secret.deleted`      | An egress secret was deleted                                                                                 |
 | `upstream_proxy.set`         | Your upstream proxy was set or changed; `upstreamProxy` has its address, credential's name and hosts         |
 | `upstream_proxy.removed`     | Your upstream proxy was removed                                                                              |
+| `credit.low`                 | Credit lasts under 5 days at this month's pace; `credit` has what is left and what 5 days need               |
+| `credit.empty`               | No credit is left; `credit` has `availableMicros` and `agentOnly`                                            |
 
 Each event carries the resource as it was:
 
@@ -242,6 +244,25 @@ sent there sends no event: check the host against `npx withruntime secrets ls`.
       "at": "2026-10-10T18:00:00.000Z",
       "message": "A request to api.openai.com:80 carried the placeholder of OPENAI_API_KEY without HTTPS, so the secret was not added. A secret goes only over HTTPS."
     }
+  }
+}
+```
+
+`credit.low` and `credit.empty` are about the account, so they have no
+`resourceId` and carry `data.credit`. Each is sent once for each top-up: a new
+top-up starts the count again. `credit.low` is sent when the credit left lasts
+under 5 days at this month's pace, the same rule as the low-credit notice in
+the inbox and by email. `credit.empty` is sent when none is left. Amounts are
+strings of micro-dollars (1,000,000 to the dollar). `requiredMicros` is the
+pace over 5 days and is only in `credit.low`. `agentOnly` is `true` when the
+account was opened with a wallet and no person may pay for it: its own agent
+adds credit itself, with its own key.
+
+```json
+{
+  "type": "credit.low",
+  "data": {
+    "credit": { "availableMicros": "3200000", "requiredMicros": "4100000", "agentOnly": true }
   }
 }
 ```

@@ -42,8 +42,10 @@ export type BrowserStartOptions = {
 export function sandboxBrowser(t: Transport, sandbox: Sandbox) {
   const base = () => `/v1/sandboxes/${encodeURIComponent(sandbox.id)}/browser`;
   return {
-    /** Starts Chromium and returns its CDP address. The first start in a
-     * sandbox installs Chromium, about a minute; this waits for it (up to 10
+    /** Starts Chromium and returns its CDP address. A start in a new
+     * sandbox takes about 1 to 2 seconds: Chromium comes from the host. A
+     * sandbox from a custom image that is not Ubuntu 24.04 x86_64 installs it
+     * on the first start, about a minute; this waits for it (up to 10
      * minutes, or the call's timeoutMs). Starting a running browser returns it
      * as it is. */
     async start(input: BrowserStartOptions = {}, options?: RequestOptions) {

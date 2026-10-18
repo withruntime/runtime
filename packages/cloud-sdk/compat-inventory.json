@@ -2052,12 +2052,12 @@
     }
   },
   "prime": {
-    "upstream": "pypi/prime-sandboxes@0.4.5",
+    "upstream": "pypi/prime-sandboxes@0.4.6",
     "counts": {
-      "present": 412,
+      "present": 414,
       "refused": 275,
       "missing": 0,
-      "total": 687
+      "total": 689
     },
     "items": {
       "APIClient": "present",
@@ -2376,6 +2376,8 @@
       "CreateSandboxRequest.idempotency_key": "present",
       "CreateSandboxRequest.idle_timeout_minutes": "present",
       "CreateSandboxRequest.labels": "present",
+      "CreateSandboxRequest.lan_network_id": "present",
+      "CreateSandboxRequest.lan_tags": "present",
       "CreateSandboxRequest.memory_gb": "present",
       "CreateSandboxRequest.name": "present",
       "CreateSandboxRequest.network_allowlist": "present",
@@ -6402,7 +6404,7 @@
     }
   },
   "daytona": {
-    "upstream": "npm/%40daytona%2Fsdk@0.224.1/package",
+    "upstream": "npm/%40daytona%2Fsdk@0.225.0/package",
     "counts": {
       "present": 542,
       "refused": 11,
@@ -7015,7 +7017,7 @@
     }
   },
   "daytona-python": {
-    "upstream": "pypi/daytona@0.224.1",
+    "upstream": "pypi/daytona@0.225.0",
     "counts": {
       "present": 454,
       "refused": 17,

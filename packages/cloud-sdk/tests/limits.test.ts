@@ -14,6 +14,14 @@ const LIMITED = {
     window: "24h",
   },
   trial: null,
+  credit: {
+    availableMicros: "42500000",
+    dailyPaceMicros: "5000000",
+    runwayDays: 8.5,
+    lowBelowDays: 3,
+    state: "ok",
+    addedBy: "owner",
+  },
 };
 const READ_ONLY = {
   access: "read",
@@ -84,6 +92,37 @@ test("`runtime limits` prints the access, the daily limit and what is left, or t
     expect(text).toMatch(/access\s+read only/);
     expect(text).toMatch(/daily limit\s+none/);
     expect(text).not.toMatch(/left/);
+  });
+});
+
+test("`runtime limits` says the credit left and its runway, and for an agent-only account how to add more", async () => {
+  await withStub(LIMITED, async () => {
+    const { lines, out } = output();
+    expect(await run(["limits"], env, out)).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toMatch(/credit\s+\$42\.50 left, lasts about 9 days at this month's pace/);
+    expect(text).not.toMatch(/billing topup/);
+  });
+  const agent = {
+    ...LIMITED,
+    credit: { ...LIMITED.credit, dailyPaceMicros: null, runwayDays: null, addedBy: "agent" },
+  };
+  await withStub(agent, async () => {
+    const { lines, out } = output();
+    expect(await run(["limits"], env, out)).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toMatch(/credit\s+\$42\.50 left, nothing is being spent/);
+    expect(text).toMatch(/No person pays for this account.*billing topup <usd>/);
+    const json: string[] = [];
+    await run(["limits", "--json"], env, { ...out, json: true, write: (t) => json.push(t) });
+    expect(JSON.parse(json[0]!)).toEqual(agent);
+    expect(json).toHaveLength(1);
+  });
+  const empty = { ...LIMITED, credit: { ...LIMITED.credit, availableMicros: "0", state: "empty" } };
+  await withStub(empty, async () => {
+    const { lines, out } = output();
+    await run(["limits"], env, out);
+    expect(lines.join("\n")).toMatch(/credit\s+none left/);
   });
 });
 

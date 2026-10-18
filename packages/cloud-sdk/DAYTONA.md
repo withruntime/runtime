@@ -17,8 +17,8 @@ from withruntime.daytona import AsyncDaytona  # was: from daytona import AsyncDa
 ```
 
 The mapping was written against `@daytona/sdk` 0.220.0 and `daytona` 0.220.0
-on PyPI, and checked against `@daytona/sdk` and `daytona` 0.224.1 on
-15 October 2026 (below, "0.224.1"). The exact releases and artifact hashes
+on PyPI, and checked against `@daytona/sdk` and `daytona` 0.225.0 on
+18 October 2026 (below, "0.225.0"). The exact releases and artifact hashes
 are kept in `compatibility-lock.json`.
 
 ## Keys
@@ -125,6 +125,37 @@ Some differences are not refusals:
   client are found by name, but only their output from then on is known.
 - `autoArchiveInterval` is recorded only: Runtime has no archive tier.
 - Runtime's stock image is Ubuntu 24.04 with Python 3.12, Node.js 24 and Bun.
+
+## 0.225.0, 18 October 2026
+
+Reviewed the published npm tarballs for `@daytona/sdk`, `@daytona/api-client`,
+`@daytona/toolbox-api-client` and `@daytona/analytics-api-client` 0.224.1 →
+0.225.0, and the PyPI wheel and sdist for `daytona` 0.224.1 → 0.225.0, each its
+registry's latest when checked. Every pinned file matched the hash already in
+`compatibility-lock.json`, every new file its registry's SHA-512 integrity or
+SHA-256 digest, and the wheel's Python source is byte for byte its sdist's.
+Nothing was installed, imported or run. No declaration of `@daytona/sdk` and no
+Python source of `daytona` changed: only versions and the exact pins on the
+three API clients. The one API change is in `@daytona/api-client` (and its
+PyPI twins): `GpuType` gains `B200`.
+
+| Upstream change | Drop-in disposition                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GpuType.B200`  | Exported, with every other `GpuType`. A create naming any GPU type is refused (`NotSupportedError`, "Runtime runs sandboxes on CPUs") before anything is made. |
+
+Two gaps near it are closed with the review. `@daytona/sdk` re-exports
+`GpuType`, `SnapshotState`, `SandboxListSortField`, `SandboxListSortDirection`,
+`SandboxClass`, `ListSecretsPaginatedSortEnum` and
+`ListSecretsPaginatedOrderEnum`, and `daytona` exports `GpuType`,
+`SandboxClass`, `SandboxListSortField` and `SandboxListSortDirection`; the
+drop-ins exported none of them, so code importing one failed. They are exported
+now with upstream's values, and the sort enums drive `list`. Python refused
+`Resources(gpu=...)` but made a CPU sandbox for `Resources(gpu_type=...)`
+alone, which Daytona sends as a GPU request; it is refused now, as in
+TypeScript. `tests/daytona/daytona-0-225-0.test.ts` and
+`sdks/python/tests/test_daytona_0_225_0.py` fail without this change. The
+oracle was not run against the new release, since it executes Daytona's code;
+the provider remains marked `partial`.
 
 ## 0.224.1, 15 October 2026
 

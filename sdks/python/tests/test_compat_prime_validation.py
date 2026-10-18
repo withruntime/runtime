@@ -160,7 +160,7 @@ class Validation(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_user_signatures_and_rpc_validation_match_review(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.5')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.6')
         from prime_sandboxes import SandboxClient as OfficialSync, AsyncSandboxClient as OfficialAsync
         from prime_sandboxes.rpc_command_session import build_command_session_start_request
         for runtime, official in ((SandboxClient, OfficialSync), (AsyncSandboxClient, OfficialAsync)):
@@ -259,7 +259,7 @@ class Validation(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_nested_request_response_and_validation_match(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.5')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.6')
         from prime_sandboxes import models as official
         for provider in (models, official):
             request = provider.CreateSandboxRequest(name='box', docker_image='python:3.13',

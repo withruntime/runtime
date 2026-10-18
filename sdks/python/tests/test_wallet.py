@@ -5,7 +5,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from withruntime import RuntimeError
-from withruntime.wallet import claim_wallet_account, open_wallet_account
+from withruntime.wallet import claim_wallet_account, open_wallet_account, rekey_wallet_account
 
 
 class Stub(BaseHTTPRequestHandler):
@@ -49,6 +49,11 @@ class WalletTest(unittest.TestCase):
             ("/api/wallet/topups", {"usd": 20, "acceptTerms": True}, None),
             ("/api/wallet/claim", {"claimCode": "rtclaim_nope"}, None),
         ])
+
+    def test_rekey_posts_the_claim_code(self):
+        Stub.seen = []
+        rekey_wallet_account("rtclaim_x", auth_url=self.url)
+        self.assertEqual(Stub.seen, [("/api/wallet/rekey", {"claimCode": "rtclaim_x"}, None)])
 
 
 if __name__ == "__main__":

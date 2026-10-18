@@ -121,16 +121,27 @@ test("--json prints the top-up as the API returned it", async () => {
 function walletStub(claims: unknown[]) {
   const saved: { key: string; orgId: string }[] = [];
   const opened: unknown[] = [];
+  const rekeyed: string[] = [];
   let i = 0;
   return {
     saved,
     opened,
+    rekeyed,
     deps: {
       open: async (input: { usd: number; acceptTerms: boolean }) => {
         opened.push(input);
         return { ...OPEN, orgId: "org_1", claimCode: "rtclaim_code" };
       },
       claim: async () => claims[Math.min(i++, claims.length - 1)] as never,
+      rekey: async (code: string) => {
+        rekeyed.push(code);
+        return {
+          status: "replaced" as const,
+          orgId: "org_1",
+          apiKey: "rtcloud_new",
+          revokedKeyId: "key_old",
+        };
+      },
       save: async (key: string, orgId: string) => {
         saved.push({ key, orgId });
       },
@@ -191,6 +202,41 @@ test("claim --wait saves the key once the payment lands, and never prints it", a
   expect(stub.saved).toEqual([{ key: "rtcloud_secret", orgId: "org_1" }]);
   expect(lines.join("\n")).not.toContain("rtcloud_secret");
   expect(lines.at(-1)).toContain("connected");
+});
+
+test("claim --new-key replaces a lost key, saves the new one, and never prints it", async () => {
+  const stub = walletStub([]);
+  const { lines, out } = capture();
+  const code = await billingCommand(
+    ["claim", "rtclaim_code"],
+    { positional: ["claim", "rtclaim_code"], flags: flags("new-key") },
+    out,
+    noClient,
+    async () => undefined,
+    stub.deps,
+  );
+  expect(code).toBe(0);
+  expect(stub.rekeyed).toEqual(["rtclaim_code"]);
+  expect(stub.saved).toEqual([{ key: "rtcloud_new", orgId: "org_1" }]);
+  expect(lines.join("\n")).not.toContain("rtcloud_new");
+  expect(lines.join("\n")).toContain("Every other key of this account no longer works");
+});
+
+test("--new-key is only for claim, and needs the code", async () => {
+  const stub = walletStub([]);
+  const { out } = capture();
+  const call = (positional: string[]) =>
+    billingCommand(
+      positional,
+      { positional, flags: flags("new-key") },
+      out,
+      noClient,
+      async () => undefined,
+      stub.deps,
+    );
+  await expect(call(["claim"])).rejects.toThrow("Give the claim code");
+  await expect(call(["topup", "20"])).rejects.toThrow();
+  expect(stub.rekeyed).toEqual([]);
 });
 
 test("claim without --wait says it is not paid yet", async () => {

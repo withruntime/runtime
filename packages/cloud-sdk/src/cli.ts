@@ -938,6 +938,7 @@ export async function run(
         ],
         ["used, last 24 hours", usd(l.daily.usedMicros)],
         ...(l.daily.remainingMicros === null ? [] : [["left", usd(l.daily.remainingMicros)]]),
+        ...(l.credit ? [["credit", creditLine(l.credit, usd)]] : []),
         ...(l.trial ? [["free time", trialLeft(l.trial)]] : []),
         ...(spend?.pilot
           ? [
@@ -948,6 +949,10 @@ export async function run(
       ]),
       l,
     );
+    if (l.credit?.addedBy === "agent" && !out.json)
+      out.write(
+        `No person pays for this account, so add credit yourself: \`${me} billing topup <usd>\`.`,
+      );
     return 0;
   }
   if (command === "secrets") return secretsCommand(rest, env, out);
@@ -1039,10 +1044,15 @@ export async function run(
   if (command === "billing") {
     product = "billing";
     const origins = connectionOrigins(env);
-    const { claimWalletAccount, openWalletAccount } = await import("./wallet.js");
+    const { claimWalletAccount, openWalletAccount, rekeyWalletAccount } =
+      await import("./wallet.js");
     return billingCommand(
       rest,
-      parse(rest, ["wait", "new-account", "accept-terms"], ["below", "amount", "monthly"]),
+      parse(
+        rest,
+        ["wait", "new-account", "accept-terms", "new-key"],
+        ["below", "amount", "monthly"],
+      ),
       out,
       () => client(env),
       undefined,
@@ -1054,6 +1064,10 @@ export async function run(
         claim: (code) => {
           checkBrowserOrigins(origins);
           return claimWalletAccount(code, { authUrl: origins.auth });
+        },
+        rekey: (code) => {
+          checkBrowserOrigins(origins);
+          return rekeyWalletAccount(code, { authUrl: origins.auth });
         },
         save: (key, orgId) => {
           checkBrowserOrigins(origins);
@@ -1538,6 +1552,18 @@ export function outOfMemoryLines(memory: OutOfMemory | undefined): string | unde
 /** Dollars from integer microdollars: cents from a dollar up, four places
  * below one, and every place below a hundredth of a cent, so a short trial
  * test never reads as $0.0000. */
+function creditLine(
+  c: NonNullable<Awaited<ReturnType<Runtime["limits"]["get"]>>["credit"]>,
+  usd: (micros: string) => string,
+): string {
+  if (c.state === "empty") return "none left: add credit to keep going";
+  const days =
+    c.runwayDays === null
+      ? "nothing is being spent"
+      : `lasts about ${Math.max(1, Math.round(c.runwayDays))} ${Math.round(c.runwayDays) <= 1 ? "day" : "days"} at this month's pace`;
+  return `${usd(c.availableMicros)} left, ${days}${c.state === "low" ? " (low)" : ""}`;
+}
+
 function dollars(micros: string | bigint): string {
   const value = BigInt(micros);
   const sign = value < 0n ? "-" : "";

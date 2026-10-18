@@ -84,13 +84,17 @@ export type AppDeploy = {
       };
     }
 );
+/** `image`: an image of this account (id, name, name:tag or name@version),
+ * ready; the version records its id. */
 export type DeployApp = ({ image: string; build?: never } | { build: string; image?: never }) & {
   env?: Record<string, string>;
   /** Carry the last deploy's environment, still sealed. With env, that
    * environment with env's names set: change one value without sending the rest
    * (needs a key that may reveal the App's secrets, secrets_reveal; else 403).
-   * Only for a build a push to the production branch made, from the repository the
-   * environment came with; otherwise refused with keep_env_refused (409). */
+   * For a build: only one a push to the production branch made, from the
+   * repository the environment came with. For an image: only from a key that
+   * may reveal the App's secrets, and only an environment named with an image
+   * deploy. Otherwise refused with keep_env_refused (409). */
   keepEnv?: boolean;
   port?: number;
   healthPath?: string;

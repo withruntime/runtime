@@ -210,7 +210,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "prime",
     language: "python",
-    upstream: { dir: "pypi/prime-sandboxes@0.4.5", entry: "prime_sandboxes" },
+    upstream: { dir: "pypi/prime-sandboxes@0.4.6", entry: "prime_sandboxes" },
     runtime: "sdks/python/withruntime/prime",
     constructed: ["APIClient", "AsyncAPIClient", "SandboxClient", "AsyncSandboxClient"],
     outside: ["Config"],
@@ -334,7 +334,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "daytona",
     language: "typescript",
-    upstream: { dir: "npm/%40daytona%2Fsdk@0.224.1/package", entry: "cjs/index.d.ts" },
+    upstream: { dir: "npm/%40daytona%2Fsdk@0.225.0/package", entry: "cjs/index.d.ts" },
     runtime: "packages/cloud-sdk/src/daytona/index.ts",
     constructed: ["Daytona"],
     outside: [],
@@ -342,7 +342,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "daytona-python",
     language: "python",
-    upstream: { dir: "pypi/daytona@0.224.1", entry: "daytona" },
+    upstream: { dir: "pypi/daytona@0.225.0", entry: "daytona" },
     runtime: "sdks/python/withruntime/daytona",
     constructed: ["Daytona", "AsyncDaytona"],
     outside: [],

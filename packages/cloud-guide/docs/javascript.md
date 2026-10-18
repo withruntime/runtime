@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.17.1. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.17.2. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -1109,14 +1109,43 @@ browser, so keep it to yourself. Code inside the sandbox finds the same
 browser at `http://127.0.0.1:9222`. `start({ headless: false })` shows it on
 the sandbox's [desktop](#a-desktop) and returns the live view as `streamUrl`.
 `sbx.browser.stop()` ends it, and `get()` then answers `running: false`. The
-first start in a sandbox installs Chromium, about a minute, once; `start` waits
-for it. Called directly, the API answers
+browser comes from the host as a read-only disk, so a start in a new sandbox
+takes about 1 to 2 seconds and installs nothing. A sandbox from a custom image
+that is not Ubuntu 24.04 x86_64 installs Chromium on its first start, about a
+minute, once; `start` waits for it. Called directly, the API answers
 409 `browser_installing` until the install is done: call again after
 `retryAfterMs`. A browser that cannot start or install answers 409
 `browser_failed` with the sandbox's own words.
 
 The CLI is `runtime sandboxes browser <id> start`, and agents use the MCP tool
 `runtime_sandboxes_browser`.
+
+### A page in under a second
+
+For many short tasks, such as fetching one page each, keep spare browsers
+paused. A paused sandbox is charged only for its storage, and wakes in about
+a tenth of a second with Chromium as it was:
+
+```ts check
+import { Sandbox } from "withruntime";
+
+const spare = await Sandbox.create({ vcpu: 1, memoryMiB: 1024 });
+const { cdpUrl } = await spare.browser.start();
+await spare.pause(); // ready for the next page
+
+await spare.wake(); // about 0.1 s
+// connect to cdpUrl, open a new browser context, fetch the page, close it
+await spare.pause();
+```
+
+Open each page in its own browser context (Playwright's
+`browser.newContext()`), so no cookie or storage passes from one page to the
+next. Measured on 18 October 2026 from a client outside Runtime, a woken
+spare had one page loaded, its screenshot taken and its HTML read 0.56 to
+0.81 seconds after the wake was asked for.
+
+Wikipedia, BBC News and a GitHub repository page each peaked between 194
+and 331 MiB, so 1 GiB is enough for fetching pages like these.
 
 ## MCP servers in a sandbox
 
