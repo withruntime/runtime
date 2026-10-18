@@ -352,3 +352,80 @@ test("with a key on this machine, `keys create` makes the key over the API with 
     await api.stop(true);
   }
 });
+
+test("`keys create --sandbox --actions` makes a key limited to those sandboxes over the API, and refuses what such a key does not take", async () => {
+  const calls: unknown[] = [];
+  const limited = `rtcloud_${randomUUID()}_${randomBytes(32).toString("base64url")}`;
+  const sandbox = randomUUID();
+  const api = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      calls.push(await request.json());
+      return Response.json({
+        key: limited,
+        keyId: randomUUID(),
+        agentId: randomUUID(),
+        orgId: randomUUID(),
+        name: "watcher",
+        access: "selected",
+        reach: "sandboxes",
+        dailyLimitMicros: 2_000_000,
+        sandboxes: [sandbox],
+        actions: ["get", "create"],
+        expires: null,
+        madeBy: keyId,
+      });
+    },
+  });
+  try {
+    const local = { RUNTIME_API_KEY: key, RUNTIME_API_URL: `http://127.0.0.1:${api.port}` };
+    const written: string[] = [];
+    const notes: string[] = [];
+    const out = {
+      json: false,
+      write: (t: string) => written.push(t),
+      error: (t: string) => notes.push(t),
+    };
+    expect(
+      await run(
+        [
+          "keys",
+          "create",
+          "--name",
+          "watcher",
+          "--sandbox",
+          sandbox,
+          "--actions",
+          "get,create",
+          "--daily-limit",
+          "2",
+        ],
+        local,
+        out,
+      ),
+    ).toBe(0);
+    expect(calls).toEqual([
+      {
+        name: "watcher",
+        sandboxes: [sandbox],
+        actions: ["get", "create"],
+        dailyLimitMicros: 2_000_000,
+      },
+    ]);
+    expect(written).toEqual([limited]);
+    expect(notes.join("")).toContain(`limited to sandbox ${sandbox} for get, create`);
+    const quiet = { json: false, write: () => undefined, error: () => undefined };
+    for (const extra of ["--account-wide", "--read-only", "--browser"])
+      await expect(
+        run(["keys", "create", "--sandbox", sandbox, "--actions", "get", extra], local, quiet),
+        extra,
+      ).rejects.toThrow(`limited to sandboxes reaches only them`);
+    await expect(run(["keys", "create", "--sandbox", sandbox], local, quiet)).rejects.toThrow(
+      "--actions",
+    );
+    expect(calls).toHaveLength(1);
+  } finally {
+    await api.stop(true);
+  }
+});

@@ -424,11 +424,16 @@ logged or written to the sandbox's disk. [Networking](./networking#your-tailscal
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage end sooner; at
+fields are `cwd`, `env`, `stdin`, `user`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage end sooner; at
 most 24 hours)
 and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
 is put over the sandbox's own environment; its values are never echoed and are
-stored only as hashes.
+stored only as hashes. `user` is `"sandbox"` (the default: the user `runtime`,
+uid 1000) or `"root"`, which runs the command as root through the sandbox's
+passwordless `sudo`, with the same environment, `PATH` and working directory
+and `HOME=/root` (unless `env` sets `HOME`), so no command needs a `sudo`
+prefix. Starting a process takes `user` too, and every process answers which
+it runs as in `user`.
 
 **Streaming.** With `"stream": true` the answer is NDJSON, one event a line:
 `start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time
@@ -454,7 +459,8 @@ it with `GET …/files/content`.
 ## Terminals
 
 `GET /v1/sandboxes/{id}/terminal` with `Upgrade: websocket` and the bearer header
-opens a terminal: `cols`, `rows`, `command` (default `bash -l`), `cwd`, or
+opens a terminal: `cols`, `rows`, `command` (default `bash -l`), `cwd`,
+`user=root` for a root shell, or
 `processId` to attach to a process started with a pty. Binary frames are terminal
 bytes both ways. Text frames are JSON: you send `{"type":"resize","cols":120,"rows":40}`;
 the server sends `{"type":"ready","processId":...}` and `{"type":"exit","exitCode":...}`.

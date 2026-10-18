@@ -26,6 +26,11 @@ public final class ProcessInfo extends JsonObject {
     return getString("command");
   }
 
+  /** {@code "sandbox"} or {@code "root"}; null from an API that does not say. */
+  public String user() {
+    return getString("user");
+  }
+
   public String cwd() {
     return getString("cwd");
   }

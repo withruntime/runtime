@@ -10,6 +10,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 17 October 2026
 
+- **Give a sandbox a key without typing it into a command.** In the CLI,
+  `--env NAME` with no `=` sends that variable's value from your own shell, as
+  `docker run -e NAME` does, on `create`, `update`, `exec` and `run`
+  (withruntime 0.17.1). The security guide now shows how to install a key
+  your sandbox's server checks on incoming requests, and the same key at
+  another provider, and how to rotate it with no failed request. See
+  [Shared keys](./security#a-secret-your-sandbox-checks-on-requests-it-receives).
 - **Swarm worker keys cannot reach scheduled jobs or their secrets.** A key
   made by another key with reach `agent` now gets `403 forbidden` on
   `/v1/secrets`, `/v1/jobs` and `/v1/job-runs`, and on the `runtime_jobs` and
@@ -20,6 +27,21 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   revoked, expired or retired counts what it spent in the last day toward
   the daily limit its maker's keys share, so revoking a worker that spent its
   limit and making another no longer spends that limit twice.
+- **Run commands as root.** A command, background process or terminal now
+  takes `user: "root"` and runs as root, with its environment, `PATH` and
+  working directory kept and `HOME` set to `/root`, so nothing needs a `sudo`
+  in front. The default is still the sandbox user, `runtime`, and each process
+  says which it runs as. It is in the API, MCP, the JavaScript, Python, Go,
+  Ruby and Java SDKs, and the CLI (`--root` on `exec`, `spawn`, `run` and
+  `shell`). Coming from Freestyle, whose VMs run as root? See
+  [how to switch](./freestyle-alternative#how-to-switch).
+- **Keys limited to sandboxes.** A key can now be limited to a few sandboxes
+  and to what it may do to them: look, start and restart, stop, run commands,
+  or reach files. It is served nothing else, so a watcher that restarts one
+  server holds no key to the rest of your account. Make one with
+  `runtime keys create --sandbox <id> --actions get,create`, or `sandboxes` and
+  `actions` in `POST /v1/keys` and `runtime.keys.create`. See
+  [Teams](./teams#a-key-limited-to-sandboxes).
 - **Wake and restart wait for room.** In the JavaScript, Python, Ruby, Go and
   Java SDKs, a sandbox's `wake` and `restart` now wait for room as `create`
   does. When the sandbox's own server is full (`no_capacity`), the SDK sends
@@ -203,6 +225,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   nothing is left billing for disk and an account without credit no longer
   reaches its 10 kept sandboxes after ten runs. `--keep` still keeps it. See
   [CLI](./cli).
+- **Volume restored from a backup stays put.** A volume made from a backup
+  can no longer be removed after it is ready by a restore attempt that
+  finished late, and the nightly backups keep earlier copies whenever a night
+  could not read the data they protect. See
+  [Volume backups](./storage#volume-backups).
 - **A paused sandbox wakes when its server can't take it.** A wake whose
   sandbox's own server is full, out of service or lost now comes back on
   another server from the sandbox's saved copy, files and memory as they were,

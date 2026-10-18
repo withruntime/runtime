@@ -86,12 +86,27 @@ export type AppDeploy = {
 );
 export type DeployApp = ({ image: string; build?: never } | { build: string; image?: never }) & {
   env?: Record<string, string>;
+  /** Carry the last deploy's environment, still sealed. With env, that
+   * environment with env's names set: change one value without sending the rest
+   * (needs a key that may reveal the App's secrets, secrets_reveal; else 403).
+   * Only for a build a push to the production branch made, from the repository the
+   * environment came with; otherwise refused with keep_env_refused (409). */
+  keepEnv?: boolean;
   port?: number;
   healthPath?: string;
   /** Return live, failed or superseded, including its URL/version or failure details. */
   wait?: boolean;
 };
-export type AppVersion = { version: number; live: boolean; previous: boolean; saved: boolean };
+export type AppVersion = {
+  version: number;
+  live: boolean;
+  previous: boolean;
+  saved: boolean;
+  /** Its deploy's id, for GET /v1/apps/{id}/deploys/{deploy}. */
+  deploy: string;
+  /** The build it was deployed from, or null for an image. */
+  build: string | null;
+};
 export type AppCopy = {
   id: string;
   version: number;

@@ -47,7 +47,9 @@ npx playwright install chromium
   `LOGNAME` say so.
 - `HOME` is `/workspace`, which is also the default working directory. Files
   there belong to you.
-- `sudo` works without a password: you are root inside your own sandbox. Root
+- `sudo` works without a password: you are root inside your own sandbox. To run
+  a command as root without typing `sudo`, give it `user: "root"` (exec,
+  background processes and terminals; `--root` in the CLI). Root
   cannot change what the sandbox may reach, how much CPU and memory it has, or
   what it costs; those are enforced on the host, outside the sandbox.
 - `PATH` starts with `/workspace/.local/bin`, then `/usr/local/bin`, `/usr/bin`

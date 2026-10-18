@@ -278,3 +278,16 @@ test("a pasted secret loses line breaks, paste markers and outer spaces, as the 
   expect(cleanSecret("\u001b[200~  sk-ant-oat01-abc \u001b[201~")).toBe("sk-ant-oat01-abc");
   expect(cleanSecret("Bearer abc def")).toBe("Bearer abc def");
 });
+
+test("--root runs exec and spawn as root; without it the request names no user", async () => {
+  const root = await cli(["sandbox", "exec", SANDBOX, "--root", "--", "apt-get", "update"]);
+  const exec = root.sent.find((request) => request.path.endsWith(":exec"));
+  expect(exec?.body).toMatchObject({ argv: ["apt-get", "update"], user: "root" });
+  const plain = await cli(["sandbox", "exec", SANDBOX, "--", "id", "-u"]);
+  expect(plain.sent.find((request) => request.path.endsWith(":exec"))?.body).not.toHaveProperty(
+    "user",
+  );
+  const spawned = await cli(["sandbox", "spawn", SANDBOX, "--root", "--", "nginx"]);
+  const start = spawned.sent.find((request) => request.path.endsWith("/processes"));
+  expect(start?.body).toMatchObject({ command: "nginx", user: "root" });
+});

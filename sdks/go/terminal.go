@@ -25,6 +25,8 @@ type TerminalOptions struct {
 	// Command runs instead of a login shell.
 	Command string
 	Cwd     string
+	// User is "sandbox" (the default) or "root".
+	User string
 	// ProcessID attaches to a process started with a PTY instead of starting
 	// a new shell.
 	ProcessID string
@@ -46,7 +48,7 @@ func (s *Sandbox) Terminal(ctx context.Context, opts *TerminalOptions) (*Termina
 	if opts == nil {
 		opts = &TerminalOptions{}
 	}
-	query := setQuery(url.Values{}, "cols", itoa(opts.Cols), "rows", itoa(opts.Rows), "command", opts.Command, "cwd", opts.Cwd, "processId", opts.ProcessID)
+	query := setQuery(url.Values{}, "cols", itoa(opts.Cols), "rows", itoa(opts.Rows), "command", opts.Command, "cwd", opts.Cwd, "user", opts.User, "processId", opts.ProcessID)
 	socket, err := s.c.websocket(ctx, s.path("/terminal"), query)
 	if err != nil {
 		return nil, err

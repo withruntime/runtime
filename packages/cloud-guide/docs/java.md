@@ -10,11 +10,11 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.3.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.4.0")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
@@ -116,6 +116,9 @@ public class Commands {
 - `env` is how secrets reach a command. It is never echoed back. Never put a
   secret in the command line itself.
 - `stdin` gives the command input, then closes it.
+- `.user("root")` runs the command as root, with no `sudo` in front, keeping
+  its `env` and `PATH`; `HOME` is `/root`. `SpawnOptions` takes it too, and
+  `ProcessInfo.user()` says which a process runs as.
 - The default timeout is 60 seconds; the maximum is 24 hours. A timeout is a
   result (`timedOut()` is true, with the output so far), not an exception.
 - `check(true)` throws `RuntimeCloudException.Command`, with the exit code and

@@ -241,19 +241,20 @@ module WithRuntime
     # Runs a command and returns its exit code and output. A String runs under
     # +bash -c+; an Array runs the program directly, with no shell.
     #
-    # +cwd+ (default /workspace), +env+ (merged over the sandbox's; put secrets
-    # here), +stdin+, +timeout+ (seconds, default 60, up to a day; a timeout is
-    # a result, not an error), +on_stdout+ and +on_stderr+ (stream the command;
-    # the result keeps everything), and +check+ (raise CommandError on a
-    # non-zero exit or a timeout).
-    def exec(command, cwd: nil, env: nil, stdin: nil, timeout: nil, on_stdout: nil, on_stderr: nil,
+    # +cwd+ (default /workspace), +user+ ("sandbox", the default, or "root",
+    # through the sandbox's passwordless sudo), +env+ (merged over the
+    # sandbox's; put secrets here), +stdin+, +timeout+ (seconds, default 60, up
+    # to a day; a timeout is a result, not an error), +on_stdout+ and
+    # +on_stderr+ (stream the command; the result keeps everything), and
+    # +check+ (raise CommandError on a non-zero exit or a timeout).
+    def exec(command, cwd: nil, user: nil, env: nil, stdin: nil, timeout: nil, on_stdout: nil, on_stderr: nil,
              check: false, idempotency_key: nil)
       streamed = on_stdout || on_stderr || (timeout && timeout > 60)
       result = if streamed
-                 collect(exec_stream(command, cwd: cwd, env: env, stdin: stdin, timeout: timeout,
+                 collect(exec_stream(command, cwd: cwd, user: user, env: env, stdin: stdin, timeout: timeout,
                                               idempotency_key: idempotency_key), on_stdout, on_stderr)
                else
-                 body = command_body(command, cwd, env, stdin, timeout)
+                 body = command_body(command, cwd, env, stdin, timeout, user)
                  CommandResult.new(@t.json("POST", path(":exec"), body: body, key: idempotency_key,
                                                                   timeout: timeout && (timeout + 60)))
                end
@@ -265,14 +266,14 @@ module WithRuntime
     # Runs a command and yields its events as they happen: start, stdout,
     # stderr, exit (each a Hash). Resumes by itself when the server ends a long
     # stream, so it never drops output. Without a block, an Enumerator.
-    def exec_stream(command, cwd: nil, env: nil, stdin: nil, timeout: nil, idempotency_key: nil, &block)
+    def exec_stream(command, cwd: nil, user: nil, env: nil, stdin: nil, timeout: nil, idempotency_key: nil, &block)
       unless block
-        return enum_for(:exec_stream, command, cwd: cwd, env: env, stdin: stdin, timeout: timeout,
+        return enum_for(:exec_stream, command, cwd: cwd, user: user, env: env, stdin: stdin, timeout: timeout,
                                                idempotency_key: idempotency_key)
       end
 
       longest = ApiDefaults::STREAMED_EXEC_TIMEOUT_SECONDS
-      body = command_body(command, cwd, env, stdin, timeout || longest).merge("stream" => true)
+      body = command_body(command, cwd, env, stdin, timeout || longest, user).merge("stream" => true)
       handed_over = nil
       process_id = nil
       cursor = 0
@@ -361,8 +362,8 @@ module WithRuntime
     # once. It outlives your connection; +process(id)+ gets it back.
     # +pipe_stdin: true+ keeps input open for +write+; +pty: { cols:, rows: }+
     # gives it a terminal.
-    def spawn(command, cwd: nil, env: nil, timeout: nil, stdin: nil, pipe_stdin: false, pty: nil, idempotency_key: nil)
-      body = command_body(command, cwd, env, pipe_stdin ? nil : stdin, timeout)
+    def spawn(command, cwd: nil, user: nil, env: nil, timeout: nil, stdin: nil, pipe_stdin: false, pty: nil, idempotency_key: nil)
+      body = command_body(command, cwd, env, pipe_stdin ? nil : stdin, timeout, user)
       body["stdinMode"] = "pipe" if pipe_stdin
       body["pty"] = Fields.body(pty) if pty
       SandboxProcess.new(self, @t.json("POST", path("/processes"), body: body, key: idempotency_key))
@@ -385,9 +386,10 @@ module WithRuntime
 
     def room_for(wait_for_capacity) = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
 
-    def command_body(command, cwd, env, stdin, timeout)
+    def command_body(command, cwd, env, stdin, timeout, user)
       body = command.is_a?(Array) ? { "argv" => command.map(&:to_s) } : { "command" => command.to_s }
       body["cwd"] = cwd if cwd
+      body["user"] = user.to_s if user
       body["env"] = env.to_h { |key, value| [key.to_s, value.to_s] } if env
       body["stdinBase64"] = [stdin.to_s.b].pack("m0") unless stdin.nil?
       body["timeoutMs"] = (timeout * 1000).round if timeout

@@ -151,6 +151,9 @@ func main() {
 - `Env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `Stdin` gives the command input, then closes it.
+- `User: "root"` runs the command as root, with no `sudo` in front, keeping its
+  `Env` and `PATH`; `HOME` is `/root`. `SpawnOptions` and `TerminalOptions`
+  take it too, and `ProcessInfo.User` says which a process runs as.
 - The default timeout is 60 seconds; the maximum is 24 hours. A timeout is a
   result (`TimedOut` is true, with the output so far), not an error.
 - `Check: true` returns a `*withruntime.CommandError`, with the exit code and

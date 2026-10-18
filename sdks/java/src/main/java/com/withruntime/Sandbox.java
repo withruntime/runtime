@@ -334,6 +334,7 @@ public final class Sandbox implements AutoCloseable {
     if (command instanceof String shell) body.put("command", shell);
     else body.put("argv", command);
     if (options.cwd != null) body.put("cwd", options.cwd);
+    if (options.user != null) body.put("user", options.user);
     if (options.env != null) body.put("env", options.env);
     if (options.stdin != null)
       body.put("stdinBase64", Base64.getEncoder().encodeToString(options.stdin));
@@ -458,7 +459,7 @@ public final class Sandbox implements AutoCloseable {
   }
 
   private SandboxProcess spawnCommand(Object command, SpawnOptions options) {
-    ExecOptions exec = new ExecOptions().cwd(options.cwd);
+    ExecOptions exec = new ExecOptions().cwd(options.cwd).user(options.user);
     exec.env = options.env;
     exec.timeout = options.timeout;
     Map<String, Object> body = commandBody(command, exec, null);

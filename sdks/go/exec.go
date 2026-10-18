@@ -15,6 +15,10 @@ import (
 type ExecOptions struct {
 	// Cwd is the working directory. Default /workspace.
 	Cwd string
+	// User is who runs it: "sandbox" (the default, uid 1000, HOME=/workspace)
+	// or "root", through the sandbox's passwordless sudo with the same
+	// environment and PATH and HOME=/root.
+	User string
 	// Env is merged over the sandbox's environment. Put secrets here, never
 	// in the command: it is never echoed back.
 	Env map[string]string
@@ -48,6 +52,9 @@ func commandBody(cmd command, opts *ExecOptions, defaultTimeout time.Duration) m
 	}
 	if opts.Cwd != "" {
 		body["cwd"] = opts.Cwd
+	}
+	if opts.User != "" {
+		body["user"] = opts.User
 	}
 	if opts.Env != nil {
 		body["env"] = opts.Env
@@ -285,7 +292,9 @@ func (s *Sandbox) follow(ctx context.Context, processID string, cursor int64) it
 
 // SpawnOptions are a background process's options, every one optional.
 type SpawnOptions struct {
-	Cwd     string
+	Cwd string
+	// User is "sandbox" (the default) or "root".
+	User    string
 	Env     map[string]string
 	Timeout time.Duration
 	// Stdin is given once, then closed. PipeStdin keeps input open for Write
@@ -319,7 +328,7 @@ func (s *Sandbox) spawn(ctx context.Context, cmd command, opts *SpawnOptions) (*
 	if opts == nil {
 		opts = &SpawnOptions{}
 	}
-	body := commandBody(cmd, &ExecOptions{Cwd: opts.Cwd, Env: opts.Env, Timeout: opts.Timeout}, 0)
+	body := commandBody(cmd, &ExecOptions{Cwd: opts.Cwd, User: opts.User, Env: opts.Env, Timeout: opts.Timeout}, 0)
 	if opts.PipeStdin {
 		body["stdinMode"] = "pipe"
 	} else if opts.Stdin != nil {

@@ -10,7 +10,7 @@ import os
 import random
 import time
 import uuid
-from typing import Any, AsyncIterator, Callable, Generic, Optional, TypeVar, Union
+from typing import Any, Literal, AsyncIterator, Callable, Generic, Optional, TypeVar, Union
 from urllib.parse import quote, urlencode
 
 from ._api_defaults import KEEP_ALIVE_MARGIN_SECONDS, STREAMED_EXEC_TIMEOUT_MS, WAIT_FOR_TIMEOUT_SECONDS
@@ -597,10 +597,13 @@ class AsyncPage:
 
 
 def _command(command: Union[str, list[str], tuple[str, ...]], cwd: Optional[str], env: Optional[dict[str, str]],
-             stdin: Optional[Union[str, bytes]], timeout_ms: Optional[int]) -> dict[str, Any]:
+             stdin: Optional[Union[str, bytes]], timeout_ms: Optional[int],
+             user: Optional[Literal["sandbox", "root"]] = None) -> dict[str, Any]:
     body: dict[str, Any] = {"command": command} if isinstance(command, str) else {"argv": list(command)}
     if cwd is not None:
         body["cwd"] = cwd
+    if user is not None:
+        body["user"] = user
     if env is not None:
         body["env"] = env
     if isinstance(stdin, str):
@@ -690,6 +693,11 @@ class AsyncProcess:
     def command(self) -> Optional[str]:
         """The command line as the sandbox reports it."""
         return self.info.get("command")
+
+    @property
+    def user(self) -> Optional[str]:
+        """Who it runs as, "sandbox" or "root"; None from an API that does not say."""
+        return self.info.get("user")
 
     @property
     def state(self) -> Optional[str]:
@@ -1572,6 +1580,7 @@ class AsyncSandbox(AsyncMachine):
         return AsyncSandbox(t, {"id": sandbox_id})
 
     async def exec(self, command: Union[str, list[str], tuple[str, ...]], *, cwd: Optional[str] = None,
+                   user: Optional[Literal["sandbox", "root"]] = None,
                    env: Optional[dict[str, str]] = None, stdin: Optional[Union[str, bytes]] = None,
                    timeout_ms: Optional[int] = None, on_stdout: Optional[Callable[[str], Any]] = None,
                    on_stderr: Optional[Callable[[str], Any]] = None, check: bool = False,
@@ -1580,10 +1589,11 @@ class AsyncSandbox(AsyncMachine):
         With on_stdout/on_stderr the output streams. The timeout is 60 s by
         default, 24 h when the output streams. A timeout is a result
         (timed_out=True, the output so far), never an error; ``check=True``
-        raises CommandError on a non-zero exit."""
+        raises CommandError on a non-zero exit. ``user="root"`` runs it as root
+        through the sandbox's sudo (the default is "sandbox")."""
         streaming = on_stdout is not None or on_stderr is not None or (timeout_ms or 0) > 60_000
         if not streaming:
-            data = await self._t.json("POST", self._path(":exec"), body=_command(command, cwd, env, stdin, timeout_ms),
+            data = await self._t.json("POST", self._path(":exec"), body=_command(command, cwd, env, stdin, timeout_ms, user),
                                       idempotency_key=idempotency_key, timeout=(timeout_ms or 60_000) / 1000 + 60)
             result = CommandResult.from_json(data)
         else:
@@ -1595,7 +1605,7 @@ class AsyncSandbox(AsyncMachine):
             # both flags carry it.
             dropped = False
             try:
-                async for event in self.exec_stream(command, cwd=cwd, env=env, stdin=stdin, timeout_ms=timeout_ms,
+                async for event in self.exec_stream(command, cwd=cwd, user=user, env=env, stdin=stdin, timeout_ms=timeout_ms,
                                                     idempotency_key=idempotency_key):
                     if event["type"] == "start":
                         process_id = event["processId"]
@@ -1634,6 +1644,7 @@ class AsyncSandbox(AsyncMachine):
         return result
 
     async def exec_stream(self, command: Union[str, list[str], tuple[str, ...]], *, cwd: Optional[str] = None,
+                          user: Optional[Literal["sandbox", "root"]] = None,
                           env: Optional[dict[str, str]] = None, stdin: Optional[Union[str, bytes]] = None,
                           timeout_ms: Optional[int] = None,
                           idempotency_key: Optional[str] = None) -> AsyncIterator[dict[str, Any]]:
@@ -1648,7 +1659,7 @@ class AsyncSandbox(AsyncMachine):
                        "stderrTruncated": "stderr_truncated", "droppedBytes": "dropped_bytes",
                        "resumeAt": "resume_at", "outOfMemory": "out_of_memory"}
             return {**event, **{alias: event[name] for name, alias in aliases.items() if name in event}}
-        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS), "stream": True}
+        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS, user), "stream": True}
         events = self._t.events("POST", self._path(":exec"), body=body, idempotency_key=idempotency_key,
                                 timeout=((timeout_ms or STREAMED_EXEC_TIMEOUT_MS) / 1000) + 60)
         read = _OutputCursor()
@@ -1685,12 +1696,13 @@ class AsyncSandbox(AsyncMachine):
             await _close_events(continued)
 
     async def spawn(self, command: Union[str, list[str], tuple[str, ...]], *, cwd: Optional[str] = None,
+                    user: Optional[Literal["sandbox", "root"]] = None,
                     env: Optional[dict[str, str]] = None, stdin: Optional[str] = None,
                     pty: Optional[dict[str, int]] = None, timeout_ms: Optional[int] = None,
                     output_encoding: Optional[str] = None) -> AsyncProcess:
         """Starts a background process and returns at once. ``stdin="pipe"``
         keeps input open for write(); ``pty={"cols": 120, "rows": 40}`` gives a terminal."""
-        body = _command(command, cwd, env, None if stdin == "pipe" else stdin, timeout_ms)
+        body = _command(command, cwd, env, None if stdin == "pipe" else stdin, timeout_ms, user)
         if output_encoding is not None:
             if output_encoding not in ("utf8", "base64"):
                 raise ValueError("output_encoding must be utf8 or base64")
@@ -1709,10 +1721,11 @@ class AsyncSandbox(AsyncMachine):
         return AsyncProcess(self._t, self.id, await self._t.json("GET", self._path(f"/processes/{_enc(process_id)}")))
 
     async def terminal(self, *, cols: int = 80, rows: int = 24, command: Optional[str] = None,
-                       cwd: Optional[str] = None, process_id: Optional[str] = None) -> AsyncTerminal:
+                       cwd: Optional[str] = None, user: Optional[Literal["sandbox", "root"]] = None,
+                       process_id: Optional[str] = None) -> AsyncTerminal:
         """An interactive terminal over a WebSocket."""
         socket = await self._t.websocket(self._path("/terminal"), {
-            "cols": cols, "rows": rows, "command": command, "cwd": cwd, "processId": process_id})
+            "cols": cols, "rows": rows, "command": command, "cwd": cwd, "user": user, "processId": process_id})
         ready = await socket.recv()
         if not isinstance(ready, str):
             raise RuntimeError("The terminal did not start.", code="terminal_refused")

@@ -84,6 +84,7 @@ runtime keys create --name ci                    # full access, until revoked
 runtime keys create --name ci --daily-limit 25   # at most $25 in any 24 hours
 runtime keys create --name monitor --read-only   # sees everything, changes nothing
 runtime keys create --name web --account-wide    # uses every sandbox in the account
+runtime keys create --name watcher --sandbox <id> --actions get,create --daily-limit 2  # one sandbox: look and restart
 runtime keys create --name ci --daily-limit 25 --browser | gh secret set RUNTIME_API_KEY
 ```
 
@@ -115,7 +116,8 @@ to your jobs as `RUNTIME_API_KEY`.
 ```bash
 id=$(runtime sandboxes create --name demo --label team=search)
 runtime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
-runtime sandboxes exec "${id}" --cwd /workspace --env API_TOKEN="${API_TOKEN}" -- env
+runtime sandboxes exec "${id}" --cwd /workspace --env API_TOKEN -- env
+runtime sandboxes exec "${id}" --root -- apt-get install -y jq
 runtime sandboxes ls
 runtime sandboxes ls --state running --label team=search
 runtime sandboxes get "${id}"
@@ -134,7 +136,9 @@ sandbox is running (`--no-wait` returns at once). Its options:
 - `--name`, `--label k=v` (repeatable); `--trial` and `--paid` are accepted
   and ignored, since the free usage is spent first, then credit
 - `--env K=V` (repeatable) sets a variable for every command, terminal and SSH
-  session in it, for its whole life; values are never shown again
+  session in it, for its whole life; values are never shown again. From
+  withruntime 0.17.1, `--env K` alone sends `K`'s value from your own shell, so
+  a secret is in no command line ([shared keys](./security#a-secret-your-sandbox-checks-on-requests-it-receives))
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
   `--connect <host:port>`
 - `--idle-pause <seconds>` pauses it after that long with nothing happening in
@@ -164,11 +168,15 @@ each means). A refused option is named as the option you typed, such as
 `--timeout`, not as the API's field (`timeoutSeconds`).
 
 `exec` streams all of the output as it happens and exits with the command's own
-exit code (124 when it timed out), so `set -e` scripts behave. Without
+exit code (124 when it timed out), so `set -e` scripts behave. `--root` runs the
+command as root with no `sudo` in front, keeping its environment and `PATH`;
+`spawn`, `run` and `shell` take `--root` too, and `ps` shows each process's
+user. Without
 `--timeout` a command may run for 24 hours; with `--json`, for 60 seconds. Everything it
 starts, `nohup … &` included, ends when the command returns; start a server with
-`spawn` (below) instead. Pass secrets with
-`--env` from a variable, never written into the command. Piped input reaches
+`spawn` (below) instead. Pass a secret
+with `--env NAME` alone, which reads it from your shell, never written into
+the command. Piped input reaches
 the command, up to 1 MiB: `echo 'print(1)' | runtime sandboxes exec "${id}" -- python3 -`.
 A program is found on the sandbox's own `PATH`, so `python` in an image from
 `python:3.12-slim` runs as it does there.

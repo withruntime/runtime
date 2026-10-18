@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.16.1";
+export const VERSION = "0.17.1";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs

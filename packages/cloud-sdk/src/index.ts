@@ -170,5 +170,12 @@ export {
   type WalletOptions,
 } from "./wallet.js";
 export type { Topup } from "./products/billing.js";
-export type { NewKey, MadeKey, ListedKey, KeyUsage } from "./products/api-keys.js";
+export type {
+  NewKey,
+  LimitedKey,
+  LimitedKeyAction,
+  MadeKey,
+  ListedKey,
+  KeyUsage,
+} from "./products/api-keys.js";
 export type { SsoConnection, SsoStatus } from "./products/sso.js";

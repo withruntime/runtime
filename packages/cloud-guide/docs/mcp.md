@@ -217,6 +217,7 @@ one of those names fails, and its error names the call that replaces it.
    `running` before executing anything. The free usage is spent first, then prepaid credit.
 2. `runtime_sandboxes_files_write`, then `runtime_sandboxes_exec` with `{"id": "<sandbox id>", "command": "python3 main.py"}`
    (or `"command": ["python3", "main.py"]` to run it without a shell).
+   Add `"user": "root"` to run it as root without `sudo` in front.
    Give each write that accepts `idempotencyKey` its own key; do not add
    unsupported fields to other tools. Check `exitCode`, `timedOut`, output and
    truncation flags; tool or HTTP success alone does not prove program success.

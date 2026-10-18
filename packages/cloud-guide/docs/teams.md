@@ -142,7 +142,8 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
 ```
 
 - `POST /v1/keys` takes `name`, and optionally `access` (`full` or `read`),
-  `reach` (`agent`, the default, or `account`) and `dailyLimitMicros`. It
+  `reach` (`agent`, the default, or `account`) and `dailyLimitMicros`, or
+  `sandboxes` and `actions` for [a key limited to sandboxes](#a-key-limited-to-sandboxes). It
   answers the new key once; a retry with the same `Idempotency-Key` answers
   without it.
 - Each key is its own agent. A worker with reach `agent` sees only its own
@@ -172,6 +173,45 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
   hours (`quota_exceeded`). Revoke workers' keys when done.
 - Each is in the [audit log](#audit-log) as `key.created`, by the making key's
   agent, with `madeBy` naming the key that made it.
+
+### A key limited to sandboxes
+
+A key can be limited to a few sandboxes and to what it may do to them. Give it
+to something that needs one sandbox and should hold no key to the rest of the
+account, such as a watcher that restarts a server when it stops answering.
+
+```bash no-run
+runtime keys create --name watcher --sandbox <sandboxId> --actions get,create --daily-limit 2
+```
+
+```ts no-run
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime(); // RUNTIME_API_KEY
+const sandboxId = process.env.SANDBOX_ID!; // the sandbox to watch
+const watcher = await runtime.keys.create({
+  name: "watcher",
+  sandboxes: [sandboxId],
+  actions: ["get", "create"],
+  dailyLimitMicros: 2_000_000,
+});
+```
+
+- `POST /v1/keys` takes `sandboxes` (1 to 20 ids) and `actions` in place of
+  `access` and `reach`. The actions are `get` (read the sandbox and its
+  metrics), `create` (start, wake and restart it; it never makes a sandbox),
+  `stop` (stop and pause it), `exec` (commands, processes and the
+  interpreter), `read_file` and `write_file`.
+- It is served only those sandboxes' own routes, called by id, and only for
+  the actions it was given. Everything else answers `403 forbidden`: other
+  sandboxes, lists, deleting, resizing, forking, networks, sessions, secrets,
+  jobs, keys, the account's settings and MCP.
+- It sees its sandboxes whichever key made them. The making key names only
+  sandboxes it acts on itself, outside every compartment.
+- Only `create` spends, so only a key with it takes a daily limit, and it needs
+  one when the making key has one.
+- `runtime keys ls` and `GET /v1/keys` show it with reach `sandboxes`, its
+  `sandboxes` and its `actions`. It makes no keys.
 
 ## Leaving and removing
 

@@ -23,6 +23,7 @@ import { VERSION, type RequestOptions } from "./transport.js";
 import type { CreateSandbox, FeedbackKind, OutOfMemory, SandboxInfo, Usage } from "./types.js";
 import type { MetricRange, SandboxMetrics, WebhookEventType } from "./products/observability.js";
 import type { SwitchingSummary, SwitchProvider } from "./products/switching.js";
+import type { LimitedKeyAction } from "./products/api-keys.js";
 import type { SecretRule, SecretScope, SecretUse } from "./products/secrets.js";
 import type { Job } from "./products/jobs.js";
 import type { InterpreterLanguage } from "./products/interpreter.js";
@@ -150,12 +151,12 @@ const SANDBOX_HELP = `runtime sandboxes <command>
 
   Every <id> below can also be the sandbox's name.
 
-  run [--keep] [create options] -- <command>                  A fresh sandbox runs one command, then is deleted
+  run [--keep] [--root] [create options] -- <command>         A fresh sandbox runs one command, then is deleted
   ssh <id|name> [-- <command...>] | ssh config [--install]    Log in over SSH, also from VS Code and JetBrains
   code <id|name> [--editor vscode|cursor|windsurf] [--path /workspace] [--print]
                                                               Open it in your editor over SSH, in one step
   port-forward <id|name> <port|local:remote>...               Forward local ports to ports in it
-  create [--name n] [--label k=v]... [--env K=V]... [--vcpu 2] [--memory 4096] [--disk 4096]
+  create [--name n] [--label k=v]... [--env K[=V]]... [--vcpu 2] [--memory 4096] [--disk 4096]
          [--cpu shared|reserved] [--cpu-floor <thousandths>] [--max-cost <usd>] [--max-total-cost <usd>]
          [--timeout <60-86400>] [--on-timeout pause|stop|delete] [--no-wait]
          [--no-internet] [--allow <host>]... [--deny <host>]... [--connect <host:port>]...
@@ -165,15 +166,16 @@ const SANDBOX_HELP = `runtime sandboxes <command>
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
   get <id>                                                    One sandbox, in full
-  exec <id> [--cwd /workspace] [--env K=V]... [--timeout <s>] -- <command...>
-                                              Run and stream output; exits with its code
-  spawn <id> [--pty] -- <command...>          Start in the background; prints a process id
+  exec <id> [--cwd /workspace] [--env K[=V]]... [--timeout <s>] [--root] -- <command...>
+                                              Run and stream output; exits with its code.
+                                              --root runs it as root: no sudo needed
+  spawn <id> [--pty] [--root] -- <command...> Start in the background; prints a process id
   ps <id>                                     Running and recent processes
   logs <id> <processId> [-f] [--raw]          A process's output so far; -f follows it to the end;
                                               on a terminal control characters show as \\uXXXX
                                               unless --raw
   kill <id> <processId> [--signal SIGTERM]
-  shell <id> [--command "bash -l"]            An interactive terminal
+  shell <id> [--command "bash -l"] [--root]   An interactive terminal
   cp <src> <dst>                              Copy files or directories; name a sandbox
                                               path as <id>:/path, e.g. cp ./app sbx:/workspace/app
   cat <id> <path>                             Print a file
@@ -192,10 +194,12 @@ const SANDBOX_HELP = `runtime sandboxes <command>
                                               --disk only grows it; programs stop (snapshot it first
                                               to keep memory)
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
-  update <id> [--name n] [--label k=v]... [--env K=V]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
+  update <id> [--name n] [--label k=v]... [--env K[=V]]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
               [--timeout <60-86400 from now>|0] [--on-timeout pause|stop|delete]
-                                              Change its settings; persistent keeps it running until stopped
+                                              Change its settings; persistent keeps it running until stopped;
+                                              --env K alone sends K's value from your own environment,
+                                              so it is in no command line or shell history
   snapshot <id> [--name n] [--retention days|credit] Keep its whole machine; prints the snapshot id
   mount <id> <s3|r2|gcs>://<bucket>[/prefix] <path> [--secret NAME] [--region r]
         [--endpoint https://...] [--account-id id] [--read-only]
@@ -374,6 +378,24 @@ const pairs = (args: Args, name: string) =>
       const at = pair.indexOf("=");
       if (at < 1) throw usage(`--${name} takes KEY=VALUE.`);
       return [pair.slice(0, at), pair.slice(at + 1)];
+    }),
+  );
+/** --env KEY=VALUE, or --env KEY alone to take KEY's value from the CLI's own
+ * environment, as docker run -e does: the value stays out of the process's
+ * arguments and the shell's history. */
+const envPairs = (args: Args, from: NodeJS.ProcessEnv) =>
+  Object.fromEntries(
+    (args.flags.get("env") ?? []).map((pair) => {
+      const at = pair.indexOf("=");
+      if (at > 0) return [pair.slice(0, at), pair.slice(at + 1)];
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(pair))
+        throw usage(
+          `--env takes KEY=VALUE, or KEY alone to send KEY's value from your environment.`,
+        );
+      const value = from[pair];
+      if (value === undefined)
+        throw usage(`--env ${pair} sends ${pair} from your environment, and it is not set there.`);
+      return [pair, value];
     }),
   );
 
@@ -730,7 +752,7 @@ export async function run(
   if (command === "run") {
     const args = parse(
       rest,
-      [...CREATE_FLAGS, "keep"],
+      [...CREATE_FLAGS, "keep", "root"],
       [...CREATE_VALUES, "cwd", "env"],
       `${me} sandboxes run -- python3 < invoice.py`,
     );
@@ -739,7 +761,7 @@ export async function run(
       throw usage(`Give the command after --: ${me} sandboxes run -- python3 < invoice.py`);
     const runtime = await client(env);
     const timeout = integer(args, "timeout");
-    const { timeoutSeconds: _lease, ...input } = createInput(args);
+    const { timeoutSeconds: _lease, ...input } = createInput(args, env);
     const onCapacityWait = waiting(out);
     const sbx = await withVolumeRelease(
       (options) => runtime.sandboxes.create(input, { ...options, onCapacityWait }),
@@ -777,7 +799,7 @@ export async function run(
     if (!has(args, "keep")) process.once("SIGINT", interrupted);
     let code = 1;
     try {
-      code = await execute(sbx, commandLine, args, out, timeout, has(args, "keep"));
+      code = await execute(sbx, commandLine, args, out, timeout, env, has(args, "keep"));
     } finally {
       try {
         if (has(args, "keep"))
@@ -1871,7 +1893,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
   switch (verb) {
     case "create": {
       const args = parse(rest, CREATE_FLAGS, CREATE_VALUES);
-      const input = createInput(args);
+      const input = createInput(args, env);
       const onCapacityWait = waiting(out);
       const sbx = await withVolumeRelease(
         (options) => runtime.sandboxes.create(input, { ...options, onCapacityWait }),
@@ -2138,14 +2160,14 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const cost = flag(args, "max-total-cost");
       if (cost !== undefined && cost !== "none" && !/^\d+(\.\d{1,6})?$/.test(cost))
         throw usage("--max-total-cost takes dollars, such as 25 or 2.50, or none.");
-      const env = {
-        ...(args.flags.has("env") ? pairs(args, "env") : {}),
+      const variables = {
+        ...(args.flags.has("env") ? envPairs(args, env) : {}),
         ...Object.fromEntries((args.flags.get("unset-env") ?? []).map((name) => [name, null])),
       };
       const settings = {
         ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
         ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
-        ...(Object.keys(env).length ? { env } : {}),
+        ...(Object.keys(variables).length ? { env: variables } : {}),
         ...(integer(args, "idle-pause") !== undefined
           ? { idlePauseSeconds: integer(args, "idle-pause")! }
           : {}),
@@ -2184,7 +2206,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     case "exec": {
       const args = parse(
         rest,
-        [],
+        ["root"],
         ["cwd", "env", "timeout"],
         `${me} sandboxes exec <id> -- ls -la`,
       );
@@ -2192,12 +2214,12 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       if (!command.length)
         throw usage("Give the command after --: runtime sandboxes exec <id> -- ls -la");
       const sbx = await use(args.positional[0]);
-      return execute(sbx, command, args, out, integer(args, "timeout"));
+      return execute(sbx, command, args, out, integer(args, "timeout"), env);
     }
     case "spawn": {
       const args = parse(
         rest,
-        ["pty"],
+        ["pty", "root"],
         ["cwd", "env"],
         `${me} sandboxes spawn <id> -- npm run dev`,
       );
@@ -2207,8 +2229,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const sbx = await use(args.positional[0]);
       const proc = await sbx.spawn(command.length === 1 ? command[0]! : command, {
         ...(has(args, "pty") ? { pty: { cols: 120, rows: 40 } } : {}),
+        ...(has(args, "root") ? { user: "root" as const } : {}),
         ...(flag(args, "cwd") ? { cwd: flag(args, "cwd")! } : {}),
-        ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
+        ...(args.flags.has("env") ? { env: envPairs(args, env) } : {}),
       });
       print(proc.id, proc.info);
       return 0;
@@ -2219,12 +2242,13 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       print(
         list.length
           ? table([
-              ["PROCESS", "STATE", "EXIT", "COMMAND"],
+              ["PROCESS", "STATE", "EXIT", "USER", "COMMAND"],
               // The command line is the guest's report: escaped, as a log is.
               ...list.map((p) => [
                 terminalSafe(String(p.id)),
                 terminalSafe(String(p.state)),
                 `${typeof p.exitCode === "number" ? p.exitCode : "-"}${p.outOfMemory ? " (out of memory)" : ""}`,
+                p.user === "root" ? "root" : "sandbox",
                 terminalSafe(String(p.command ?? "")),
               ]),
             ])
@@ -2296,9 +2320,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       return 0;
     }
     case "shell": {
-      const args = parse(rest, [], ["command"]);
+      const args = parse(rest, ["root"], ["command"]);
       const sbx = await use(args.positional[0]);
-      return shell(sbx, flag(args, "command"));
+      return shell(sbx, flag(args, "command"), has(args, "root"));
     }
     case "cat": {
       const sbx = await use(rest[0]);
@@ -3021,12 +3045,20 @@ const KEYS_HELP = `runtime keys <command>
       stdout, and lasts until revoked. --json prints it as JSON, still alone on
       stdout. --account-wide makes a key that sees and uses every sandbox and
       other resource in the account; without it, a key sees only what it makes.
+  create --sandbox <id,...> --actions <action,...> [--name <name>] [--daily-limit <usd>]
+      A key limited to those sandboxes (up to 20, by id) and those actions on
+      them, made by the saved key: get reads them; create starts, wakes and
+      restarts them, and needs --daily-limit when the making key has one; stop
+      stops and pauses them; exec runs commands; read_file and write_file reach
+      their files. It is served nothing else: no list, no other sandbox, no
+      account route, no MCP.
   ls                      This key and the keys it made, with what each spent today
   usage <keyId>           What one of them has spent and holds
   revoke <keyId>          Revoke one: a worker's key when the worker is done
 
   runtime keys create --name worker-1 --daily-limit 5
   runtime keys create --name ci --daily-limit 25 --browser | gh secret set RUNTIME_API_KEY
+  runtime keys create --name watcher --sandbox sbx_id --actions get,create --daily-limit 2
 
 Making, listing and revoking keys with a key needs one an owner or admin made.
 Every key is also at https://withruntime.com/account/keys.
@@ -3213,13 +3245,27 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
     return 0;
   }
   if (verb !== "create") throw unknown("keys command", verb, ["create", "ls", "usage", "revoke"]);
-  const args = parse(rest, ["read-only", "account-wide", "browser"], ["name", "daily-limit"]);
-  const known = new Set(["name", "read-only", "daily-limit", "account-wide", "browser"]);
+  const args = parse(
+    rest,
+    ["read-only", "account-wide", "browser"],
+    ["name", "daily-limit", "sandbox", "actions"],
+  );
+  const known = new Set([
+    "name",
+    "read-only",
+    "daily-limit",
+    "account-wide",
+    "browser",
+    "sandbox",
+    "actions",
+  ]);
   for (const name of args.flags.keys())
     if (!known.has(name)) throw usage(`Unknown option --${name}.`);
   if (args.positional.length || args.rest) throw usage(`Unexpected ${args.positional[0] ?? "--"}.`);
   const readOnly = has(args, "read-only");
   const limit = flag(args, "daily-limit");
+  if (flag(args, "sandbox") !== undefined || flag(args, "actions") !== undefined)
+    return limitedKey(args, env, out, limit === undefined ? null : limit);
   if (readOnly && limit !== undefined)
     throw usage("A read-only key cannot spend, so it takes no --daily-limit.");
   if (readOnly && has(args, "account-wide"))
@@ -3269,6 +3315,47 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
       : `Created key "${made.name}" (${terms.join(", ")}). Store it now: it is not shown again, and Runtime keeps only a hash of it.\nIn CI, give it to your jobs as RUNTIME_API_KEY from the secret store.`,
   );
   await confirm?.();
+  return 0;
+}
+
+/** `runtime keys create --sandbox ... --actions ...`: a key limited to
+ * sandboxes, made by the saved key (never in the browser: the keys page
+ * makes none). */
+async function limitedKey(
+  args: ReturnType<typeof parse>,
+  env: NodeJS.ProcessEnv,
+  out: Out,
+  limit: string | null,
+): Promise<number> {
+  for (const refused of ["read-only", "account-wide", "browser"])
+    if (has(args, refused))
+      throw usage(
+        `A key limited to sandboxes reaches only them and is made by this machine's key, so it takes no --${refused}.`,
+      );
+  const list = (name: string) =>
+    (flag(args, name) ?? "")
+      .split(",")
+      .map((each) => each.trim())
+      .filter(Boolean);
+  const sandboxes = list("sandbox");
+  const actions = list("actions");
+  if (!sandboxes.length || !actions.length)
+    throw usage(
+      `Usage: ${named("runtime keys create --sandbox <id,...> --actions <get,create,stop,exec,read_file,write_file> [--daily-limit <usd>]")}`,
+    );
+  const { dailyLimitMicros } = await import("./keys.js");
+  const made = await (
+    await client(env)
+  ).keys.create({
+    name: flag(args, "name") ?? "Sandbox key",
+    sandboxes,
+    actions: actions as LimitedKeyAction[],
+    dailyLimitMicros: limit === null ? null : dailyLimitMicros(limit),
+  });
+  out.write(out.json ? JSON.stringify(made) : made.key);
+  out.error(
+    `Created key "${made.name}", limited to ${made.sandboxes?.length === 1 ? "sandbox" : "sandboxes"} ${(made.sandboxes ?? []).join(", ")} for ${(made.actions ?? []).join(", ")}${made.dailyLimitMicros === null ? "" : `, daily limit ${usdOf(made.dailyLimitMicros)}`}, made by this machine's key. Store it now: it is not shown again.\nIt calls those sandboxes by id and nothing else; revoke it with ${named("runtime keys revoke")} ${made.keyId}.`,
+  );
   return 0;
 }
 
@@ -4249,7 +4336,7 @@ function usdMicros(args: Args, name: string): number | undefined {
   return Number(micros);
 }
 /** A create body from the command line's flags. */
-function createInput(args: Args): CreateSandbox & { wait?: boolean } {
+function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait?: boolean } {
   for (const name of ["image", "snapshot", "volume", "name", "region", "connect"])
     if (args.flags.get(name)?.some((value) => !value.trim()))
       throw usage(`--${name} needs a non-empty value.`);
@@ -4279,7 +4366,7 @@ function createInput(args: Args): CreateSandbox & { wait?: boolean } {
       : {}),
     ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
     ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
-    ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
+    ...(args.flags.has("env") ? { env: envPairs(args, env) } : {}),
     ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
     ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
     ...(integer(args, "disk") !== undefined ? { diskMiB: integer(args, "disk")! } : {}),
@@ -4323,6 +4410,7 @@ async function execute(
   args: Args,
   out: Out,
   timeout: number | undefined,
+  env: NodeJS.ProcessEnv,
   /** `run` stops its whole sandbox on Ctrl-C, so it handles the signal itself. */
   ownInterrupt = true,
 ): Promise<number> {
@@ -4332,7 +4420,8 @@ async function execute(
   const options = {
     ...(stdin ? { stdin } : {}),
     ...(flag(args, "cwd") ? { cwd: flag(args, "cwd")! } : {}),
-    ...(args.flags.has("env") ? { env: pairs(args, "env") } : {}),
+    ...(args.flags.has("env") ? { env: envPairs(args, env) } : {}),
+    ...(has(args, "root") ? { user: "root" as const } : {}),
     ...(timeout !== undefined ? { timeoutMs: timeout * 1000 } : {}),
   };
   // Ctrl-C stops the command in the sandbox too, and says so; without this
@@ -4377,12 +4466,13 @@ async function execute(
   return lost && code === 0 ? 1 : code;
 }
 
-async function shell(sbx: Sandbox, command?: string): Promise<number> {
+async function shell(sbx: Sandbox, command?: string, root = false): Promise<number> {
   const stdin = process.stdin;
   const size = () => ({ cols: process.stdout.columns || 80, rows: process.stdout.rows || 24 });
   const terminal = await sbx.terminal({
     ...size(),
     ...(command ? { command } : {}),
+    ...(root ? { user: "root" as const } : {}),
     onData: (data) => process.stdout.write(data),
   });
   if (stdin.isTTY) stdin.setRawMode(true);

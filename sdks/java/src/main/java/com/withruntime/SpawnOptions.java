@@ -10,6 +10,7 @@ public final class SpawnOptions {
   public SpawnOptions() {}
 
   String cwd;
+  String user;
   Map<String, String> env;
   Duration timeout;
   byte[] stdin;
@@ -20,6 +21,12 @@ public final class SpawnOptions {
 
   public SpawnOptions cwd(String cwd) {
     this.cwd = cwd;
+    return this;
+  }
+
+  /** {@code "sandbox"} (the default) or {@code "root"}, through the sandbox's passwordless sudo. */
+  public SpawnOptions user(String user) {
+    this.user = user;
     return this;
   }
 

@@ -225,6 +225,7 @@ type ProcessInfo struct {
 	State       string     `json:"state"`
 	ExitCode    *int       `json:"exitCode"`
 	Command     string     `json:"command"`
+	User        string     `json:"user"`
 	Cwd         string     `json:"cwd"`
 	PTY         bool       `json:"pty"`
 	StdinOpen   bool       `json:"stdinOpen"`

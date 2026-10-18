@@ -10,7 +10,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.15.1. `pip show withruntime` shows the
+This guide describes `withruntime` 0.16.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -156,6 +156,10 @@ with Sandbox.create() as sbx:
 - `env` is how secrets reach a command. It is never echoed back, and journals
   record a hash, not the value. Never put a secret in the command line itself.
 - `stdin` gives the command input, then closes it.
+- `user="root"` runs the command as root, with no `sudo` in front: its `env`,
+  `PATH` and working directory stay the same and `HOME` is `/root`. The
+  default, `"sandbox"`, is the user `runtime`. `spawn` and `terminal` take it
+  too, and a process's `user` says which it runs as.
 - The default timeout is 60 seconds, or what the sandbox's time limit has left
   when that is less, and 24 hours when the output streams (`on_stdout`,
   `on_stderr` or `exec_stream`); the maximum is 24 hours. A command with no

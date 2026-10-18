@@ -115,6 +115,7 @@ function commandBody(command: string | readonly string[], options: ExecOptions) 
     ...(typeof command === "string" ? { command } : { argv: [...command] }),
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.user === undefined ? {} : { user: options.user }),
     ...(options.stdin === undefined
       ? {}
       : typeof options.stdin === "string"
@@ -386,6 +387,8 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       rows?: number;
       command?: string;
       cwd?: string;
+      /** "root" opens the shell (or runs `command`) as root. */
+      user?: "sandbox" | "root";
       /** Attach to a process started with a pty instead of a new shell. */
       processId?: string;
       onData?: (data: Uint8Array) => void;
@@ -396,6 +399,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       rows: options.rows,
       command: options.command,
       cwd: options.cwd,
+      user: options.user,
       processId: options.processId,
     });
     return Terminal.open(socket, options.onData);

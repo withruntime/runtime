@@ -191,6 +191,10 @@ export type CommandResult = {
 
 export type ExecOptions = {
   cwd?: string;
+  /** Who runs it: "sandbox" (the default, uid 1000, HOME=/workspace) or
+   * "root", through the sandbox's passwordless sudo with the same
+   * environment and PATH and HOME=/root: no need to prefix it with sudo. */
+  user?: "sandbox" | "root";
   /** Merged over the sandbox's environment. Put secrets here, never in the command. */
   env?: Record<string, string>;
   /** Given to standard input, then closed. */
@@ -212,6 +216,8 @@ export type ProcessInfo = {
   state: "running" | "exited" | "killed" | "timed_out" | "unknown";
   exitCode: number | null;
   command: string;
+  /** Who it runs as; absent from APIs before 17 October 2026. */
+  user?: "sandbox" | "root";
   cwd: string;
   pty: boolean;
   stdinOpen: boolean;

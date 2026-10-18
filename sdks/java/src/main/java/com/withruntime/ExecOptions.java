@@ -11,6 +11,7 @@ public final class ExecOptions {
   public ExecOptions() {}
 
   String cwd;
+  String user;
   Map<String, String> env;
   byte[] stdin;
   Duration timeout;
@@ -22,6 +23,15 @@ public final class ExecOptions {
   /** The working directory. Default /workspace. */
   public ExecOptions cwd(String cwd) {
     this.cwd = cwd;
+    return this;
+  }
+
+  /**
+   * Who runs it: {@code "sandbox"} (the default, uid 1000, HOME=/workspace) or {@code "root"},
+   * through the sandbox's passwordless sudo with the same environment and PATH and HOME=/root.
+   */
+  public ExecOptions user(String user) {
+    this.user = user;
     return this;
   }
 

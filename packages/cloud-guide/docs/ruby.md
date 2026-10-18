@@ -86,6 +86,8 @@ sbx.stop
 - `env:` is how secrets reach a command. It is never echoed back. Never put a
   secret in the command line itself.
 - `stdin:` gives the command input, then closes it.
+- `user: "root"` runs the command as root, with no `sudo` in front, keeping its
+  `env:` and `PATH`; `HOME` is `/root`. `spawn` and `terminal` take it too.
 - The default timeout is 60 seconds; the maximum is a day. A timeout is a
   result (`timed_out` is true, with the output so far), not an exception.
 - `check: true` raises `WithRuntime::CommandError`, with the exit code and

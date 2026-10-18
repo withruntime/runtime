@@ -365,6 +365,38 @@ deletes it there. The value is typed once and never shown again.
   and `DELETE /v1/egress-secrets/{name}`; the MCP tool is
   `runtime_secrets`, with `set`, `list` and `delete`.
 
+### A secret your sandbox checks on requests it receives
+
+A secret above only ever leaves a sandbox. For one the sandbox's own server
+checks, such as a shared key another service sends in a header to its
+[preview](./networking#private-preview-links), the program needs the value itself: put it in the
+sandbox's `env`. Its value is never shown back by the API, the CLI or the
+website. Make the key on your own machine and give it to both sides from
+there, so it is in no command line, file, log or chat:
+
+```bash no-run
+key=$(openssl rand -hex 32)
+# The other side, here a Cloudflare Worker's secret, read from standard input.
+printf %s "$key" | npx wrangler secret put APP_SHARED_KEY
+# The sandbox: --env NAME alone sends that variable's value from your shell.
+APP_SHARED_KEY=$key runtime sandboxes update "${id}" --env APP_SHARED_KEY
+unset key
+# A program already running keeps the value it started with: restart it.
+```
+
+- To rotate it, run the same lines again and restart the server in the
+  sandbox. For no failed request in between, have the server accept the old
+  and the new key (say `APP_SHARED_KEY` and `APP_SHARED_KEY_NEXT`) until the
+  other side has the new one, then `--unset-env` the old.
+- `--env NAME` without `=` works on `create`, `update`, `exec` and `run` from
+  withruntime 0.17.1, as `docker run -e NAME` does; a name not set in your
+  shell is refused before anything is sent. Older versions take
+  `--env NAME=value` only. From code, it is `env` on create or
+  `sandbox.update({ env })`.
+- Runtime's app in ChatGPT never takes a key's value, so set it from the CLI,
+  the API or an agent connected with an API key. The preview stays private:
+  the other service still needs its preview token as well.
+
 ## Your own proxy
 
 **Paid accounts can send their sandboxes' connections through their own HTTP

@@ -123,6 +123,18 @@ await box.wake(); // later: it carries on where it stopped
 await box.stop();
 ```
 
+A Freestyle VM runs commands as root. A Runtime sandbox runs them as the user
+`runtime`, who has passwordless `sudo`; to keep running everything as root,
+with no `sudo` in front of each command, pass `user: "root"`:
+
+```ts check
+import { Sandbox } from "withruntime";
+
+await using box = await Sandbox.create();
+await box.exec("apt-get install -y jq", { user: "root" });
+await box.spawn("nginx -g 'daemon off;'", { user: "root" });
+```
+
 ## When Freestyle may fit better
 
 - **More than 16 vCPUs in one VM.** Freestyle's Pro plan goes to 32 vCPUs.
