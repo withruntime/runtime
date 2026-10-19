@@ -1,0 +1,336 @@
+# ``runtime.agents``: an agent is a versioned definition (where its sandbox
+# starts, its size, the command that runs its harness, its instructions, the
+# secrets and MCP servers it may use); a session is one piece of work or one
+# conversation with it, with its own sandbox and an ordered log of events.
+# Private beta: an account outside it is refused with PermissionDeniedError,
+# code ``product_in_beta`` (403), and retrying does not change it.
+#
+#     definition = runtime.agents.templates.definition("claude-code", use="team")
+#     await runtime.agents.create("dev", definition)
+#     session = await runtime.agents.start("dev", "Fix the flaky test in ci.ts")
+#     async for event in session.events():
+#         print(event["kind"], event["body"].get("text"))
+#
+# Approvals come later, beside sessions and triggers here:
+# ``runtime.agents.approvals.list()`` and ``.answer()``.
+from __future__ import annotations
+
+import copy
+import time
+from collections.abc import Mapping
+from collections.abc import Iterator as KeyIterator
+from typing import Any, AsyncIterator, Optional, Union
+from urllib.parse import quote
+
+from .._agent_templates import TEMPLATES, USES
+from .._errors import InvalidRequestError, RuntimeError
+
+# A session has ended once it is one of these; it never changes again.
+SESSION_ENDED = ("done", "failed", "stopped")
+# How long one read of a session's log waits on the server for a new event.
+EVENTS_WAIT_SECONDS = 30
+
+
+def _enc(value: str) -> str:
+    return quote(value, safe="")
+
+
+def _fields(**values: Any) -> dict[str, Any]:
+    """The API's body: a field left as None is not sent."""
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def _agent(record: dict[str, Any]) -> dict[str, Any]:
+    """An agent as the API answers it; ``warnings`` is always a list."""
+    if isinstance(record, dict) and record.get("warnings") is None:
+        record["warnings"] = []
+    return record
+
+
+def _timed_out() -> RuntimeError:
+    return RuntimeError("Waiting reached its deadline; the session goes on.", code="timeout",
+                        hint="Call wait() again, or read the session, to keep following it.")
+
+
+class AgentTemplates(Mapping):
+    """The harnesses an agent can run, by key: ``claude-code``, ``codex``,
+    ``gemini-cli``, ``claude-agent-sdk`` and ``openai-agents-sdk``. Each has a
+    title, the command, the API key's secret and host, how a subscription
+    logs in (None: the SDKs take an API key) and a definition. ``uses`` holds
+    the presets ``support`` (your customers, driven by your own app: 1 vCPU,
+    1 GiB, a session per end customer under your own key such as
+    ``customer:42``, triggers api and webhook) and ``team`` (your team: 4
+    vCPU, 8 GiB, triggers slack and github).
+
+    A subscription is for your own team's agents. An agent that serves your
+    customers uses an API key: those are the providers' terms, and the API
+    warns with ``subscription_for_customers`` when one does not."""
+
+    def __init__(self) -> None:
+        self._templates = TEMPLATES
+        self.uses: dict[str, dict[str, Any]] = copy.deepcopy(USES)
+
+    def __getitem__(self, key: str) -> dict[str, Any]:
+        return copy.deepcopy(self._templates[key])
+
+    def __iter__(self) -> KeyIterator[str]:
+        return iter(self._templates)
+
+    def __len__(self) -> int:
+        return len(self._templates)
+
+    def definition(self, template: str, use: Optional[str] = None) -> dict[str, Any]:
+        """A new definition: the template's, with the use's preset over it.
+        Pass it to ``agents.create`` as it is, or change it first."""
+        if template not in self._templates:
+            raise InvalidRequestError(f"No template {template!r}.", code="invalid_request",
+                                      details={"field": "template"},
+                                      hint=f"Nothing was sent. Use one of {', '.join(self._templates)}.")
+        if use is not None and use not in USES:
+            raise InvalidRequestError(f"No use {use!r}.", code="invalid_request", details={"field": "use"},
+                                      hint=f"Nothing was sent. Use one of {', '.join(USES)}.")
+        merged = copy.deepcopy(self._templates[template]["definition"])
+        if use is not None:
+            merged.update(copy.deepcopy(USES[use]["definition"]))
+        return merged
+
+
+class AsyncAgentSession:
+    """One session of an agent: its record in ``session``, and whether
+    ``start`` ``joined`` the open session with the same key, with the ``seq``
+    of the words it sent. The record: {id, agentId, agentVersion, key,
+    trigger, state, reason, result, sandboxId, lastSeq, labels, createdAt,
+    startedAt, endedAt}, and, once the API sends them, ``parentSessionId`` and
+    ``rootSessionId`` (a child session's parent and its tree's root),
+    ``cost`` {dollars, vcpuSeconds, gibSeconds} so far, ``treeCost`` (its
+    children's summed in), ``historyBytes`` (text history, counted as
+    storage) and ``attachmentBytes`` (files and screenshots, counted as
+    storage), each None until then. A session's history is kept until it is
+    deleted (``sessions.delete``)."""
+
+    def __init__(self, t: Any, session: dict[str, Any], joined: bool = False,
+                 seq: Optional[int] = None) -> None:
+        self._t = t
+        self.session = session
+        self.id: str = session["id"]
+        self.joined = joined
+        self.seq: int = seq if seq is not None else int(session.get("lastSeq") or 0)
+
+    def __repr__(self) -> str:
+        return f"AgentSession(id={self.id!r}, state={self.state!r})"
+
+    @property
+    def state(self) -> str:
+        """queued, running, waiting, done, failed or stopped, as last read."""
+        return self.session["state"]
+
+    @property
+    def ended(self) -> bool:
+        return self.state in SESSION_ENDED
+
+    def _path(self, tail: str = "") -> str:
+        return f"/v1/agents/sessions/{_enc(self.id)}{tail}"
+
+    async def refresh(self) -> dict[str, Any]:
+        """Read the session again."""
+        self.session = await self._t.json("GET", self._path())
+        return self.session
+
+    async def send(self, text: str, *, idempotency_key: Optional[str] = None) -> int:
+        """Words into the session while it runs or waits; returns their seq.
+        A retry with the same ``idempotency_key`` is the same words, never
+        twice. An ended session refuses with ConflictError ``session_ended``."""
+        body = await self._t.json("POST", self._path("/messages"), body={"text": text},
+                                  idempotency_key=idempotency_key)
+        return int(body["seq"])
+
+    async def events(self, *, after: int = 0) -> AsyncIterator[dict[str, Any]]:
+        """``async for`` each event of the log after seq ``after`` (0: from the
+        start), in order, as it comes: {seq, kind, actor, body, createdAt},
+        the words in ``body["text"]``. Each read waits up to 30 seconds on the
+        server for a new one; the loop ends once the session has ended and
+        its whole log has been given."""
+        ended = False
+        while True:
+            page = await self._t.json("GET", self._path("/events"),
+                                      query={"after": after, "wait": 0 if ended else EVENTS_WAIT_SECONDS})
+            data = page.get("data") or []
+            for event in data:
+                after = max(after, int(event["seq"]))
+                yield event
+            if page.get("ended"):
+                if not data:
+                    return
+                ended = True
+
+    async def stop(self) -> dict[str, Any]:
+        """Ask it to stop. A queued session ends at once; a running or waiting
+        one ends once its sandbox is gone (``wait`` follows it there)."""
+        self.session = await self._t.json("POST", self._path("/stop"))
+        return self.session
+
+    async def wait(self, *, timeout: float = 0) -> dict[str, Any]:
+        """Return the session once it has ended (done, failed or stopped; a
+        failed session is returned, not raised: read ``reason``). Each round
+        waits on the session's log, not a timer. ``timeout`` in seconds, 0 for
+        none; past it, RuntimeError ``timeout`` and the session goes on."""
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout != timeout \
+                or timeout < 0 or timeout == float("inf"):
+            raise InvalidRequestError("timeout must be a finite, nonnegative number of seconds.",
+                                      code="invalid_request", details={"field": "timeout"},
+                                      hint="Fix the option and call again; nothing was sent.")
+        deadline = time.monotonic() + timeout if timeout > 0 else None
+        options: dict[str, Any] = {} if deadline is None else {"deadline": deadline}
+        try:
+            while True:
+                await self._read(options)
+                if self.ended:
+                    return self.session
+                seconds = EVENTS_WAIT_SECONDS
+                if deadline is not None:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise _timed_out()
+                    seconds = max(1, min(EVENTS_WAIT_SECONDS, int(left)))
+                await self._t.json("GET", self._path("/events"),
+                                   query={"after": int(self.session.get("lastSeq") or 0), "wait": seconds},
+                                   **options)
+        except RuntimeError as error:
+            if deadline is not None and time.monotonic() >= deadline and error.code == "request_timeout":
+                raise _timed_out() from error
+            raise
+
+    async def _read(self, options: dict[str, Any]) -> None:
+        self.session = await self._t.json("GET", self._path(), **options)
+
+
+class AsyncAgentSessions:
+    """``runtime.agents.sessions``: every agent's sessions."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    async def get(self, session_id: str) -> AsyncAgentSession:
+        """One session by id, to follow, send to, stop or wait for."""
+        record = await self._t.json("GET", f"/v1/agents/sessions/{_enc(session_id)}")
+        return AsyncAgentSession(self._t, record)
+
+    async def delete(self, session_id: str) -> None:
+        """Delete an ended session and its history; until then it is kept,
+        counted as storage. An open session is refused with ConflictError
+        ``session_open``: stop it first."""
+        await self._t.json("DELETE", f"/v1/agents/sessions/{_enc(session_id)}")
+
+    async def list(self, *, agent: Optional[str] = None, state: Optional[Union[str, list[str]]] = None,
+                   cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage:
+        """Sessions, newest first, of one ``agent`` (id or name) and in a
+        ``state`` if given, ``limit`` a page. ``async for`` walks every page."""
+        from .._async_client import AsyncPage
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", "/v1/agents/sessions",
+                                      query={"agent": agent, "state": state, "cursor": at, "limit": limit})
+            return AsyncPage(body["data"], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+
+class AsyncAgentTriggers:
+    """``runtime.agents.triggers``: what starts or feeds an agent's sessions
+    besides the API. Kinds and their config: ``slack`` {team, channel};
+    ``github`` {repository, installation} (installation: the id of Runtime's
+    GitHub App installation, your own; optional ``events``); ``schedule``
+    {cron, timezone?, input}; ``webhook`` {}. A Slack
+    workspace or GitHub installation that is not this account's own is
+    refused with ConflictError ``not_installed``."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    async def create(self, agent: str, kind: str, config: dict[str, Any]) -> dict[str, Any]:
+        """A trigger of ``agent`` (id or name)."""
+        return await self._t.json("POST", f"/v1/agents/{_enc(agent)}/triggers",
+                                  body={"kind": kind, "config": config})
+
+    async def list(self, agent: str) -> list[dict[str, Any]]:
+        """The agent's triggers, paused ones included."""
+        body = await self._t.json("GET", f"/v1/agents/{_enc(agent)}/triggers")
+        return body["data"]
+
+    async def pause(self, trigger_id: str, why: str) -> dict[str, Any]:
+        """Hold this trigger alone, saying ``why``: its events are refused with
+        ConflictError ``trigger_paused`` and the why, never queued. Other
+        triggers and the API go on."""
+        return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/pause", body={"why": why})
+
+    async def resume(self, trigger_id: str) -> dict[str, Any]:
+        """Let a paused trigger go on."""
+        return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/resume", body={})
+
+    async def delete(self, trigger_id: str) -> None:
+        await self._t.json("DELETE", f"/v1/agents/triggers/{_enc(trigger_id)}")
+
+
+class AsyncAgents:
+    """``runtime.agents`` (private beta). Times are ISO 8601 strings."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+        self.sessions = AsyncAgentSessions(t)
+        self.triggers = AsyncAgentTriggers(t)
+        self.templates = AgentTemplates()
+
+    async def create(self, name: str, definition: dict[str, Any], *, labels: Optional[dict[str, str]] = None,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Make an agent, version 1. ``definition`` as the API takes it:
+        ``command`` (required), ``from`` ({image} or {snapshot}), ``vcpu`` and
+        ``memoryMiB`` (4 vCPU and 8 GiB unless set), ``instructions``,
+        ``env``, ``secrets``, ``mcp``, ``volumes``, ``idlePauseSeconds``,
+        ``maxSessionSeconds``, ``maxConcurrent``, ``maxSessionDollars`` (5 unless
+        set: a session at it stops with reason ``budget``), ``maxDayDollars``
+        (100 unless set: an agent at it starts nothing new, ConflictError
+        ``budget_reached``, until the next day), ``template``;
+        ``templates.definition`` makes one.
+        A name in use is refused with ConflictError ``name_taken``; the names
+        sessions, triggers, templates and approvals are refused, since they are
+        paths beside the agents."""
+        return _agent(await self._t.json("POST", "/v1/agents",
+                                         body=_fields(name=name, definition=definition, labels=labels),
+                                         idempotency_key=idempotency_key))
+
+    async def get(self, agent: str) -> dict[str, Any]:
+        """One agent by id or name: {id, name, version, definition, labels,
+        warnings, createdAt, updatedAt}."""
+        return _agent(await self._t.json("GET", f"/v1/agents/{_enc(agent)}"))
+
+    async def list(self, *, cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage:
+        """Your agents, ``limit`` a page. ``async for`` walks every page."""
+        from .._async_client import AsyncPage
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", "/v1/agents", query={"cursor": at, "limit": limit})
+            return AsyncPage([_agent(a) for a in body["data"]], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+    async def update(self, agent: str, definition: dict[str, Any]) -> dict[str, Any]:
+        """A new version of the agent's definition, whole. Sessions already
+        started keep the version they started with."""
+        return _agent(await self._t.json("PATCH", f"/v1/agents/{_enc(agent)}", body={"definition": definition}))
+
+    async def delete(self, agent: str) -> None:
+        """Delete it: its triggers go, its open sessions are asked to stop."""
+        await self._t.json("DELETE", f"/v1/agents/{_enc(agent)}")
+
+    async def start(self, agent: str, input: str, *, key: Optional[str] = None,
+                    labels: Optional[dict[str, str]] = None,
+                    idempotency_key: Optional[str] = None) -> AsyncAgentSession:
+        """Start a session of ``agent`` (id or name) with ``input`` as its
+        first words. With ``key``, your own name for the conversation (a Slack
+        thread, a pull request, one of your customers such as ``customer:42``),
+        words join the open session with that key rather than start a second;
+        the handle's ``joined`` says which happened. Too many open sessions are
+        refused with RateLimitError ``quota_exceeded``, an agent at its day's
+        budget with ConflictError ``budget_reached``."""
+        body = await self._t.json("POST", f"/v1/agents/{_enc(agent)}/sessions",
+                                  body=_fields(input=input, key=key, labels=labels),
+                                  idempotency_key=idempotency_key)
+        return AsyncAgentSession(self._t, body["session"], bool(body.get("joined")), body.get("seq"))

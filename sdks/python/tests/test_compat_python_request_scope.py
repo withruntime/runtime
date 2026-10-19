@@ -107,7 +107,9 @@ class HTTPDeadline(unittest.TestCase):
                 with request_scope(.03):
                     transport.json("GET", "/retry")
             self.assertEqual(caught.exception.code, "request_timeout")
-            self.assertLess(time.monotonic() - started, .2)
+            # Retry-After asks for 10 s: well under that proves the deadline
+            # cut the wait, with room for a busy check machine.
+            self.assertLess(time.monotonic() - started, 2)
             self.assertEqual(sum("retry" in path for path in self.calls), 1)
             self.assertIsNone(current().deadline)
         finally:

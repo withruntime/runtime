@@ -271,6 +271,14 @@ export type ClosedAccount = {
   released: boolean;
 };
 
+/** One of Runtime's optional emails: `own-deletions` (warnings for dates
+ * the account's own retention set), `billing` (credit low or out), `usage`
+ * (the month's free usage at 80% and all) or `tips` (getting started). */
+export type EmailCategory = "own-deletions" | "billing" | "usage" | "tips";
+
+/** Whether this key's person gets one optional email, in this account. */
+export type EmailSetting = { category: EmailCategory; enabled: boolean; updatedAt: string | null };
+
 /** The account this key belongs to: `runtime.account`. */
 export class AccountApi {
   constructor(private readonly t: Transport) {}
@@ -279,6 +287,29 @@ export class AccountApi {
    * name exactly (`me().orgName`). Needs a key for every product made by an
    * owner. Moves no money: what is unspent of a purchase made in the last 15
    * days is refunded on request; other credit is forfeited. */
+  /** Which of Runtime's optional emails this key's person gets for this
+   * account. Without `set`, reads them; with `{ category, enabled }`, turns
+   * one on or off for that person only, and answers all of them. Sign-in,
+   * support replies, credit expiry and deletions Runtime decides are always
+   * sent and are not listed. */
+  async emails(
+    set?: { category: EmailCategory; enabled: boolean },
+    options: RequestOptions = {},
+  ): Promise<EmailSetting[]> {
+    const answer = set
+      ? await this.t.json<{ settings: EmailSetting[] }>({
+          method: "POST",
+          path: "/v1/account/emails:update",
+          body: { category: set.category, enabled: set.enabled },
+          ...options,
+        })
+      : await this.t.json<{ settings: EmailSetting[] }>({
+          method: "GET",
+          path: "/v1/account/emails",
+          ...options,
+        });
+    return answer.settings;
+  }
   close(input: { confirm: string }, options: RequestOptions = {}) {
     return this.t.json<ClosedAccount>({
       method: "POST",

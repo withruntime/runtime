@@ -36,17 +36,44 @@ public final class Products {
 
     /** Stores or replaces a secret for these hosts (api.openai.com, *.github.com). */
     public JsonObject set(String name, String value, List<String> hosts) {
-      return set(name, value, hosts, null, null);
+      return set(name, value, hosts, null, null, null);
     }
 
     /** With header: set that header on every request to the hosts, format's {value} replaced. */
     public JsonObject set(String name, String value, List<String> hosts, String header, String format) {
+      return set(name, value, hosts, header, format, null);
+    }
+
+    /**
+     * With only ({@code Map.of("labels", List.of(Map.of("role", "hub")), "sandboxes", List.of(id))}):
+     * only those sandboxes get the secret instead of every sandbox of the organization. Those whose
+     * labels hold every pair of any one selector in labels (1 to 8 selectors), and those named in
+     * sandboxes (1 to 100 ids). Null when replacing a secret: the scope it has stays, so a new value
+     * never widens who gets it; an empty map is every sandbox again.
+     */
+    public JsonObject set(
+        String name,
+        String value,
+        List<String> hosts,
+        String header,
+        String format,
+        Map<String, Object> only) {
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("value", value);
       body.put("hosts", hosts);
       if (header != null) body.put("header", header);
       if (format != null) body.put("format", format);
+      if (only != null) body.put("only", only);
       return new JsonObject(t.object(new Transport.Call("PUT", path(name)).body(body)));
+    }
+
+    /**
+     * Changes which sandboxes get a secret, without its value: an empty map is every sandbox of the
+     * organization again. Returns the secret, with only and enforced.
+     */
+    public JsonObject scope(String name, Map<String, Object> only) {
+      return new JsonObject(
+          t.object(new Transport.Call("PUT", path(name) + "/sandboxes").body(only)));
     }
 
     /** Names, hosts and placeholders. Never values. */
@@ -91,6 +118,34 @@ public final class Products {
 
     public JsonObject get() {
       return new JsonObject(t.object(new Transport.Call("GET", "/v1/referrals")));
+    }
+  }
+
+  /**
+   * {@code runtime.emails()}: which of Runtime's optional emails this key's person gets for this
+   * account: own-deletions (warnings for dates the account's own retention set), billing, usage and
+   * tips. Sign-in, support replies, credit expiry and deletions Runtime decides are always sent and
+   * are not listed.
+   */
+  public static final class Emails {
+    private final Transport t;
+
+    Emails(Transport transport) {
+      this.t = transport;
+    }
+
+    /** Each: category, enabled and updatedAt (null until changed). */
+    public List<JsonObject> get() {
+      return new JsonObject(t.object(new Transport.Call("GET", "/v1/account/emails"))).getObjects("settings");
+    }
+
+    /** Turns one on or off for this key's person only, and answers all of them. Needs a key for every action. */
+    public List<JsonObject> set(String category, boolean enabled) {
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("category", category);
+      body.put("enabled", enabled);
+      return new JsonObject(t.object(new Transport.Call("POST", "/v1/account/emails:update").body(body)))
+          .getObjects("settings");
     }
   }
 

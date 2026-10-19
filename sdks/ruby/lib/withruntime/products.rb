@@ -88,10 +88,20 @@ module WithRuntime
   class Secrets < Product
     # Stores or replaces a secret for +hosts+ ("api.openai.com", "*.github.com").
     # With +header:+, that header is set on every request to them, +format:+'s
-    # {value} replaced.
-    def set(name, value:, hosts:, header: nil, format: nil)
-      body = { "value" => value, "hosts" => hosts, "header" => header, "format" => format }.compact
+    # {value} replaced. With +only:+ (<tt>{ labels: [{ role: "hub" }], sandboxes: [id] }</tt>),
+    # only those sandboxes get it instead of every sandbox of the organization: those whose
+    # labels hold every pair of any one selector, and those named by id. Left out when replacing
+    # a secret, the scope it has stays, so a new value never widens who gets it; +{}+ is every
+    # sandbox again.
+    def set(name, value:, hosts:, header: nil, format: nil, only: nil)
+      body = { "value" => value, "hosts" => hosts, "header" => header, "format" => format, "only" => only }.compact
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}", body: body))
+    end
+
+    # Changes which sandboxes get a secret, without its value: +{}+ is every sandbox of the
+    # organization again. Returns the secret, with +only+ and +enforced+.
+    def scope(name, only)
+      Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/sandboxes", body: only))
     end
 
     # Names, hosts and placeholders. Never values.
@@ -113,6 +123,21 @@ module WithRuntime
   # integer microdollars in strings.
   class Referrals < Product
     def get = Record.new(@t.json("GET", "/v1/referrals"))
+  end
+
+  # +runtime.emails+: which of Runtime's optional emails this key's person gets
+  # for this account: own-deletions (warnings for dates the account's own
+  # retention set), billing, usage and tips. Sign-in, support replies, credit
+  # expiry and deletions Runtime decides are always sent and are not listed.
+  class Emails < Product
+    def get = @t.json("GET", "/v1/account/emails")["settings"].map { |row| Record.new(row) }
+
+    # Turns one on or off for this key's person only, and answers all of them.
+    # Needs a key for every action.
+    def set(category, enabled)
+      body = { "category" => category, "enabled" => enabled }
+      @t.json("POST", "/v1/account/emails:update", body: body)["settings"].map { |row| Record.new(row) }
+    end
   end
 
   # +runtime.switching+: compare usage with a rival's published rates, and record a switch.

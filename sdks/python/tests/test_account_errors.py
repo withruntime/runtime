@@ -42,5 +42,31 @@ class AccountCloseTest(unittest.TestCase):
         self.assertTrue(hasattr(withruntime.Runtime(api_key="rk_x"), "account"))
 
 
+class AccountEmailsTest(unittest.TestCase):
+    """runtime.account.emails (0921): read the key's person's optional emails,
+    or turn one on or off."""
+
+    def test_reads_and_changes_one(self) -> None:
+        from withruntime._sync_client import Account
+
+        calls: list[tuple[Any, ...]] = []
+        settings = [{"category": "own-deletions", "enabled": False, "updatedAt": None}]
+
+        class Transport:
+            def json(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+                calls.append((method, path, kwargs))
+                return {"settings": settings}
+
+        account = Account(Transport())  # type: ignore[arg-type]
+        self.assertEqual(account.emails(), settings)
+        self.assertEqual(account.emails("own-deletions", False), settings)
+        self.assertEqual(calls, [
+            ("GET", "/v1/account/emails", {}),
+            ("POST", "/v1/account/emails:update", {"body": {"category": "own-deletions", "enabled": False}}),
+        ])
+        with self.assertRaises(ValueError):
+            account.emails("billing")
+
+
 if __name__ == "__main__":
     unittest.main()

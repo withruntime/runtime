@@ -80,3 +80,50 @@ test("`runtime account close` needs --confirm, and says the name to type", async
     expect(seen).toEqual(['POST /v1/account:close {"confirm":"Acme"}']);
   });
 });
+
+/* runtime.account.emails() and `runtime account emails` (0921): read the
+   key's person's optional emails, or turn one on or off. */
+const EMAILS = {
+  settings: [
+    { category: "own-deletions", enabled: false, updatedAt: "2026-10-18T18:20:00.000Z" },
+    { category: "billing", enabled: true, updatedAt: null },
+    { category: "usage", enabled: true, updatedAt: null },
+    { category: "tips", enabled: true, updatedAt: null },
+  ],
+};
+
+test("account.emails() reads GET /v1/account/emails, and with a change posts it", async () => {
+  await withStub(EMAILS, async (seen) => {
+    const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+    expect(await runtime.account.emails()).toEqual(EMAILS.settings as never);
+    await runtime.account.emails({ category: "own-deletions", enabled: false });
+    expect(seen).toEqual([
+      "GET /v1/account/emails",
+      'POST /v1/account/emails:update {"category":"own-deletions","enabled":false}',
+    ]);
+  });
+});
+
+test("`runtime account emails` lists them, and `<category> off` turns one off", async () => {
+  const env = { RUNTIME_API_KEY: "rk_cli", RUNTIME_API_URL: "https://api.example.test" };
+  const lines: string[] = [];
+  const out = {
+    json: false,
+    write: (t: string) => lines.push(t),
+    error: (t: string) => lines.push(t),
+  };
+  await withStub(EMAILS, async (seen) => {
+    expect(await run(["account", "emails"], env, out)).toBe(0);
+    expect(lines.join("\n")).toContain("own-deletions off");
+    expect(await run(["account", "emails", "own-deletions", "off"], env, out)).toBe(0);
+    expect(seen).toEqual([
+      "GET /v1/account/emails",
+      'POST /v1/account/emails:update {"category":"own-deletions","enabled":false}',
+    ]);
+    await expect(run(["account", "emails", "everything", "off"], env, out)).rejects.toThrow(
+      "everything",
+    );
+    await expect(run(["account", "emails", "billing"], env, out)).rejects.toThrow("on|off");
+    expect(seen).toHaveLength(2);
+  });
+});

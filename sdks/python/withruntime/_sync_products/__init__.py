@@ -1,6 +1,7 @@
 """GENERATED from _async_products/__init__.py by scripts/generate_sync.py. Do not edit."""
 from typing import Any
 
+from .agents import Agents
 from .apps import Apps, Functions
 from .audit import Audit
 from .browser import Browser
@@ -32,6 +33,7 @@ CLIENT["jobs"] = Jobs
 CLIENT["apps"] = Apps
 CLIENT["functions"] = Functions
 CLIENT["builds"] = Builds
+CLIENT["agents"] = Agents
 CLIENT["referrals"] = Referrals
 CLIENT["billing"] = Billing
 CLIENT["limits"] = Limits

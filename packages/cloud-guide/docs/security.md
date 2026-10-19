@@ -300,8 +300,10 @@ deletes it there. The value is typed once and never shown again.
 
   Each `--only-label` is one selector (`role=hub,tier=prod` needs both);
   `--only-sandbox` names a sandbox by id, up to 100. In the SDKs,
-  `only: { labels: [{ role: "hub" }], sandboxes: ["<id>"] }`; in the API and
-  MCP tool, the same `only` object. Replacing a secret's value without
+  `only: { labels: [{ role: "hub" }], sandboxes: ["<id>"] }` (a dict in Python
+  and Ruby, `Only: &withruntime.SecretScope{...}` in Go, a map in Java, passed
+  to `secrets.set` or `secrets.scope`); in the API and MCP tool, the same
+  `only` object. Replacing a secret's value without
   `only` keeps the scope it has, so a new value never reaches more sandboxes
   than the old one did; `--all-sandboxes` (`only: {}`) gives it to every
   sandbox again. `runtime secrets scope` (`PUT /v1/egress-secrets/{name}/sandboxes`,

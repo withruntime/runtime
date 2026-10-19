@@ -8,7 +8,7 @@ reach. Anything missing installs in one command, or once for every sandbox in a
 
 ## What is installed
 
-The image is Ubuntu 24.04.5 LTS (noble) for amd64, on a 6.1 kernel.
+The image is Ubuntu 24.04.5 LTS (noble) for amd64, on a 6.18 kernel.
 
 | Kind              | What                                                                                                           |
 | ----------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -21,7 +21,9 @@ The image is Ubuntu 24.04.5 LTS (noble) for amd64, on a 6.1 kernel.
 | System            | `sudo`, `adduser` and `useradd`, `chronyd`, `sshd` (for [SSH and editors](./editors)), `ip`, `iptables-legacy` |
 
 **Anything else installs the usual way:** `sudo apt-get install -y ...`,
-`pip install ...`, `npm install ...`, `uv pip install ...`. To start every
+`pip install ...`, `npm install ...`, `uv pip install ...`. A new sandbox has
+no apt package lists yet, so run `sudo apt-get update` once before the first
+`apt-get install`. To start every
 sandbox with your dependencies already there, build a [custom image](./images).
 
 - **Java, Go and Rust:** install Ubuntu's packages with `sudo apt-get install`,
@@ -338,6 +340,27 @@ docker compose up -d
   shares it.
 - To start every sandbox with Docker installed, build a custom image whose
   recipe runs it: `commands: ["enable-docker --no-start"]`.
+
+## FUSE filesystems
+
+FUSE is built into the kernel and `/dev/fuse` is in every sandbox, so sshfs,
+rclone, bindfs, s3fs, gcsfuse, squashfuse or your own FUSE program mount as
+the sandbox user, no `sudo` needed:
+
+```bash no-run
+sudo apt-get update && sudo apt-get install -y fuse3 sshfs
+mkdir -p ~/remote && sshfs me@example.com:/srv ~/remote
+fusermount3 -u ~/remote
+```
+
+- **`allow_other`** (letting other users, such as root or a container, see the
+  mount) is refused until you add `user_allow_other` to `/etc/fuse.conf`, or
+  mount with `sudo`.
+- **A bucket:** for S3, R2 or Google Cloud Storage, use
+  [Mount your own bucket](./storage#mount-your-own-bucket), which keeps the
+  key out of the sandbox.
+- **Lifetime:** a mount is a process in the sandbox. It lasts through a pause
+  and a wake, and ends when the sandbox stops.
 
 ## Time and lifetime
 

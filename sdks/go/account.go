@@ -21,6 +21,39 @@ func (s *LimitService) Get(ctx context.Context) (*KeyLimits, error) {
 	return &limits, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/limits"}, &limits)
 }
 
+// EmailSetting says whether this key's person gets one of Runtime's optional
+// emails, in this account: own-deletions (warnings for dates the account's own
+// retention set), billing, usage or tips. Sign-in, support replies, credit
+// expiry and deletions Runtime decides are always sent and are not listed.
+type EmailSetting struct {
+	Category  string  `json:"category"`
+	Enabled   bool    `json:"enabled"`
+	UpdatedAt *string `json:"updatedAt"`
+}
+
+// EmailService is client.Emails.
+type EmailService struct{ c *Client }
+
+// Get reads which optional emails this key's person gets for this account.
+func (s *EmailService) Get(ctx context.Context) ([]EmailSetting, error) {
+	var answer struct {
+		Settings []EmailSetting `json:"settings"`
+	}
+	err := s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/account/emails"}, &answer)
+	return answer.Settings, err
+}
+
+// Set turns one optional email on or off for this key's person only, and
+// answers all of them. It needs a key for every action.
+func (s *EmailService) Set(ctx context.Context, category string, enabled bool) ([]EmailSetting, error) {
+	var answer struct {
+		Settings []EmailSetting `json:"settings"`
+	}
+	err := s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/account/emails:update",
+		body: map[string]any{"category": category, "enabled": enabled}}, &answer)
+	return answer.Settings, err
+}
+
 // ReferralSummary is the account's referral link and what it earned. Money is
 // integer microdollars in strings.
 type ReferralSummary struct {

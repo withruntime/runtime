@@ -67,6 +67,8 @@ export const PRODUCT_NAMES: readonly ProductName[] = [
   { name: "jobs", title: "Jobs", engine: "machine", singular: "job", old: was("job") },
   { name: "workflows", title: "Workflows", engine: "machine", singular: "workflow", old: [] },
   { name: "builds", title: "Builds", engine: "machine", singular: "build", old: [] },
+  { name: "agents", title: "Agents", engine: "machine", singular: "agent", old: [] },
+  { name: "ci", title: "CI/CD", engine: "machine", old: [] },
   // Disk
   { name: "volumes", title: "Volumes", engine: "disk", singular: "volume", old: was("volume") },
   {
@@ -124,6 +126,7 @@ export const PRODUCT_NAMES: readonly ProductName[] = [
   { name: "usage", title: "Usage", engine: "meter", old: [] },
   { name: "billing", title: "Billing", engine: "meter", old: [] },
   { name: "metrics", title: "Metrics", engine: "meter", old: [] },
+  { name: "plans", title: "Plans", engine: "meter", singular: "plan", old: [] },
   // Database (not now: CLOUD.md section 2)
   { name: "postgres", title: "Postgres", engine: "database", old: [] },
   { name: "mysql", title: "MySQL", engine: "database", old: [] },

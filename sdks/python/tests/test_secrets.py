@@ -102,6 +102,32 @@ class SecretsTest(unittest.TestCase):
         expected = {"value": "ghp_x", "hosts": ["api.github.com"], "rules": rules}
         self.assertEqual([seen[2] for seen in Stub.seen], [expected, expected])
 
+    def test_only_and_scope_are_sent_sync_and_async(self):
+        only = {"labels": [{"role": "hub"}], "sandboxes": ["ef01c6ef-6648-450b-acd2-6fe82ac31960"]}
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.set("SLACK_APP_TOKEN", value="xapp_x", hosts=["slack.com"], only=only)
+            runtime.secrets.set("SLACK_APP_TOKEN", value="xapp_x", hosts=["slack.com"], only={})
+            runtime.secrets.set("SLACK_APP_TOKEN", value="xapp_x", hosts=["slack.com"])
+            scoped = runtime.secrets.scope("SLACK_APP_TOKEN", {"labels": [{"role": "hub"}]})
+            runtime.secrets.scope("SLACK_APP_TOKEN", {})
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                return await runtime.secrets.scope("A B", only)
+
+        self.assertTrue(asyncio.run(go())["enforced"])
+        self.assertTrue(scoped["enforced"])
+        base = {"value": "xapp_x", "hosts": ["slack.com"]}
+        path = "/v1/egress-secrets/SLACK_APP_TOKEN"
+        self.assertEqual(Stub.seen, [
+            ("PUT", path, {**base, "only": only}),
+            ("PUT", path, {**base, "only": {}}),
+            ("PUT", path, base),  # no `only`: the scope the secret has stays
+            ("PUT", f"{path}/sandboxes", {"labels": [{"role": "hub"}]}),
+            ("PUT", f"{path}/sandboxes", {}),
+            ("PUT", "/v1/egress-secrets/A%20B/sandboxes", only),
+        ])
+
 
 class UpstreamProxyStub(BaseHTTPRequestHandler):
     seen: list = []

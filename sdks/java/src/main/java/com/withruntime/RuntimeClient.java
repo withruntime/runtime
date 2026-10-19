@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.4.0";
+  public static final String VERSION = "0.5.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -32,8 +32,10 @@ public final class RuntimeClient {
   private final Snapshots snapshots;
   private final Images images;
   private final Volumes volumes;
+  private final Agents agents;
   private final Products.Secrets secrets;
   private final Products.Limits limits;
+  private final Products.Emails emails;
   private final Products.Referrals referrals;
   private final Products.Switching switching;
   private final Products.Events events;
@@ -66,8 +68,10 @@ public final class RuntimeClient {
     this.snapshots = new Snapshots(transport);
     this.images = new Images(transport);
     this.volumes = new Volumes(transport);
+    this.agents = new Agents(transport);
     this.secrets = new Products.Secrets(transport);
     this.limits = new Products.Limits(transport);
+    this.emails = new Products.Emails(transport);
     this.referrals = new Products.Referrals(transport);
     this.switching = new Products.Switching(transport);
     this.events = new Products.Events(transport);
@@ -190,6 +194,11 @@ public final class RuntimeClient {
     return volumes;
   }
 
+  /** Agents that run in sandboxes, one session per piece of work. A private beta. */
+  public Agents agents() {
+    return agents;
+  }
+
   /** Values sandboxes use on the way out without seeing them. */
   public Products.Secrets secrets() {
     return secrets;
@@ -198,6 +207,11 @@ public final class RuntimeClient {
   /** What this key may do and spend. */
   public Products.Limits limits() {
     return limits;
+  }
+
+  /** Which of Runtime's optional emails this key's person gets. */
+  public Products.Emails emails() {
+    return emails;
   }
 
   public Products.Referrals referrals() {

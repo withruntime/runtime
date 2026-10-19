@@ -23,6 +23,16 @@ from .._errors import ConflictError, InvalidRequestError, NotFoundError, Runtime
 from .jobs import switched_off
 
 
+class SecretScope(TypedDict, total=False):
+    """Which sandboxes get a secret: those whose labels hold every pair of any
+    one selector in ``labels`` (1 to 8 selectors of 1 to 8 pairs, including
+    sandboxes created or labelled later), and those named in ``sandboxes``
+    (1 to 100 ids). A secret as returned carries it as ``only``; absent means
+    every sandbox of the organization."""
+    labels: list[dict[str, str]]
+    sandboxes: list[str]
+
+
 class _RulePaths(TypedDict):
     paths: list[str]
 
@@ -109,7 +119,8 @@ class Secrets:
         return self._store("POST", "/v1/secrets", body={"name": name, "value": value}, idempotency_key=key)
 
     def set(self, name: str, *, value: str, hosts: Optional[list[str]] = None, header: Optional[str] = None,
-                  format: Optional[str] = None, rules: Optional[list[SecretRule]] = None, jobs: bool = False,
+                  format: Optional[str] = None, rules: Optional[list[SecretRule]] = None,
+                  only: Optional[SecretScope] = None, jobs: bool = False,
                   idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Store or replace a secret. ``value`` is visible ASCII and spaces, at
         most 8 KiB. ``hosts`` are names or ``*.domain``. ``header`` (with
@@ -122,6 +133,11 @@ class Secrets:
         ``/``, no ``.`` or ``..`` segments, no ``;`` or ``\\``, no encoded slash.
         Without rules, every request to the hosts; replacing a secret without
         rules clears them.
+
+        ``only`` (``{"labels": [{"role": "hub"}], "sandboxes": [id]}``) gives the
+        secret to those sandboxes instead of every sandbox of the organization.
+        Left out when replacing a secret, the scope it has stays, so a new value
+        never widens who gets it; ``{}`` is every sandbox again.
 
         ``jobs=True`` also keeps a copy scheduled jobs can use (up to 64 KiB of
         UTF-8 without ``hosts``); setting it again rotates it. With both, a jobs
@@ -139,6 +155,8 @@ class Secrets:
                 body["format"] = format
             if rules is not None:
                 body["rules"] = rules
+            if only is not None:
+                body["only"] = only
             part = f"{idempotency_key}:sandboxes"[:128] if idempotency_key and jobs else idempotency_key
             saved = self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}", body=body,
                                        idempotency_key=part)
@@ -156,6 +174,12 @@ class Secrets:
                      "is stored or rotated.",
                 details={"stored": ["sandboxes"], "field": "jobs"}) from error
         return {**(saved or {"name": name}), "jobs": copy}
+
+    def scope(self, name: str, only: SecretScope) -> dict[str, Any]:
+        """Changes which sandboxes get a secret, without its value: ``{}`` is
+        every sandbox of the organization again. Returns the secret, with
+        ``only`` and ``enforced``."""
+        return self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}/sandboxes", body=only)
 
     def list(self) -> list[dict[str, Any]]:
         """The sandboxes' secrets: names, hosts, headers and placeholders. Never

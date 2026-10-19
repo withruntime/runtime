@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -40,6 +40,8 @@ type Client struct {
 	Secrets *SecretService
 	// Limits says what this key may do and spend.
 	Limits *LimitService
+	// Emails are which of Runtime's optional emails this key's person gets.
+	Emails *EmailService
 	// Referrals is the account's referral link and what it earned.
 	Referrals *ReferralService
 	// Switching compares usage with a rival's rates and records a switch.
@@ -64,6 +66,10 @@ type Client struct {
 	Networks *NetworkService
 	SSO      *SSOService
 	MCP      *MCPService
+	// Agents runs your agents, each piece of work a session in its own
+	// sandbox (private beta: an account outside it is refused 403
+	// product_in_beta).
+	Agents *AgentService
 
 	// Deprecated: renamed IPs on 6 October 2026 (one plural word per
 	// product); the old name is the same service until a release after its
@@ -220,6 +226,7 @@ func New(options ...Option) (*Client, error) {
 	c.Volumes = &VolumeService{c: c}
 	c.Secrets = &SecretService{c: c}
 	c.Limits = &LimitService{c: c}
+	c.Emails = &EmailService{c: c}
 	c.Referrals = &ReferralService{c: c}
 	c.Switching = &SwitchingService{c: c}
 	c.Events = &EventService{c: c}
@@ -236,6 +243,7 @@ func New(options ...Option) (*Client, error) {
 	c.Tunnel = c.Networks.WireGuard
 	c.SSO = &SSOService{c: c}
 	c.MCP = &MCPService{c: c}
+	c.Agents = newAgentService(c)
 	return c, nil
 }
 

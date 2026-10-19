@@ -64,6 +64,7 @@ Account
   account switch <name|id>                     Use another of them for every command after
   account add                                  Connect another account (choose it in the browser)
   account close --confirm "<account name>"     Close the account for good (owner, key for every product)
+  account emails [<category> on|off]           Your optional emails from Runtime: own-deletions, billing, usage, tips
   audit [--action member.] [--limit 50] [--before <next>]
                                                The account's audit log (owner or admin keys)
   sso                                          Single sign-on and SCIM directory sync (owner or
@@ -3176,8 +3177,33 @@ async function accountCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out):
     );
     return 0;
   }
+  if (verb === "emails") {
+    /* 0921: which of Runtime's optional emails this key's person gets.
+       Bare, it lists them; `<category> on|off` changes one, for that person
+       only. */
+    const [category, state, ...extra] = rest;
+    const categories = ["own-deletions", "billing", "usage", "tips"] as const;
+    if (extra.length || (category && !state) || (state && state !== "on" && state !== "off"))
+      throw usage(`${me} account emails [<${categories.join("|")}> on|off]`);
+    if (category && !(categories as readonly string[]).includes(category))
+      throw unknown("email", category, [...categories]);
+    const runtime = await client(env);
+    const settings = await runtime.account.emails(
+      category
+        ? { category: category as (typeof categories)[number], enabled: state === "on" }
+        : undefined,
+    );
+    print(
+      [
+        ...settings.map((each) => `${each.category.padEnd(14)}${each.enabled ? "on" : "off"}`),
+        "Always sent: sign-in, invitations, revoked keys, support replies, credit expiry, service credits, and deletions Runtime decides.",
+      ].join("\n"),
+      { settings },
+    );
+    return 0;
+  }
   if (verb !== "ls" && verb !== "list")
-    throw unknown("account command", verb, ["ls", "switch", "add", "close"]);
+    throw unknown("account command", verb, ["ls", "switch", "add", "close", "emails"]);
   await nameSaved(env).catch(() => undefined);
   const current = await store.read().catch(() => null);
   const saved = [

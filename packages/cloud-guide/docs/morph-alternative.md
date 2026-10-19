@@ -26,7 +26,7 @@ Weighing more than two? [Morph Cloud alternatives](/compare/morph-alternatives) 
 - **CPU and memory priced apart.** One MCU covers 1 vCPU, 4 GB of memory or
   16 GB of disk, and a machine pays for whichever it needs most of. On Runtime
   you choose vCPUs and memory separately and pay for each.
-- **No plan fee.** Morph's plans with included credit cost {{term:morph:developer}} or {{term:morph:team}} a month.
+- **No plan fee.** Morph's plans with included credit cost {{term:morph:team}} or {{term:morph:scale}} a month.
   Runtime is prepaid credit from {{topup-min}}, with {{included-machine}} every month.
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
@@ -52,14 +52,14 @@ ports, dedicated outbound addresses and WireGuard private networks. See
 Morph's figures come from its public pricing and product pages, checked
 {{checked:morph}}.
 
-|                  | Runtime                                                        | Morph                                                                                        |
-| ---------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Isolation        | Firecracker microVM, own kernel                                | Full virtual machines                                                                        |
-| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:morph:unit}} per MCU-hour for the machine's size                                      |
-| Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the MCU: 4 GB per MCU                                                                 |
-| Plan fee         | None; prepaid credit from {{topup-min}}                        | Free with no credit; Developer {{term:morph:developer}} and Team {{term:morph:team}} a month |
-| Free start       | {{included-machine}} every month, no card                      | 1,000 MCUs with the {{term:morph:developer}} Developer plan                                  |
-| Snapshots, forks | Files, memory and running processes                            | Memory and disk; branches to many replicas                                                   |
+|                  | Runtime                                                        | Morph                                                                                          |
+| ---------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Isolation        | Firecracker microVM, own kernel                                | Full virtual machines                                                                          |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | {{rate:morph:unit}} per MCU-hour for the machine's size                                        |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the MCU: 4 GB per MCU                                                                   |
+| Plan fee         | None; prepaid credit from {{topup-min}}                        | Developer free with no credit; Team {{term:morph:team}} and Scale {{term:morph:scale}} a month |
+| Free start       | {{included-machine}} every month, no card                      | 1,000 MCUs with the {{term:morph:team}} Team plan                                              |
+| Snapshots, forks | Files, memory and running processes                            | Memory and disk; branches to many replicas                                                     |
 
 ## Cost for the same job
 
@@ -137,7 +137,7 @@ try {
 
 ## Sources
 
-Checked 23 September 2026.
+Checked 23 September 2026; plan names and included MCUs reread 17 October 2026.
 
 - [Morph Cloud pricing](https://cloud.morph.so/web/pricing)
 - [Morph Devboxes](https://cloud.morph.so/web/product/devboxes)

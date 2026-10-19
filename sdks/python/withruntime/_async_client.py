@@ -1980,6 +1980,22 @@ class AsyncAccount:
         made in the last 15 days is refunded on request; other credit is forfeited."""
         return await self._t.json("POST", "/v1/account:close", body={"confirm": confirm}, retry=False)
 
+    async def emails(self, category: Optional[str] = None, enabled: Optional[bool] = None) -> list[dict[str, Any]]:
+        """Which of Runtime's optional emails this key's person gets for this
+        account: ``own-deletions`` (warnings for dates the account's own
+        retention set), ``billing``, ``usage`` and ``tips``. Without arguments,
+        reads them; with ``category`` and ``enabled``, turns one on or off for
+        that person only, and answers all of them. Sign-in, support replies,
+        credit expiry and deletions Runtime decides are always sent."""
+        if category is None and enabled is None:
+            answer = await self._t.json("GET", "/v1/account/emails")
+        else:
+            if category is None or enabled is None:
+                raise ValueError("Give both category and enabled, or neither.")
+            answer = await self._t.json("POST", "/v1/account/emails:update",
+                                        body={"category": category, "enabled": enabled})
+        return answer["settings"]
+
 
 def _camel(name: str) -> str:
     special = {"memory_mib": "memoryMiB", "disk_mib": "diskMiB", "snapshot_id": "snapshot"}

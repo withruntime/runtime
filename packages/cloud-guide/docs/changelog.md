@@ -22,6 +22,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   could not add it at that moment, the sandbox now gets a
   `sandbox.secret_not_applied` event with reason `withheld`, saying the fault
   is ours and what to do. See [events](./observability#events).
+- **Secret scopes in the Python, Go, Ruby and Java SDKs.** The SDKs can now
+  give a secret to some sandboxes instead of all of them, as the JavaScript
+  SDK can: `only` on `secrets.set` (`only=` in Python and Ruby, `Only` in Go,
+  a sixth argument in Java) and `secrets.scope(name, only)` (`Scope` in Go),
+  which changes who gets an existing secret without its value. Python is
+  0.17.0, Go 0.6.0, Ruby 0.5.0 and Java 0.5.0. See
+  [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
 - **A sandbox out of memory still answers.** When a sandbox's programs fill
   its memory, Linux now ends one of them for memory, as the guide says,
   instead of the whole sandbox slowing until commands, reads and kills time
@@ -140,6 +147,10 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   end, with no exit code and no retry. It now ends `failed` with the reason
   `timeout`, keeps its exit code and output, and is retried when the job asks
   for retries. See [jobs](./jobs#what-a-run-is).
+- **FUSE filesystems.** sshfs, rclone, s3fs, gcsfuse, bindfs or your own FUSE
+  program mount in any sandbox as its own user, and a mount lasts through a
+  pause and a wake. See
+  [FUSE filesystems](./sandbox-environment#fuse-filesystems).
 
 ## 16 October 2026
 
@@ -390,7 +401,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   it failed on an `/app` only root could write. See
   [Build from a Dockerfile](./images#build-from-a-dockerfile).
 - **Morph Cloud code runs on Runtime after one import.** Change
-  `from "morphcloud"` to `from "withruntime/morph"` (`withruntime` 0.15.0):
+  `from "morphcloud"` to `from "withruntime/morph"` (`withruntime` 0.16.0):
   snapshots and their cached `setup` steps, instances, `branch`, pause and
   resume, `exec` and HTTP services run as Runtime sandboxes, snapshots and
   previews. See [Switch to Runtime](./migrate).

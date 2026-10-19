@@ -229,6 +229,36 @@ and confirm:
   anyone's are, until someone deletes them. The same holds when your
   directory suspends someone.
 
+## Emails
+
+Each person chooses which of Runtime's optional emails they get, for each
+account they are in, at Settings, Emails
+([withruntime.com/account/emails](https://withruntime.com/account/emails)).
+Turning one off stops it for you only: other owners still get theirs, and the
+account's notices (`GET /v1/notices`, Usage & billing) and webhooks still have
+every one. Each of these emails also ends with a link that stops that kind
+for you, after asking.
+
+| Setting         | What it is                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `own-deletions` | A day before a sandbox is deleted at the date its own `:retention` chose, at most once a day |
+| `billing`       | When the account's credit runs low or runs out                                               |
+| `usage`         | When the account has used 80% and all of the month's free usage                              |
+| `tips`          | A few getting-started emails in your first days                                              |
+
+Always sent, with no switch: sign-in links and invitations, a revoked key,
+replies in a support conversation, credit about to expire, service credits,
+and a warning before Runtime deletes something nothing pays for.
+
+From code, a key reads and sets its own person's, never anyone else's:
+`GET /v1/account/emails`, and `POST /v1/account/emails:update` with
+`{"category": "own-deletions", "enabled": false}`; in the CLI,
+`runtime account emails` and `runtime account emails own-deletions off`; in
+MCP, `runtime_account` action `emails` reads them. Reading them needs a key
+that reads usage, and changing them a key for every action: a read-only or
+limited key is answered 403 `forbidden` and changes nothing. A key with no
+person (a wallet account's) has none, and is answered 409 `no_person`.
+
 ## Closing the account
 
 An owner closes the account for good at

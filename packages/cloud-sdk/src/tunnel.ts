@@ -266,7 +266,7 @@ export class Tunnel {
                       message: "The sandbox has no OpenSSH server (sshd).",
                       code: "sshd_missing",
                       status: 0,
-                      hint: "Install it once: sudo apt-get install -y openssh-server",
+                      hint: "Install it once: sudo apt-get update && sudo apt-get install -y openssh-server",
                     })
                   : new RuntimeError({
                       message: `The sandbox refused the connection (${error.message}).`,

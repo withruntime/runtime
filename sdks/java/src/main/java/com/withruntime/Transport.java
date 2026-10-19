@@ -567,18 +567,30 @@ final class Transport {
   Object json(Call call) {
     take(call);
     try {
-      String text = new String(sendWhole(call), StandardCharsets.UTF_8);
-      if (text.isBlank()) return null;
-      try {
-        return Json.parse(text);
-      } catch (IllegalArgumentException error) {
-        throw new RuntimeCloudException(
-            "Unexpected answer from " + call.method + " " + call.path + ": " + error.getMessage(),
-            "unexpected_answer",
-            "Update the SDK, or report it with runtime.feedback().");
-      }
+      return parse(call, sendWhole(call));
     } finally {
       slots.release();
+    }
+  }
+
+  /**
+   * A long poll's JSON answer (null when empty). It mostly waits, so, like a stream, it holds no
+   * connection slot: a few sessions followed at once never queue the client's other calls.
+   */
+  Object poll(Call call) {
+    return parse(call, sendWhole(call));
+  }
+
+  private static Object parse(Call call, byte[] body) {
+    String text = new String(body, StandardCharsets.UTF_8);
+    if (text.isBlank()) return null;
+    try {
+      return Json.parse(text);
+    } catch (IllegalArgumentException error) {
+      throw new RuntimeCloudException(
+          "Unexpected answer from " + call.method + " " + call.path + ": " + error.getMessage(),
+          "unexpected_answer",
+          "Update the SDK, or report it with runtime.feedback().");
     }
   }
 

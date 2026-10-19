@@ -7,6 +7,17 @@ import (
 	"time"
 )
 
+// SecretScope says which sandboxes get a secret: those whose labels hold every
+// pair of any one selector in Labels (1 to 8 selectors of 1 to 8 pairs,
+// including sandboxes created or labelled later), and those named in Sandboxes
+// (1 to 100 ids of the organization). Any other sandbox sees no placeholder,
+// and its requests never carry the value. The empty scope is every sandbox of
+// the organization.
+type SecretScope struct {
+	Labels    []map[string]string `json:"labels,omitempty"`
+	Sandboxes []string            `json:"sandboxes,omitempty"`
+}
+
 // Secret is a value your sandboxes use without seeing it. Every sandbox of the
 // organization has an environment variable of the secret's name holding
 // Placeholder; the egress proxy puts the value into HTTPS requests to Hosts,
@@ -16,7 +27,9 @@ type Secret struct {
 	Hosts       []string  `json:"hosts"`
 	Header      string    `json:"header,omitempty"`
 	Format      string    `json:"format,omitempty"`
-	Placeholder string    `json:"placeholder"`
+	// Only is who gets the secret; nil is every sandbox of the organization.
+	Only        *SecretScope `json:"only,omitempty"`
+	Placeholder string       `json:"placeholder"`
 	ValueBytes  int       `json:"valueBytes"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -34,6 +47,10 @@ type SetSecretOptions struct {
 	Header string `json:"header,omitempty"`
 	// Format is the header's value, with {value} where the secret goes.
 	Format string `json:"format,omitempty"`
+	// Only gives the secret to some sandboxes instead of all of them. Nil when
+	// replacing a secret: the scope it has stays, so a new value never widens
+	// who gets it. &SecretScope{} is every sandbox of the organization again.
+	Only *SecretScope `json:"only,omitempty"`
 }
 
 // SecretService is client.Secrets.
@@ -45,6 +62,14 @@ func secretPath(name string) string { return "/v1/egress-secrets/" + url.PathEsc
 func (s *SecretService) Set(ctx context.Context, name string, opts SetSecretOptions) (*Secret, error) {
 	var secret Secret
 	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name), body: opts}, &secret)
+}
+
+// Scope changes which sandboxes get a secret, without its value:
+// &SecretScope{} is every sandbox of the organization again. Enforced is set
+// on the secret returned.
+func (s *SecretService) Scope(ctx context.Context, name string, only SecretScope) (*Secret, error) {
+	var secret Secret
+	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name) + "/sandboxes", body: only}, &secret)
 }
 
 // List returns names, hosts and placeholders. Never values.
