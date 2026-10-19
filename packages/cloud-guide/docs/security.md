@@ -108,8 +108,12 @@ may reach.
   compartment or name a new one. More keys can join it the same way.
 - A key in a compartment lists, creates, runs commands in, forks, snapshots,
   pauses, wakes and deletes the sandboxes, snapshots, images, volumes,
-  previews, ports, jobs and job secrets that its compartment's keys made, and
-  nothing else.
+  previews, ports, jobs, job secrets, Apps and Functions that its
+  compartment's keys made, and nothing else. It deploys an App or Function
+  from an image only: a deploy that names a `build` answers 403
+  `outside_compartment`, as builds and repositories do. It cannot give an
+  App or Function a name one of the account's own Apps holds: create or
+  rename answers 409 `name_taken`.
 - Anything outside its compartment answers 404 `not_found`, exactly as an id
   that does not exist. No key outside it reaches in either, read-only keys
   included, except an account-wide key, which sees everything in the account.
@@ -124,8 +128,8 @@ may reach.
   compartment is set when the key is made and never changes.
 - A key in a compartment cannot reach the account's own settings: billing,
   keys, domains, dedicated addresses, the account's networks, egress secrets,
-  registry logins, webhooks, telemetry export, the audit log, apps and
-  functions. Those answer 403 `outside_compartment`. It can read who it is with
+  registry logins, webhooks, telemetry export, the audit log, builds and
+  repositories. Those answer 403 `outside_compartment`. It can read who it is with
   `GET /v1/me`, whose `compartment` names its compartment.
 - A compartment's sandboxes are left out of the account's private network and
   its WireGuard peers. The account's egress rules, egress secrets, your own
@@ -154,7 +158,9 @@ nothing in the guest, root included, can go around it.
   suites, builds, package installs, crawlers within the limits, CI and load
   tests against your own servers do. A sandbox that crosses one loses its
   network and is paused, or stopped if it cannot pause; your inbox
-  (`GET /v1/notices`) says what was seen and what was done. An account that
+  (`GET /v1/notices`) says what was seen and what was done. It stays paused
+  or stopped, with its files kept, until support lifts it: a wake, restart, snapshot or fork of it, or a start
+  from a snapshot of it, answers `sandbox_halted` until then. An account that
   has paid is never suspended for it; an account without credit that probes internal
   addresses is. Traffic that looks like a flood, repeated attempts on the
   closed mail ports, or full CPU beside a mining pool's website is only
@@ -277,6 +283,29 @@ deletes it there. The value is typed once and never shown again.
   `--allow /v1/chat/completions` for every method; in the SDKs,
   `rules: [{ methods: ["GET"], paths: ["/repos/acme/*"] }]`. An account with
   no credit gets `payment_required` (402).
+- A secret's hosts and rules narrow without its value, from `withruntime`
+  0.22.0: `runtime secrets set NAME --keep-value` with the narrower `--host`
+  and `--allow` it keeps (`PUT /v1/egress-secrets/{name}/rules`,
+  `runtime.secrets.narrow(name, { hosts, rules })`; `narrow` in every SDK).
+  Narrower means it can go nowhere it could not before: each host is one its
+  hosts already name (`a.example.com` or `*.a.example.com` under
+  `*.example.com`), and each method and path a new rule allows is one its
+  rules allow now. A secret without rules allows every request, so any rules
+  narrow it; on an account with no credit, giving rules to one that had none
+  gets `payment_required` (402), as storing them does. Anything wider is
+  refused with `invalid_request`, saying what would widen: a new place could
+  learn the value, so widening needs the value. The audit log records it as
+  an update with `narrowed`. For example, a token that should only fetch one
+  repository over git:
+
+  ```bash no-run
+  runtime secrets set GIT_BASIC --keep-value \
+    --allow "GET /acme/app.git/info/refs" --allow "POST /acme/app.git/git-upload-pack"
+  ```
+
+  A push (`POST /acme/app.git/git-receive-pack`) then goes out with the
+  placeholder, and GitHub refuses it.
+
 - With `only`, the secret goes to some of your sandboxes instead of all of
   them: those whose labels match a selector, and those you name by id. Any
   other sandbox has no environment variable for it, and the proxy puts its
@@ -318,6 +347,11 @@ deletes it there. The value is typed once and never shown again.
   every account. An upstream proxy's credential is sent for every sandbox the
   proxy covers, whatever its scope.
 
+- A jobs secret (`--jobs`) is stored by one key and is that key's: your other
+  keys cannot use it until you share it with
+  `runtime secrets share NAME --agent <id>` (or `--all`), and you can always
+  use it yourself. A secret you store on the website stays every key's. A job
+  that binds a secret another key stored stops until that secret is shared.
 - With `secrets` on a create, the sandbox names the secrets it may use, and
   gets only those: least privilege from the sandbox's side. An agent whose
   definition needs one key gets that key and nothing else, so a prompt

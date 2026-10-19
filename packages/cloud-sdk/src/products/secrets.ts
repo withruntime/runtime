@@ -74,6 +74,10 @@ export type JobSecret = {
   name: string;
   ownerId: string;
   createdBy: string;
+  /** Agents besides `createdBy` that may use it, as `principalId`s from
+   * `runtime.me()`, or `"all"`: every key of the person. A secret stored on
+   * the website is `"all"`. */
+  usableBy: string[] | "all";
   version: number;
   createdAt: number;
   updatedAt: number;
@@ -260,6 +264,21 @@ export function secrets(t: Transport) {
         body: only,
         ...options,
       }),
+    /** Narrows where a secret goes, without its value: `hosts` a subset of
+     * its hosts, `rules` allowing only requests its rules allow now (a secret
+     * without rules allows every request). Either absent stays as it is.
+     * Anything wider is refused: widening needs the value, through `set`. */
+    narrow: (
+      name: string,
+      to: { hosts?: string[]; rules?: SecretRule[] },
+      options?: RequestOptions,
+    ) =>
+      t.json<Secret & { enforced: boolean }>({
+        method: "PUT",
+        path: `${path(name)}/rules`,
+        body: to,
+        ...options,
+      }),
     /** The sandboxes' secrets: names, hosts and placeholders. Never values.
      * `all()` includes the jobs copies. */
     list,
@@ -305,6 +324,26 @@ export function secrets(t: Transport) {
         method: "POST",
         path: `${jobPath(live.id)}:reveal`,
         body: query,
+        ...options,
+      });
+    },
+    /** Choose which of your keys may use the jobs copy besides the one that
+     * stored it: agent ids (`principalId` from `me()`), `[]` for only that
+     * key, or `"all"` for every key of yours. Replaces the list. Only your
+     * person or the key that stored it may call this. */
+    share: async (name: string, agents: string[] | "all", options?: RequestOptions) => {
+      const live = await liveCopy(name, options);
+      if (!live)
+        throw new NotFoundError({
+          message: `${name} has no copy for jobs to share.`,
+          code: "not_found",
+          status: 404,
+          hint: "Store one with set(name, { value, jobs: true }).",
+        });
+      return store<JobSecret>({
+        method: "POST",
+        path: `${jobPath(live.id)}:share`,
+        body: { agents },
         ...options,
       });
     },

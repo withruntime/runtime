@@ -81,6 +81,10 @@ Account
                                                flag one selector, any may match); --only-sandbox:
                                                only that sandbox. A new value keeps the scope;
                                                --all-sandboxes gives it to every sandbox again
+  secrets set <NAME> --keep-value [--host <host>]... [--allow '[GET] /path']...
+                                               Narrow where it goes without its value: a subset of
+                                               its hosts, only requests its rules allow now.
+                                               Anything wider needs the value
   secrets set <NAME> --jobs [--host ...]       A copy scheduled jobs put in their environment
                                                (job create --secret NAME); with --host, both
   secrets scope <NAME> --only-label k=v... | --only-sandbox <id>... | --all-sandboxes
@@ -89,6 +93,9 @@ Account
   secrets rotate <NAME>                        A new version of the jobs copy, from standard input
   secrets reveal <NAME> [--version N]          Print the jobs copy's value. The sandboxes' copy is
                                                never readable, by anyone
+  secrets share <NAME> --agent <id>... | --all | --none
+                                               Which of your keys may use the jobs copy besides the one
+                                               that stored it (ids: from 'me'); --all: every key
   secrets rm <NAME>                            Delete a secret, every copy
   keys create [--name <name>] [--read-only] [--daily-limit <usd>] [--account-wide]
                                                A new API key for CI, approved by an owner in the browser
@@ -2795,8 +2802,18 @@ export async function secretsCommand(
   const [verb, ...rest] = argv;
   const args = parse(
     rest,
-    ["jobs", "all-sandboxes"],
-    ["host", "header", "format", "allow", "value", "version", "only-label", "only-sandbox"],
+    ["jobs", "all-sandboxes", "keep-value", "all", "none"],
+    [
+      "host",
+      "header",
+      "format",
+      "allow",
+      "value",
+      "version",
+      "only-label",
+      "only-sandbox",
+      "agent",
+    ],
   );
   const print = (human: string, value: unknown) =>
     out.write(out.json ? JSON.stringify(value) : human);
@@ -2850,6 +2867,40 @@ export async function secretsCommand(
       throw usage(
         `rotate replaces the copy for jobs. ${jobsOnly}; to change the sandboxes' copy, set it again with --host.`,
       );
+    if (verb === "set" && has(args, "keep-value")) {
+      // Narrowing needs no value: it only takes places away (secrets.narrow).
+      if (
+        jobs ||
+        args.flags.has("value") ||
+        args.flags.has("header") ||
+        args.flags.has("format") ||
+        args.flags.has("only-label") ||
+        args.flags.has("only-sandbox") ||
+        args.flags.has("all-sandboxes")
+      )
+        throw usage(
+          `--keep-value changes only --host and --allow, and only to narrower ones. Change who gets it with \`${me} secrets scope\`; anything else needs the value.`,
+        );
+      const allow = args.flags.get("allow");
+      if (!hosts.length && !allow)
+        throw usage("With --keep-value, give the narrower --host and/or --allow it keeps.");
+      const saved = await (
+        await client(env)
+      ).secrets.narrow(name, {
+        ...(hosts.length ? { hosts } : {}),
+        ...(allow ? { rules: parseSecretRules(allow) } : {}),
+      });
+      print(
+        [
+          `Narrowed ${saved.name}; its value is unchanged. It goes only to ${saved.hosts.join(", ")}${saved.rules?.length ? `, only in these requests: ${ruleText(saved.rules)}` : ""}.`,
+          ...(saved.enforced
+            ? []
+            : ["A host is catching up; running sandboxes have it within a minute."]),
+        ].join("\n"),
+        saved,
+      );
+      return 0;
+    }
     if (!hosts.length && !jobs)
       throw usage(
         "Give --host once for each host the value may go to, such as --host api.openai.com, and/or --jobs to let scheduled jobs use it.",
@@ -2861,7 +2912,7 @@ export async function secretsCommand(
     const value = await read();
     if (!value)
       throw usage(
-        'The value is empty. Pipe it in: printf %s "$KEY" | runtime secrets set NAME --host ...',
+        'The value is empty. Pipe it in: printf %s "$KEY" | runtime secrets set NAME --host ...; or, to narrow its hosts and rules without it, add --keep-value.',
       );
     const runtime = await client(env);
     if (verb === "rotate") {
@@ -2938,6 +2989,24 @@ export async function secretsCommand(
     );
     return 0;
   }
+  if (verb === "share") {
+    const name = need(args.positional[0], "the secret's name");
+    const named = args.flags.get("agent") ?? [];
+    if (Number(named.length > 0) + Number(has(args, "all")) + Number(has(args, "none")) !== 1)
+      throw usage(
+        "Say who may use it: --agent <id> (once per agent), --all for every key of yours, or --none for only the key that stored it.",
+      );
+    const saved = await (await client(env)).secrets.share(name, has(args, "all") ? "all" : named);
+    print(
+      `${saved.name}: ${
+        saved.usableBy === "all"
+          ? "every key of yours"
+          : `only the key that stored it${saved.usableBy.length ? `, and ${saved.usableBy.length} named agent${saved.usableBy.length === 1 ? "" : "s"}` : ""}`
+      }.`,
+      saved,
+    );
+    return 0;
+  }
   if (verb === "reveal") {
     const name = need(args.positional[0], "the secret's name");
     const version = flag(args, "version");
@@ -2957,7 +3026,9 @@ export async function secretsCommand(
     );
     return 0;
   }
-  throw usage("secrets takes set, scope, ls, get, rotate, reveal or rm. Run `runtime help`.");
+  throw usage(
+    "secrets takes set, scope, ls, get, rotate, share, reveal or rm. Run `runtime help`.",
+  );
 }
 
 async function readInput(source: string): Promise<string> {
@@ -3134,9 +3205,11 @@ const KEYS_HELP = `runtime keys <command>
       stdout, and lasts until revoked. --json prints it as JSON, still alone on
       stdout. --account-wide makes a key that sees and uses every sandbox and
       other resource in the account; without it, a key sees only what it makes.
-  create --sandbox <id,...> --actions <action,...> [--name <name>] [--daily-limit <usd>]
-      A key limited to those sandboxes (up to 20, by id) and those actions on
-      them, made by the saved key: get reads them; create starts, wakes and
+  create --sandbox <id,...> --actions <action,...> [--name <name>] [--daily-limit <usd>] [--browser]
+      A key limited to those sandboxes (up to 20, by id, whichever key made
+      them) and those actions on them, made by the saved key, or with no saved
+      key (or --browser) approved by an owner or admin in the browser, as
+      above: get reads them; create starts, wakes and
       restarts them, and needs --daily-limit when the making key has one; stop
       stops and pauses them; exec runs commands; read_file and write_file reach
       their files. It is served nothing else: no list, no other sandbox, no
@@ -3148,6 +3221,7 @@ const KEYS_HELP = `runtime keys <command>
   runtime keys create --name worker-1 --daily-limit 5
   runtime keys create --name ci --daily-limit 25 --browser | gh secret set RUNTIME_API_KEY
   runtime keys create --name watcher --sandbox sbx_id --actions get,create --daily-limit 2
+  runtime keys create --name helper --sandbox sbx_a,sbx_b --actions get,exec,read_file,write_file --browser
 
 Making, listing and revoking keys with a key needs one an owner or admin made.
 Every key is also at https://withruntime.com/account/keys.
@@ -3433,19 +3507,19 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
 }
 
 /** `runtime keys create --sandbox ... --actions ...`: a key limited to
- * sandboxes, made by the saved key (never in the browser: the keys page
- * makes none). */
+ * sandboxes, made by the saved key, or, with no key on this machine or with
+ * --browser, asked for and approved by an owner or admin in the browser
+ * (0921): an agent whose person reaches Runtime only through a connector
+ * holds no key to make one with. */
 async function limitedKey(
   args: ReturnType<typeof parse>,
   env: NodeJS.ProcessEnv,
   out: Out,
   limit: string | null,
 ): Promise<number> {
-  for (const refused of ["read-only", "account-wide", "browser"])
+  for (const refused of ["read-only", "account-wide"])
     if (has(args, refused))
-      throw usage(
-        `A key limited to sandboxes reaches only them and is made by this machine's key, so it takes no --${refused}.`,
-      );
+      throw usage(`A key limited to sandboxes reaches only them, so it takes no --${refused}.`);
   const list = (name: string) =>
     (flag(args, name) ?? "")
       .split(",")
@@ -3457,19 +3531,32 @@ async function limitedKey(
     throw usage(
       `Usage: ${named("runtime keys create --sandbox <id,...> --actions <get,create,stop,exec,read_file,write_file> [--daily-limit <usd>]")}`,
     );
-  const { dailyLimitMicros } = await import("./keys.js");
-  const made = await (
-    await client(env)
-  ).keys.create({
+  const { createKey, dailyLimitMicros } = await import("./keys.js");
+  const request = {
     name: flag(args, "name") ?? "Sandbox key",
     sandboxes,
     actions: actions as LimitedKeyAction[],
     dailyLimitMicros: limit === null ? null : dailyLimitMicros(limit),
-  });
-  out.write(out.json ? JSON.stringify(made) : made.key);
+  };
+  const saved = has(args, "browser")
+    ? null
+    : env.RUNTIME_API_KEY || (await connectionStore(env).read())?.key || null;
+  const asked = saved
+    ? null
+    : await createKey({ ...request, access: "full" }, env, { notify: out.error });
+  const made = asked
+    ? { ...asked, sandboxes, actions }
+    : await new Runtime({
+        apiKey: saved!,
+        baseUrl: env.RUNTIME_API_URL,
+        maxRetries: 4,
+      }).keys.create(request);
+  const { confirm, ...shown } = made as typeof made & { confirm?: () => Promise<void> };
+  out.write(out.json ? JSON.stringify(shown) : shown.key);
   out.error(
-    `Created key "${made.name}", limited to ${made.sandboxes?.length === 1 ? "sandbox" : "sandboxes"} ${(made.sandboxes ?? []).join(", ")} for ${(made.actions ?? []).join(", ")}${made.dailyLimitMicros === null ? "" : `, daily limit ${usdOf(made.dailyLimitMicros)}`}, made by this machine's key. Store it now: it is not shown again.\nIt calls those sandboxes by id and nothing else; revoke it with ${named("runtime keys revoke")} ${made.keyId}.`,
+    `Created key "${shown.name}", limited to ${shown.sandboxes?.length === 1 ? "sandbox" : "sandboxes"} ${(shown.sandboxes ?? []).join(", ")} for ${(shown.actions ?? []).join(", ")}${shown.dailyLimitMicros === null ? "" : `, daily limit ${usdOf(shown.dailyLimitMicros)}`}, ${saved ? "made by this machine's key" : "approved in the browser"}. Store it now: it is not shown again.\nIt calls those sandboxes by id and nothing else; revoke it at https://withruntime.com/account/keys${saved ? ` or with ${named("runtime keys revoke")} ${shown.keyId}` : ""}.`,
   );
+  await confirm?.();
   return 0;
 }
 

@@ -112,6 +112,13 @@ module WithRuntime
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/sandboxes", body: only))
     end
 
+    # Narrows +hosts:+ and/or +rules:+ without the value; only strictly narrower
+    # ones are accepted. Widening needs the value: call +set+ again with it.
+    def narrow(name, hosts: nil, rules: nil)
+      body = { "hosts" => hosts, "rules" => rules }.compact
+      Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/rules", body: body))
+    end
+
     # Names, hosts and placeholders. Never values.
     def list = @t.json("GET", "/v1/egress-secrets")["secrets"].map { |secret| Record.new(secret) }
 

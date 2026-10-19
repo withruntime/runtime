@@ -43,6 +43,11 @@ A fine-grained token with read access to public repositories is enough. For
 other account shares can hold a
 [dedicated outbound address](/docs/networking#dedicated-outbound-addresses).
 
+Runtime can move an account whose sandboxes scrape sites to addresses kept for
+scrapers instead of the shared ones, so a site that blocks scrapers does not
+block the other accounts on the same server. Those addresses are in the same
+list, and a sandbox keeps its internet whichever it sends from.
+
 ## Connections to one site
 
 A sandbox opens up to 20 new connections a second to one site, after a burst

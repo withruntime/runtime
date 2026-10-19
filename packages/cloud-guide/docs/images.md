@@ -370,9 +370,12 @@ Spending and deletion ask for confirmation, using the permissions already
 granted to the console's agent.
 
 A build that fails in one of your steps ends with that step's output in the
-log. A build that fails on our side instead, because its build machine did not
-start or the server failed, says so in its error rather than blaming your
-Dockerfile, and we are alerted; build again in a few minutes.
+log. When the server that builds the image is busy, the build waits up to five
+minutes for room to start its build machine, and its log says it is waiting;
+that wait counts toward the build time. A build that fails on our side instead,
+because its build machine did not start or the server failed, says so in its
+error rather than blaming your Dockerfile, and we are alerted; build again in a
+few minutes.
 
 ## Limits
 

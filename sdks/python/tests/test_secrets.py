@@ -81,6 +81,23 @@ class SecretsTest(unittest.TestCase):
             ("DELETE", "/v1/egress-secrets/OPENAI_API_KEY", None),
         ])
 
+    def test_narrow_sends_only_given_fields_sync_and_async(self):
+        rules = [{"methods": ["GET"], "paths": ["/repos/acme/*"]}]
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.narrow("GITHUB_TOKEN", hosts=["api.github.com"])
+            runtime.secrets.narrow("GITHUB_TOKEN", rules=rules)
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                await runtime.secrets.narrow("GITHUB_TOKEN", hosts=["api.github.com"], rules=rules)
+
+        asyncio.run(go())
+        self.assertEqual(Stub.seen, [
+            ("PUT", "/v1/egress-secrets/GITHUB_TOKEN/rules", {"hosts": ["api.github.com"]}),
+            ("PUT", "/v1/egress-secrets/GITHUB_TOKEN/rules", {"rules": rules}),
+            ("PUT", "/v1/egress-secrets/GITHUB_TOKEN/rules", {"hosts": ["api.github.com"], "rules": rules}),
+        ])
+
     def test_async_set(self):
         async def go():
             async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
@@ -216,6 +233,67 @@ class UpstreamProxyTest(unittest.TestCase):
 
         self.assertEqual(asyncio.run(go())["url"], "https://proxy.example.com:8443")
         self.assertEqual(UpstreamProxyStub.seen[0][2], {"url": "https://proxy.example.com:8443"})
+
+
+COPY = {"id": "sec_1", "name": "HUB_KEY", "ownerId": "p", "createdBy": "agent_a", "usableBy": [], "version": 1,
+        "createdAt": 0, "updatedAt": 0, "deletedAt": None}
+
+
+class ShareStub(BaseHTTPRequestHandler):
+    seen: list = []
+
+    def log_message(self, *args):
+        pass
+
+    def answer(self, value):
+        data = json.dumps(value).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        ShareStub.seen.append((self.command, self.path, None))
+        self.answer([COPY] if self.path.startswith("/v1/secrets") else {"secrets": []})
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)))
+        ShareStub.seen.append((self.command, self.path, body))
+        self.answer({**COPY, "usableBy": body["agents"]})
+
+
+class ShareTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), ShareStub)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def setUp(self):
+        ShareStub.seen = []
+
+    def test_sync_share_replaces_who_may_use_the_jobs_copy(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            self.assertEqual(runtime.secrets.share("HUB_KEY", ["agent_b"])["usableBy"], ["agent_b"])
+            self.assertEqual(runtime.secrets.share("HUB_KEY", "all")["usableBy"], "all")
+            with self.assertRaises(NotFoundError):
+                runtime.secrets.share("MISSING", [])
+        self.assertEqual([seen[2] for seen in ShareStub.seen if seen[0] == "POST"],
+                         [{"agents": ["agent_b"]}, {"agents": "all"}])
+        self.assertEqual(ShareStub.seen[1][:2], ("POST", "/v1/secrets/sec_1:share"))
+
+    def test_async_share(self):
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                return await runtime.secrets.share("HUB_KEY", [])
+
+        self.assertEqual(asyncio.run(go())["usableBy"], [])
+        self.assertEqual(ShareStub.seen[-1], ("POST", "/v1/secrets/sec_1:share", {"agents": []}))
 
 
 if __name__ == "__main__":

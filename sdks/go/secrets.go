@@ -21,20 +21,35 @@ type SecretScope struct {
 // Secret is a value your sandboxes use without seeing it. Every sandbox of the
 // organization has an environment variable of the secret's name holding
 // Placeholder; the egress proxy puts the value into HTTPS requests to Hosts,
-// or sets Header on every such request. The value is never returned.
+// or sets Header on every such request. Rules, when present, limit it to the
+// requests a rule allows. The value is never returned.
 type Secret struct {
-	Name   string   `json:"name"`
-	Hosts  []string `json:"hosts"`
-	Header string   `json:"header,omitempty"`
-	Format string   `json:"format,omitempty"`
+	Name   string       `json:"name"`
+	Hosts  []string     `json:"hosts"`
+	Header string       `json:"header,omitempty"`
+	Format string       `json:"format,omitempty"`
+	Rules  []SecretRule `json:"rules,omitempty"`
 	// Only is who gets the secret; nil is every sandbox of the organization.
 	Only        *SecretScope `json:"only,omitempty"`
 	Placeholder string       `json:"placeholder"`
 	ValueBytes  int          `json:"valueBytes"`
 	CreatedAt   time.Time    `json:"createdAt"`
 	UpdatedAt   time.Time    `json:"updatedAt"`
-	// Enforced is set on Set and Delete: the hosts confirmed the change.
+	// Enforced is set on Set, Scope, Narrow and Delete: the hosts confirmed the change.
 	Enforced bool `json:"enforced,omitempty"`
+}
+
+// SecretRule is one kind of request a secret may ride on: Methods (every
+// method when empty) and Paths, each exact or a prefix ending in "/*".
+type SecretRule struct {
+	Methods []string `json:"methods,omitempty"`
+	Paths   []string `json:"paths"`
+}
+
+// NarrowSecretOptions are what a secret narrows to. Give Hosts, Rules or both.
+type NarrowSecretOptions struct {
+	Hosts []string     `json:"hosts,omitempty"`
+	Rules []SecretRule `json:"rules,omitempty"`
 }
 
 // SetSecretOptions are a secret's fields. Value and Hosts are required.
@@ -70,6 +85,14 @@ func (s *SecretService) Set(ctx context.Context, name string, opts SetSecretOpti
 func (s *SecretService) Scope(ctx context.Context, name string, only SecretScope) (*Secret, error) {
 	var secret Secret
 	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name) + "/sandboxes", body: only}, &secret)
+}
+
+// Narrow limits a secret's hosts and/or rules without its value. Only
+// strictly narrower ones are accepted; widening needs the value (call Set again
+// with it).
+func (s *SecretService) Narrow(ctx context.Context, name string, opts NarrowSecretOptions) (*Secret, error) {
+	var secret Secret
+	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name) + "/rules", body: opts}, &secret)
 }
 
 // List returns names, hosts and placeholders. Never values.

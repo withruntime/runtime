@@ -180,6 +180,18 @@ class AsyncSecrets:
         ``only`` and ``enforced``."""
         return await self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}/sandboxes", body=only)
 
+    async def narrow(self, name: str, *, hosts: Optional[list[str]] = None,
+            rules: Optional[list[SecretRule]] = None) -> dict[str, Any]:
+        """Narrow a secret's ``hosts`` and/or ``rules`` without its value. Only
+        strictly narrower ones are accepted; widening needs the value, so call
+        ``set`` again with it."""
+        body: dict[str, Any] = {}
+        if hosts is not None:
+            body["hosts"] = hosts
+        if rules is not None:
+            body["rules"] = rules
+        return await self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}/rules", body=body)
+
     async def list(self) -> list[dict[str, Any]]:
         """The sandboxes' secrets: names, hosts, headers and placeholders. Never
         values. ``all()`` includes the jobs copies."""
@@ -226,6 +238,17 @@ class AsyncSecrets:
                                 "back.", code="not_found", status=404)
         body: dict[str, Any] = {} if version is None else {"version": version}
         return await self._store("POST", f"/v1/secrets/{quote(live['id'], safe='')}:reveal", body=body)
+
+    async def share(self, name: str, agents: "list[str] | str") -> dict[str, Any]:
+        """Choose which of your keys may use the jobs copy besides the one that
+        stored it: agent ids (``principal_id`` from ``me()``), ``[]`` for only
+        that key, or ``"all"`` for every key of yours. Replaces the list. Only
+        your person or the key that stored it may call this."""
+        live = await self._live(name)
+        if live is None:
+            raise NotFoundError(f"{name} has no copy for jobs to share.", code="not_found", status=404,
+                                hint="Store one with set(name, value=..., jobs=True).")
+        return await self._store("POST", f"/v1/secrets/{quote(live['id'], safe='')}:share", body={"agents": agents})
 
     async def delete(self, name: str) -> dict[str, Any]:
         """Delete a secret everywhere it is kept: the sandboxes' value is erased

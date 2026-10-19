@@ -29,6 +29,12 @@ export type KeyRequest = {
   reach?: KeyReach;
   /** The most its agent may spend in any 24 hours, or null for none. */
   dailyLimitMicros: number | null;
+  /** A key limited to these sandboxes (1 to 20, by id), whichever key made
+   * them, and to `actions` on them; access is then "full" and reach is not
+   * given. Only an owner or admin approves one. Without "create" it cannot
+   * start, wake or restart them; a running one is still billed as usual. */
+  sandboxes?: string[];
+  actions?: Array<"get" | "create" | "stop" | "exec" | "read_file" | "write_file">;
 };
 export type CreatedKey = KeyRequest & {
   key: string;
@@ -121,6 +127,16 @@ export async function createKey(
       "usage",
       "A read-only key already sees the whole account, so it takes no --account-wide.",
     );
+  const limited = request.sandboxes !== undefined || request.actions !== undefined;
+  if (limited && (!request.sandboxes?.length || !request.actions?.length))
+    throw failure("usage", "A key limited to sandboxes names at least one sandbox and one action.");
+  if (limited && (request.access !== "full" || request.reach !== undefined))
+    throw failure(
+      "usage",
+      "A key limited to sandboxes reaches only them, so it takes no --read-only or --account-wide.",
+    );
+  if (limited && !request.actions!.includes("create") && request.dailyLimitMicros !== null)
+    throw failure("usage", "A key without create cannot spend, so it takes no --daily-limit.");
   const origins = connectionOrigins(env);
   const fetcher = options.fetch ?? envFetch;
   const notify = options.notify ?? ((message: string) => process.stderr.write(`${message}\n`));
@@ -181,6 +197,7 @@ export async function createKey(
     access: request.access,
     ...(request.reach === "account" ? { reach: "account" } : {}),
     dailyLimitMicros: request.dailyLimitMicros,
+    ...(limited ? { sandboxes: request.sandboxes, actions: request.actions } : {}),
     machine: options.machine ?? hostname(),
     publicKey: pair.publicKey,
   });
@@ -209,7 +226,7 @@ export async function createKey(
   const expiresAt = Math.min(started.expiresAt, Date.now() + 15 * 60_000);
 
   notify(
-    `Approve this key in your browser: ${link.href}\nCheck that the page shows code ${started.userCode}. An account owner chooses Create key.\nWaiting for the approval, up to 15 minutes. Stopping this cancels the request.`,
+    `Approve this key in your browser: ${link.href}\nCheck that the page shows code ${started.userCode}. An account ${limited ? "owner or admin" : "owner"} chooses Create key.\nWaiting for the approval, up to 15 minutes. Stopping this cancels the request.`,
   );
   if (options.interactive ?? Boolean(process.stderr.isTTY))
     await (options.openBrowser ?? browser)(link.href).catch(() =>
@@ -274,6 +291,7 @@ export async function createKey(
         access: request.access,
         reach: request.reach ?? "agent",
         dailyLimitMicros: request.dailyLimitMicros,
+        ...(limited ? { sandboxes: request.sandboxes, actions: request.actions } : {}),
         key,
         keyId: match[1]!,
         agentId: result.agentId,

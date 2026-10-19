@@ -200,6 +200,17 @@ it is going, and a secret rotated or deleted after a run started is refused to
 that run. The value is in the run's environment, so a command that prints it
 puts it in the job's logs.
 
+A jobs secret stored by an API key is that key's: other keys of yours cannot
+list, read, rotate, delete or bind it until you share it. Share it with
+`runtime secrets share NAME --agent <id>` (once per agent; an agent's id is the
+`principalId` that `runtime me` prints for its key), or with `--all` for every
+key of yours, or `--none` for only the key that stored it. You, signed in, can
+always use it. A secret stored on the website is every key's, as before. A job
+created with a secret its key may not use is refused with `secret_not_shared`.
+A job that binds a secret another key stored stops at its next run, whenever
+the job was made, until that key or you share the secret with the job's key.
+If another of your keys could reach a secret before now, rotate it.
+
 ## Commands
 
 | CLI                                 | SDK                          | What it does                                  |

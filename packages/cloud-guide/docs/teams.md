@@ -149,15 +149,51 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
 - Each key is its own agent. A worker with reach `agent` sees only its own
   sandboxes, and its spend and audit rows are its own.
 - A key made by a key with reach `agent` uses what a sandbox needs (sandboxes,
-  files, images, volumes, snapshots, previews and ports), its own usage, and
-  `/v1/keys`. The account's own settings are refused with `403 forbidden`,
+  files, images, volumes, snapshots, previews and ports), the Apps and
+  Functions its own agent made (create, list, deploy, roll back, delete), its
+  own usage, and `/v1/keys`. Another worker's App answers 404, as an id that
+  does not exist. It deploys an App or Function from an image only: a deploy
+  that names a `build` comes from the account's repositories and is refused
+  with `403 forbidden`, before any build is read. Deploy builds with a key
+  made on the website. It asks an App for at most 2 `minCopies`, 2 `spares`
+  and 20 `maxCopies`; make a larger App with a key made on the website. It
+  cannot give an App or Function a name one of the account's own Apps holds:
+  create or rename answers `409 name_taken`. The account's own settings are
+  refused with `403 forbidden`,
   whatever its person's role: closing the account, webhooks, telemetry
   exports, the audit log, credit and billing, secrets, scheduled jobs and their
-  secrets, domains and networks. Call those with a key made on the website, or
+  secrets, domains, networks, builds and repositories. Call those with a key made on the website, or
   make this key account-wide.
 - The coordinator sees each worker's spend with `runtime keys ls` or
   `GET /v1/usage?key=<keyId>`, for itself, the keys it made at any depth, and
   any key its reads already reach.
+- Workers start from the coordinator's snapshots that carry the label
+  `share: made-keys` (set it when taking the snapshot, or later with
+  `POST /v1/snapshots/{id}:update`). Only snapshots the coordinator's key took
+  itself count, not those of other keys it can reach. The label is set on
+  each snapshot itself and never copied: a sandbox started from a shared
+  snapshot, a fork's copies and kept snapshot, and a snapshot taken without
+  labels of its own all leave `share: made-keys` out, so a copy you change and snapshot
+  again is not shared unless you label it. A worker key made before this
+  feature was released (see the [changelog](./changelog)) does not reach
+  shared snapshots: make it again. Every key under the
+  coordinator, at any depth, can create a sandbox from such a snapshot, memory or disk, and do nothing
+  else with it: it does not list, read, change or delete it. A snapshot
+  without the label stays `404 snapshot_not_found` to them. So does a
+  labelled snapshot of a sandbox that named its egress secrets (`secrets` on
+  create): a copy would keep that list, and those secrets are the
+  coordinator's to reach, not the worker's. The coordinator still starts it.
+  Sharing never crosses a [compartment](./security#compartments). Revoking the
+  coordinator's key ends the sharing.
+
+  ```ts no-run
+  const snapshot = await sandbox.snapshot({ labels: { share: "made-keys" } });
+  // in a worker, with its own key:
+  const copy = await new Runtime({ apiKey: worker.key }).sandboxes.create({
+    snapshot: snapshot.id,
+  });
+  ```
+
 - Revoking stops a key within ten seconds. What its agent made keeps running
   until stopped.
 - Only a full-access key made by an owner or admin can do this. A read-only
@@ -212,6 +248,29 @@ const watcher = await runtime.keys.create({
   one when the making key has one.
 - `runtime keys ls` and `GET /v1/keys` show it with reach `sandboxes`, its
   `sandboxes` and its `actions`. It makes no keys.
+
+#### Asked for in the browser
+
+With no key on the machine, or with `--browser`, the same command asks an
+owner or admin to approve the key in the browser, as `runtime keys create`
+does for any key. Use it when the sandboxes were made by a connector such as
+ChatGPT or Claude and nobody holds a key to make one with, or to give an agent
+somewhere else a few sandboxes and nothing more:
+
+```bash no-run
+runtime keys create --name helper --sandbox <id>,<id> --actions get,exec,read_file,write_file
+```
+
+- It prints a link and a code. The approval page names each sandbox, what the
+  key can do to it, and whether it can spend; the key reaches the terminal
+  that asked, sealed to it, and is never shown anywhere else.
+- Only an owner or admin approves it, for any sandbox in the account outside
+  every compartment, whichever key made it.
+- Without `create` it cannot start, wake or restart its sandboxes, and takes
+  no daily limit: the key places no hold of its own. A running sandbox it
+  reaches is billed to its owner as usual, and commands the key runs count as
+  activity, so they keep it from pausing when idle. To bound that, give the
+  sandbox a time limit (`timeoutSeconds`) or stop it when done.
 
 ## Leaving and removing
 

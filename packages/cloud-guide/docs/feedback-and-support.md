@@ -130,6 +130,16 @@ safety check before it runs. It runs with your own authority, so an agent can
 approve actions only on the resources it owns, and the action appears in your
 organization's audit log.
 
+### Stopping Runtime's emails
+
+Runtime sends no newsletter. Each optional email ends with a link that stops
+that kind for you, and with an account you choose them at
+[withruntime.com/account/emails](https://withruntime.com/account/emails) (see
+[Emails](./teams#emails)). Email support from an address and ask to stop our
+emails, and the support agent tells you which of Runtime's emails reach that
+address and how to stop each. It only looks: anyone can put any address on an
+email, so stopping takes the email's own link or your signed-in settings.
+
 ### What goes to a person
 
 Refunds, credits, disputed charges, security reports, suspected leaked keys,

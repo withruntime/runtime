@@ -377,10 +377,12 @@ runtime secrets set SLACK_APP_TOKEN --host slack.com --only-label role=hub < tok
 runtime secrets set DEPLOY_KEY --host api.example.com --only-sandbox "${id}" < key.txt     # only that sandbox
 runtime secrets set SLACK_APP_TOKEN --host slack.com --all-sandboxes < token.txt           # every sandbox again
 runtime secrets scope SLACK_APP_TOKEN --only-label role=hub                                  # change who gets it, no value
+runtime secrets set GITHUB_TOKEN --keep-value --allow 'GET /repos/acme/app/*'               # narrow it, no value
 printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
 runtime secrets ls
 runtime secrets rotate DB_PASSWORD < new-password.txt
 runtime secrets reveal DB_PASSWORD
+runtime secrets share DB_PASSWORD --agent "${agent}"   # or --all, or --none
 runtime secrets rm OPENAI_API_KEY
 ```
 
@@ -390,7 +392,9 @@ has `OPENAI_API_KEY` set to a placeholder, and the proxy swaps in the value on
 HTTPS requests to the hosts you named. On accounts with credit, from `withruntime`
 0.7.0, `--allow` narrows that to some methods and paths, once
 per rule: `--allow /v1/chat/completions` for every method,
-`--allow 'GET,HEAD /repos/acme/*'` for two. `--only-label key=value` (once per
+`--allow 'GET,HEAD /repos/acme/*'` for two. With `--keep-value` (from 0.22.0), `set` reads no value
+and only narrows the `--host` and `--allow` an existing secret has: anything
+wider is refused, since widening needs the value. `--only-label key=value` (once per
 selector) and `--only-sandbox <id>` give it to those sandboxes alone; a new
 value keeps that scope until `--all-sandboxes`. `ls` shows names, hosts,
 placeholders, rules and which sandboxes get each, never values. See [Security](./security#secrets-sandboxes-never-see).
@@ -400,6 +404,12 @@ their run's environment, bound with `runtime jobs create --secret NAME`; give
 `--host` too and the secret goes to both. Only the jobs copy has versions
 (`rotate`) and can be read back (`reveal`, with a key allowed to reveal); the
 sandboxes' copy is never readable. `rm` deletes every copy.
+
+A jobs copy stored by an API key is that key's. Your other keys need it shared
+with `runtime secrets share NAME --agent <id>` (repeat the flag; an id is the
+`principalId` from `runtime me`), `--all` for every key of yours, or `--none`
+for only the key that stored it. It replaces the list and prints who may use it
+now. A secret stored on the website stays every key's.
 
 ## Scheduled jobs
 

@@ -38,9 +38,15 @@ nothing. The message names the limit and its number, and the error's
 ```
 
 Retrying does not help. Delete or stop something the limit counts, add credit
-if the account has none, or write to support@withruntime.com with the number
-you need: any limit below can be raised for an account, usually the same day
-([feedback and support](./feedback-and-support)).
+if the account has none, or write to support@withruntime.com with the limit
+(`details.limit`) and the number you need: any limit below can be raised for
+an account, usually the same day ([feedback and support](./feedback-and-support)).
+Raise sandboxes at once with the vCPUs, memory and disk across running
+sandboxes, so the larger count fits. A raised limit is the account's own: it
+starts at what auto top-up gives ({{auto-sandboxes}} at once, and twice the
+vCPUs, memory and disk) and replaces auto top-up's doubling, so it stays the
+same with auto top-up on or off and is never below what auto top-up would
+give. It shows on the Limits page and in `GET /v1/limits` at once.
 
 ## What an account holds and runs
 

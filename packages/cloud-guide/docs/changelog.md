@@ -10,6 +10,72 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 19 October 2026
 
+- **Workers start from their coordinator's snapshots.** A key made by a key
+  can now create a sandbox from a snapshot that its maker, or any key above
+  it, took and labelled `share: made-keys`. It can only start from it: it never lists,
+  reads, changes or deletes it, and a snapshot without the label stays out of
+  its reach. The label is never copied to sandboxes, forks or new
+  snapshots made from a shared one: set it on each snapshot you share.
+  Worker keys made before this release need to be made again to use it. A
+  `share: made-keys` label already on a snapshot was taken off, so nothing
+  became shared by itself; a `share` label of any other value is untouched.
+  A snapshot of a sandbox that named its egress secrets (`secrets`) is
+  never shared: workers get `snapshot_not_found` for it, while its owner
+  still starts it. Sharing never crosses a compartment.
+  Before, a worker key with reach `agent` was answered
+  `snapshot_not_found` for every snapshot but its own. See
+  [Run a swarm](./teams#run-a-swarm).
+- **A scraping account no longer gets other accounts blocked.** Runtime can
+  move an account whose sandboxes scrape sites to outbound addresses kept for
+  scrapers, so a site that answers it with a CAPTCHA or a ban does not block
+  the other accounts on the same server. The move reaches its running
+  sandboxes at their next connection, they keep their internet throughout, and
+  the addresses are in the same published list as the shared ones. See
+  [Shared addresses](./egress#shared-addresses-and-per-address-limits).
+- **MCP sandbox switch and resize refusals say what to do.** Through
+  MCP, switching a sandbox's image while asking to keep more than
+  `/workspace` again says what a switch keeps and how to keep everything
+  (snapshot first), and a resize sent without a restart says that a resize
+  always restarts, instead of naming only the field. See [MCP](./mcp).
+- **Jobs secrets belong to the key that stored them.** A jobs secret stored
+  by an API key can now be used only by that key, by agents you name, and by
+  you. Share it with your other keys using
+  `runtime secrets share NAME --agent <id>`, `--all` or `--none`
+  (`secrets.share` in the SDKs, `POST /v1/secrets/{id}:share`). Secrets you
+  store on the website stay every key's. A job that binds a secret another
+  key stored stops at its next run until that key or you share it; if another
+  of your keys could reach a secret before now, rotate it. A job created with
+  a secret its key may not use is refused with `secret_not_shared`. See [secrets in a job](./jobs#secrets-in-a-job).
+- **Ask support to stop our emails and get a straight answer.** Email
+  support "remove me from your list" and the support agent now tells you
+  which of Runtime's emails reach that address, if any, and how to stop each:
+  the link at the foot of each optional email, or
+  Settings, Emails in the console. It no longer
+  passes the request to a person or promises a removal. See
+  [Stopping Runtime's emails](./feedback-and-support#stopping-runtime-s-emails).
+- **Raise how many sandboxes run at once.** Ask support for a higher count
+  and it is raised for your account with the vCPUs, memory and disk to match,
+  never below what auto top-up gives, whether auto top-up is on or off. See
+  [when you meet one](./limits#when-you-meet-one).
+- **A sandbox paused for abuse stays paused until support lifts it.** When
+  the abuse checks pause or stop a sandbox for traffic only abuse makes, such
+  as reaching a cryptocurrency mining pool, a wake, restart, snapshot or fork of it
+  now answers `sandbox_halted` (403) saying why, instead of running it again. Its files are kept,
+  and your inbox says what was seen. See [Security](./security#network-access).
+- **A build on a busy server waits for room instead of failing.** When the
+  server an image builds on has no room for its build machine at that moment,
+  the build waits up to five minutes for room and then runs, and its log says
+  it is waiting. Before, it failed at once with a fault on our side and asked
+  you to build again. See [Images](./images).
+- **Narrow a secret without its value.** `runtime secrets set NAME
+--keep-value` with a narrower `--host` or `--allow` takes hosts, methods or
+  paths away from a secret you stored, with no need to have its value at hand:
+  a token that could push to a repository can be made fetch-only by anyone who
+  may write secrets. Anything wider is refused, since a new place could learn
+  the value. In the API, `PUT /v1/egress-secrets/{name}/rules`; in every SDK,
+  `secrets.narrow` (withruntime 0.22.0 for JavaScript, 0.21.0 for Python); in the console, leave the value empty
+  when you edit a secret to take hosts or rules away. The audit log records each one.
+  See [Secrets sandboxes never see](./security#secrets-sandboxes-never-see).
 - **Apps, Functions and Builds in the Go, Ruby and Java SDKs (private beta).**
   Go 0.7.0 (`client.Apps`, `client.Functions`, `client.Builds`), Ruby 0.6.0
   (`client.apps`, `client.functions`, `client.builds`) and Java 0.6.0
@@ -22,6 +88,32 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 18 October 2026
 
+- **Clear refusals instead of 500 errors on sandbox create.** A create
+  that asks for ports beyond 80 and 443 (`network.connect`) from an account
+  without a kept top-up is refused with 403 `connect_not_allowed`, saying
+  what lifts it, and a `maxTotalCostMicros` below the first minutes a paid
+  sandbox holds is refused with 400 `invalid_request` naming that field; both
+  answered 500 before. A pause sent while a sandbox is still starting, a
+  wake sent while it is pausing, and a restart sent while it is stopping now
+  wait for it instead of being refused, and a file call right after a wake
+  waits for the sandbox to listen instead of answering `guest_busy`. A
+  persistent sandbox stopped before it ever started now reads
+  `diskKept: false`, since it has no disk to restart from; it read `true`,
+  and its restart was refused. See [networking](./networking),
+  [limits](./limits) and [the API guide](./api).
+- **API key limited to chosen sandboxes, approved in the browser.** An agent
+  with no key can now ask for a key that reaches only the sandboxes it names,
+  whichever key or connector made them: `runtime keys create --sandbox <id>
+--actions get,exec`. An owner or admin approves it from a link, seeing each
+  sandbox and what the key may do. Without `create` it cannot start, wake or
+  restart them; a running one is billed as usual until its own time limit. See
+  [asked for in the browser](./teams#asked-for-in-the-browser).
+- **Snapshot starts no longer stop for CPU on one server.** A sandbox started
+  from a snapshot whose server was short of CPU for your other sandboxes used
+  to stop with `account_busy_here`. Now it starts on another server that holds
+  a checked copy of the snapshot, and stops only when none of them has room
+  (or after it has moved 3 times).
+  See [A sandbox stopped on its own](./troubleshooting#a-sandbox-stopped-on-its-own).
 - **Apps console with traffic and live releases.** Console → Apps shows each
   App as a card with its last day of requests, error rate, copies running,
   last release and this month's cost. An App's page draws its copies by
@@ -58,6 +150,21 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   could not add it at that moment, the sandbox now gets a
   `sandbox.secret_not_applied` event with reason `withheld`, saying the fault
   is ours and what to do. See [events](./observability#events).
+- **A worker's key runs its own Apps.** A key made by another key, or a key in
+  a compartment, can now create, list, deploy, roll back and delete the Apps
+  and Functions its own agent made, as it does sandboxes, over the API and
+  MCP. Another agent's App still answers 404. Such a key deploys from an
+  image only: a deploy naming a `build` answers 403 (`forbidden`, or
+  `outside_compartment` in a compartment); deploy builds with an account's
+  key. Such a key asks an App for at most 2 `minCopies`, 2 `spares` and 20
+  `maxCopies`; a larger App is made with a key made on the website. It
+  cannot give an App or Function a name one of the account's own Apps holds:
+  create or rename answers 409 `name_taken`. See
+  [Run a swarm](./teams#run-a-swarm).
+- **MCP: `runtime_apps` action `deploy` takes its `id`.** It refused its own
+  `id`, and listed no `image` or `build`, for every key; it now takes them.
+  The `runtime_apps` tool also answers a worker's or compartment's key in the
+  Apps beta, which it refused before.
 - **A pause succeeds when its server's snapshot space is full.** Saving a
   snapshot now leaves the room each server keeps for pausing the sandboxes it
   runs. When that room is short, the server makes room while the pause
@@ -92,6 +199,14 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   out. Your programs share its memory less a small reserve for the sandbox's
   own services. See
   [when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory).
+- **Upload stalled: a clear answer in 30 seconds, not a 503 after two minutes.**
+  A request whose body stops arriving for 30 seconds, such as a chunk of a
+  large upload, is now answered at once with the bytes received, where before
+  it waited about two minutes and answered `503 api_unavailable`. A body that
+  keeps arriving, however slowly, is never cut. The SDKs and the CLI get
+  `503 body_stalled` and send it again by themselves with the same key; other
+  clients get `408 request_timeout`. See
+  [errors](./api#responses-and-errors).
 - **Fetch a web page in under a second with a paused browser.** The guides
   show how to keep spare browsers paused, charged only for storage, and wake
   one per page: wake to page done measured 0.56 to 0.81 seconds. Python's
@@ -167,6 +282,14 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   `runtime keys create --sandbox <id> --actions get,create`, or `sandboxes` and
   `actions` in `POST /v1/keys` and `runtime.keys.create`. See
   [Teams](./teams#a-key-limited-to-sandboxes).
+- **.NET programs run.** Programs built on .NET 7 or later, such as `dotnet`,
+  PowerShell and GitHub's Actions runner, no longer stop as they start with
+  "File size limit exceeded". Commands in a sandbox had a file-size limit as
+  large as its disk, and .NET sizes an in-memory file at 2 TiB to map its code
+  twice. Commands now have no file-size limit, as on any Linux machine: a file
+  still cannot hold more than the disk, but sparse files and in-memory files
+  larger than it work. New sandboxes get this. See
+  [Sandbox environment](./sandbox-environment).
 - **Wake and restart wait for room.** In the JavaScript, Python, Ruby, Go and
   Java SDKs, a sandbox's `wake` and `restart` now wait for room as `create`
   does. When the sandbox's own server is full (`no_capacity`), the SDK sends

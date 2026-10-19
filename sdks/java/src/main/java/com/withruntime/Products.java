@@ -76,6 +76,17 @@ public final class Products {
           t.object(new Transport.Call("PUT", path(name) + "/sandboxes").body(only)));
     }
 
+    /**
+     * Narrows a secret's hosts and/or rules without its value (null leaves one as it is). Only
+     * strictly narrower ones are accepted; widening needs the value, so call set again with it.
+     */
+    public JsonObject narrow(String name, List<String> hosts, List<Map<String, Object>> rules) {
+      Map<String, Object> body = new LinkedHashMap<>();
+      if (hosts != null) body.put("hosts", hosts);
+      if (rules != null) body.put("rules", rules);
+      return new JsonObject(t.object(new Transport.Call("PUT", path(name) + "/rules").body(body)));
+    }
+
     /** Names, hosts and placeholders. Never values. */
     public List<JsonObject> list() {
       return new JsonObject(t.object(new Transport.Call("GET", "/v1/egress-secrets"))).getObjects("secrets");

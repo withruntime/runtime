@@ -416,7 +416,7 @@ test("`keys create --sandbox --actions` makes a key limited to those sandboxes o
     expect(written).toEqual([limited]);
     expect(notes.join("")).toContain(`limited to sandbox ${sandbox} for get, create`);
     const quiet = { json: false, write: () => undefined, error: () => undefined };
-    for (const extra of ["--account-wide", "--read-only", "--browser"])
+    for (const extra of ["--account-wide", "--read-only"])
       await expect(
         run(["keys", "create", "--sandbox", sandbox, "--actions", "get", extra], local, quiet),
         extra,
@@ -429,3 +429,118 @@ test("`keys create --sandbox --actions` makes a key limited to those sandboxes o
     await api.stop(true);
   }
 });
+
+test("a key limited to sandboxes is asked for in the browser with its sandboxes and actions, and refuses what such a key does not take", async () => {
+  const sandboxes = [randomUUID(), randomUUID()];
+  const site = website(["connected"]);
+  const { notes, options: opts } = options(site.fetcher);
+  const created = await createKey(
+    {
+      name: "Research helper",
+      access: "full",
+      dailyLimitMicros: null,
+      sandboxes,
+      actions: ["get", "exec", "read_file", "write_file"],
+    },
+    env,
+    opts,
+  );
+  expect(created).toMatchObject({
+    key,
+    sandboxes,
+    actions: ["get", "exec", "read_file", "write_file"],
+  });
+  expect(site.calls[0]!.body).toMatchObject({
+    purpose: "key",
+    access: "full",
+    dailyLimitMicros: null,
+    sandboxes,
+    actions: ["get", "exec", "read_file", "write_file"],
+  });
+  expect(site.calls[0]!.body.reach).toBeUndefined();
+  expect(notes.join("")).toContain("owner or admin");
+  const limited: KeyRequest = {
+    name: "x",
+    access: "full",
+    dailyLimitMicros: null,
+    sandboxes,
+    actions: ["get"],
+  };
+  for (const bad of [
+    { ...limited, dailyLimitMicros: 1_000_000 },
+    { ...limited, access: "read" as const },
+    { ...limited, reach: "account" as const },
+    { ...limited, sandboxes: [] },
+    { ...limited, actions: [] },
+  ]) {
+    const refused = website([]);
+    await expect(createKey(bad, env, options(refused.fetcher).options)).rejects.toMatchObject({
+      code: "usage",
+    });
+    expect(refused.calls).toHaveLength(0);
+  }
+});
+
+test("`keys create --sandbox --actions` with no key on the machine asks the browser for it", async () => {
+  const sandbox = randomUUID();
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  let publicKey = "";
+  const site: ReturnType<typeof Bun.serve> = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request): Promise<Response> {
+      const path = new URL(request.url).pathname.replace("/api/connect/", "");
+      const body = (await request.json()) as Record<string, unknown>;
+      calls.push({ path, body });
+      if (path === "start") {
+        publicKey = String(body.publicKey);
+        return Response.json({
+          deviceCode: "d".repeat(43),
+          userCode: "ABCD-EF01-2345",
+          expiresAt: Date.now() + 15 * 60_000,
+          interval: 5,
+          verificationUri: `http://127.0.0.1:${site.port}/connect?code=ABCD-EF01-2345`,
+        });
+      }
+      if (path === "token")
+        return Response.json({
+          status: "connected",
+          encryptedKey: publicEncrypt(
+            { key: publicKey, oaepHash: "sha256" },
+            Buffer.from(key),
+          ).toString("base64"),
+          connectionId: randomUUID(),
+          agentId: "agent-1",
+          orgId: "org-1",
+        });
+      return Response.json({ connected: true });
+    },
+  });
+  try {
+    const written: string[] = [];
+    const notes: string[] = [];
+    expect(
+      await run(
+        ["keys", "create", "--sandbox", sandbox, "--actions", "get,exec", "--name", "helper"],
+        {
+          RUNTIME_AUTH_URL: `http://127.0.0.1:${site.port}`,
+          RUNTIME_API_URL: `http://127.0.0.1:${site.port}`,
+        },
+        { json: false, write: (t) => written.push(t), error: (t) => notes.push(t) },
+      ),
+    ).toBe(0);
+    expect(calls.map((call) => call.path)).toEqual(["start", "token", "confirm"]);
+    expect(calls[0]!.body).toMatchObject({
+      purpose: "key",
+      agentName: "helper",
+      access: "full",
+      sandboxes: [sandbox],
+      actions: ["get", "exec"],
+    });
+    expect(written).toEqual([key]);
+    expect(notes.join("")).toContain(`limited to sandbox ${sandbox} for get, exec`);
+    expect(notes.join("")).toContain("approved in the browser");
+  } finally {
+    await site.stop(true);
+  }
+}, 20_000);

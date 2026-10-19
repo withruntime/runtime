@@ -69,6 +69,13 @@ export const PRODUCT_NAMES: readonly ProductName[] = [
   { name: "builds", title: "Builds", engine: "machine", singular: "build", old: [] },
   { name: "agents", title: "Agents", engine: "machine", singular: "agent", old: [] },
   { name: "ci", title: "CI/CD", engine: "machine", old: [] },
+  {
+    name: "actions",
+    title: "GitHub Actions runners",
+    engine: "machine",
+    singular: "runner",
+    old: [],
+  },
   // Disk
   { name: "volumes", title: "Volumes", engine: "disk", singular: "volume", old: was("volume") },
   {

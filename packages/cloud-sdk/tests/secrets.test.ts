@@ -293,3 +293,110 @@ test("`runtime secrets scope` changes who gets a secret without reading a value"
   const { out } = output();
   await expect(secretsCommand(["scope", "K"], env, out)).rejects.toThrow(/Say who gets it/);
 });
+
+const COPY = {
+  id: "sec_1",
+  name: "HUB_KEY",
+  ownerId: "p",
+  createdBy: "agent_a",
+  usableBy: [] as string[] | "all",
+  version: 1,
+  createdAt: 0,
+  updatedAt: 0,
+  deletedAt: null,
+};
+
+test("secrets.share finds the live jobs copy and replaces who may use it", async () => {
+  await withStub(
+    (request) =>
+      request.method === "GET" ? [COPY] : { ...COPY, usableBy: ["agent_b", "agent_c"] },
+    async (seen) => {
+      const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+      const shared = await runtime.secrets.share("HUB_KEY", ["agent_b", "agent_c"]);
+      expect(shared.usableBy).toEqual(["agent_b", "agent_c"]);
+      expect(seen.map((s) => s.line)).toEqual(["GET /v1/secrets", "POST /v1/secrets/sec_1:share"]);
+      expect(JSON.parse(seen[1]!.body)).toEqual({ agents: ["agent_b", "agent_c"] });
+      await runtime.secrets.share("HUB_KEY", "all");
+      expect(JSON.parse(seen[3]!.body)).toEqual({ agents: "all" });
+    },
+  );
+  await withStub(
+    () => [],
+    async () => {
+      const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+      await expect(runtime.secrets.share("NOPE", [])).rejects.toThrow(/no copy for jobs/);
+    },
+  );
+});
+
+test("`runtime secrets share` takes --agent, --all or --none, and says who may use it", async () => {
+  const answers: Array<string[] | "all"> = [[], ["a1", "a2"], "all"];
+  await withStub(
+    (request) => (request.method === "GET" ? [COPY] : { ...COPY, usableBy: answers.shift()! }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(await secretsCommand(["share", "HUB_KEY", "--none"], env, out)).toBe(0);
+      expect(JSON.parse(seen[1]!.body)).toEqual({ agents: [] });
+      expect(lines.at(-1)).toBe("HUB_KEY: only the key that stored it.");
+      expect(
+        await secretsCommand(["share", "HUB_KEY", "--agent", "a1", "--agent", "a2"], env, out),
+      ).toBe(0);
+      expect(JSON.parse(seen[3]!.body)).toEqual({ agents: ["a1", "a2"] });
+      expect(lines.at(-1)).toBe("HUB_KEY: only the key that stored it, and 2 named agents.");
+      expect(await secretsCommand(["share", "HUB_KEY", "--all"], env, out)).toBe(0);
+      expect(JSON.parse(seen[5]!.body)).toEqual({ agents: "all" });
+      expect(lines.at(-1)).toBe("HUB_KEY: every key of yours.");
+    },
+  );
+  const { out } = output();
+  await expect(secretsCommand(["share", "K"], env, out)).rejects.toThrow(/Say who may use it/);
+  await expect(secretsCommand(["share", "K", "--all", "--none"], env, out)).rejects.toThrow(
+    /Say who may use it/,
+  );
+});
+
+test("`runtime secrets set --keep-value` narrows hosts and rules without reading a value", async () => {
+  const rules = [
+    { methods: ["GET"], paths: ["/acme/repo.git/info/refs"] },
+    { methods: ["POST"], paths: ["/acme/repo.git/git-upload-pack"] },
+  ];
+  await withStub(
+    () => ({ ...SECRET, hosts: ["github.com"], rules, enforced: true }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await secretsCommand(
+          [
+            "set",
+            "GIT_BASIC",
+            "--keep-value",
+            "--allow",
+            "GET /acme/repo.git/info/refs",
+            "--allow",
+            "POST /acme/repo.git/git-upload-pack",
+          ],
+          env,
+          out,
+          () => {
+            throw new Error("narrowing reads no value");
+          },
+        ),
+      ).toBe(0);
+      expect(seen[0]!.line).toBe("PUT /v1/egress-secrets/GIT_BASIC/rules");
+      expect(JSON.parse(seen[0]!.body)).toEqual({ rules });
+      expect(lines.join("\n")).toContain("its value is unchanged. It goes only to github.com");
+      await secretsCommand(["set", "K", "--keep-value", "--host", "github.com"], env, out);
+      expect(JSON.parse(seen[1]!.body)).toEqual({ hosts: ["github.com"] });
+    },
+  );
+  const { out } = output();
+  await expect(secretsCommand(["set", "K", "--keep-value"], env, out)).rejects.toThrow(
+    /give the narrower --host and\/or --allow/,
+  );
+  await expect(
+    secretsCommand(["set", "K", "--keep-value", "--host", "a.io", "--header", "x"], env, out),
+  ).rejects.toThrow(/only --host and --allow/);
+  await expect(
+    secretsCommand(["set", "K", "--host", "a.io"], env, out, async () => ""),
+  ).rejects.toThrow(/add --keep-value/);
+});
