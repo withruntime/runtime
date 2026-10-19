@@ -10,10 +10,42 @@ module WithRuntime
   end
 
   # One entry of a session's log: +seq+, +kind+ (input, answer, reply, ask,
-  # status, result, error or note), +actor+, +body+ and +created_at+. +text+
-  # is its words, +body.text+.
+  # status, result, error, note, or child: a child session's end, posted into
+  # its parent's log), +actor+, +body+ and +created_at+. +text+ is its words,
+  # +body.text+.
   class AgentEvent < Record
     def text = self["body"].is_a?(Hash) ? self["body"]["text"] : nil
+  end
+
+  # A session as the API answers it. Times are ISO 8601 strings.
+  #
+  # +id+, +agent_id+, +agent_version+, +key+, +trigger+ (api, slack, github,
+  # schedule, webhook, or spawn: a child its parent's harness started),
+  # +state+ (queued, running, waiting, done, failed or stopped), +reason+
+  # (why it ended; among others "budget", "parent_ended", and "deleted" on a
+  # deleted record), +result+, +sandbox_id+, +last_seq+, +labels+,
+  # +created_at+, +started_at+, +ended_at+.
+  #
+  # Its tree: +parent_session_id+ (nil for a top session), +root_session_id+
+  # (itself for a top session) and +depth+ (0 to 3). Its use: +cost+ (this
+  # session's so far) and +tree_cost+ (it and every session under it), each
+  # an AgentCost. Its storage: +history_bytes+ (its log, kept until the
+  # session is deleted) and +attachment_bytes+ (its files and screenshots).
+  # +stop_why+ is why a stop was asked ("stopped", "budget" or
+  # "parent_ended") or nil, and +deleted_at+ is set once its history was
+  # deleted (+sessions.delete+).
+  class AgentSessionInfo < Record
+    def cost = AgentCost.new(self["cost"])
+    def tree_cost = AgentCost.new(self["treeCost"])
+    def deleted? = !self["deletedAt"].nil?
+  end
+
+  # What a session, or its tree, has used: +dollars+, +vcpu_seconds+ and
+  # +gib_seconds+ (0 when not given).
+  class AgentCost < Record
+    def dollars = self["dollars"] || 0
+    def vcpu_seconds = self["vcpuSeconds"] || 0
+    def gib_seconds = self["gibSeconds"] || 0
   end
 
   # +runtime.agents+: agents that run in their own sandbox per session, started
@@ -28,14 +60,18 @@ module WithRuntime
   #
   # A definition is a Hash, by snake_case keyword (+memory_mib:+) or by the
   # API's own key ("memoryMiB"): +command+ (required), +from+ ({ image: } or
-  # { snapshot: }), +vcpu+ and +memory_mib+ (4 vCPU and 8 GiB unless set),
-  # +instructions+, +env+, +secrets+ (names of egress secrets: model keys go
-  # here), +mcp+ ([{ name:, url: }]), +volumes+ ([{ volume:, path: }]),
-  # +idle_pause_seconds+, +max_session_seconds+, +max_concurrent+,
-  # +max_session_dollars+ (5 unless set: a session at it stops, reason
-  # "budget"), +max_day_dollars+ (100 unless set: an agent at it starts nothing
-  # new, ConflictError +budget_reached+, until the next day) and +template+
-  # ("support" or "team").
+  # { snapshot: }), +vcpu+ and +memory_mib+ (4 vCPU and 8 GiB unless set; a
+  # definition from a snapshot takes neither, InvalidRequestError, since a
+  # snapshot keeps its own size), +instructions+, +env+, +secrets+ (names of
+  # egress secrets: model keys go here), +mcp+ ([{ name:, url: }]), +volumes+
+  # ([{ volume:, path: }]), +idle_pause_seconds+, +max_session_seconds+,
+  # +max_concurrent+, +max_session_dollars+ (more than 0, at most 10000, 5
+  # unless set: the session and every session under it, the root's covering
+  # its tree; a tree at it stops, reason "budget"), +max_day_dollars+ (more
+  # than 0, at most 100000, 100 unless set: the agent's sessions started that
+  # UTC day; an agent at it starts nothing new, ConflictError
+  # +budget_reached+, until the next day) and +template+ ("support" or
+  # "team").
   class Agents < Product
     attr_reader :sessions, :triggers, :templates
 
@@ -99,37 +135,42 @@ module WithRuntime
       AgentSession.new(@t, info, joined: false, seq: info["lastSeq"])
     end
 
-    # Deletes an ended session and its history; until then it is kept,
-    # counted as storage. An open session is refused +session_open+
-    # (ConflictError): stop it first.
+    # Deletes an ended session's history: its log, and every log under it in
+    # its tree. Until then the history is kept, counted as storage. The
+    # session is kept as a deleted record: +get+ still reads it, with
+    # +deleted_at+ set, +reason+ "deleted", +key+ and +result+ cleared and its
+    # cost kept (a delete never frees budget), and its log reads empty. An
+    # open session or tree is refused +session_open+ (ConflictError): stop it
+    # first.
     def delete(id) = @t.json("DELETE", "/v1/agents/sessions/#{seg(id)}") && nil
 
-    # The first page of sessions, as records; +each+ walks every page.
-    # +agent+ is an id or a name; +state+ is queued, running, waiting, done,
-    # failed or stopped; at most +limit+ a page.
-    def list(agent: nil, state: nil, cursor: nil, limit: nil)
-      sessions_page({ "agent" => agent, "state" => state, "limit" => limit }, cursor)
+    # The first page of sessions, as AgentSessionInfo records; +each+ walks
+    # every page. +agent+ is an id or a name; +state+ is queued, running,
+    # waiting, done, failed or stopped; +parent+ (a session's id) lists its
+    # direct children; +root+ (a top session's id) its whole tree, the root
+    # included; +deleted: true+ includes deleted records, hidden otherwise; at
+    # most +limit+ a page.
+    def list(agent: nil, state: nil, parent: nil, root: nil, deleted: nil, cursor: nil, limit: nil)
+      query = { "agent" => agent, "state" => state, "parent" => parent, "root" => root, "deleted" => deleted, "limit" => limit }
+      sessions_page(query, cursor)
     end
 
     private
 
     def sessions_page(query, cursor)
       body = @t.json("GET", "/v1/agents/sessions", query: query.merge("cursor" => cursor))
-      Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| sessions_page(query, after) }
+      Page.new(body["data"].map { |item| AgentSessionInfo.new(item) }, body["nextCursor"]) { |after| sessions_page(query, after) }
     end
   end
 
-  # A session of an agent. +info+ is its latest record: +state+ (queued,
-  # running, waiting, done, failed or stopped), +reason+, +result+,
-  # +last_seq+ and the rest; once the API sends them, +parent_session_id+ and
-  # +root_session_id+ (a child session's parent and its tree's root), +cost+
-  # ({ dollars, vcpuSeconds, gibSeconds } so far), +tree_cost+ (its children's
-  # summed in), +history_bytes+ (text history, counted as storage) and
-  # +attachment_bytes+ (files and screenshots, counted as storage), each nil
-  # until then; history is kept until the session is deleted
-  # (+sessions.delete+). +joined+ is whether +start+
-  # joined an open session with the same key, and +seq+ the number of the
-  # words it sent.
+  # A session of an agent. +info+ is its latest record, an AgentSessionInfo:
+  # +state+ (queued, running, waiting, done, failed or stopped), +reason+,
+  # +result+, +last_seq+, its tree (+parent_session_id+, +root_session_id+,
+  # +depth+), its use (+cost+, +tree_cost+), its storage (+history_bytes+,
+  # +attachment_bytes+), +stop_why+, +deleted_at+ and the rest; history is
+  # kept until the session is deleted (+sessions.delete+). +joined+ is
+  # whether +start+ joined an open session with the same key, and +seq+ the
+  # number of the words it sent.
   class AgentSession
     ENDED = %w[done failed stopped].freeze
     # How long the API holds an events read open, and the margin past it a
@@ -141,7 +182,7 @@ module WithRuntime
 
     def initialize(transport, info, joined: false, seq: nil)
       @t = transport
-      @info = Record.new(info)
+      @info = AgentSessionInfo.new(info)
       @joined = joined
       @seq = seq
     end
@@ -153,9 +194,14 @@ module WithRuntime
 
     # Reads the session again.
     def refresh(timeout: nil)
-      @info = Record.new(@t.json("GET", path, timeout: timeout))
+      @info = AgentSessionInfo.new(@t.json("GET", path, timeout: timeout))
       self
     end
+
+    # The first page of its direct children, the sessions its harness started
+    # (+trigger+ "spawn"), newest first; +each+ walks every page.
+    # +sessions.list(root:)+ reads a whole tree.
+    def children(cursor: nil, limit: nil) = AgentSessions.new(@t).list(parent: id, cursor: cursor, limit: limit)
 
     # Sends words into a running or waiting session and answers their seq.
     # The idempotency key, made here when not given, means a retried send is
@@ -192,7 +238,7 @@ module WithRuntime
     # Asks the session to stop and keeps the answer. A running session ends
     # once its sandbox is deleted; this does not wait for that (+wait+ does).
     def stop
-      @info = Record.new(@t.json("POST", path("/stop"), body: {}))
+      @info = AgentSessionInfo.new(@t.json("POST", path("/stop"), body: {}))
     end
 
     # The session once it has ended (done, failed or stopped); a failed

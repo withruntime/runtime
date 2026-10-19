@@ -37,6 +37,15 @@ public final class AgentSession {
     return "/v1/agents/sessions/" + Transport.segment(id) + suffix;
   }
 
+  /**
+   * The first page of its direct children, the sessions its harness started (trigger spawn), newest
+   * first. A page walks every one; {@code sessions().list(new ListAgentSessions().root(id))} reads
+   * a whole tree.
+   */
+  public Page<AgentSessionInfo> children() {
+    return new Agents.Sessions(t).list(new ListAgentSessions().parent(id));
+  }
+
   public String id() {
     return id;
   }

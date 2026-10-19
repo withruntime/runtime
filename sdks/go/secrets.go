@@ -23,16 +23,16 @@ type SecretScope struct {
 // Placeholder; the egress proxy puts the value into HTTPS requests to Hosts,
 // or sets Header on every such request. The value is never returned.
 type Secret struct {
-	Name        string    `json:"name"`
-	Hosts       []string  `json:"hosts"`
-	Header      string    `json:"header,omitempty"`
-	Format      string    `json:"format,omitempty"`
+	Name   string   `json:"name"`
+	Hosts  []string `json:"hosts"`
+	Header string   `json:"header,omitempty"`
+	Format string   `json:"format,omitempty"`
 	// Only is who gets the secret; nil is every sandbox of the organization.
 	Only        *SecretScope `json:"only,omitempty"`
 	Placeholder string       `json:"placeholder"`
-	ValueBytes  int       `json:"valueBytes"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ValueBytes  int          `json:"valueBytes"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
 	// Enforced is set on Set and Delete: the hosts confirmed the change.
 	Enforced bool `json:"enforced,omitempty"`
 }

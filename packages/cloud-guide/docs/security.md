@@ -318,6 +318,43 @@ deletes it there. The value is typed once and never shown again.
   every account. An upstream proxy's credential is sent for every sandbox the
   proxy covers, whatever its scope.
 
+- With `secrets` on a create, the sandbox names the secrets it may use, and
+  gets only those: least privilege from the sandbox's side. An agent whose
+  definition needs one key gets that key and nothing else, so a prompt
+  injection cannot send your deploy key anywhere, even to a host the deploy
+  key allows. It narrows each secret's `only` and never widens it: a secret
+  scoped away from the sandbox stays away, whatever the list says. `[]` is
+  none; leave it out for every secret that reaches the sandbox, as before.
+
+  ```bash no-run
+  runtime sandboxes create --secret ANTHROPIC_API_KEY
+  runtime sandboxes create --no-secrets          # no secret at all
+  ```
+
+  ```ts check
+  import { Sandbox } from "withruntime";
+
+  await using agent = await Sandbox.create({ secrets: ["ANTHROPIC_API_KEY"] });
+  console.log(agent.info.secrets); // ["ANTHROPIC_API_KEY"]
+  ```
+
+  In the API and the `runtime_sandboxes_create` MCP tool, `"secrets":
+["ANTHROPIC_API_KEY"]`; in Python, Go, Java and Ruby, the create's
+  `secrets` option. At most 64 names. A sandbox outside a secret's list has
+  no environment variable for it, and the proxy puts the value into none of
+  its requests, even with the placeholder copied in by hand. A name you have
+  not stored yet is allowed, and takes effect once you store that secret.
+  The list is fixed for the sandbox's life: an update cannot change it. A
+  fork, and a copy of a snapshot, keeps its source's list and may only narrow
+  it (`secrets` on the fork); a wider one is refused. The answer's `secrets` is the list as
+  stored, read back; a sandbox whose list cannot be confirmed is stopped before
+  anything runs in it, and the create answers `secrets_unconfirmed` (500):
+  create it again. `getOrCreate` with
+  `secrets` refuses (`secrets_mismatch`) a sandbox already holding the name
+  that may use more than it asks. Reading a sandbox shows its list as
+  `secrets` (`null` when it names none). Each server holds the list before
+  the sandbox's first request.
+
 - The value is sealed to the servers' key when you store it. No API, tool or
   command returns it, and a sandbox never holds it: not in its environment, its
   memory or its disk, so a prompt injection or a stolen sandbox cannot leak it.

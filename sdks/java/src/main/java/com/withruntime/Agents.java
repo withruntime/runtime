@@ -140,8 +140,11 @@ public final class Agents {
     }
 
     /**
-     * Deletes an ended session and its history; until then it is kept, counted as storage. An open
-     * session is refused with a Conflict, session_open: stop it first.
+     * Deletes an ended session's history: its log, and every log under it in its tree. Until then
+     * the history is kept, counted as storage. The session is kept as a deleted record: {@link
+     * #get} still reads it, with deletedAt set, reason deleted, key and result cleared and its cost
+     * kept (a delete never frees budget), and its log reads empty. An open session or tree is
+     * refused with a Conflict, session_open: stop it first.
      */
     public void delete(String id) {
       t.json(new Transport.Call("DELETE", AgentSession.path(id, "")));
@@ -160,12 +163,28 @@ public final class Agents {
       return Page.read(t, call(agent, state, cursor, limit), AgentSessionInfo::new, next -> call(agent, state, next, limit));
     }
 
+    /**
+     * The first page of sessions these filters find, newest first: by agent and state, a session's
+     * direct children ({@link ListAgentSessions#parent}), a whole tree ({@link
+     * ListAgentSessions#root}), and deleted records too ({@link ListAgentSessions#includeDeleted}).
+     */
+    public Page<AgentSessionInfo> list(ListAgentSessions filter) {
+      return Page.read(t, call(filter, filter.cursor), AgentSessionInfo::new, next -> call(filter, next));
+    }
+
     private static Transport.Call call(String agent, String state, String cursor, Integer limit) {
+      return call(new ListAgentSessions().agent(agent).state(state).limit(limit), cursor);
+    }
+
+    private static Transport.Call call(ListAgentSessions filter, String cursor) {
       return new Transport.Call("GET", "/v1/agents/sessions")
-          .query("agent", agent)
-          .query("state", state)
+          .query("agent", filter.agent)
+          .query("state", filter.state)
+          .query("parent", filter.parent)
+          .query("root", filter.root)
+          .query("deleted", filter.includeDeleted ? "true" : null)
           .query("cursor", cursor)
-          .query("limit", limit);
+          .query("limit", filter.limit);
     }
   }
 

@@ -57,6 +57,9 @@ const expected: Record<string, string> = {
   "withruntime/ports": "ports",
   "withruntime/ips": "ips",
   "withruntime/networks": "networks",
+  "withruntime/agents": "agents",
+  "withruntime/containers": "containers",
+  "withruntime/builds": "builds",
 };
 
 test("engines asks for the Node that require(esm) needs", () => {

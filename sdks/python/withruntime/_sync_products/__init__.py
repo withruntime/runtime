@@ -6,6 +6,7 @@ from .apps import Apps, Functions
 from .audit import Audit
 from .browser import Browser
 from .builds import Builds
+from .containers import Containers
 from .desktop import Desktop
 from .images import Images
 from .jobs import Jobs
@@ -33,6 +34,7 @@ CLIENT["jobs"] = Jobs
 CLIENT["apps"] = Apps
 CLIENT["functions"] = Functions
 CLIENT["builds"] = Builds
+CLIENT["containers"] = Containers
 CLIENT["agents"] = Agents
 CLIENT["referrals"] = Referrals
 CLIENT["billing"] = Billing

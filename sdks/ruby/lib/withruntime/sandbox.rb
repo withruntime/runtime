@@ -25,6 +25,12 @@ module WithRuntime
     # room, the create raises +no_capacity+ and nothing is made or charged.
     # +sbx.info.placement+ is an opaque tag for its server: the same tag means
     # the same server.
+    #
+    # +secrets: [name, ...]+ is the egress secrets this sandbox may use, by
+    # name: only those of your egress secrets that would otherwise reach it.
+    # +[]+ is none; leave it out for every secret that reaches it. Fixed for
+    # the sandbox's life; a copy of a snapshot may only narrow its source's
+    # list. +sbx.info.secrets+ reads it back, nil for every secret.
     def create(wait: true, idempotency_key: nil, wait_for_capacity: nil, **fields)
       room = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
       info = @t.json("POST", "/v1/sandboxes", body: Fields.body(fields), wait: wait ? 60 : 0,
@@ -208,8 +214,14 @@ module WithRuntime
     # run. One copy without +count+; an array with it. If a copy fails, the
     # error's +details["startedSandboxIds"]+ names the copies that did start.
     # +funding+ is accepted and ignored: copies run on free usage first, then credit.
-    def fork(count: nil, name: nil, labels: nil, keep_snapshot: nil, funding: nil, idempotency_key: nil)
-      body = Fields.body(count: count, name: name, labels: labels, keep_snapshot: keep_snapshot)
+    # +secrets: [name, ...]+ is the egress secrets the copies may use, by name:
+    # only those of your egress secrets that would otherwise reach them. +[]+
+    # is none; leave it out to keep this sandbox's list. Fixed for the copies'
+    # life; it may only narrow this sandbox's list.
+    def fork(count: nil, name: nil, labels: nil, keep_snapshot: nil, funding: nil, secrets: nil,
+             idempotency_key: nil)
+      body = Fields.body(count: count, name: name, labels: labels, keep_snapshot: keep_snapshot,
+                         secrets: secrets&.to_a)
       reply = @t.json("POST", path(":fork"), body: body, wait: 60, key: idempotency_key)
       copies = reply["sandboxes"].map { |info| Sandbox.new(@t, info) }
       count.nil? ? copies.first : copies

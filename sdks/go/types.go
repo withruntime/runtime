@@ -63,6 +63,10 @@ type SandboxInfo struct {
 	// are on the same server. It is never the server's name, and other
 	// accounts see unrelated tags. Nil before it is placed.
 	Placement *string `json:"placement"`
+	// Secrets is the egress secrets this sandbox may use, by name, fixed at
+	// its creation. Nil is every secret that reaches it; a list page leaves
+	// it out, so it is nil there too.
+	Secrets *[]string `json:"secrets"`
 	// Reused is true when GetOrCreate answered a sandbox that already had
 	// the name.
 	Reused bool `json:"reused"`
@@ -161,6 +165,13 @@ type CreateOptions struct {
 	// starts only where that snapshot is kept, so Snapshot with SpreadFrom
 	// naming its server also fails with no_capacity.
 	SpreadFrom []string `json:"spreadFrom,omitempty"`
+
+	// Secrets is the egress secrets this sandbox may use, by name: only
+	// those of your egress secrets that would otherwise reach it, at most 64.
+	// &[]string{} is none; leave it nil for every secret that reaches it.
+	// Fixed for the sandbox's life; a copy of a snapshot may only narrow its
+	// source's list.
+	Secrets *[]string `json:"secrets,omitempty"`
 
 	// IdempotencyKey: leave it empty and the client makes one per call and
 	// keeps it across its own retries. Pass your own only to retry a create

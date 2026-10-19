@@ -200,3 +200,70 @@ test("sandbox create sends spreadFrom in the request body", async () => {
   expect((calls[0]!.body as { spreadFrom: string[] }).spreadFrom).toEqual(["sbx_a", "sbx_b"]);
   expect(made.info.placement).toBe("pl_3f9a0c1b2d4e5f60");
 });
+
+/** A transport that answers every call with a running sandbox whose secrets
+ * are `secrets`, and a fork with one such copy. */
+function secretsTransport(calls: Call[], secrets: string[] | null) {
+  return {
+    waitForCapacityMs: 0,
+    json: async (call: Call) => {
+      calls.push(call);
+      const info = { id: "fixture", state: "running", secrets };
+      return call.path.endsWith(":fork") ? { sandboxes: [{ ...info, id: "copy" }] } : info;
+    },
+  } as unknown as Transport;
+}
+
+test("sandbox create sends secrets when given, [] when empty, and nothing when absent", async () => {
+  const given: Call[] = [];
+  const made = await new Sandboxes(secretsTransport(given, ["ANTHROPIC_API_KEY"])).create({
+    secrets: ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
+  });
+  expect((given[0]!.body as { secrets: string[] }).secrets).toEqual([
+    "ANTHROPIC_API_KEY",
+    "GITHUB_TOKEN",
+  ]);
+  expect(made.info.secrets).toEqual(["ANTHROPIC_API_KEY"]);
+
+  // [] is none, not "leave it out": it must reach the API as an empty array.
+  const none: Call[] = [];
+  const closed = await new Sandboxes(secretsTransport(none, [])).create({ secrets: [] });
+  expect(none[0]!.body).toHaveProperty("secrets", []);
+  expect(JSON.stringify(none[0]!.body)).toContain('"secrets":[]');
+  expect(closed.info.secrets).toEqual([]);
+
+  const absent: Call[] = [];
+  const open = await new Sandboxes(secretsTransport(absent, null)).create({});
+  expect(absent[0]!.body).not.toHaveProperty("secrets");
+  expect(open.info.secrets).toBeNull();
+});
+
+test("getOrCreate sends secrets with the name", async () => {
+  const calls: Call[] = [];
+  await new Sandboxes(secretsTransport(calls, ["ANTHROPIC_API_KEY"])).getOrCreate("agent", {
+    secrets: ["ANTHROPIC_API_KEY"],
+  });
+  expect(calls[0]!.body).toMatchObject({
+    name: "agent",
+    getOrCreate: true,
+    secrets: ["ANTHROPIC_API_KEY"],
+  });
+});
+
+test("fork sends secrets to narrow the copies, [] included, and leaves it out when absent", async () => {
+  for (const [secrets, sent] of [
+    [["ANTHROPIC_API_KEY"], ["ANTHROPIC_API_KEY"]],
+    [[], []],
+    [undefined, undefined],
+  ] as const) {
+    const calls: Call[] = [];
+    const sandboxes = new Sandboxes(secretsTransport(calls, ["ANTHROPIC_API_KEY"]));
+    const source = await sandboxes.get("fixture");
+    const copy = await source.fork(secrets === undefined ? {} : { secrets: [...secrets] });
+    const fork = calls.find((call) => call.path === "/v1/sandboxes/fixture:fork")!;
+    expect(fork.method).toBe("POST");
+    if (sent === undefined) expect(fork.body).not.toHaveProperty("secrets");
+    else expect(fork.body).toHaveProperty("secrets", [...sent]);
+    expect(copy.info.secrets).toEqual(["ANTHROPIC_API_KEY"]);
+  }
+});

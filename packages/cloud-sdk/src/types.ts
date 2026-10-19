@@ -62,6 +62,12 @@ export type SandboxInfo = {
   /** The names of its own environment variables (`env`), on a create, an
    * update and a read of one sandbox. Values are never shown. */
   envNames?: string[];
+  /** The egress secrets this sandbox may use, by name: only those of your
+   * egress secrets that would otherwise reach it. Null is every secret that
+   * reaches it. Fixed for the sandbox's life; a fork or a copy of a snapshot
+   * may only narrow its source's list. On a create, an update, a fork and a
+   * read of one sandbox; absent from list pages and older servers. */
+  secrets?: string[] | null;
   /** On an update with labels by a key that may read secrets, when one of
    * the account's egress secrets is scoped: true once every server running its sandboxes holds the change,
    * so the next request uses the new scope; false while one has not
@@ -103,6 +109,11 @@ export type CreateSandbox = {
    * `env`. At most 32 variables and 32 KiB. Values are never shown again;
    * answers list only `envNames`. Copies made by fork() keep them. */
   env?: Record<string, string>;
+  /** The egress secrets this sandbox may use, by name: only those of your
+   * egress secrets that would otherwise reach it. [] is none; leave it out
+   * for every secret that reaches it. Fixed for the sandbox's life; a fork or
+   * a copy of a snapshot may only narrow its source's list. At most 64. */
+  secrets?: string[];
   /** Omit to use the free usage while it lasts, then prepaid credit. */
   funding?: "trial" | "paid";
   region?: string;

@@ -141,6 +141,10 @@ sandbox is running (`--no-wait` returns at once). Its options:
   a secret is in no command line ([shared keys](./security#a-secret-your-sandbox-checks-on-requests-it-receives))
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
   `--connect <host:port>`
+- `--secret NAME` (repeatable) lets it use only the egress secrets you name,
+  of those that would otherwise reach it; `--no-secrets` gives it none.
+  Without either it gets every one that reaches it. Fixed for its life: `fork`
+  takes the same two options, and may only narrow the list. `get` shows it
 - `--idle-pause <seconds>` pauses it after that long with nothing happening in
   it (default {{idle-pause-seconds}}; {{idle-pause-min}} to {{idle-pause-max}}, or 0 for never), and `--no-auto-wake` keeps a
   paused one paused until `wake`
@@ -455,6 +459,7 @@ vol=$(runtime volumes create --size-mib 10240 --name cache)
 id=$(runtime sandboxes create --image "${img}" --volume "${vol}:/data")
 base=$(runtime sandboxes create --image "${img}")
 runtime sandboxes fork "${base}" --count 3              # three running copies of it
+runtime sandboxes fork "${base}" --no-secrets           # a copy with none of its egress secrets
 snap=$(runtime sandboxes snapshot "${base}" --name ready)
 runtime sandboxes create --snapshot "${snap}"           # a copy, any time later
 other=$(runtime sandboxes create --spread-from "${base}")   # starts on a server "${base}" is not on

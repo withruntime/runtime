@@ -119,6 +119,16 @@ public final class CreateSandbox extends Params<CreateSandbox> {
     return set("spreadFrom", new ArrayList<>(ids));
   }
 
+  /**
+   * The egress secrets this sandbox may use, by name: only those of your egress secrets that would
+   * otherwise reach it, at most 64. An empty list is none; leave it unset (or pass null) for every
+   * secret that reaches it. Fixed for the sandbox's life; a copy of a snapshot may only narrow its
+   * source's list.
+   */
+  public CreateSandbox secrets(List<String> names) {
+    return set("secrets", names == null ? null : new ArrayList<>(names));
+  }
+
   /** Attaches a volume: mode "rw" (one sandbox at a time) or a read-only "snapshot" copy. */
   @SuppressWarnings("unchecked")
   public CreateSandbox volume(String volumeId, String path, String mode) {

@@ -152,6 +152,36 @@ and one kept as long as you have credit, posts none. Every paused sandbox with a
 end date gets a warning a day before its saved state is deleted. Its
 storage is still charged from the moment it paused, as above.
 
+<!-- launch: agents -->
+
+## Agents
+
+An agent's session runs in a sandbox of its own, billed as any sandbox:
+{{cpu-rate}} per active vCPU-hour and {{memory-rate}} per reserved GiB-hour of
+memory while it runs, and [paused storage](#paused-storage) while it waits for
+words. There is no session fee and no seat; your model provider bills your key.
+
+A session's history and files are storage, counted with your saved copies:
+they share the free {{free-saved-copies}} a month ([free usage](./included-usage)),
+are billed past it at {{paused-storage-rate}} per decimal GB per 30-day month,
+and are kept until you delete them. Each session says its size.
+
+Each agent has caps, on by default: $5 a session, every session under it
+included, and $100 a day ([budgets](./agents#budgets)).
+
+<!-- /launch: agents -->
+
+<!-- launch: containers -->
+
+## Containers
+
+A container is billed as a sandbox of its size, at the sandbox rates:
+**{{cpu-rate}} per active vCPU-hour** and **{{memory-rate}} per reserved
+GiB-hour of memory**, while it runs. Containers have no price of their own. Containers need credit on the account
+([Containers](./containers)).
+
+<!-- /launch: containers -->
+
 ## Snapshots, images and volumes
 
 Storage has been charged since 23 September 2026. An item made before then is
@@ -208,6 +238,20 @@ Storage is paid an hour at a time from your balance. The hold covers the most
 the item can be charged for that hour; the charge is what it used, and the rest
 is released. Each hour settles within a minute of its end, usually seconds, and
 is in the [usage export](./api#export-settled-usage) from then.
+
+<!-- launch: builds -->
+
+## Builds
+
+A build runs on a builder, a sandbox of 8 vCPUs and 8 GiB in your account,
+at the sandbox rates: **{{cpu-rate}} per active vCPU-hour** and
+**{{memory-rate}} per reserved GiB-hour of memory**, while it runs. Builds
+have no price of their own. A 70-second build costs at most
+{{=$4 8 * 70 / 3600 * cpu-rate + 8 * 70 / 3600 * memory-rate}}, all 8 vCPUs
+busy throughout. A warm builder and a build's saved server are snapshots,
+charged at the [snapshot rate](#snapshots-images-and-volumes). Builds need
+credit on the account ([Builds](./builds)).
+<!-- /launch: builds -->
 
 ## Network products
 

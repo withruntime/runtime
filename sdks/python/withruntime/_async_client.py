@@ -463,7 +463,7 @@ _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
     "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "persistent", "max_total_cost_micros",
     "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "volumes",
-    "env", "tailscale",
+    "env", "tailscale", "secrets",
 )
 
 
@@ -1744,13 +1744,18 @@ class AsyncSandbox(AsyncMachine):
 
     async def fork(self, count: Optional[int] = None, *, name: Optional[str] = None,
                    labels: Optional[dict[str, str]] = None, keep_snapshot: Optional[bool] = None,
-                   funding: Optional[str] = None, idempotency_key: Optional[str] = None) -> Any:
+                   funding: Optional[str] = None, secrets: Optional[list[str]] = None,
+                   idempotency_key: Optional[str] = None) -> Any:
         """Copies of this sandbox as it is now (files, memory, running processes),
         answered once they run. A running sandbox is paused for the moment its
         snapshot takes, then woken. One Sandbox without ``count``; a list with it.
         ``funding`` is accepted and ignored: copies run on free usage first,
-        then credit."""
-        body = {"count": count, "name": name, "labels": labels, "keepSnapshot": keep_snapshot}
+        then credit. ``secrets`` is the egress secrets the copies may use, by
+        name: only those of your egress secrets that would otherwise reach them.
+        [] is none; leave it out to keep this sandbox's list. Fixed for the
+        copies' life; it may only narrow this sandbox's list."""
+        body = {"count": count, "name": name, "labels": labels, "keepSnapshot": keep_snapshot,
+                "secrets": None if secrets is None else list(secrets)}
         reply = await self._t.json("POST", self._path(":fork"), body={k: v for k, v in body.items() if v is not None},
                                    wait=60, idempotency_key=idempotency_key)
         sandboxes = [AsyncSandbox(self._t, info) for info in reply["sandboxes"]]
@@ -1781,7 +1786,12 @@ class AsyncMachines(Generic[_M]):
         out for none: it runs while it works and pauses when idle), on_lease_end ("pause", "stop" or "delete"),
         max_cost_micros, network={"internet": True, "deny": [...]}, and
         image, snapshot, spread_from (one to 16 ids of your own sandboxes or snapshots: it
-        starts on a server none of them is on, or the create raises ``no_capacity``), volumes and the rest of _CREATE_FIELDS; a misspelled one
+        starts on a server none of them is on, or the create raises ``no_capacity``), volumes,
+        secrets (the egress secrets this sandbox may use, by name: only those of your egress
+        secrets that would otherwise reach it. [] is none; leave it out for every secret that
+        reaches it. Fixed for the sandbox's life; a copy of a snapshot may only narrow its
+        source's list. ``sbx.info.get("secrets")`` reads it back, None for every secret)
+        and the rest of _CREATE_FIELDS; a misspelled one
         raises TypeError, naming the one meant).
         When every slot without credit or the account's quota is taken, it waits for one
         to free, up to ``wait_for_capacity`` seconds (the client's, 120 by

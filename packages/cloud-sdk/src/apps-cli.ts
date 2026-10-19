@@ -19,11 +19,18 @@ import {
   type ConnectRepository,
   type Repository,
 } from "./products/builds.js";
+import {
+  containers,
+  type Container,
+  type ContainerState,
+  type CreateContainer,
+  type UpdateContainer,
+} from "./products/containers.js";
 
-/* `runtime apps` and `runtime builds`, kept out of cli.ts as cli-extras.ts
-   is. Both are in a private beta: a key outside it is refused
-   product_in_beta, said in the server's words and hint (cli-words.ts),
-   never as a stack. */
+/* `runtime apps`, `runtime builds` and `runtime containers`, kept out of
+   cli.ts as cli-extras.ts is. All three are in a private beta: a key outside
+   it is refused product_in_beta, said in the server's words and hint
+   (cli-words.ts), never as a stack. */
 
 type Out = { json: boolean; write: (text: string) => void; error: (text: string) => void };
 type Args = ReturnType<CliKit["parse"]>;
@@ -98,6 +105,35 @@ Examples
   runtime builds repos connect acme/web --deploy web --start "npm start"
   runtime builds run <repoId> --ref main
   runtime builds ls --commit $(git rev-parse HEAD)
+`;
+
+export const CONTAINER_HELP = `runtime containers <command>
+
+  A container runs one OCI image's process on its own microVM, billed at the
+  sandbox rates. It never sleeps unless --sleep; on exit it restarts when it
+  serves a port, else it stops (--on-exit sets either).
+  In a private beta: outside it, each command says how to ask to join.
+
+  create <image> --vcpu <1-16> --memory <128-65536> [--name <name>] [--label key=value]...
+         [--env KEY[=VALUE]]... [--entrypoint <program>] [--workdir /app] [--user <user>]
+         [--port <1-65535>] [--on-exit restart|stop] [--sleep] [-- <command...>]
+                                              Run it; prints its id. The image's digest is pinned.
+                                              --env KEY alone sends KEY's value from your environment.
+                                              --entrypoint drops the image's command; after --, the
+                                              command replaces the image's
+  ls [--all] [--state <state>]... [--label key=value]...
+                                              Your containers: all but deleting and deleted, unless
+                                              --all or --state
+  get <container>                             One container, in full (an id or its name): its
+                                              environment's names, never their values
+  update <container> [--name <name>] [--label key=value]...
+                                              Rename it or replace its labels
+  rm <container> [--wait]                     Delete it and stop its process; --wait: until deleted
+
+Examples
+  runtime containers create nginx:1.27 --vcpu 1 --memory 512 --name web
+  runtime containers create python:3.12 --vcpu 1 --memory 1024 -- python3 -m http.server 8000
+  runtime containers rm web --wait
 `;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -668,4 +704,170 @@ export async function buildsCommand(
     "cancel",
     "logs",
   ]);
+}
+
+const CONTAINER_STATES: readonly ContainerState[] = [
+  "waiting",
+  "running",
+  "sleeping",
+  "stopped",
+  "failed",
+  "deleting",
+  "deleted",
+];
+const CONTAINER_VALUES = [
+  "vcpu",
+  "memory",
+  "name",
+  "label",
+  "env",
+  "entrypoint",
+  "workdir",
+  "user",
+  "port",
+  "on-exit",
+];
+
+export async function containersCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  out: Out,
+  client: () => Promise<Runtime>,
+  kit: CliKit,
+): Promise<number> {
+  const { parse, flag, has, integer, need, pairs, envPairs, table, usage } = kit;
+  const [verb, ...rest] = argv;
+  const print = (human: string, value: unknown) =>
+    out.write(out.json ? JSON.stringify(value) : human);
+  if (!verb || verb === "help" || verb === "--help") {
+    print(named(CONTAINER_HELP), { usage: named(CONTAINER_HELP) });
+    return 0;
+  }
+  const api = containers((await client()).transport);
+  /** A container's id from its id or its name: a name is looked up among the
+   * containers not deleted, and must be one container's alone. */
+  const idOf = async (target: string | undefined) => {
+    const given = need(target, "a container's id or name");
+    if (UUID.test(given)) return given;
+    const found = (await api.list({ name: given })).data;
+    if (found.length === 1) return found[0]!.id;
+    throw usage(
+      found.length
+        ? `${found.length} containers are named ${given}; give one's id (${me} containers ls).`
+        : `No container is named ${given}. Your containers: ${me} containers ls`,
+    );
+  };
+  switch (verb) {
+    case "create": {
+      const args = parse(rest, ["sleep"], CONTAINER_VALUES);
+      if (args.positional.length !== 1)
+        throw usage(
+          `Give one image: ${me} containers create nginx:1.27 --vcpu 1 --memory 512 [-- <command...>]`,
+        );
+      const image = args.positional[0]!;
+      const vcpu = integer(args, "vcpu");
+      const memoryMiB = integer(args, "memory");
+      if (vcpu === undefined || memoryMiB === undefined)
+        throw usage(
+          `Give --vcpu and --memory: ${me} containers create ${image} --vcpu 1 --memory 512`,
+        );
+      const onExit = flag(args, "on-exit");
+      if (onExit !== undefined && onExit !== "restart" && onExit !== "stop")
+        throw usage("--on-exit takes restart or stop.");
+      const port = integer(args, "port");
+      const entrypoint = flag(args, "entrypoint");
+      const workingDir = flag(args, "workdir");
+      const user = flag(args, "user");
+      const name = flag(args, "name");
+      const input: CreateContainer = {
+        image,
+        vcpu,
+        memoryMiB,
+        ...(name === undefined ? {} : { name }),
+        ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
+        ...(args.flags.has("env") ? { env: envPairs(args, env) } : {}),
+        ...(entrypoint === undefined ? {} : { entrypoint: [entrypoint] }),
+        ...(args.rest?.length ? { command: args.rest } : {}),
+        ...(workingDir === undefined ? {} : { workingDir }),
+        ...(user === undefined ? {} : { user }),
+        ...(port === undefined ? {} : { port }),
+        ...(onExit === undefined ? {} : { onExit }),
+        ...(has(args, "sleep") ? { sleep: true } : {}),
+      };
+      const made = await api.create(input);
+      if (!out.json)
+        out.error(
+          `${made.name ?? made.id} is ${made.state}, running ${made.image}. Read it: ${me} containers get ${made.name ?? made.id}`,
+        );
+      print(made.id, made);
+      return 0;
+    }
+    case "ls":
+    case "list": {
+      const args = parse(rest, ["all"], ["state", "label"]);
+      const states = args.flags.get("state");
+      for (const state of states ?? [])
+        if (!CONTAINER_STATES.includes(state as ContainerState))
+          throw usage(`--state takes ${CONTAINER_STATES.join(", ")}.`);
+      // --label key=value, as the list's key:value filters.
+      const labels = Object.entries(pairs(args, "label")).map(([k, v]) => `${k}:${v}`);
+      const all = await (
+        await api.list({
+          limit: 100,
+          ...(states
+            ? { state: states as ContainerState[] }
+            : has(args, "all")
+              ? { state: CONTAINER_STATES }
+              : {}),
+          ...(labels.length ? { label: labels } : {}),
+        })
+      ).toArray(Infinity);
+      print(
+        all.length
+          ? table([
+              ["ID", "NAME", "STATE", "IMAGE", "PORT", "SIZE", "CREATED"],
+              ...all.map((c: Container) => [
+                c.id,
+                c.name ?? "-",
+                c.state,
+                c.image,
+                c.port === null ? "-" : String(c.port),
+                `${c.vcpu} vCPU, ${c.memoryMiB} MiB`,
+                when(c.createdAt),
+              ]),
+            ])
+          : `No containers. Run one: ${me} containers create nginx:1.27 --vcpu 1 --memory 512`,
+        all,
+      );
+      return 0;
+    }
+    case "get": {
+      const found = await api.get(await idOf(rest[0]));
+      print(JSON.stringify(found, null, 2), found);
+      return 0;
+    }
+    case "update": {
+      const args = parse(rest, [], ["name", "label"]);
+      const id = await idOf(args.positional[0]);
+      const change: UpdateContainer = {
+        ...(flag(args, "name") === undefined ? {} : { name: flag(args, "name")! }),
+        ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
+      };
+      if (!Object.keys(change).length)
+        throw usage(
+          `Give --name or --label: ${me} containers update ${args.positional[0]} --name web`,
+        );
+      const updated = await api.update(id, change);
+      print(`${updated.name ?? updated.id} updated.`, updated);
+      return 0;
+    }
+    case "rm":
+    case "delete": {
+      const args = parse(rest, ["wait"], []);
+      const gone = await api.delete(await idOf(args.positional[0]), { wait: has(args, "wait") });
+      print(`${gone.name ?? gone.id} ${gone.state}.`, gone);
+      return 0;
+    }
+  }
+  throw kit.unknown("containers command", verb, ["create", "ls", "get", "update", "rm"]);
 }

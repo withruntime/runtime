@@ -16,6 +16,7 @@ from withruntime import RuntimeError as RuntimeAPIError
 
 AGENT_ID = "11111111-1111-4111-8111-111111111111"
 SESSION_ID = "22222222-2222-4222-8222-222222222222"
+CHILD_ID = "44444444-4444-4444-8444-444444444444"
 TRIGGER_ID = "33333333-3333-4333-8333-333333333333"
 AGENT = {"id": AGENT_ID, "name": "dev", "version": 1, "definition": {"command": "run"}, "labels": {},
          "createdAt": "2026-10-18T00:00:00Z", "updatedAt": "2026-10-18T00:00:00Z"}
@@ -28,7 +29,17 @@ GUIDE = Path(__file__).resolve().parents[3] / "packages" / "cloud-guide" / "agen
 def session(state="running", last_seq=1):
     return {"id": SESSION_ID, "agentId": AGENT_ID, "agentVersion": 1, "key": None, "trigger": "api",
             "state": state, "reason": None, "result": None, "sandboxId": None, "lastSeq": last_seq,
-            "labels": {}, "createdAt": "2026-10-18T00:00:00Z", "startedAt": None, "endedAt": None}
+            "labels": {}, "createdAt": "2026-10-18T00:00:00Z", "startedAt": None, "endedAt": None,
+            "parentSessionId": None, "rootSessionId": SESSION_ID, "depth": 0,
+            "cost": {"dollars": 0.25, "vcpuSeconds": 120, "gibSeconds": 240},
+            "treeCost": {"dollars": 0.75, "vcpuSeconds": 360, "gibSeconds": 720},
+            "historyBytes": 2048, "attachmentBytes": 4096, "stopWhy": None, "deletedAt": None}
+
+
+def child(**fields):
+    """A session its parent's harness started, as the API answers it."""
+    return {**session("done", 4), "id": CHILD_ID, "trigger": "spawn", "parentSessionId": SESSION_ID, "depth": 1,
+            **fields}
 
 
 def event(seq, kind="reply", text="hi"):
@@ -58,6 +69,8 @@ class Stub(BaseHTTPRequestHandler):
     # session the next of these states. The last of each repeats.
     pages: list = []
     states: list = []
+    # When set, what a read of one session answers.
+    record = None
 
     def log_message(self, *args):
         pass
@@ -98,6 +111,8 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer(session("stopped"))
         if path == f"/v1/agents/sessions/{SESSION_ID}" and method == "DELETE":
             return self.answer(None, 204)
+        if path == f"/v1/agents/sessions/{SESSION_ID}" and Stub.record is not None:
+            return self.answer(Stub.record)
         if path == f"/v1/agents/sessions/{SESSION_ID}":
             state = Stub.states.pop(0) if len(Stub.states) > 1 else (Stub.states or ["running"])[0]
             return self.answer(session(state, 3))
@@ -134,6 +149,7 @@ class AgentsTest(unittest.TestCase):
 
     def setUp(self):
         Stub.seen, Stub.mode, Stub.pages, Stub.states = [], "ok", [{"data": [], "ended": True}], []
+        Stub.record = None
 
     def client(self):
         return Runtime(api_key="rk_test", base_url=self.url, max_retries=2)
@@ -188,6 +204,54 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(Stub.seen[5][2], {"agent": ["dev"], "state": ["running"]})
         self.assertEqual(Stub.seen[6][2], {"agent": ["dev"], "state": ["running"], "cursor": ["page-2"]})
         self.assertTrue(all(s[4] for s in Stub.seen if s[0] != "GET"))
+
+    def test_children_and_tree_lists_read_by_parent_root_and_deleted(self):
+        with self.client() as runtime:
+            handle = runtime.agents.sessions.get(SESSION_ID)
+            children = handle.children(limit=5)
+            self.assertTrue(children.has_more)
+            self.assertEqual([s["id"] for s in children], [SESSION_ID, "second"])
+            self.assertEqual(len(list(runtime.agents.sessions.list(root=SESSION_ID, deleted=True))), 2)
+            runtime.agents.sessions.list(parent=SESSION_ID, state="done", deleted=False)
+        reads = [s[2] for s in Stub.seen if s[1] == "/v1/agents/sessions"]
+        self.assertEqual(reads, [
+            {"parent": [SESSION_ID], "limit": ["5"]}, {"parent": [SESSION_ID], "limit": ["5"], "cursor": ["page-2"]},
+            {"root": [SESSION_ID], "deleted": ["true"]}, {"root": [SESSION_ID], "deleted": ["true"], "cursor": ["page-2"]},
+            {"parent": [SESSION_ID], "state": ["done"], "deleted": ["false"]}])
+        # A spawn is the harness's own call: no SDK method sends one.
+        self.assertFalse(any(s[1].endswith("/spawn") for s in Stub.seen))
+        self.assertFalse(hasattr(handle, "spawn"))
+
+    def test_a_sessions_tree_cost_and_storage_read_as_the_api_sends_them(self):
+        Stub.record = child(reason="budget", stopWhy="budget")
+        with self.client() as runtime:
+            found = runtime.agents.sessions.get(SESSION_ID).session
+        self.assertEqual((found["trigger"], found["parentSessionId"], found["rootSessionId"], found["depth"]),
+                         ("spawn", SESSION_ID, SESSION_ID, 1))
+        self.assertEqual((found["reason"], found["stopWhy"]), ("budget", "budget"))
+        self.assertEqual(found["cost"], {"dollars": 0.25, "vcpuSeconds": 120, "gibSeconds": 240})
+        self.assertEqual(found["treeCost"]["dollars"], 0.75)
+        self.assertEqual((found["historyBytes"], found["attachmentBytes"]), (2048, 4096))
+        self.assertIsNone(found["deletedAt"])
+
+    def test_a_deleted_session_is_kept_as_a_record_with_an_empty_log(self):
+        Stub.record = {**session("done", 4), "reason": "deleted", "key": None, "result": None,
+                       "deletedAt": "2026-10-19T00:00:00Z"}
+        with self.client() as runtime:
+            self.assertIsNone(runtime.agents.sessions.delete(SESSION_ID))
+            kept = runtime.agents.sessions.get(SESSION_ID)
+            self.assertEqual(list(kept.events()), [])
+        self.assertEqual((kept.session["reason"], kept.session["deletedAt"]), ("deleted", "2026-10-19T00:00:00Z"))
+        self.assertEqual(kept.session["cost"]["dollars"], 0.25)
+        base = f"/v1/agents/sessions/{SESSION_ID}"
+        self.assertEqual(self.routes(), [("DELETE", base), ("GET", base), ("GET", f"{base}/events")])
+
+    def test_a_childs_end_reads_in_its_parents_log(self):
+        Stub.pages = [{"data": [event(5, "child", "done: https://github.com/acme/web/pull/8")], "ended": True},
+                      {"data": [], "ended": True}]
+        with self.client() as runtime:
+            events = list(runtime.agents.sessions.get(SESSION_ID).events(after=4))
+        self.assertEqual([(e["seq"], e["kind"]) for e in events], [(5, "child")])
 
     def test_events_long_poll_from_after_and_drain_the_log_once_it_ended(self):
         Stub.pages = [
@@ -297,11 +361,14 @@ class AgentsTest(unittest.TestCase):
                 ended = await handle.wait()
                 triggers = await runtime.agents.triggers.list("dev")
                 sessions = await (await runtime.agents.sessions.list()).to_list()
-                return ids, seq, events, ended, triggers, sessions
+                children = await (await handle.children()).to_list()
+                return ids, seq, events, ended, triggers, sessions + children
         ids, seq, events, ended, triggers, sessions = asyncio.run(go())
         self.assertEqual(ids, [AGENT_ID, "second"])
         self.assertEqual((seq, events, ended["state"]), (7, [1, 2], "done"))
-        self.assertEqual((len(triggers), len(sessions)), (1, 2))
+        self.assertEqual((len(triggers), len(sessions)), (1, 4))
+        self.assertEqual([s[2] for s in Stub.seen if s[1] == "/v1/agents/sessions"][2:],
+                         [{"parent": [SESSION_ID]}, {"parent": [SESSION_ID], "cursor": ["page-2"]}])
         self.assertEqual(Stub.seen[0][3]["definition"]["template"], "team")
 
 

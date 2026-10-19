@@ -38,6 +38,13 @@ promise that another product is available.
   sandboxes started from it run there too. It is also copied off that server,
   so it survives losing it ([storage and backups](./storage)).
 - A sandbox with volumes cannot be snapshotted.
+- A snapshot or a fork of a running sandbox usually holds its memory as it was
+  when the request arrived: the sandbox stops at once and stays stopped until
+  its memory is written to disk, then runs again. Several snapshots and forks
+  on one server at once take their turns at the disk while their sandboxes are
+  stopped. A sandbox whose time limit or funded time ends soon, on a busy
+  server, keeps running until its turn at the disk instead, and stops then:
+  its snapshot, or its fork's copies, hold that later moment.
 - To install dependencies once and start many sandboxes from them, build a
   [custom image](./javascript#custom-images) and create each sandbox from it.
 

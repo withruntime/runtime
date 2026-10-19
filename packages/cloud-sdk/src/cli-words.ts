@@ -30,6 +30,7 @@ const OPTIONS: Record<string, { flag: string; micros?: true }> = {
   image: { flag: "--image" },
   snapshot: { flag: "--snapshot" },
   spreadFrom: { flag: "--spread-from" },
+  secrets: { flag: "--secret / --no-secrets" },
   volumes: { flag: "--volume" },
   network: { flag: "--allow / --deny / --connect / --no-internet" },
   maxCostMicros: { flag: "--max-cost", micros: true },

@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.7.0"
+const Version = "0.9.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -77,6 +77,9 @@ type Client struct {
 	Functions *AppService
 	// Builds builds connected repositories. Private beta.
 	Builds *BuildService
+	// Containers run one OCI image's process each on its own microVM, at
+	// the sandbox rates. Private beta.
+	Containers *ContainerService
 
 	// Deprecated: renamed IPs on 6 October 2026 (one plural word per
 	// product); the old name is the same service until a release after its
@@ -254,6 +257,7 @@ func New(options ...Option) (*Client, error) {
 	c.Apps = &AppService{c: c, base: "/v1/apps", apps: true}
 	c.Functions = &AppService{c: c, base: "/v1/functions"}
 	c.Builds = &BuildService{c: c, Repositories: &RepositoryService{c: c}}
+	c.Containers = &ContainerService{c: c}
 	return c, nil
 }
 

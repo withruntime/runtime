@@ -1,6 +1,7 @@
 package com.withruntime;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /** A sandbox as the API answers it. Money is integer microdollars (1,000,000 = $1). */
@@ -116,6 +117,14 @@ public final class SandboxInfo extends JsonObject {
    */
   public String placement() {
     return getString("placement");
+  }
+
+  /**
+   * The egress secrets this sandbox may use, by name, fixed at its creation. Null is every secret
+   * that reaches it; a list page leaves it out, so it is null there too.
+   */
+  public List<String> secrets() {
+    return has("secrets") ? getStrings("secrets") : null;
   }
 
   /** getOrCreate answered a sandbox that already had the name. */

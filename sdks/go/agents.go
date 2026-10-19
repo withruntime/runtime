@@ -43,16 +43,18 @@ func newAgentService(c *Client) *AgentService {
 
 // AgentDefinition is what an agent runs: Command is required, every other
 // field optional (the API fills in 4 vCPU, 8192 MiB, a 60 s idle pause, a day
-// per session, 10 sessions at once, $5 a session and $100 a day). A change
-// makes a new version, which only later sessions use.
+// per session, 10 sessions at once, $5 a session's tree and $100 a day). A
+// change makes a new version, which only later sessions use.
 type AgentDefinition struct {
 	// Command starts the harness in the sandbox.
 	Command string `json:"command,omitempty"`
 	// From is the image or snapshot the sandbox starts from.
 	From *AgentFrom `json:"from,omitempty"`
-	// VCPU is 1, 2, 4, 8 or 16.
+	// VCPU is 1, 2, 4, 8 or 16 (4 unless set). A definition From a snapshot
+	// takes no VCPU or MemoryMiB (400 invalid_request): a snapshot keeps its
+	// own size.
 	VCPU int `json:"vcpu,omitempty"`
-	// MemoryMiB is 512 to 65536, a multiple of 256.
+	// MemoryMiB is 512 to 65536, a multiple of 256 (8192 unless set).
 	MemoryMiB int `json:"memoryMiB,omitempty"`
 	// Instructions are the agent's own words to the harness.
 	Instructions string            `json:"instructions,omitempty"`
@@ -69,11 +71,13 @@ type AgentDefinition struct {
 	MaxSessionSeconds int `json:"maxSessionSeconds,omitempty"`
 	// MaxConcurrent is how many of its sessions may run at once (1 to 1000).
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
-	// MaxSessionDollars stops a session (reason "budget") once it has cost
-	// this much, its child sessions included (default 5).
+	// MaxSessionDollars caps a session and every session under it (more
+	// than 0, at most 10000, default 5); the root's covers its whole tree. A
+	// tree at it stops (reason "budget") and spawns no more children.
 	MaxSessionDollars float64 `json:"maxSessionDollars,omitempty"`
-	// MaxDayDollars is the agent's spend a day: past it, it starts nothing
-	// new (409 budget_reached) until the next day (default 100).
+	// MaxDayDollars caps the agent's sessions started that UTC day (more
+	// than 0, at most 100000, default 100): past it, it starts nothing new
+	// (409 budget_reached, errors.Is ErrConflict) until the next day.
 	MaxDayDollars float64 `json:"maxDayDollars,omitempty"`
 	// Template is the use it was made for: "support" or "team".
 	Template string `json:"template,omitempty"`
@@ -173,11 +177,13 @@ type AgentSessionInfo struct {
 	AgentID      string  `json:"agentId"`
 	AgentVersion int     `json:"agentVersion"`
 	Key          *string `json:"key"`
-	// Trigger is what started it: api, slack, github, schedule or webhook.
+	// Trigger is what started it: api, slack, github, schedule, webhook, or
+	// spawn (a child session its parent's harness started).
 	Trigger string `json:"trigger"`
 	// State is queued, running, waiting, done, failed or stopped.
 	State string `json:"state"`
-	// Reason says why it ended.
+	// Reason says why it ended; among others "budget" (its tree reached
+	// MaxSessionDollars), "parent_ended", and "deleted" on a deleted record.
 	Reason *string `json:"reason"`
 	// Result is what it ended with, as the agent said it (a pull request's
 	// address, an answer).
@@ -188,21 +194,28 @@ type AgentSessionInfo struct {
 	CreatedAt time.Time         `json:"createdAt"`
 	StartedAt *time.Time        `json:"startedAt"`
 	EndedAt   *time.Time        `json:"endedAt"`
-	// ParentSessionID and RootSessionID place a child session in its tree:
-	// its parent and the session that began the tree. Nil for a session
-	// started by the API or a trigger, and until the API sends them.
+	// ParentSessionID is the session that spawned it; nil for a top session.
 	ParentSessionID *string `json:"parentSessionId"`
-	RootSessionID   *string `json:"rootSessionId"`
-	// Cost is what the session has used so far, and TreeCost the same with
-	// its children's summed in; nil until the API sends them.
-	Cost     *AgentCost `json:"cost"`
-	TreeCost *AgentCost `json:"treeCost"`
-	// HistoryBytes is its text history, counted as storage and kept until the
-	// session is deleted. Nil until the API sends it.
-	HistoryBytes *int64 `json:"historyBytes"`
-	// AttachmentBytes is its files and screenshots, counted as storage. Nil
-	// until the API sends it.
-	AttachmentBytes *int64 `json:"attachmentBytes"`
+	// RootSessionID is the top of its tree: its own ID for a top session.
+	RootSessionID string `json:"rootSessionId"`
+	// Depth is 0 for a top session, and one more for each parent above it
+	// (at most 3).
+	Depth int `json:"depth"`
+	// Cost is what this session has used so far; TreeCost is it and every
+	// session under it. A delete keeps both: it never frees budget.
+	Cost     AgentCost `json:"cost"`
+	TreeCost AgentCost `json:"treeCost"`
+	// HistoryBytes is its log's size, counted as storage and kept until the
+	// session is deleted.
+	HistoryBytes int64 `json:"historyBytes"`
+	// AttachmentBytes is its files' and screenshots' size, counted as
+	// storage.
+	AttachmentBytes int64 `json:"attachmentBytes"`
+	// StopWhy is why a stop was asked: "stopped", "budget" or
+	// "parent_ended"; nil when none was.
+	StopWhy *string `json:"stopWhy"`
+	// DeletedAt is set once its history was deleted (Sessions.Delete).
+	DeletedAt *time.Time `json:"deletedAt"`
 }
 
 // AgentCost is what a session (or its tree) has used.
@@ -220,7 +233,8 @@ func (i AgentSessionInfo) Ended() bool {
 // AgentEvent is one entry of a session's log.
 type AgentEvent struct {
 	Seq int64 `json:"seq"`
-	// Kind is input, answer, reply, ask, status, result, error or note.
+	// Kind is input, answer, reply, ask, status, result, error, note, or
+	// child: a child session's end, posted into its parent's log.
 	Kind string `json:"kind"`
 	// Actor is who: a principal's id for the API, slack:<user>,
 	// github:<login>, agent for the harness, runtime for the runner.
@@ -396,8 +410,14 @@ type AgentSessionListOptions struct {
 	// Agent is an agent's id or name.
 	Agent string
 	// State is one of queued, running, waiting, done, failed or stopped.
-	State  string
-	Cursor string
+	State string
+	// Parent is a session's id: its direct children.
+	Parent string
+	// Root is a top session's id: its whole tree, the root included.
+	Root string
+	// Deleted includes deleted records, which a list hides otherwise.
+	Deleted bool
+	Cursor  string
 	// Limit caps a page (0: the API's default).
 	Limit int
 }
@@ -412,9 +432,12 @@ func (s *AgentSessionService) Get(ctx context.Context, id string) (*AgentSession
 	return session, nil
 }
 
-// Delete deletes an ended session and its history; until then it is kept,
-// counted as storage. An open session is refused with 409 session_open
-// (errors.Is ErrConflict): stop it first.
+// Delete deletes an ended session's history: its log, and every log under it
+// in its tree. Until then the history is kept, counted as storage. The
+// session is kept as a deleted record: Get still reads it, with DeletedAt
+// set, Reason "deleted", Key and Result cleared and its cost kept (a delete
+// never frees budget), and its log reads empty. An open session or tree is
+// refused with 409 session_open (errors.Is ErrConflict): stop it first.
 func (s *AgentSessionService) Delete(ctx context.Context, id string) error {
 	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/agents/sessions/" + url.PathEscape(id)}, nil)
 }
@@ -425,7 +448,11 @@ func (s *AgentSessionService) List(ctx context.Context, opts *AgentSessionListOp
 	query := url.Values{}
 	cursor := ""
 	if opts != nil {
-		setQuery(query, "agent", opts.Agent, "state", opts.State, "limit", itoa(opts.Limit))
+		setQuery(query, "agent", opts.Agent, "state", opts.State, "parent", opts.Parent, "root", opts.Root,
+			"limit", itoa(opts.Limit))
+		if opts.Deleted {
+			query.Set("deleted", "true")
+		}
 		cursor = opts.Cursor
 	}
 	return nextPage[AgentSessionInfo](ctx, s.c, "/v1/agents/sessions", query, cursor)
@@ -494,6 +521,13 @@ func (s *AgentSession) Refresh(ctx context.Context) error {
 	}
 	s.set(info)
 	return nil
+}
+
+// Children returns the first page of its direct children, the sessions its
+// harness started (Trigger "spawn"), newest first. Page.All walks every one;
+// Sessions.List with Root reads a whole tree.
+func (s *AgentSession) Children(ctx context.Context) (*Page[AgentSessionInfo], error) {
+	return nextPage[AgentSessionInfo](ctx, s.c, "/v1/agents/sessions", url.Values{"parent": {s.ID()}}, "")
 }
 
 // AgentSendOptions are Send's optional fields.

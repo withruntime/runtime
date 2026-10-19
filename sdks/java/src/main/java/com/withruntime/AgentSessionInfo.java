@@ -27,7 +27,10 @@ public final class AgentSessionInfo extends JsonObject {
     return getString("key");
   }
 
-  /** What started it: api, slack, github, schedule or webhook. */
+  /**
+   * What started it: api, slack, github, schedule, webhook, or spawn (a child session its parent's
+   * harness started).
+   */
   public String trigger() {
     return getString("trigger");
   }
@@ -43,7 +46,10 @@ public final class AgentSessionInfo extends JsonObject {
     return "done".equals(state) || "failed".equals(state) || "stopped".equals(state);
   }
 
-  /** Why it failed or stopped, or null. */
+  /**
+   * Why it ended, or null: among others budget (its tree reached its maxSessionDollars),
+   * parent_ended, and deleted on a deleted record.
+   */
   public String reason() {
     return getString("reason");
   }
@@ -79,37 +85,49 @@ public final class AgentSessionInfo extends JsonObject {
     return getInstant("endedAt");
   }
 
-  /** The session that started this child session, or null (and null until the API sends it). */
+  /** The session that spawned it, or null for a top session. */
   public String parentSessionId() {
     return getString("parentSessionId");
   }
 
-  /** The session its tree began with, or null (and null until the API sends it). */
+  /** The top of its tree: its own id for a top session. */
   public String rootSessionId() {
     return getString("rootSessionId");
   }
 
-  /** What it has used so far, or null until the API sends it. */
+  /** 0 for a top session, one more for each parent above it (at most 3). */
+  public int depth() {
+    return (int) getLong("depth", 0);
+  }
+
+  /** What this session has used so far. A delete keeps it: it never frees budget. */
   public Cost cost() {
-    return get("cost") instanceof Map<?, ?> ? new Cost(getObject("cost").raw()) : null;
+    return new Cost(getObject("cost").raw());
   }
 
-  /** What it and its child sessions have used so far, or null until the API sends it. */
+  /** What it and every session under it have used so far. */
   public Cost treeCost() {
-    return get("treeCost") instanceof Map<?, ?> ? new Cost(getObject("treeCost").raw()) : null;
+    return new Cost(getObject("treeCost").raw());
   }
 
-  /**
-   * Its text history, counted as storage and kept until the session is deleted; null until the API
-   * sends it.
-   */
-  public Long historyBytes() {
-    return getLong("historyBytes");
+  /** Its log's size in bytes, counted as storage and kept until the session is deleted. */
+  public long historyBytes() {
+    return getLong("historyBytes", 0);
   }
 
-  /** Its files and screenshots, counted as storage; null until the API sends it. */
-  public Long attachmentBytes() {
-    return getLong("attachmentBytes");
+  /** Its files' and screenshots' size in bytes, counted as storage. */
+  public long attachmentBytes() {
+    return getLong("attachmentBytes", 0);
+  }
+
+  /** Why a stop was asked: stopped, budget or parent_ended; null when none was. */
+  public String stopWhy() {
+    return getString("stopWhy");
+  }
+
+  /** When its history was deleted, or null: a deleted session is kept as a record. */
+  public Instant deletedAt() {
+    return getInstant("deletedAt");
   }
 
   /** What a session (or its tree) has used: dollars, vCPU-seconds and GiB-seconds. */

@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.6.0";
+  public static final String VERSION = "0.8.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -36,6 +36,7 @@ public final class RuntimeClient {
   private final Apps apps;
   private final Apps functions;
   private final Builds builds;
+  private final Containers containers;
   private final Products.Secrets secrets;
   private final Products.Limits limits;
   private final Products.Emails emails;
@@ -75,6 +76,7 @@ public final class RuntimeClient {
     this.apps = new Apps(transport, "apps");
     this.functions = new Apps(transport, "functions");
     this.builds = new Builds(transport);
+    this.containers = new Containers(transport);
     this.secrets = new Products.Secrets(transport);
     this.limits = new Products.Limits(transport);
     this.emails = new Products.Emails(transport);
@@ -227,6 +229,14 @@ public final class RuntimeClient {
    */
   public Builds builds() {
     return builds;
+  }
+
+  /**
+   * One OCI image's process each on its own microVM, at the sandbox rates. In private beta:
+   * outside it, PermissionDenied with code product_in_beta.
+   */
+  public Containers containers() {
+    return containers;
   }
 
   /** Values sandboxes use on the way out without seeing them. */

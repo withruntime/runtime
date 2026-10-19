@@ -20,6 +20,7 @@ from .apps import AsyncApps, AsyncFunctions
 from .audit import AsyncAudit
 from .browser import AsyncBrowser
 from .builds import AsyncBuilds
+from .containers import AsyncContainers
 from .desktop import AsyncDesktop
 from .images import AsyncImages
 from .jobs import AsyncJobs
@@ -47,6 +48,7 @@ CLIENT["jobs"] = AsyncJobs
 CLIENT["apps"] = AsyncApps
 CLIENT["functions"] = AsyncFunctions
 CLIENT["builds"] = AsyncBuilds
+CLIENT["containers"] = AsyncContainers
 CLIENT["agents"] = AsyncAgents
 CLIENT["referrals"] = AsyncReferrals
 CLIENT["billing"] = AsyncBilling

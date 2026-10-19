@@ -23,6 +23,7 @@ def info(**extra):
 
 class Stub(BaseHTTPRequestHandler):
     seen: list = []
+    extra: dict = {}
     state = "running"
     expires_in = 60
 
@@ -39,7 +40,7 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Stub.seen.append(("GET", self.path, None))
-        self._answer(info())
+        self._answer(info(**Stub.extra))
 
     def do_POST(self):
         length = int(self.headers.get("content-length") or 0)
@@ -49,6 +50,9 @@ class Stub(BaseHTTPRequestHandler):
             self._answer(info(**body))
         elif self.path == "/v1/sandboxes":
             self._answer(info(**({"reused": True} if body.get("getOrCreate") else {})))
+        elif self.path.endswith(":fork"):
+            self._answer({"sandboxes": [info(id=f"{ID[:-1]}{n}", secrets=body.get("secrets"))
+                                        for n in range(body.get("count") or 1)]})
         else:
             self._answer(info())
 
@@ -66,6 +70,7 @@ class LifecycleSettingsTest(unittest.TestCase):
 
     def setUp(self):
         Stub.seen = []
+        Stub.extra = {}
         Stub.state = "running"
         Stub.expires_in = 60
 
@@ -88,6 +93,45 @@ class LifecycleSettingsTest(unittest.TestCase):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             runtime.sandboxes.create(spread_from=["a", "b"], wait=False)
         self.assertEqual(self.posts("/v1/sandboxes")[0], {"spreadFrom": ["a", "b"]})
+
+    def test_create_sends_secrets_only_when_given(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.sandboxes.create(secrets=["ANTHROPIC_API_KEY"], wait=False)
+            runtime.sandboxes.create(secrets=[], wait=False)
+            runtime.sandboxes.create(wait=False)
+            runtime.sandboxes.get_or_create("dev", secrets=["ANTHROPIC_API_KEY"], wait=False)
+            runtime.sandboxes.create(snapshot="snap-1", secrets=[], wait=False)
+        self.assertEqual(self.posts("/v1/sandboxes"), [
+            {"secrets": ["ANTHROPIC_API_KEY"]}, {"secrets": []}, {},
+            {"name": "dev", "getOrCreate": True, "secrets": ["ANTHROPIC_API_KEY"]},
+            {"snapshot": "snap-1", "secrets": []}])
+
+    def test_fork_sends_secrets_only_when_given(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            sbx = runtime.sandboxes.get(ID)
+            copy = sbx.fork(secrets=["ANTHROPIC_API_KEY"])
+            none = sbx.fork(2, secrets=[])
+            sbx.fork()
+        self.assertEqual(self.posts(":fork"), [{"secrets": ["ANTHROPIC_API_KEY"]}, {"count": 2, "secrets": []}, {}])
+        self.assertEqual(copy.info["secrets"], ["ANTHROPIC_API_KEY"])
+        self.assertEqual([c.info["secrets"] for c in none], [[], []])
+
+    def test_async_create_and_fork_send_secrets(self):
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                sbx = await runtime.sandboxes.create(secrets=[], wait=False)
+                await sbx.fork(secrets=["ANTHROPIC_API_KEY"])
+
+        asyncio.run(go())
+        self.assertEqual(self.posts("/v1/sandboxes"), [{"secrets": []}])
+        self.assertEqual(self.posts(":fork"), [{"secrets": ["ANTHROPIC_API_KEY"]}])
+
+    def test_a_read_sandbox_carries_its_secrets(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            Stub.extra = {"secrets": ["ANTHROPIC_API_KEY"]}
+            self.assertEqual(runtime.sandboxes.get(ID).info["secrets"], ["ANTHROPIC_API_KEY"])
+            Stub.extra = {"secrets": None}
+            self.assertIsNone(runtime.sandboxes.get(ID).info["secrets"])
 
     def test_update_sends_only_what_changes(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:

@@ -22,7 +22,9 @@ func (s *SandboxService) Create(ctx context.Context, opts *CreateOptions) (*Sand
 	if opts == nil {
 		opts = &CreateOptions{}
 	}
-	body, err := withExtra(opts, opts.Extra)
+	sent := *opts
+	sent.Secrets = someSecrets(opts.Secrets)
+	body, err := withExtra(&sent, opts.Extra)
 	if err != nil {
 		return nil, err
 	}
@@ -498,8 +500,23 @@ type ForkOptions struct {
 	KeepSnapshot bool `json:"keepSnapshot,omitempty"`
 	// Deprecated: Funding is accepted and ignored: copies run on the free
 	// usage first, then prepaid credit.
-	Funding        string `json:"funding,omitempty"`
-	IdempotencyKey string `json:"-"`
+	Funding string `json:"funding,omitempty"`
+	// Secrets is the egress secrets the copies may use, by name: only those
+	// of your egress secrets that would otherwise reach them. &[]string{} is
+	// none; leave it nil to keep this sandbox's list. Fixed for the copies'
+	// life; it may only narrow this sandbox's list.
+	Secrets        *[]string `json:"secrets,omitempty"`
+	IdempotencyKey string    `json:"-"`
+}
+
+// someSecrets sends a list of no names as [], never null: a pointer to a nil
+// slice still asks for none.
+func someSecrets(names *[]string) *[]string {
+	if names == nil || *names != nil {
+		return names
+	}
+	none := []string{}
+	return &none
 }
 
 // Fork starts copies of this sandbox as it is now (files, memory, running
@@ -511,13 +528,15 @@ func (s *Sandbox) Fork(ctx context.Context, opts *ForkOptions) ([]*Sandbox, erro
 	if opts == nil {
 		opts = &ForkOptions{}
 	}
+	sent := *opts
+	sent.Secrets = someSecrets(opts.Secrets)
 	var reply struct {
 		Sandboxes []SandboxInfo `json:"sandboxes"`
 	}
 	if err := s.c.do(ctx, &call{
 		method: http.MethodPost,
 		path:   s.path(":fork"),
-		body:   opts,
+		body:   &sent,
 		wait:   60,
 		key:    opts.IdempotencyKey,
 	}, &reply); err != nil {

@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.18.0. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.21.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -477,6 +477,22 @@ billing ends; the host then writes its memory to disk, and a wake or snapshot
 asked for meanwhile waits for that write. Wake restores it on the same host. See [pricing](./pricing) for what a paused sandbox costs and
 how long it is kept.
 
+A server keeps room for the memory of every sandbox it runs that can pause.
+When that room is short, a pause still succeeds. It can take up to about a
+minute while the server makes room: it compresses saved memory images, moves
+kept snapshots to other servers, and copies paused sandboxes to storage and
+shrinks them. If there is still no room, the sandbox is paused all the same
+and billed as paused: the server holds its memory and saves it once there is
+room, and a wake meanwhile resumes it at once. Only a sandbox whose time is
+nearly up, too near its end to save its memory later, is not paused then:
+`pause()` fails with `no_capacity` (409, `retryable` true, `Retry-After: 60`)
+and the sandbox keeps running with its memory and files; pause again with a
+new call, which is a new request. A `pause()` that returns first, with the
+sandbox still `pausing`, has not failed: `GET /v1/sandboxes/{id}?waitFor=paused`
+(`sbx.refresh()` in a loop) shows `paused`, or `running` if it was not taken.
+A snapshot the server has no room for is refused with `host_capacity` (409);
+retry it later.
+
 ### Wake on request
 
 A paused sandbox wakes by itself when a request needs it: an `exec`, a file,
@@ -734,6 +750,16 @@ rule allows by method and path carry it: a path is exact or ends in `/*`.
 Replacing a secret keeps its placeholder, so running sandboxes use the new
 value. See [security](./security#secrets-sandboxes-never-see) for the limits
 and what is never rewritten.
+
+```ts check
+import { Sandbox } from "withruntime";
+await using sbx = await Sandbox.create({ secrets: ["ANTHROPIC_API_KEY"] });
+console.log(sbx.info.secrets);
+```
+
+`secrets` limits a sandbox to the egress secrets you name, of those that would
+otherwise reach it: `[]` is none, and leaving it out is every one. It is fixed
+for the sandbox's life; a `fork()` or a copy of a snapshot may only narrow it.
 
 ## Custom images
 

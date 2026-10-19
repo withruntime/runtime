@@ -19,7 +19,7 @@ import copy
 import time
 from collections.abc import Mapping
 from collections.abc import Iterator as KeyIterator
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Optional, TypedDict, Union
 from urllib.parse import quote
 
 from .._agent_templates import TEMPLATES, USES
@@ -38,6 +38,55 @@ def _enc(value: str) -> str:
 def _fields(**values: Any) -> dict[str, Any]:
     """The API's body: a field left as None is not sent."""
     return {name: value for name, value in values.items() if value is not None}
+
+
+class AgentCost(TypedDict):
+    """What a session, or its tree, has used: ``dollars``, ``vcpuSeconds``
+    and ``gibSeconds``."""
+    dollars: float
+    vcpuSeconds: float
+    gibSeconds: float
+
+
+class AgentSessionRecord(TypedDict):
+    """A session as the API answers it. Times are ISO 8601 strings.
+
+    ``trigger``: api, slack, github, schedule, webhook, or spawn (a child a
+    harness started). ``state``: queued, running, waiting, done, failed or
+    stopped. ``reason`` (why it ended): among others ``budget`` (its tree
+    reached ``maxSessionDollars``), ``parent_ended`` and ``deleted`` (a
+    deleted record). ``stopWhy``: why a stop was asked, ``stopped``,
+    ``budget`` or ``parent_ended``, or None.
+
+    Its tree: ``parentSessionId`` (None for a top session), ``rootSessionId``
+    (itself for a top session) and ``depth`` (0 to 3, 0 at the top). Its use:
+    ``cost`` (this session's so far) and ``treeCost`` (it and every session
+    under it). Its storage: ``historyBytes`` (its log) and
+    ``attachmentBytes`` (its files and screenshots). ``deletedAt`` is set
+    once its history was deleted (``sessions.delete``)."""
+    id: str
+    agentId: str
+    agentVersion: int
+    key: Optional[str]
+    trigger: str
+    state: str
+    reason: Optional[str]
+    result: Optional[str]
+    sandboxId: Optional[str]
+    lastSeq: int
+    labels: dict[str, str]
+    createdAt: str
+    startedAt: Optional[str]
+    endedAt: Optional[str]
+    parentSessionId: Optional[str]
+    rootSessionId: str
+    depth: int
+    cost: AgentCost
+    treeCost: AgentCost
+    historyBytes: int
+    attachmentBytes: int
+    stopWhy: Optional[str]
+    deletedAt: Optional[str]
 
 
 def _agent(record: dict[str, Any]) -> dict[str, Any]:
@@ -96,22 +145,20 @@ class AgentTemplates(Mapping):
 
 
 class AsyncAgentSession:
-    """One session of an agent: its record in ``session``, and whether
+    """One session of an agent: its record in ``session`` (an
+    AgentSessionRecord: {id, agentId, agentVersion, key, trigger, state,
+    reason, result, sandboxId, lastSeq, labels, createdAt, startedAt,
+    endedAt}, its tree {parentSessionId, rootSessionId, depth}, its use
+    {cost, treeCost}, each {dollars, vcpuSeconds, gibSeconds}, its storage
+    {historyBytes, attachmentBytes}, stopWhy and deletedAt), and whether
     ``start`` ``joined`` the open session with the same key, with the ``seq``
-    of the words it sent. The record: {id, agentId, agentVersion, key,
-    trigger, state, reason, result, sandboxId, lastSeq, labels, createdAt,
-    startedAt, endedAt}, and, once the API sends them, ``parentSessionId`` and
-    ``rootSessionId`` (a child session's parent and its tree's root),
-    ``cost`` {dollars, vcpuSeconds, gibSeconds} so far, ``treeCost`` (its
-    children's summed in), ``historyBytes`` (text history, counted as
-    storage) and ``attachmentBytes`` (files and screenshots, counted as
-    storage), each None until then. A session's history is kept until it is
-    deleted (``sessions.delete``)."""
+    of the words it sent. A session's history is kept, counted as storage,
+    until it is deleted (``sessions.delete``)."""
 
-    def __init__(self, t: Any, session: dict[str, Any], joined: bool = False,
+    def __init__(self, t: Any, session: AgentSessionRecord, joined: bool = False,
                  seq: Optional[int] = None) -> None:
         self._t = t
-        self.session = session
+        self.session: AgentSessionRecord = session
         self.id: str = session["id"]
         self.joined = joined
         self.seq: int = seq if seq is not None else int(session.get("lastSeq") or 0)
@@ -131,10 +178,17 @@ class AsyncAgentSession:
     def _path(self, tail: str = "") -> str:
         return f"/v1/agents/sessions/{_enc(self.id)}{tail}"
 
-    async def refresh(self) -> dict[str, Any]:
+    async def refresh(self) -> AgentSessionRecord:
         """Read the session again."""
         self.session = await self._t.json("GET", self._path())
         return self.session
+
+    async def children(self, *, cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage:
+        """A page of its direct children, the sessions its harness started
+        (``trigger`` spawn), newest first, ``limit`` a page;
+        ``async for`` walks every page. ``sessions.list(root=...)`` reads a
+        whole tree."""
+        return await AsyncAgentSessions(self._t).list(parent=self.id, cursor=cursor, limit=limit)
 
     async def send(self, text: str, *, idempotency_key: Optional[str] = None) -> int:
         """Words into the session while it runs or waits; returns their seq.
@@ -147,7 +201,9 @@ class AsyncAgentSession:
     async def events(self, *, after: int = 0) -> AsyncIterator[dict[str, Any]]:
         """``async for`` each event of the log after seq ``after`` (0: from the
         start), in order, as it comes: {seq, kind, actor, body, createdAt},
-        the words in ``body["text"]``. Each read waits up to 30 seconds on the
+        the words in ``body["text"]``. ``kind`` is input, answer, reply, ask,
+        status, result, error, note, or child (a child session's end, posted
+        into its parent's log). Each read waits up to 30 seconds on the
         server for a new one; the loop ends once the session has ended and
         its whole log has been given."""
         ended = False
@@ -163,13 +219,13 @@ class AsyncAgentSession:
                     return
                 ended = True
 
-    async def stop(self) -> dict[str, Any]:
+    async def stop(self) -> AgentSessionRecord:
         """Ask it to stop. A queued session ends at once; a running or waiting
         one ends once its sandbox is gone (``wait`` follows it there)."""
         self.session = await self._t.json("POST", self._path("/stop"))
         return self.session
 
-    async def wait(self, *, timeout: float = 0) -> dict[str, Any]:
+    async def wait(self, *, timeout: float = 0) -> AgentSessionRecord:
         """Return the session once it has ended (done, failed or stopped; a
         failed session is returned, not raised: read ``reason``). Each round
         waits on the session's log, not a timer. ``timeout`` in seconds, 0 for
@@ -216,20 +272,29 @@ class AsyncAgentSessions:
         return AsyncAgentSession(self._t, record)
 
     async def delete(self, session_id: str) -> None:
-        """Delete an ended session and its history; until then it is kept,
-        counted as storage. An open session is refused with ConflictError
+        """Delete an ended session's history: its log, and every log under it
+        in its tree. Until then the history is kept, counted as storage. The
+        session is kept as a deleted record: ``get`` still reads it, with
+        ``deletedAt`` set, ``reason`` deleted, ``key`` and ``result`` cleared
+        and its cost kept (a delete never frees budget), and its log reads
+        empty. An open session or tree is refused with ConflictError
         ``session_open``: stop it first."""
         await self._t.json("DELETE", f"/v1/agents/sessions/{_enc(session_id)}")
 
     async def list(self, *, agent: Optional[str] = None, state: Optional[Union[str, list[str]]] = None,
+                   parent: Optional[str] = None, root: Optional[str] = None, deleted: Optional[bool] = None,
                    cursor: Optional[str] = None, limit: Optional[int] = None) -> AsyncPage:
         """Sessions, newest first, of one ``agent`` (id or name) and in a
-        ``state`` if given, ``limit`` a page. ``async for`` walks every page."""
+        ``state`` if given, ``limit`` a page. ``parent`` (a session's id):
+        its direct children. ``root`` (a top session's id): its whole tree,
+        the root included. ``deleted=True`` includes deleted records, which
+        are hidden otherwise. ``async for`` walks every page."""
         from .._async_client import AsyncPage
 
         async def fetch(at: Optional[str]) -> AsyncPage:
             body = await self._t.json("GET", "/v1/agents/sessions",
-                                      query={"agent": agent, "state": state, "cursor": at, "limit": limit})
+                                      query={"agent": agent, "state": state, "parent": parent, "root": root,
+                                             "deleted": deleted, "cursor": at, "limit": limit})
             return AsyncPage(body["data"], body.get("nextCursor"), fetch)
         return await fetch(cursor)
 
@@ -283,12 +348,17 @@ class AsyncAgents:
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Make an agent, version 1. ``definition`` as the API takes it:
         ``command`` (required), ``from`` ({image} or {snapshot}), ``vcpu`` and
-        ``memoryMiB`` (4 vCPU and 8 GiB unless set), ``instructions``,
-        ``env``, ``secrets``, ``mcp``, ``volumes``, ``idlePauseSeconds``,
-        ``maxSessionSeconds``, ``maxConcurrent``, ``maxSessionDollars`` (5 unless
-        set: a session at it stops with reason ``budget``), ``maxDayDollars``
-        (100 unless set: an agent at it starts nothing new, ConflictError
-        ``budget_reached``, until the next day), ``template``;
+        ``memoryMiB`` (4 vCPU and 8 GiB unless set; a definition from a
+        snapshot takes neither, InvalidRequestError, since a snapshot keeps
+        its own size), ``instructions``, ``env``, ``secrets``, ``mcp``,
+        ``volumes``, ``idlePauseSeconds``, ``maxSessionSeconds``,
+        ``maxConcurrent``, ``maxSessionDollars`` (more than 0, at most 10000,
+        5 unless set: the session and every session under it, the root's
+        covering its tree; a tree at it stops with reason ``budget``),
+        ``maxDayDollars`` (more than 0, at most 100000, 100 unless set: the
+        agent's sessions started that UTC day; an agent at it starts nothing
+        new, ConflictError ``budget_reached``, until the next day),
+        ``template``;
         ``templates.definition`` makes one.
         A name in use is refused with ConflictError ``name_taken``; the names
         sessions, triggers, templates and approvals are refused, since they are

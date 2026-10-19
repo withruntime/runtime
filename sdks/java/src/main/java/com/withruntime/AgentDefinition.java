@@ -66,7 +66,10 @@ public final class AgentDefinition {
     return set("from", image == null ? null : Map.of("image", image));
   }
 
-  /** Start from this snapshot, such as one with a harness already logged in. */
+  /**
+   * Start from this snapshot, such as one with a harness already logged in. A snapshot keeps its
+   * own size: a definition from one that sets vcpu or memoryMiB is refused (InvalidRequest).
+   */
   public AgentDefinition fromSnapshot(String snapshot) {
     return set("from", snapshot == null ? null : Map.of("snapshot", snapshot));
   }
@@ -76,7 +79,7 @@ public final class AgentDefinition {
     return view().getObject("from");
   }
 
-  /** 1, 2, 4, 8 or 16; 4 unless set. */
+  /** 1, 2, 4, 8 or 16; 4 unless set. Not with a snapshot, which keeps its own size. */
   public AgentDefinition vcpu(int vcpu) {
     return set("vcpu", vcpu);
   }
@@ -85,7 +88,7 @@ public final class AgentDefinition {
     return integer("vcpu");
   }
 
-  /** 512 to 65536, a multiple of 256; 8192 unless set. */
+  /** 512 to 65536, a multiple of 256; 8192 (8 GiB) unless set. Not with a snapshot. */
   public AgentDefinition memoryMiB(int mib) {
     return set("memoryMiB", mib);
   }
@@ -185,8 +188,8 @@ public final class AgentDefinition {
   }
 
   /**
-   * Dollars a session may cost, its child sessions included (5 unless set): one that reaches it
-   * stops with reason budget.
+   * Dollars a session and every session under it may cost: more than 0, at most 10000, 5 unless
+   * set. The root's covers its whole tree; a tree that reaches it stops with reason budget.
    */
   public AgentDefinition maxSessionDollars(double dollars) {
     return set("maxSessionDollars", dollars);
@@ -197,8 +200,8 @@ public final class AgentDefinition {
   }
 
   /**
-   * Dollars the agent may spend a day (100 unless set): past it, it starts nothing new (a Conflict,
-   * budget_reached) until the next day.
+   * Dollars the agent's sessions started in a UTC day may cost: more than 0, at most 100000, 100
+   * unless set. Past it, it starts nothing new (a Conflict, budget_reached) until the next day.
    */
   public AgentDefinition maxDayDollars(double dollars) {
     return set("maxDayDollars", dollars);

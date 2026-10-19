@@ -64,6 +64,31 @@ you need: any limit below can be raised for an account, usually the same day
 | Dedicated outbound addresses (`address.count`)              | Needs credit          | 2                                                       |
 | Private networks (`tunnel.count`)                           | Needs a kept top-up   | 1                                                       |
 
+<!-- launch: agents -->
+
+| Limit (`details.limit`)                             | Without credit | With credit |
+| --------------------------------------------------- | -------------- | ----------- |
+| Agents (`agent.count`)                              | 20             | 20          |
+| Agent sessions open at once (`agent-session.count`) | 50             | 50          |
+
+An agent session's sandbox counts toward the sandbox rows above too. A session
+tree goes at most 3 levels deep with at most 20 open children
+([subagents](./agents#subagents)).
+
+<!-- /launch: agents -->
+
+<!-- launch: containers -->
+
+**Containers** need credit on the account. With credit an account keeps up
+to 20 containers (`container.count`); one past them is refused
+`quota_exceeded`: "This account holds up to 20 containers. Delete one you no
+longer need, or write to support@withruntime.com to raise the limit." Without
+credit, a create is refused `payment_required`: "Containers need credit on
+the account, bought or given." A container is 1 to 16 vCPUs and 128 MiB to
+64 GiB of memory ([Containers](./containers)).
+
+<!-- /launch: containers -->
+
 Without credit, a sandbox is at most 2 vCPU, 4 GiB of memory and a 10 GiB
 disk, an account keeps {{no-credit-kept}} sandboxes, running, paused or stopped,
 and makes {{no-credit-daily}} in any 24 hours, and it starts
@@ -74,6 +99,18 @@ up to {{max-vcpu}} vCPUs, {{max-memory}} of memory and a {{max-disk}} disk
 ([pricing](./pricing#how-many-at-once)). A disputed payment, a suspension or
 an abuse report holds an account to {{restricted-sandboxes}} sandboxes at
 once.
+
+<!-- launch: builds -->
+
+**Builds** need credit on the account. With credit an account connects up to
+10 repositories (`repository.count`) and has up to 4 builds not yet ended at
+once (`build.count`); a build past them is refused `quota_exceeded`: "This
+account runs up to 4 builds at once. Wait for one to end, or cancel one, or
+write to support@withruntime.com to raise the limit." Without credit, a
+connect or a build is refused `payment_required`: "Builds need credit on the
+account, bought or given." Each build's builder is a sandbox and counts
+toward the sandboxes at once while it runs ([Builds](./builds)).
+<!-- /launch: builds -->
 
 ## Limits of one sandbox or one feature
 

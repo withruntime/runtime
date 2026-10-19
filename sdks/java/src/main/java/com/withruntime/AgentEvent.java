@@ -15,7 +15,7 @@ public final class AgentEvent extends JsonObject {
 
   /**
    * input and answer (words to the agent); reply, ask, status, result and note (the agent's); error
-   * (the runner's).
+   * (the runner's); child (a child session's end, posted into its parent's log).
    */
   public String kind() {
     return getString("kind");

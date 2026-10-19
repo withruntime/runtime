@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.18.0",
+  "version": "0.21.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -54,6 +54,21 @@
       "types": "./dist/networks/index.d.ts",
       "import": "./dist/networks/index.js",
       "default": "./dist/networks/index.js"
+    },
+    "./agents": {
+      "types": "./dist/agents/index.d.ts",
+      "import": "./dist/agents/index.js",
+      "default": "./dist/agents/index.js"
+    },
+    "./containers": {
+      "types": "./dist/containers/index.d.ts",
+      "import": "./dist/containers/index.js",
+      "default": "./dist/containers/index.js"
+    },
+    "./builds": {
+      "types": "./dist/builds/index.d.ts",
+      "import": "./dist/builds/index.js",
+      "default": "./dist/builds/index.js"
     },
     "./e2b": {
       "types": "./dist/e2b/index.d.ts",

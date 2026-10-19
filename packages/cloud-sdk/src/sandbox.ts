@@ -440,6 +440,8 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
    * each its own sandbox, answered once they run. A running sandbox is paused
    * for the moment its snapshot takes, then woken. One without `count`; an
    * array with it. `funding` is what the copies run on, as for a create;
+   * omitted, they keep this sandbox's. `secrets` names the egress secrets the
+   * copies may use, and may only narrow this sandbox's list: [] is none;
    * omitted, they keep this sandbox's. */
   fork(
     options?: {
@@ -447,6 +449,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       labels?: Record<string, string>;
       keepSnapshot?: boolean;
       funding?: "trial" | "paid";
+      secrets?: string[];
     } & RequestOptions,
   ): Promise<Sandbox>;
   fork(
@@ -456,6 +459,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       labels?: Record<string, string>;
       keepSnapshot?: boolean;
       funding?: "trial" | "paid";
+      secrets?: string[];
     } & RequestOptions,
   ): Promise<Sandbox[]>;
   async fork(
@@ -465,6 +469,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       labels?: Record<string, string>;
       keepSnapshot?: boolean;
       funding?: "trial" | "paid";
+      secrets?: string[];
     } & RequestOptions = {},
   ): Promise<Sandbox | Sandbox[]> {
     const { idempotencyKey, signal, timeoutMs, ...body } = options;

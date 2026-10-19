@@ -138,6 +138,8 @@ Products
   jobs       A command in a fresh sandbox, once or on a cron schedule, with its logs
   apps       Your web server from an image or a build, copies started by requests (beta)
   builds     A connected repository's commits built into what an App deploys (beta)
+  containers One OCI image's process on its own microVM, at the sandbox rates (beta)
+  agents     Claude Code, Codex, Gemini CLI or your own agent in a sandbox per session (beta)
   domains    Your own hostname for a sandbox's port, with HTTPS
   ports      A public TCP port to a sandbox: databases, game servers
   ips        A dedicated outbound address, for allow-lists
@@ -164,7 +166,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
          [--timeout <60-86400>] [--on-timeout pause|stop|delete] [--no-wait]
          [--no-internet] [--allow <host>]... [--deny <host>]... [--connect <host:port>]...
          [--image <name:tag|imageId> | --snapshot <snapshotId>] [--volume <volumeId>:/data[:snapshot]]...
-         [--spread-from <id>]...
+         [--spread-from <id>]... [--secret NAME]... [--no-secrets]
          [--idle-pause <seconds>] [--no-auto-wake] [--persistent] [--get-or-create]
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
@@ -211,7 +213,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   tailscale up <id> --auth-key-secret NAME [--hostname h] [--tag tag:x]...
                                               Join your tailnet (paid); the key is a secret set with --jobs
   tailscale status <id> | tailscale down <id> Its tailnet address; take it off the tailnet
-  fork <id> [--count 3] [--name n] [--keep-snapshot]
+  fork <id> [--count 3] [--name n] [--keep-snapshot] [--secret NAME]... [--no-secrets]
                                               Copies of it as it is now, running; prints their ids
   run-code <id> <file|-> [--lang python|javascript|typescript|r|java|bash|go] [--context c] [--out-dir .]
                                               Run a notebook-style cell; charts saved as PNG
@@ -482,6 +484,8 @@ const COMMANDS = [
   "jobs",
   "apps",
   "builds",
+  "containers",
+  "agents",
   "domains",
   "ports",
   "ips",
@@ -502,6 +506,8 @@ const OWN_HELP = [
   "jobs",
   "apps",
   "builds",
+  "containers",
+  "agents",
   "keys",
   "webhooks",
   "webhook",
@@ -660,6 +666,20 @@ function describe(info: SandboxInfo): string {
         .map(([k, v]) => `${k}=${v}`)
         .join(", ") || "-",
     ],
+    // Null is every egress secret that reaches it; [] is none. Absent from
+    // older servers, so no line then rather than a guess.
+    ...(info.secrets === undefined
+      ? []
+      : [
+          [
+            "secrets",
+            info.secrets === null
+              ? "every one that reaches it"
+              : info.secrets.length
+                ? info.secrets.join(", ")
+                : "none",
+          ],
+        ]),
     ["charged", dollars(BigInt(Math.round(Number(info.chargedMicros) || 0)))],
   ]);
 }
@@ -1261,6 +1281,20 @@ export async function run(
   if (command === "build" || command === "builds") {
     product = "builds";
     return (await import("./apps-cli.js")).buildsCommand(rest, out, () => client(env), kit);
+  }
+  if (command === "container" || command === "containers") {
+    product = "containers";
+    return (await import("./apps-cli.js")).containersCommand(
+      rest,
+      env,
+      out,
+      () => client(env),
+      kit,
+    );
+  }
+  if (command === "agent" || command === "agents") {
+    product = "agents";
+    return (await import("./agents-cli.js")).agentsCommand(rest, env, out, () => client(env), kit);
   }
   // WireGuard is inside networks: `runtime networks wireguard peer add`.
   const wireguard = command === "networks" && rest[0] === "wireguard";
@@ -2161,12 +2195,18 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       return 0;
     }
     case "fork": {
-      const args = parse(rest, ["keep-snapshot", "trial", "paid"], ["count", "name"]);
+      const args = parse(
+        rest,
+        ["keep-snapshot", "trial", "paid", "no-secrets"],
+        ["count", "name", "secret"],
+      );
+      const secrets = secretsInput(args);
       const sbx = await get(args.positional[0]);
       const forks = await sbx.fork({
         count: integer(args, "count") ?? 1,
         ...(flag(args, "name") ? { name: flag(args, "name")! } : {}),
         ...(has(args, "keep-snapshot") ? { keepSnapshot: true } : {}),
+        ...secrets,
         ...(has(args, "trial")
           ? { funding: "trial" as const }
           : has(args, "paid")
@@ -4324,6 +4364,7 @@ const CREATE_FLAGS = [
   "no-auto-wake",
   "persistent",
   "get-or-create",
+  "no-secrets",
 ];
 /** Says on standard error, once for each reason, why a create has not
  * answered yet: it is waiting for a slot without credit or room, which can take up to
@@ -4393,6 +4434,7 @@ const CREATE_VALUES = [
   "image",
   "snapshot",
   "spread-from",
+  "secret",
   "volume",
   "env",
 ];
@@ -4408,6 +4450,25 @@ function usdMicros(args: Args, name: string): number | undefined {
   if (micros > BigInt(Number.MAX_SAFE_INTEGER))
     throw usage(`--${name} is too large to represent exactly in microdollars.`);
   return Number(micros);
+}
+/** The egress secrets a new sandbox may use: each --secret adds a name
+ * (commas also separate them), --no-secrets is none, and neither leaves it
+ * out, for every secret that reaches it. Fixed for the sandbox's life. */
+function secretsInput(args: Args): { secrets?: string[] } {
+  const names = args.flags.get("secret");
+  if (has(args, "no-secrets")) {
+    if (names) throw usage("Give --secret or --no-secrets, not both.");
+    return { secrets: [] };
+  }
+  if (!names) return {};
+  return {
+    secrets: names
+      .flatMap((value) => value.split(","))
+      .map((name) => {
+        if (!name.trim()) throw usage("--secret needs a non-empty value.");
+        return name.trim();
+      }),
+  };
 }
 /** A create body from the command line's flags. */
 function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait?: boolean } {
@@ -4429,6 +4490,7 @@ function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait
             }),
         }
       : {}),
+    ...secretsInput(args),
     ...(args.flags.has("volume") ? { volumes: args.flags.get("volume")!.map(attachment) } : {}),
     ...(has(args, "no-internet") || rules.length
       ? {

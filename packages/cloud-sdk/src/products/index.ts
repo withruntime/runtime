@@ -21,6 +21,9 @@ import { sandboxTailscale } from "./tailscale.js";
 import { secrets } from "./secrets.js";
 import { mcp, sandboxMcp } from "./mcp.js";
 import { events, otel, sandboxMetrics, webhooks } from "./observability.js";
+import { agents } from "./agents.js";
+import { builds } from "./builds.js";
+import { containers } from "./containers.js";
 
 /* HOW A LANE ADDS A PRODUCT TO THE SDK
  *
@@ -57,6 +60,10 @@ export const clientExtensions = {
   ports,
   ips,
   networks,
+  agents,
+  // Builds (beta): the API answers product_in_beta outside its list.
+  builds,
+  containers,
 } satisfies Record<string, (t: Transport) => unknown>;
 
 export const sandboxExtensions = {

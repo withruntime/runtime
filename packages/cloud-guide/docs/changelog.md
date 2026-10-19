@@ -22,6 +22,14 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 18 October 2026
 
+- **Apps console with traffic and live releases.** Console → Apps shows each
+  App as a card with its last day of requests, error rate, copies running,
+  last release and this month's cost. An App's page draws its copies by
+  version, a release step by step as requests move to the new version, its
+  requests, errors and latency over an hour, a day or a week, its busiest
+  routes, and log search by request id or any words. A failed release keeps
+  its output, and the previous version rolls back in one click. See
+  [custom domains on an App](./networking#on-an-app).
 - **Move from Cloudflare Sandbox to Runtime.** A Worker written for
   Cloudflare's Sandbox SDK (0.x) now runs on Runtime sandboxes once you change
   its import to `withruntime/cloudflare`, delete the `containers` block from
@@ -29,6 +37,15 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   files, background processes, the code interpreter, preview URLs, sessions
   and `gitCheckout` work as before. See
   [change the import](./cloudflare-sandbox-alternative#change-the-import).
+- **A sandbox can name the secrets it gets.** Create a sandbox with
+  `secrets: ["ANTHROPIC_API_KEY"]` (`runtime sandboxes create --secret
+ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
+  any other, and our proxy puts no other value into its requests. An agent
+  given untrusted input can no longer send a key meant for other work. `[]`
+  is none; the list narrows each secret's own `only`, is fixed for the
+  sandbox's life, and a fork or copy of a snapshot may only narrow it. In the
+  API, the MCP tool and every SDK. See
+  [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
 - **One deletion email a day, not one per pause.** A sandbox with
   `:retention` days of its own is a day or so from deletion after each idle
   pause, and its owners were emailed a warning on every pause, though using
@@ -41,6 +58,27 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   could not add it at that moment, the sandbox now gets a
   `sandbox.secret_not_applied` event with reason `withheld`, saying the fault
   is ours and what to do. See [events](./observability#events).
+- **A pause succeeds when its server's snapshot space is full.** Saving a
+  snapshot now leaves the room each server keeps for pausing the sandboxes it
+  runs. When that room is short, the server makes room while the pause
+  waits, up to about a minute: it compresses saved memory images, moves kept
+  snapshots to other servers, and copies paused sandboxes to storage and
+  shrinks them. If there is still no room, the sandbox is paused all the
+  same: the server holds its memory and saves it once there is room, and a
+  wake meanwhile resumes it at once. Such a pause used to fail. Only a
+  sandbox too near the end of its time to save its memory later is not
+  paused: the pause fails with `no_capacity` (409, retryable) and the sandbox
+  keeps running, its memory intact. A snapshot the server has no room for is
+  refused with `host_capacity` (409); retry it later. See
+  [pause, wake, extend](./javascript#pause-wake-extend).
+- **Snapshots and forks in bursts no longer wait running.** A snapshot or a
+  fork of a running sandbox now stops it at once, so the snapshot, or the
+  fork's copies, hold the memory of the moment you asked, and then waits for
+  its turn at the server's disk with the sandbox stopped. Before, it waited
+  for that turn with the sandbox still running, and a burst on one server
+  could take tens of seconds each, the sandbox changing all the while. A
+  sandbox whose time limit or funded time ends soon, on a busy server, still
+  waits running and stops at its turn, as before. See [products](./products).
 - **Secret scopes in the Python, Go, Ruby and Java SDKs.** The SDKs can now
   give a secret to some sandboxes instead of all of them, as the JavaScript
   SDK can: `only` on `secrets.set` (`only=` in Python and Ruby, `Only` in Go,

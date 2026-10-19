@@ -181,3 +181,26 @@ export type {
   KeyUsage,
 } from "./products/api-keys.js";
 export type { SsoConnection, SsoStatus } from "./products/sso.js";
+export type {
+  Agent,
+  AgentDefinition,
+  AgentEvent,
+  AgentSession,
+  AgentSessionHandle,
+  AgentSessionState,
+  AgentTemplate,
+  AgentTemplateKey,
+  AgentTrigger,
+  AgentTriggerKind,
+  AgentUse,
+  CreateAgent,
+  CreateAgentTrigger,
+  StartAgentSession,
+} from "./products/agents.js";
+export { AGENT_TEMPLATES, AGENT_USES } from "./products/agents.js";
+export type {
+  Container,
+  ContainerState,
+  CreateContainer,
+  UpdateContainer,
+} from "./products/containers.js";

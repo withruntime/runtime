@@ -34,7 +34,9 @@ logger = logging.getLogger("withruntime")
 # a step's HOME is its user's home.
 # runtime-builder/7 (15 October 2026): a WORKDIR's new directories are the
 # USER's, and root owns what COPY and ADD write unless --chown, as in Docker.
-IMAGE_RECIPE = "runtime-builder/7"
+# runtime-builder/8 (18 October 2026): every image carries the containers'
+# launcher, so one built before it can't start as a container.
+IMAGE_RECIPE = "runtime-builder/8"
 
 
 def image_tag(key: str) -> str:
