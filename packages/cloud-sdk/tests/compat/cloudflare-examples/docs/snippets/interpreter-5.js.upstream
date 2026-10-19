@@ -1,0 +1,9 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/api/interpreter/ (code block 5)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const ctx = await sandbox.createCodeContext({ language: "python" });
+
+await sandbox.runCode("import math; radius = 5", { context: ctx });
+const result = await sandbox.runCode("math.pi * radius ** 2", { context: ctx });
+
+console.log(result.results[0].text); // "78.53981633974483"

@@ -1,0 +1,13 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/execute-commands/ (code block 1)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox } from "withruntime/cloudflare";
+
+const sandbox = getSandbox(env.Sandbox, "my-sandbox");
+
+// Execute a single command
+const result = await sandbox.exec("python --version");
+
+console.log(result.stdout); // "Python 3.11.0"
+console.log(result.exitCode); // 0
+console.log(result.success); // true

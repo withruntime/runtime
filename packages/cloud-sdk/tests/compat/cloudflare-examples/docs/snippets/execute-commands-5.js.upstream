@@ -1,0 +1,26 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/execute-commands/ (code block 5)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+try {
+	const result = await sandbox.exec("python analyze.py");
+
+	if (!result.success) {
+		// Command failed (non-zero exit code)
+		console.error("Analysis failed:", result.stderr);
+		console.log("Exit code:", result.exitCode);
+
+		// Handle specific exit codes
+		if (result.exitCode === 1) {
+			throw new Error("Invalid input data");
+		} else if (result.exitCode === 2) {
+			throw new Error("Missing dependencies");
+		}
+	}
+
+	// Success - process output
+	return JSON.parse(result.stdout);
+} catch (error) {
+	// Execution error (couldn't start command)
+	console.error("Execution failed:", error.message);
+	throw error;
+}

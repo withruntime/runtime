@@ -163,6 +163,26 @@ public class RuntimeCloudException extends RuntimeException {
     this(a.message, a.code, a.status, a.hint, a.requestId, a.details, a.idempotencyKey, a.retryAfter, a.cause);
   }
 
+  /**
+   * This failure carrying the key of the write it belongs to, as the same subclass: a read that
+   * failed while following a write keeps that write's key, so a caller can retry it safely.
+   */
+  RuntimeCloudException withIdempotencyKey(String key) {
+    if (key == null || idempotencyKey != null) return this;
+    if (this instanceof Connection)
+      return new Connection(getMessage(), code, hint, key, details, this);
+    if (this instanceof Command) return this;
+    Init a = new Init(getMessage(), code, status, hint, requestId, details, key, retryAfter, this);
+    if (this instanceof Authentication) return new Authentication(a);
+    if (this instanceof PermissionDenied) return new PermissionDenied(a);
+    if (this instanceof NotFound) return new NotFound(a);
+    if (this instanceof Conflict) return new Conflict(a);
+    if (this instanceof InvalidRequest) return new InvalidRequest(a);
+    if (this instanceof RateLimited) return new RateLimited(a);
+    if (this instanceof ServiceUnavailable) return new ServiceUnavailable(a);
+    return new RuntimeCloudException(a);
+  }
+
   static RuntimeCloudException missingKey() {
     return new Authentication(
         new Init(
@@ -249,7 +269,11 @@ public class RuntimeCloudException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     Connection(String message, String code, String hint, String idempotencyKey, Throwable cause) {
-      super(message, code, 0, hint, null, null, idempotencyKey, null, cause);
+      this(message, code, hint, idempotencyKey, null, cause);
+    }
+
+    Connection(String message, String code, String hint, String idempotencyKey, Map<String, Object> details, Throwable cause) {
+      super(message, code, 0, hint, null, details, idempotencyKey, null, cause);
     }
   }
 

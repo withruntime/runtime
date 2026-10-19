@@ -102,6 +102,37 @@ all 73 inventory items are present or refused, none missing. How it maps:
   `withruntime.morph`, inventoried as `morph-python`; see
   [the Python document](../../sdks/python/COMPATIBILITY.md).
 
+### Cloudflare 0.12.10 Worker examples, live (18 October 2026)
+
+`tests/compat/cloudflare-examples/` holds Cloudflare's own Workers, copied
+verbatim with their source URL and the date read: the `minimal` and `alpine`
+examples at the `@cloudflare/sandbox@0.12.10` tag, the get-started Worker, and
+the runnable 0.x snippets from the docs on exec, streaming, files, background
+processes, the code interpreter, preview URLs, sessions and `gitCheckout`. The
+only change in each is the package name and, in `wrangler.jsonc`, the removed
+`containers` block. `fixtures.ts` lists what each must answer, and the
+examples skipped with the reason (Workers AI, Artifacts, model keys, backups,
+tunnels, terminals, placeholder repositories, or a call 0.12.10 does not have).
+
+- `RUNTIME_API_KEY=... bun scripts/compatibility-cloudflare-live.ts --run`
+  builds the package, runs each example under `wrangler dev` (workerd) with the
+  key as a Worker secret, sends the requests the docs describe, and checks the
+  answers. A local relay caps it at 12 sandboxes, gives each a 10 minute limit
+  and a cost cap, labels them with the run, and deletes them after each Worker
+  and at the end.
+- 18 October 2026: 58 of 58 checks passed, 9 sandboxes created, all deleted.
+- The run found that the Worker's Durable Object lacked most of the module's
+  calls (`gitCheckout`, `runCode`, `streamProcessLogs` and the session calls
+  failed with "RPC receiver does not implement"), `waitForPort` was missing,
+  local preview URLs were not Cloudflare's `http://<port>-<id>-<token>.localhost`,
+  `readFile` had no `mimeType`, and 14 of upstream's value exports and about
+  70 of its types were missing. `tests/compat/cloudflare-worker-surface.test.ts`
+  checks each.
+- Differences that stay: a sandbox holds at most 4 code contexts (a fifth
+  `createCodeContext` says how to free one); a process's `pid` is not
+  reported; `processId` and `autoCleanup` refuse. Errors across a Durable
+  Object call keep their message but not `code`, as on Cloudflare.
+
 ### Freestyle 0.2.18, 0.2.19 and 0.2.20 review (15 October 2026)
 
 The pin advances from 0.2.17 to 0.2.20; support remains partial. The four npm
@@ -311,7 +342,7 @@ Remaining implementation work is tracked only in the repository `WORKLIST.md`.
 | Sprites     | No control-mode WebSocket protocol, managed services, in-place checkpoint restore (start a new sandbox from the snapshot), checkpoint history filters, network presets (`include`), an allow rule inside a denied wildcard (Runtime's deny always wins), privilege or resource policies, `maxRunAfterDisconnect`, Fly token exchange or Sprite list streaming; each is refused by name. A checkpoint is a Runtime disk snapshot (files, not running processes); the Sprite pauses for the moment it takes. An allow rule makes an allowlist, as Sprites' DNS allowlist does. The port watcher polls `ss` once a second. Session handles use native process IDs, not tmux. The sprite URL maps port 8080. File bytes and process byte streams preserve binary data.                                                                                                                                    |
 | Freestyle   | Provider catalog snapshot slugs are not Runtime snapshots and are refused. Firewall support is limited to an explicit empty rule set or the exact allow-public-outbound shape; arbitrary rule selectors, TLS policies and private networks are refused. No automatic-restart guarantee, retention scheduler, placement constraints, live resize, Linux-user switching, PTY namespace, public IPv6 or account-owned egress address emulation. Native snapshot retention is positive whole days.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Modal       | CPU sandboxes only; different resource reservation/limit values, fractional CPU, GPU and foreign placement are refused. Named Apps group Runtime sandboxes; they do not deploy Functions. Registry authentication uses Runtime's registry configuration. No Functions/Cls, volumes/bucket mounts, GPU image steps, readiness probes, sidecars, directory mounts, filesystem-only images from snapshots, or snapshot restoration API. Entry-point completion stops the sandbox while the originating client is alive; the native lease remains the bound if that client disappears. A different client can reconnect using the saved entrypoint process ID.                                                                                                                                                                                                                                            |
-| Cloudflare  | The conditional Worker entry supplies a Durable Object bridge and custom-hostname preview proxy; infrastructure configuration must still remove the vendor Container declaration and provide Runtime secrets. Custom preview routing is implemented but has no live public-hostname acceptance evidence. No isolated PID namespaces, interpreter contexts, bucket mounts, backup format, terminal WebSocket protocol, watchers/change versions, custom process IDs or provider cleanup-record semantics. Foreground named sessions use resident Bash; background processes inherit exported state/cwd but do not yet inherit every local variable/function/option.                                                                                                                                                                                                                                    |
+| Cloudflare  | The conditional Worker entry supplies a Durable Object bridge and custom-hostname preview proxy; infrastructure configuration must still remove the vendor Container declaration and provide Runtime secrets. Cloudflare's examples run live under `wrangler dev` (above); custom preview routing has no live public-hostname acceptance evidence. At most 4 interpreter contexts. No isolated PID namespaces, backup format, terminal WebSocket protocol, custom process IDs or provider cleanup-record semantics. Foreground named sessions use resident Bash; background processes inherit exported state/cwd but do not yet inherit every local variable/function/option.                                                                                                                                                                                                                         |
 
 ## Keeping compatibility current
 

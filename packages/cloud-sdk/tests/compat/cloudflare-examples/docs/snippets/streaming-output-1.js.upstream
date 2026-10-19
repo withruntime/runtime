@@ -1,0 +1,28 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/streaming-output/ (code block 1)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox, parseSSEStream } from "withruntime/cloudflare";
+
+const sandbox = getSandbox(env.Sandbox, "my-sandbox");
+
+const stream = await sandbox.execStream("npm run build");
+
+for await (const event of parseSSEStream(stream)) {
+	switch (event.type) {
+		case "stdout":
+			console.log(event.data);
+			break;
+
+		case "stderr":
+			console.error(event.data);
+			break;
+
+		case "complete":
+			console.log("Exit code:", event.exitCode);
+			break;
+
+		case "error":
+			console.error("Failed:", event.error);
+			break;
+	}
+}

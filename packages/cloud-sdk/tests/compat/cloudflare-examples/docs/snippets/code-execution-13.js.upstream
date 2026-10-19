@@ -1,0 +1,10 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/code-execution/ (code block 13)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const contexts = await sandbox.listCodeContexts();
+
+console.log(`${contexts.length} active contexts:`);
+
+for (const ctx of contexts) {
+	console.log(`  ${ctx.id} (${ctx.language})`);
+}

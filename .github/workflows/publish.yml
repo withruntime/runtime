@@ -134,8 +134,20 @@ jobs:
           curl -fsSL -o /tmp/mcp-publisher.tar.gz https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
           echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  /tmp/mcp-publisher.tar.gz" | sha256sum -c -
           tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
-          /tmp/mcp-publisher login dns --domain withruntime.com --private-key "$MCP_REGISTRY_KEY"
-          /tmp/mcp-publisher publish
+          # The registry answers a gateway timeout now and then (504 on
+          # 18 October 2026; the same publish went through 20 minutes
+          # later), and one that timed out may still have landed: try
+          # again, and stop once it lists the version.
+          for try in 1 2 3 4; do
+            /tmp/mcp-publisher login dns --domain withruntime.com --private-key "$MCP_REGISTRY_KEY" &&
+              /tmp/mcp-publisher publish && exit 0
+            if (cd ../.. && node .github/release/cli.ts decide mcp) | grep -qx do=skip; then exit 0; fi
+            [ "$try" = 4 ] && break
+            echo "Try $try failed; again in $((try * 30)) seconds."
+            sleep $((try * 30))
+          done
+          echo "The MCP registry refused all four tries." >&2
+          exit 1
 
   pypi:
     name: PyPI ${{ matrix.project }}

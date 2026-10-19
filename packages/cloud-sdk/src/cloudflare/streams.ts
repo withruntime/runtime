@@ -88,6 +88,39 @@ export async function* parseSSEStream<T>(
   }
 }
 
+/** The events of a server-sent-events Response, as parseSSEStream reads them. */
+export async function* responseToAsyncIterable<T>(
+  response: Response,
+  signal?: AbortSignal,
+): AsyncIterable<T> {
+  if (!response.ok) throw new Error(`Response not ok: ${response.status} ${response.statusText}`);
+  if (!response.body) throw new Error("No response body");
+  yield* parseSSEStream<T>(response.body, signal);
+}
+/** Events as a server-sent-events stream, one `data:` line each, then
+ * `data: [DONE]`, as Cloudflare's helper writes them. */
+export function asyncIterableToSSEStream<T>(
+  events: AsyncIterable<T>,
+  options: { signal?: AbortSignal; serialize?: (event: T) => string } = {},
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const serialize = options.serialize ?? ((event: T) => JSON.stringify(event));
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const event of events) {
+          if (options.signal?.aborted) throw new Error("Operation was aborted");
+          controller.enqueue(encoder.encode(`data: ${serialize(event)}\n\n`));
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+  });
+}
+
 /** A `readFileStream()` stream's chunks: strings for text, bytes for binary.
  * Returns the file's metadata. */
 export async function* streamFile(

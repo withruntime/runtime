@@ -169,6 +169,25 @@ export class OperationInterruptedError extends SandboxError<{
   }
 }
 
+/** Cloudflare's transport error for its WebSocket sessions; Runtime's API
+ * has no such session, so the adapter never throws it. */
+export class RPCTransportError extends SandboxError<{ kind: string; originalMessage: string }> {
+  get kind() {
+    return this.context.kind;
+  }
+  get originalMessage() {
+    return this.context.originalMessage;
+  }
+}
+/** Input the container refuses, such as content that is not base64. */
+export class ValidationFailedError extends SandboxError<{
+  validationErrors: { field: string; message: string; code: string }[];
+}> {
+  get validationErrors() {
+    return this.context.validationErrors;
+  }
+}
+
 export class BucketMountError extends Error {
   readonly code: string;
   constructor(message: string, code = "BUCKET_MOUNT_ERROR") {

@@ -1,0 +1,12 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 17)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Write binary
+await sandbox.writeFile("/workspace/image.png", base64data, {
+	encoding: "base64",
+});
+
+// Read binary
+const file = await sandbox.readFile("/workspace/image.png", {
+	encoding: "base64",
+});

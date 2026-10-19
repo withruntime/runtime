@@ -1,0 +1,12 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/execute-commands/ (code block 7)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Pipes and filters
+const result = await sandbox.exec('ls -la | grep ".py" | wc -l');
+console.log("Python files:", result.stdout.trim());
+
+// Output redirection
+await sandbox.exec("python generate.py > output.txt 2> errors.txt");
+
+// Multiple commands
+await sandbox.exec("cd /workspace && npm install && npm test");

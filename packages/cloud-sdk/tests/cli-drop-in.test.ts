@@ -14,14 +14,25 @@ const PAGES = {
   daytona: "daytona-alternative.md",
   vercel: "vercel-sandbox-alternative.md",
   blaxel: "blaxel-alternative.md",
+  cloudflare: "cloudflare-sandbox-alternative.md",
 } as const;
 
 test("each drop-in's import lines are the ones its guide page shows", () => {
   for (const [provider, page] of Object.entries(PAGES)) {
     const text = readFileSync(join(GUIDES, page), "utf8");
-    const [, js, py] = dropInLines(provider as keyof typeof PAGES);
+    const [, js, second] = dropInLines(provider as keyof typeof PAGES);
     expect(text).toContain(js!.trim());
-    expect(text).toContain(py!.trim());
+    // Cloudflare's SDK runs only in a Worker, so it has no Python line.
+    if (provider !== "cloudflare") expect(text).toContain(second!.trim());
+    else {
+      // More than the import changes; the page and the CLI both say what.
+      expect(second).toContain("containers");
+      for (const step of [
+        'export { Sandbox } from "withruntime/cloudflare"',
+        "npx wrangler secret put RUNTIME_API_KEY",
+      ])
+        expect(text).toContain(step);
+    }
   }
 });
 

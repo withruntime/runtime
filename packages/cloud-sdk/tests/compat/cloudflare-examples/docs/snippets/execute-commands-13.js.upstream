@@ -1,0 +1,12 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/execute-commands/ (code block 13)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const session = await sandbox.createSession({
+	commandTimeoutMs: 10000, // 10s default for all commands
+});
+
+await session.exec("npm install"); // Times out after 10s
+await session.exec("npm run build"); // Times out after 10s
+
+// Per-command timeout overrides the session default
+await session.exec("npm test", { timeout: 60000 }); // 60s for this command

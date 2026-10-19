@@ -1,0 +1,11 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 15)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Stop specific process (terminates entire process tree)
+await sandbox.killProcess(server.id);
+
+// Force kill if needed
+await sandbox.killProcess(server.id, "SIGKILL");
+
+// Stop all processes
+await sandbox.killAllProcesses();

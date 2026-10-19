@@ -154,20 +154,30 @@ export class CodeInterpreter {
     only("Cloudflare createCodeContext", options, ["language", "cwd", "envVars", "timeout"]);
     const language = this.#language(options.language);
     const s = await this.#native();
-    return context(
-      await s.interpreter.contexts.create(
-        {
-          language,
-          cwd: options.cwd ?? "/workspace",
-          env: Object.fromEntries(
-            Object.entries(options.envVars ?? {}).filter(
-              (e): e is [string, string] => e[1] !== undefined,
+    try {
+      return context(
+        await s.interpreter.contexts.create(
+          {
+            language,
+            cwd: options.cwd ?? "/workspace",
+            env: Object.fromEntries(
+              Object.entries(options.envVars ?? {}).filter(
+                (e): e is [string, string] => e[1] !== undefined,
+              ),
             ),
-          ),
-        },
-        options.timeout !== undefined ? { timeoutMs: options.timeout } : {},
-      ),
-    );
+          },
+          options.timeout !== undefined ? { timeoutMs: options.timeout } : {},
+        ),
+      );
+    } catch (error) {
+      // Cloudflare's container has no fixed count; Runtime's does. Say so,
+      // and what frees one, in the message: only it survives Worker RPC.
+      if ((error as { code?: string }).code !== "context_limit") throw error;
+      throw new Error(
+        `${(error as Error).message} Cloudflare's container has no fixed limit; delete a context you no longer need with deleteCodeContext(), and list them with listCodeContexts(). runCode without a context uses one per language.`,
+        { cause: error },
+      );
+    }
   }
   async runCode(code: string, options: RunCodeOptions = {}): Promise<Execution> {
     if (hasEnv(options.envVars)) throw new CompatibilityError("Cloudflare", RUN_ENV);

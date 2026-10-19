@@ -8,8 +8,27 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 19 October 2026
+
+- **Apps, Functions and Builds in the Go, Ruby and Java SDKs (private beta).**
+  Go 0.7.0 (`client.Apps`, `client.Functions`, `client.Builds`), Ruby 0.6.0
+  (`client.apps`, `client.functions`, `client.builds`) and Java 0.6.0
+  (`apps()`, `functions()`, `builds()`) carry every method the TypeScript SDK
+  has: create, deploy from an image or a build and wait for it, roll back,
+  versions and copies; builds of a connected repository with their log,
+  followed as it is written. Each can also ask for the link that installs
+  Runtime's GitHub App, so private repositories build. Outside the beta these
+  calls are refused with `product_in_beta`.
+
 ## 18 October 2026
 
+- **Move from Cloudflare Sandbox to Runtime.** A Worker written for
+  Cloudflare's Sandbox SDK (0.x) now runs on Runtime sandboxes once you change
+  its import to `withruntime/cloudflare`, delete the `containers` block from
+  `wrangler.jsonc` and add a `RUNTIME_API_KEY` secret. Commands, streaming,
+  files, background processes, the code interpreter, preview URLs, sessions
+  and `gitCheckout` work as before. See
+  [change the import](./cloudflare-sandbox-alternative#change-the-import).
 - **One deletion email a day, not one per pause.** A sandbox with
   `:retention` days of its own is a day or so from deletion after each idle
   pause, and its owners were emailed a warning on every pause, though using

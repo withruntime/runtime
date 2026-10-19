@@ -1,0 +1,17 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/streaming-output/ (code block 7)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { parseSSEStream } from "withruntime/cloudflare";
+
+const process = await sandbox.startProcess("node server.js");
+
+const logStream = await sandbox.streamProcessLogs(process.id);
+
+for await (const log of parseSSEStream(logStream)) {
+	console.log(log.data);
+
+	if (log.data.includes("Server listening")) {
+		console.log("Server is ready");
+		break;
+	}
+}

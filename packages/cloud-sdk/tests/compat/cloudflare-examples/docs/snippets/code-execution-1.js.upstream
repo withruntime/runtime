@@ -1,0 +1,19 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/code-execution/ (code block 1)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox } from "withruntime/cloudflare";
+
+const sandbox = getSandbox(env.Sandbox, "my-sandbox");
+
+// Create a Python context
+const pythonContext = await sandbox.createCodeContext({
+	language: "python",
+});
+
+console.log("Context ID:", pythonContext.id);
+console.log("Language:", pythonContext.language);
+
+// Create a JavaScript context
+const jsContext = await sandbox.createCodeContext({
+	language: "javascript",
+});

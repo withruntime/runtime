@@ -1,0 +1,35 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/api/sessions/ (code block 2)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Separate workflow environments
+const prodSession = await sandbox.createSession({
+	id: "prod",
+	env: { NODE_ENV: "production", API_URL: "https://api.example.com" },
+	cwd: "/workspace/prod",
+});
+
+const testSession = await sandbox.createSession({
+	id: "test",
+	env: {
+		NODE_ENV: "test",
+		API_URL: "http://localhost:3000",
+		DEBUG_MODE: undefined, // Skipped, not set in this session
+	},
+	cwd: "/workspace/test",
+});
+
+// Run in parallel
+const [prodResult, testResult] = await Promise.all([
+	prodSession.exec("npm run build"),
+	testSession.exec("npm run build"),
+]);
+
+// Session with a default command timeout
+const session = await sandbox.createSession({
+	commandTimeoutMs: 5000, // 5s timeout for all commands
+});
+
+await session.exec("sleep 10"); // Times out after 5s
+
+// Per-command timeout overrides session-level timeout
+await session.exec("sleep 10", { timeout: 3000 }); // Times out after 3s

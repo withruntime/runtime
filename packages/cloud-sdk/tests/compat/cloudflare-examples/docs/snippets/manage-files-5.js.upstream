@@ -1,0 +1,18 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 5)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Read text file
+const file = await sandbox.readFile("/workspace/app.js");
+console.log(file.content);
+
+// Read and parse JSON
+const configFile = await sandbox.readFile("/workspace/config.json");
+const config = JSON.parse(configFile.content);
+
+// Read binary file (v0.10.1 with `rpc` transport)
+const imageFile = await sandbox.readFile("/workspace/image.png", {
+	encoding: "none",
+});
+return new Response(imageFile.content, {
+	headers: { "Content-Type": imageFile.mimeType },
+});

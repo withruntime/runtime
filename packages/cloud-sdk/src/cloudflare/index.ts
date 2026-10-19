@@ -27,6 +27,7 @@ import {
   ProcessExitedBeforeReadyError,
   ProcessReadyTimeoutError,
   S3FSMountError,
+  ValidationFailedError,
   response,
 } from "./errors.js";
 import {
@@ -38,6 +39,7 @@ import {
   type RunCodeOptions,
 } from "./interpreter.js";
 import { sseStream, type FileStreamEvent } from "./streams.js";
+import { mimeType } from "./mime.js";
 import { CHANGES, watchFilters } from "./watch.js";
 export { CompatibilityError };
 export * from "./errors.js";
@@ -56,8 +58,13 @@ export {
   isProcessStatus,
   parseSSEStream,
   streamFile,
+  asyncIterableToSSEStream,
+  responseToAsyncIterable,
 } from "./streams.js";
 export type { FileChunk, FileMetadata, FileStreamEvent } from "./streams.js";
+export * from "./types.js";
+/** Cloudflare's interface for its Sandbox class. */
+export type ISandbox = Sandbox;
 export class SandboxSecurityError extends Error {
   constructor(
     message: string,
@@ -130,6 +137,13 @@ export type CheckChangesResult =
       version: string;
       timestamp: string;
     };
+export interface GitCheckoutOptions {
+  branch?: string;
+  targetDir?: string;
+  sessionId?: string;
+  depth?: number;
+  cloneTimeoutMs?: number;
+}
 export interface GitCheckoutResult {
   success: boolean;
   repoUrl: string;
@@ -165,6 +179,7 @@ export interface ReadFileResult {
   content: string;
   encoding: "utf-8" | "base64";
   isBinary: boolean;
+  mimeType: string;
   size: number;
   timestamp: string;
 }
@@ -183,6 +198,13 @@ export interface SessionOptions {
   cwd?: string;
   isolation?: boolean;
   commandTimeoutMs?: number;
+}
+export interface WaitForPortOptions {
+  mode?: "http" | "tcp";
+  path?: string;
+  status?: number | { min: number; max: number };
+  timeout?: number;
+  interval?: number;
 }
 export interface ProcessOptions {
   timeout?: number;
@@ -479,7 +501,7 @@ export class Sandbox {
     return sseStream<FileStreamEvent>(async (send) => {
       send({
         type: "metadata",
-        mimeType: isBinary ? "application/octet-stream" : "text/plain",
+        mimeType: read.mimeType,
         size: bytes.length,
         isBinary,
         encoding: isBinary ? "base64" : "utf-8",
@@ -616,16 +638,7 @@ export class Sandbox {
     });
   }
   /** Clones with git in the sandbox, as Cloudflare's container does. */
-  async gitCheckout(
-    repoUrl: string,
-    options: {
-      branch?: string;
-      targetDir?: string;
-      sessionId?: string;
-      depth?: number;
-      cloneTimeoutMs?: number;
-    } = {},
-  ): Promise<GitCheckoutResult> {
+  async gitCheckout(repoUrl: string, options: GitCheckoutOptions = {}): Promise<GitCheckoutResult> {
     only("Cloudflare gitCheckout", options, [
       "branch",
       "targetDir",
@@ -1065,11 +1078,23 @@ export class ExecutionSession {
     if (options.encoding && !["utf8", "utf-8", "base64"].includes(options.encoding))
       throw new CompatibilityError("Cloudflare", `file encoding ${options.encoding}`);
     let bytes: Uint8Array;
-    if (typeof content === "string")
-      bytes =
-        options.encoding === "base64"
-          ? Uint8Array.from(atob(content), (c) => c.charCodeAt(0))
-          : new TextEncoder().encode(content);
+    if (typeof content === "string" && options.encoding === "base64") {
+      // Cloudflare's container refuses anything but base64's alphabet.
+      if (!/^[A-Za-z0-9+/=]*$/.test(content))
+        throw new ValidationFailedError(
+          response(
+            "VALIDATION_FAILED",
+            `Invalid base64 content for '${path}': must contain only A-Z, a-z, 0-9, +, /, =`,
+            {
+              validationErrors: [
+                { field: "content", message: "Invalid base64 characters", code: "INVALID_BASE64" },
+              ],
+            },
+            { httpStatus: 400 },
+          ),
+        );
+      bytes = Uint8Array.from(atob(content), (c) => c.charCodeAt(0));
+    } else if (typeof content === "string") bytes = new TextEncoder().encode(content);
     else {
       const buffer = await new Response(content).arrayBuffer();
       bytes = new Uint8Array(buffer);
@@ -1087,7 +1112,9 @@ export class ExecutionSession {
     options: { encoding?: "utf8" | "utf-8" | "base64" | "none" } = {},
   ): Promise<ReadFileResult | ReadFileStreamResult> {
     const s = await this.sandbox.native(),
-      bytes = await s.files.read(await this.path(path));
+      resolved = await this.path(path),
+      bytes = await s.files.read(resolved),
+      type = mimeType(resolved, bytes);
     if (options.encoding === "none")
       return {
         success: true as const,
@@ -1099,7 +1126,7 @@ export class ExecutionSession {
           },
         }),
         size: bytes.length,
-        mimeType: "application/octet-stream",
+        mimeType: type,
         timestamp: new Date().toISOString(),
       };
     const text = new TextDecoder().decode(bytes),
@@ -1115,6 +1142,7 @@ export class ExecutionSession {
       content: encoded ? btoa(raw) : text,
       encoding: encoded ? "base64" : "utf-8",
       isBinary: binary,
+      mimeType: type,
       size: bytes.length,
       timestamp: new Date().toISOString(),
     };
@@ -1176,7 +1204,68 @@ export class ExecutionSession {
       { mode: 0o600 },
     );
   }
+  // The rest of Cloudflare's ExecutionSession: the sandbox's calls, in this session.
+  moveFile(path: string, newPath: string) {
+    return this.renameFile(path, newPath);
+  }
+  readFileStream(path: string) {
+    return this.sandbox.readFileStream(path, { sessionId: this.id });
+  }
+  gitCheckout(repoUrl: string, options: Omit<GitCheckoutOptions, "sessionId"> = {}) {
+    return this.sandbox.gitCheckout(repoUrl, { ...options, sessionId: this.id });
+  }
+  watch(path: string, options: Omit<WatchOptions, "sessionId"> = {}) {
+    return this.sandbox.watch(path, { ...options, sessionId: this.id });
+  }
+  checkChanges(path: string, options: Omit<CheckChangesOptions, "sessionId"> = {}) {
+    return this.sandbox.checkChanges(path, { ...options, sessionId: this.id });
+  }
+  listProcesses() {
+    return this.sandbox.listProcesses();
+  }
+  getProcess(id: string) {
+    return this.sandbox.getProcess(id);
+  }
+  killProcess(id: string, signal?: string) {
+    return this.sandbox.killProcess(id, signal);
+  }
+  killAllProcesses() {
+    return this.sandbox.killAllProcesses();
+  }
+  cleanupCompletedProcesses() {
+    return this.sandbox.cleanupCompletedProcesses();
+  }
+  getProcessLogs(id: string) {
+    return this.sandbox.getProcessLogs(id);
+  }
+  streamProcessLogs(id: string, options?: { signal?: AbortSignal }) {
+    return this.sandbox.streamProcessLogs(id, options);
+  }
+  createCodeContext(options?: CreateContextOptions) {
+    return this.sandbox.createCodeContext(options);
+  }
+  runCode(code: string, options?: RunCodeOptions) {
+    return this.sandbox.runCode(code, options);
+  }
+  runCodeStream(code: string, options?: RunCodeOptions) {
+    return this.sandbox.runCodeStream(code, options);
+  }
+  listCodeContexts() {
+    return this.sandbox.listCodeContexts();
+  }
+  deleteCodeContext(contextId: string) {
+    return this.sandbox.deleteCodeContext(contextId);
+  }
+  mountBucket(bucket: string, mountPath: string, options: MountBucketOptions) {
+    return this.sandbox.mountBucket(bucket, mountPath, options);
+  }
+  unmountBucket(mountPath: string) {
+    return this.sandbox.unmountBucket(mountPath);
+  }
 }
+refuse("Cloudflare", "ExecutionSession", ExecutionSession, {
+  terminal: "open a terminal with the native Runtime sandbox's terminal()",
+});
 export class Process {
   constructor(
     private readonly sandbox: Sandbox,
@@ -1227,58 +1316,106 @@ export class Process {
     });
     return { exitCode: r.exitCode ?? -1 };
   }
-  async waitForLog(pattern: string | RegExp, timeout = 30000) {
-    const condition = `log pattern ${String(pattern)}`;
-    const context = { processId: this.id, command: this.command, condition };
+  /** Cloudflare's errors for a wait, with its messages: a timeout, or the
+   * process ending first. */
+  #timedOut(condition: string, timeout: number) {
+    return new ProcessReadyTimeoutError(
+      response(
+        "PROCESS_READY_TIMEOUT",
+        `Process did not become ready within ${timeout}ms. Waiting for: ${condition}`,
+        { processId: this.id, command: this.command, condition, timeout },
+        {
+          httpStatus: 408,
+          suggestion: `Check if your process outputs ${condition}. You can increase the timeout parameter.`,
+        },
+      ),
+    );
+  }
+  #exited(condition: string, exitCode: number) {
+    return new ProcessExitedBeforeReadyError(
+      response(
+        "PROCESS_EXITED_BEFORE_READY",
+        `Process exited with code ${exitCode} before becoming ready. Waiting for: ${condition}`,
+        { processId: this.id, command: this.command, condition, exitCode },
+        { httpStatus: 500, suggestion: "Check process logs with getLogs() for error messages" },
+      ),
+    );
+  }
+  /** Waits as Cloudflare does: with no limit unless `timeout` is given. */
+  async #within<T>(
+    condition: string,
+    timeout: number | undefined,
+    wait: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    if (timeout === undefined) return wait();
     const signal = timeoutSignal(timeout);
     try {
-      return await this.#waitForLog(pattern, signal);
+      return await wait(signal);
     } catch (error) {
       if (!signal.aborted) throw error;
-      throw new ProcessReadyTimeoutError(
-        response(
-          "PROCESS_READY_TIMEOUT",
-          `Process did not become ready within ${timeout}ms`,
-          { ...context, timeout },
-          { httpStatus: 408, operation: "process.start" },
-        ),
-      );
+      throw this.#timedOut(condition, timeout);
     }
   }
-  async #waitForLog(pattern: string | RegExp, signal: AbortSignal) {
-    let output = "";
+  async waitForLog(pattern: string | RegExp, timeout?: number) {
+    const condition = typeof pattern === "string" ? `"${pattern}"` : pattern.toString();
+    return this.#within(condition, timeout, (signal) =>
+      this.#waitForLog(pattern, condition, signal),
+    );
+  }
+  async #waitForLog(pattern: string | RegExp, condition: string, signal?: AbortSignal) {
+    let stdout = "",
+      stderr = "";
     for await (const e of this.native.output({ signal })) {
-      if (e.type === "stdout" || e.type === "stderr") {
-        output += e.data;
-        const match =
-          typeof pattern === "string" ? output.includes(pattern) : output.match(pattern);
-        if (match)
-          return {
-            line:
-              output
-                .split("\n")
-                .find((line) =>
-                  typeof pattern === "string"
-                    ? line.includes(pattern)
-                    : new RegExp(pattern.source, pattern.flags.replace("g", "")).test(line),
-                ) ?? output,
-            ...(typeof pattern === "string" ? {} : { match }),
-          };
-      } else if (e.type === "exit")
-        throw new ProcessExitedBeforeReadyError(
-          response(
-            "PROCESS_EXITED_BEFORE_READY",
-            "Process exited before expected output",
-            {
-              processId: this.id,
-              command: this.command,
-              condition: `log pattern ${String(pattern)}`,
-              exitCode: e.exitCode ?? -1,
-            },
-            { httpStatus: 409, operation: "process.start" },
-          ),
-        );
+      if (e.type === "stdout") stdout += e.data;
+      else if (e.type === "stderr") stderr += e.data;
+      const found = matchLine(stdout, pattern) ?? matchLine(stderr, pattern);
+      if (found) return found;
+      if (e.type === "exit") throw this.#exited(condition, e.exitCode ?? 1);
     }
-    throw new Error("Process output ended before expected output");
+    throw this.#exited(condition, 0);
   }
+  /** Resolves once the port answers: an HTTP status in range (200-399 by
+   * default) at `path`, or a TCP connection in `tcp` mode. Throws if the
+   * process ends first, or after `timeout` milliseconds when one is given. */
+  async waitForPort(port: number, options: WaitForPortOptions = {}) {
+    only("Cloudflare waitForPort", options, ["mode", "path", "status", "timeout", "interval"]);
+    const { mode = "http", path = "/", status = { min: 200, max: 399 }, interval = 500 } = options;
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      throw new TypeError(`Invalid port number: ${port}`);
+    if (mode !== "http" && mode !== "tcp") throw new TypeError("mode is http or tcp");
+    const condition = mode === "http" ? `port ${port} (HTTP ${path})` : `port ${port} (TCP)`;
+    const min = typeof status === "number" ? status : status.min;
+    const max = typeof status === "number" ? status : status.max;
+    const url = `http://127.0.0.1:${port}${path.startsWith("/") ? path : `/${path}`}`;
+    const probe =
+      mode === "http"
+        ? `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 ${quote(url)}) && [ "$code" -ge ${min} ] && [ "$code" -le ${max} ]`
+        : `exec 3<>/dev/tcp/127.0.0.1/${port}`;
+    const s = await this.sandbox.native();
+    await this.#within(condition, options.timeout, async (signal) => {
+      for (;;) {
+        await this.native.refresh();
+        if (this.native.info.state !== "running")
+          throw this.#exited(condition, this.native.info.exitCode ?? 1);
+        if ((await s.exec(["bash", "-c", probe], { signal })).exitCode === 0) return;
+        await new Promise((done) => setTimeout(done, interval));
+        signal?.throwIfAborted();
+      }
+    });
+  }
+}
+/** The first line holding a match, as Cloudflare's waitForLog answers. */
+function matchLine(text: string, pattern: string | RegExp) {
+  if (typeof pattern === "string") {
+    if (!text.includes(pattern)) return null;
+    return { line: text.split("\n").find((line) => line.includes(pattern)) ?? pattern };
+  }
+  const safe = new RegExp(pattern.source, pattern.flags.replace("g", ""));
+  const match = text.match(safe);
+  if (!match) return null;
+  for (const line of text.split("\n")) {
+    const lineMatch = line.match(safe);
+    if (lineMatch) return { line, match: lineMatch };
+  }
+  return { line: match[0], match };
 }

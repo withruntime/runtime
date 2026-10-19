@@ -176,6 +176,16 @@ A `timeoutMs` (Python `timeout`) is kept by Runtime's server, up to 24 hours,
 and `kill()` deletes the sandbox, as on E2B. With no timeout, E2B's 300 seconds
 ends in a pause rather than a delete, so call `kill()` when the work is done.
 
+**From Cloudflare's Sandbox SDK (0.x):** change `from "@cloudflare/sandbox"`
+to `from "withruntime/cloudflare"` in both the `getSandbox` import and the
+`export { Sandbox }` line, delete the `containers` block from the Wrangler
+config (keep the `Sandbox` Durable Object binding and its migration), and store
+a key with `npx wrangler secret put RUNTIME_API_KEY` (SDK 0.18.0 and later).
+The Worker's `getSandbox(env.Sandbox, name)` then reaches a Runtime sandbox
+kept for that name. Backups, tunnels, terminals and outbound interception
+refuse by name and say what to use instead; a sandbox holds at most 4 code
+contexts ([Cloudflare](./cloudflare-sandbox-alternative#change-the-import)).
+
 ### Map the calls
 
 The usual calls of other sandbox SDKs, and their Runtime equivalent. Names on the

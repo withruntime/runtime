@@ -1,0 +1,14 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 19)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+try {
+	// Invalid: contains invalid base64 characters
+	await sandbox.writeFile("/workspace/data.bin", "invalid!@#$", {
+		encoding: "base64",
+	});
+} catch (error) {
+	if (error.code === "VALIDATION_FAILED") {
+		// Content contains invalid base64 characters
+		console.error("Invalid base64 content");
+	}
+}

@@ -3,9 +3,9 @@
 module WithRuntime
   # Ruby's snake_case keywords as the API's camelCase fields: +timeout_seconds:+
   # is timeoutSeconds, +memory_mib:+ is memoryMiB. User data (labels, env,
-  # build_args, headers and the like) is sent as it is.
+  # build_args, build_env, headers and the like) is sent as it is.
   module Fields
-    OPAQUE = %w[labels env buildArgs headers data context detail].freeze
+    OPAQUE = %w[labels env buildArgs buildEnv headers data context detail].freeze
 
     module_function
 

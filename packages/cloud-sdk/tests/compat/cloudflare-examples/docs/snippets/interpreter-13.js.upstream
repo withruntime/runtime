@@ -1,0 +1,10 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/api/interpreter/ (code block 13)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const ctx = await sandbox.createCodeContext({ language: "javascript" });
+
+await sandbox.runCode("const x = 10", { context: ctx });
+await sandbox.runCode("let y = 20", { context: ctx });
+const result = await sandbox.runCode("x + y", { context: ctx });
+
+console.log(result.results[0].text); // "30"

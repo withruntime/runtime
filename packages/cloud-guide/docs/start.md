@@ -186,7 +186,9 @@ maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
 Runtime's, and shows how to work out your monthly saving from measured usage.
 Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after changing one
 import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
-`withruntime/blaxel`; Morph's TypeScript client, to `withruntime/morph`.
+`withruntime/blaxel`; Morph's TypeScript client, to `withruntime/morph`; a
+Worker written for Cloudflare's Sandbox SDK, to `withruntime/cloudflare`, with
+its `containers` block deleted and a `RUNTIME_API_KEY` secret.
 `npx withruntime compare --from <provider>` prints what you save, and
 credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 

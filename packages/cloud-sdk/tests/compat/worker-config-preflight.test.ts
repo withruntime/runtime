@@ -12,6 +12,7 @@ void mock.module("cloudflare:workers", () => ({
       readonly env: unknown,
     ) {}
   },
+  WorkerEntrypoint: class {},
 }));
 const { Sandbox: Worker } = await import("../../src/cloudflare/worker.js");
 

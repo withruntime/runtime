@@ -1,0 +1,15 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 5)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const processes = await sandbox.listProcesses();
+
+console.log(`Running ${processes.length} processes:`);
+
+for (const proc of processes) {
+	console.log(`${proc.id}: ${proc.command} (${proc.status})`);
+}
+
+// Check if specific process is running
+const isRunning = processes.some(
+	(p) => p.id === processId && p.status === "running",
+);

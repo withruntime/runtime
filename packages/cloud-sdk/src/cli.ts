@@ -1616,7 +1616,7 @@ const RIVAL_NAMES: Record<SwitchProvider, string> = {
 /** The rivals whose SDK runs on Runtime unchanged but for one import, and that
  * import in JavaScript and Python. Held to the guides' own lines by
  * `tests/cli-drop-in.test.ts`. */
-const DROP_IN: Partial<Record<SwitchProvider, { js: string; py: string }>> = {
+const DROP_IN: Partial<Record<SwitchProvider, { js: string; py?: string; also?: string }>> = {
   e2b: {
     js: 'import { Sandbox } from "withruntime/e2b"; // was: from "e2b"',
     py: "from withruntime.e2b import Sandbox  # was: from e2b import Sandbox",
@@ -1633,6 +1633,11 @@ const DROP_IN: Partial<Record<SwitchProvider, { js: string; py: string }>> = {
     js: 'import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"',
     py: "from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance",
   },
+  // A Worker-only SDK: no Python. More than the import changes, so say what.
+  cloudflare: {
+    js: 'import { getSandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"',
+    also: "Change the `export { Sandbox }` line the same way, delete the `containers` block from the Wrangler config and run `npx wrangler secret put RUNTIME_API_KEY`.",
+  },
 };
 
 /** How to move a rival's code across, when one import does it. */
@@ -1640,9 +1645,10 @@ export function dropInLines(provider: SwitchProvider | undefined): string[] {
   const drop = provider && DROP_IN[provider];
   if (!drop) return [];
   return [
-    `Your ${RIVAL_NAMES[provider]} code runs on Runtime with one import changed:`,
+    `Your ${RIVAL_NAMES[provider]} code runs on Runtime with ${drop.also ? "this import changed" : "one import changed"}:`,
     `  ${drop.js}`,
-    `  ${drop.py}`,
+    ...(drop.py ? [`  ${drop.py}`] : []),
+    ...(drop.also ? [drop.also] : []),
   ];
 }
 

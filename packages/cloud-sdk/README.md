@@ -162,6 +162,25 @@ copies memory and processes. `stop` deletes the sandbox, as Morph's does.
 SSH, reboot and a time limit set after start throw `CompatibilityError`
 naming the alternative. `COMPATIBILITY.md` lists every mapping.
 
+## Code written for Cloudflare's Sandbox SDK
+
+`withruntime/cloudflare` runs a Worker written for Cloudflare's 0.x
+`@cloudflare/sandbox` API on Runtime sandboxes. Change the package name in the
+import and in the `Sandbox` export:
+
+```ts no-run
+import { getSandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
+export { Sandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
+```
+
+Then delete the `containers` block from the Wrangler config, keeping the
+`Sandbox` Durable Object binding, and store a key with
+`npx wrangler secret put RUNTIME_API_KEY`. Exec, streaming, files, processes,
+the code interpreter, sessions, `gitCheckout` and `exposePort` work as
+Cloudflare documents them; backups, tunnels, terminals and outbound
+interception throw `CompatibilityError` naming the alternative.
+`COMPATIBILITY.md` lists every mapping.
+
 ## Agent frameworks
 
 `withruntime/openai-agents` is a sandbox client for the OpenAI Agents SDK's

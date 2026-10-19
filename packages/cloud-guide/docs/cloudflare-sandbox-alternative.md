@@ -114,7 +114,69 @@ replaces the Cloudflare calls on a branch, tests them on the free usage, and tel
 you what you save each month. Your old code stays on the main branch until you
 merge.
 
-### From the Sandbox SDK
+### Change the import
+
+Runtime's SDK runs a Worker written for Cloudflare's 0.x `@cloudflare/sandbox`
+API, as this page describes from SDK version 0.18.0. The switch is the import,
+one config block and one secret, not literally one line. Change the package
+name in both lines that name it:
+
+```ts no-run
+import { getSandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
+export { Sandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
+```
+
+In `wrangler.jsonc` (or `wrangler.toml`), delete the `containers` block: the
+sandbox runs on Runtime, so there is no image to build and no Docker on your
+machine. Keep the `Sandbox` Durable Object binding, its migration and
+`nodejs_compat` as they are.
+
+```jsonc no-run
+"containers": [
+  { "class_name": "Sandbox", "image": "./Dockerfile", "instance_type": "lite", "max_instances": 1 }
+],
+```
+
+Create a key at https://withruntime.com/account/keys and store it as a Worker
+secret, never in the config or the source:
+
+```bash no-run
+npx wrangler secret put RUNTIME_API_KEY
+```
+
+`getSandbox(env.Sandbox, "my-sandbox")` then reaches a Runtime sandbox kept
+for that name, and `exec`, streaming, files, background processes, the code
+interpreter, sessions, `gitCheckout` and `exposePort` with `proxyToSandbox`
+work as Cloudflare documents them. On 18 October 2026 Cloudflare's get-started
+Worker, its `minimal` and `alpine` examples and the runnable 0.x examples from
+its docs ran unchanged under `wrangler dev` on Runtime sandboxes, with only
+those changes.
+
+What works differently:
+
+- **Calls Runtime has no counterpart for refuse by name**, before anything
+  happens, and the message says what to use instead: backups (Runtime's
+  snapshots), tunnels and `wsConnect` (the URL `exposePort` returns),
+  terminals, outbound interception in a `Sandbox` subclass (the sandbox's
+  network rules and secrets), and container settings such as
+  `containerTimeouts` and `transport`.
+- **Process ids are Runtime's.** `startProcess(cmd, { processId })` and
+  `autoCleanup` refuse, and a process's `pid` is not reported.
+- **At most 4 code contexts per sandbox.** Cloudflare's container has no fixed
+  number. A fifth `createCodeContext` throws and says to delete one with
+  `deleteCodeContext()`; `runCode` without a context uses one per language.
+- **Errors keep their message.** Across a Durable Object call an error arrives
+  with its message and without its `code` field, on Cloudflare too, so match
+  on the message.
+
+Version 1.0 of `@cloudflare/sandbox` drops `getSandbox` and the `Sandbox`
+class: your own Durable Object starts the Container and runs
+`this.ctx.container.exec([...])`, and the package keeps only `Files`, `S3Mount`
+and `DirectoryBackup`. On Runtime, `container.exec(["sh", "task.sh"])` is
+`box.exec(["sh", "task.sh"])`, and `new Files(container).writeFile(path, data)`
+is `box.files.write(path, data)`.
+
+### Or port the calls
 
 Cloudflare, inside a Worker, with the 0.x `@cloudflare/sandbox` API:
 
@@ -144,13 +206,6 @@ try {
   await box.stop();
 }
 ```
-
-Version 1.0 of `@cloudflare/sandbox` drops `getSandbox` and the `Sandbox`
-class: your own Durable Object starts the Container and runs
-`this.ctx.container.exec([...])`, and the package keeps only `Files`, `S3Mount`
-and `DirectoryBackup`. On Runtime, `container.exec(["sh", "task.sh"])` is
-`box.exec(["sh", "task.sh"])`, and `new Files(container).writeFile(path, data)`
-is `box.files.write(path, data)`.
 
 ### Calling Runtime from a Worker
 

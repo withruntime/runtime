@@ -1,0 +1,14 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 9)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const files = {
+	"/workspace/src/app.js": 'console.log("app");',
+	"/workspace/src/utils.js": 'console.log("utils");',
+	"/workspace/README.md": "# My Project",
+};
+
+await Promise.all(
+	Object.entries(files).map(([path, content]) =>
+		sandbox.writeFile(path, content),
+	),
+);

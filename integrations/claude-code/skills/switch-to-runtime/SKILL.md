@@ -20,7 +20,9 @@ In short, the guide has you:
    `withruntime/daytona`, `withruntime/vercel` or `withruntime/blaxel` (Python
    `withruntime.e2b`, `withruntime.daytona`, `withruntime.vercel`,
    `withruntime.blaxel`). Morph's TypeScript client needs its import changed
-   to `withruntime/morph`.
+   to `withruntime/morph`. A Worker written for Cloudflare's Sandbox SDK
+   needs its import changed to `withruntime/cloudflare`, the `containers`
+   block deleted from its Wrangler config and a `RUNTIME_API_KEY` secret.
    Agent frameworks have ready integrations: see topic `frameworks`.
 3. Connect with one approval (`runtime_connect`, or `npx -y withruntime login`)
    and run the project's own tests on the free trial with `funding: "trial"`.

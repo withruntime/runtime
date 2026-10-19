@@ -1,0 +1,5 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 25)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+await sandbox.killAllProcesses();
+const server = await sandbox.startProcess("node server.js");

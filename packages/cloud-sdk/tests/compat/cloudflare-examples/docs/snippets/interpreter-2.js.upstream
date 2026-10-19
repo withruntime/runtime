@@ -1,0 +1,7 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/api/interpreter/ (code block 2)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const ctx = await sandbox.createCodeContext({
+	language: "python",
+	envVars: { API_KEY: env.API_KEY },
+});

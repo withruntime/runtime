@@ -1,0 +1,11 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 1)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Absolute paths
+await sandbox.writeFile("/workspace/app.js", code);
+
+// Relative paths (session-aware)
+const session = await sandbox.createSession();
+await session.exec("cd /workspace/my-project");
+await session.writeFile("app.js", code); // Writes to /workspace/my-project/app.js
+await session.writeFile("src/index.js", code); // Writes to /workspace/my-project/src/index.js

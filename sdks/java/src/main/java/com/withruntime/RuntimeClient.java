@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.5.0";
+  public static final String VERSION = "0.6.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -33,6 +33,9 @@ public final class RuntimeClient {
   private final Images images;
   private final Volumes volumes;
   private final Agents agents;
+  private final Apps apps;
+  private final Apps functions;
+  private final Builds builds;
   private final Products.Secrets secrets;
   private final Products.Limits limits;
   private final Products.Emails emails;
@@ -69,6 +72,9 @@ public final class RuntimeClient {
     this.images = new Images(transport);
     this.volumes = new Volumes(transport);
     this.agents = new Agents(transport);
+    this.apps = new Apps(transport, "apps");
+    this.functions = new Apps(transport, "functions");
+    this.builds = new Builds(transport);
     this.secrets = new Products.Secrets(transport);
     this.limits = new Products.Limits(transport);
     this.emails = new Products.Emails(transport);
@@ -197,6 +203,30 @@ public final class RuntimeClient {
   /** Agents that run in sandboxes, one session per piece of work. A private beta. */
   public Agents agents() {
     return agents;
+  }
+
+  /**
+   * Servers that wake on demand behind one URL, deployed from an image or a build, keeping copies
+   * awake if asked. In private beta: outside it, PermissionDenied with code product_in_beta.
+   */
+  public Apps apps() {
+    return apps;
+  }
+
+  /**
+   * Apps that keep no copy awake, at /v1/functions. In private beta: outside it, PermissionDenied
+   * with code product_in_beta.
+   */
+  public Apps functions() {
+    return functions;
+  }
+
+  /**
+   * Builds of connected repositories, and the repositories ({@code builds().repositories()}). In
+   * private beta: outside it, PermissionDenied with code product_in_beta.
+   */
+  public Builds builds() {
+    return builds;
   }
 
   /** Values sandboxes use on the way out without seeing them. */

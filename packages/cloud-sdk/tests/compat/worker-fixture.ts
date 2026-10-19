@@ -15,7 +15,7 @@ export default {
         duplicate = true;
       }
       const ports = await sb.getExposedPorts("new.example.test");
-      const forwarded = await proxyToSandbox(new Request(first.url + "/hello?x=1"), env);
+      const forwarded = await proxyToSandbox(new Request(new URL("/hello?x=1", first.url)), env);
       const denied = await proxyToSandbox(
         new Request(first.url.replace("-stable.", "-wrong.")),
         env,

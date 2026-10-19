@@ -1,0 +1,11 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 23)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const process = await sandbox.startProcess("node server.js");
+await new Promise((resolve) => setTimeout(resolve, 1000));
+
+const processes = await sandbox.listProcesses();
+if (!processes.find((p) => p.id === process.id)) {
+	const logs = await sandbox.getProcessLogs(process.id);
+	console.error("Process exited:", logs);
+}

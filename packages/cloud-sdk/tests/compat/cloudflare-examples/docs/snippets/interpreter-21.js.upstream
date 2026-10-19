@@ -1,0 +1,21 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/api/interpreter/ (code block 21)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const result = await sandbox.runCode(
+	`
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 10, 100)
+plt.plot(x, np.sin(x))
+plt.show()
+`,
+	{ language: "python" },
+);
+
+if (result.results[0]?.png) {
+	const imageBuffer = Buffer.from(result.results[0].png, "base64");
+	return new Response(imageBuffer, {
+		headers: { "Content-Type": "image/png" },
+	});
+}

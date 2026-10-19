@@ -4,4 +4,5 @@ declare module "cloudflare:workers" {
   import type { CloudflareWorkersModule } from "@cloudflare/workers-types/index.ts";
   export const DurableObject: typeof CloudflareWorkersModule.DurableObject;
   export const RpcTarget: typeof CloudflareWorkersModule.RpcTarget;
+  export const WorkerEntrypoint: typeof CloudflareWorkersModule.WorkerEntrypoint;
 }

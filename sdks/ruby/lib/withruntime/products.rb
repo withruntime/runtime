@@ -13,6 +13,14 @@ module WithRuntime
 
     def seg(value) = Transport.segment(value)
 
+    # A change's body from keyword arguments: nil is left out, +:remove+ sends
+    # null, which clears the field.
+    def patch(changes)
+      body = Fields.body(changes.reject { |_key, value| value == :remove })
+      changes.each { |key, value| body[key.is_a?(Symbol) ? Fields.camel(key) : key.to_s] = nil if value == :remove }
+      body
+    end
+
     def page(path, query)
       body = @t.json("GET", path, query: query)
       Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) do |cursor|

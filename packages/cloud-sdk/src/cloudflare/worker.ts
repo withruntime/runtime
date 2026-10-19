@@ -1,21 +1,26 @@
-/** Workers conditional entry. The Durable Object coordinates requests and stores
- * configuration; Runtime owns compute. Existing Container/Wrangler declarations
- * still need removal during infrastructure migration. */
-import { DurableObject } from "cloudflare:workers";
+/** Workers conditional entry: what a Worker imports as `withruntime/cloudflare`.
+ * `Sandbox` is the Durable Object class the Worker exports and binds, as with
+ * @cloudflare/sandbox; it keeps the sandbox's name and preview tokens, and
+ * Runtime runs the sandbox. The Wrangler config drops its `containers` block. */
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import type {
   DurableObjectState,
   DurableObjectNamespace,
   Request as WorkerRequest,
   Response as WorkerResponse,
 } from "@cloudflare/workers-types/index.ts";
-import { only, CompatibilityError } from "../compat/core.js";
+import { only, refusal, CompatibilityError, type RefusedAsync } from "../compat/core.js";
 import { Runtime } from "../client.js";
 import { workerSandboxIdentity } from "./identity.js";
 import {
   Sandbox as RuntimeSandbox,
+  SandboxSecurityError,
   sanitizeSandboxId,
   validateSandboxConfiguration,
+  type CheckChangesOptions,
   type ExecutionSession,
+  type GitCheckoutOptions,
+  type MountBucketOptions,
   type Process,
   type SandboxOptions,
   type SessionOptions,
@@ -23,8 +28,51 @@ import {
   type ProcessOptions,
   type ReadFileResult,
   type ReadFileStreamResult,
+  type StreamOptions,
+  type WaitForPortOptions,
+  type WatchOptions,
 } from "./index.js";
+import type { CreateContextOptions, RunCodeOptions } from "./interpreter.js";
 export * from "./index.js";
+/** The bindings a Worker passes to proxyToSandbox, as Cloudflare names them. */
+export interface SandboxEnv<T extends Sandbox = Sandbox> {
+  Sandbox: DurableObjectNamespace<T>;
+}
+/** Cloudflare's egress entrypoint for outbound interception, which Runtime
+ * does with network rules and secrets instead. */
+export class ContainerProxy extends WorkerEntrypoint {
+  override fetch(): Promise<WorkerResponse> {
+    return Promise.reject(refusal("Cloudflare", "ContainerProxy", OUTBOUND));
+  }
+}
+const OUTBOUND =
+  "set the sandbox's network rules with Runtime's network API, and store keys as Runtime secrets, which Runtime's proxy adds to the requests you name";
+const TERMINAL = "open a terminal with the native Runtime sandbox's terminal()";
+/** Members of Cloudflare's Durable Object a Runtime sandbox has no counterpart
+ * for, refused with what to use instead. */
+const REFUSED: Record<string, string> = {
+  callTunnels: "use exposePort for a public URL",
+  setContainerTimeouts: "a Runtime sandbox has no container start to tune",
+  setTransport: "Runtime's API is the only transport",
+  containerFetch: "fetch the URL exposePort returns",
+  getContainerPlacementId: "a Runtime sandbox's id is its place",
+  createBackup: "snapshot the sandbox with Runtime's snapshots, or keep the folder on a volume",
+  restoreBackup: "create a sandbox from a Runtime snapshot",
+  terminal: TERMINAL,
+};
+/** Hooks and outbound settings a subclass of Cloudflare's class may set,
+ * which would otherwise be silently ignored. */
+const SUBCLASS: Record<string, string> = {
+  onStart: "a Runtime sandbox has no Durable Object lifecycle hooks",
+  onStop: "a Runtime sandbox has no Durable Object lifecycle hooks",
+  onError: "a Runtime sandbox has no Durable Object lifecycle hooks",
+  onActivityExpired: "set sleepAfter or keepAlive instead",
+  interceptHttps: OUTBOUND,
+  enableInternet: OUTBOUND,
+  allowedHosts: OUTBOUND,
+  deniedHosts: OUTBOUND,
+};
+const STATIC_OUTBOUND = ["outboundByHost", "outbound", "outboundHandlers"];
 export interface RuntimeWorkerEnv {
   RUNTIME_API_KEY: string;
   RUNTIME_API_URL?: string;
@@ -101,21 +149,51 @@ function sessionTarget(session: ExecutionSession) {
     execStream: (command: string, options?: ExecOptions) => session.execStream(command, options),
     startProcess: async (command: string, options?: ProcessOptions) =>
       processTarget(await session.startProcess(command, options)),
+    listProcesses: async () => (await session.listProcesses()).map((p) => processTarget(p)),
+    getProcess: async (id: string) => {
+      const p = await session.getProcess(id);
+      return p ? processTarget(p) : null;
+    },
+    killProcess: (id: string, signal?: string) => session.killProcess(id, signal),
+    killAllProcesses: () => session.killAllProcesses(),
+    cleanupCompletedProcesses: () => session.cleanupCompletedProcesses(),
+    getProcessLogs: (id: string) => session.getProcessLogs(id),
+    streamProcessLogs: (id: string) => session.streamProcessLogs(id),
     writeFile: (...args: Parameters<ExecutionSession["writeFile"]>) => session.writeFile(...args),
     readFile,
+    readFileStream: (path: string) => session.readFileStream(path),
     mkdir: (...args: Parameters<ExecutionSession["mkdir"]>) => session.mkdir(...args),
     deleteFile: (path: string) => session.deleteFile(path),
     renameFile: (path: string, to: string) => session.renameFile(path, to),
     moveFile: (path: string, to: string) => session.renameFile(path, to),
     exists: (path: string) => session.exists(path),
     listFiles: (...args: Parameters<ExecutionSession["listFiles"]>) => session.listFiles(...args),
+    gitCheckout: (repoUrl: string, options?: Omit<GitCheckoutOptions, "sessionId">) =>
+      session.gitCheckout(repoUrl, options),
+    watch: (path: string, options?: Omit<WatchOptions, "sessionId">) =>
+      session.watch(path, options),
+    checkChanges: (path: string, options?: Omit<CheckChangesOptions, "sessionId">) =>
+      session.checkChanges(path, options),
     setEnvVars: (...args: Parameters<ExecutionSession["setEnvVars"]>) =>
       session.setEnvVars(...args),
+    createCodeContext: (options?: CreateContextOptions) => session.createCodeContext(options),
+    runCode: (code: string, options?: RunCodeOptions) => session.runCode(code, options),
+    runCodeStream: (code: string, options?: RunCodeOptions) => session.runCodeStream(code, options),
+    listCodeContexts: () => session.listCodeContexts(),
+    deleteCodeContext: (id: string) => session.deleteCodeContext(id),
+    mountBucket: (bucket: string, path: string, options: MountBucketOptions) =>
+      session.mountBucket(bucket, path, options),
+    unmountBucket: (path: string) => session.unmountBucket(path),
+    terminal: () => Promise.reject(refusal("Cloudflare", "ExecutionSession.terminal", TERMINAL)),
   };
 }
+/** A Process as plain data and callable members, as Cloudflare's RPC returns
+ * one. `pid` is absent: Runtime does not report it (Cloudflare's type has it
+ * optional). */
 function processTarget(process: Process) {
   return {
     id: process.id,
+    pid: undefined,
     command: process.command,
     status: process.status,
     startTime: process.startTime,
@@ -128,9 +206,20 @@ function processTarget(process: Process) {
     waitForExit: (timeout?: number) => process.waitForExit(timeout),
     waitForLog: (pattern: string | RegExp, timeout?: number) =>
       process.waitForLog(pattern, timeout),
+    waitForPort: (port: number, options?: WaitForPortOptions) => process.waitForPort(port, options),
   };
 }
 export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends DurableObject<Env> {
+  // Refused below, on the prototype: declared so a Worker that calls one
+  // compiles and gets the refusal, not a type error.
+  declare readonly callTunnels: RefusedAsync;
+  declare readonly setContainerTimeouts: RefusedAsync;
+  declare readonly setTransport: RefusedAsync;
+  declare readonly containerFetch: RefusedAsync;
+  declare readonly getContainerPlacementId: RefusedAsync;
+  declare readonly createBackup: RefusedAsync;
+  declare readonly restoreBackup: RefusedAsync;
+  declare readonly terminal: RefusedAsync;
   private configuration: Configuration = {};
   private configurationIntent?: ConfigurationIntent;
   private facade?: RuntimeSandbox;
@@ -179,6 +268,7 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
       throw new Error("Call getSandbox(namespace, id) before using the Durable Object");
     if (!this.env.RUNTIME_API_KEY?.startsWith("rtcloud_"))
       throw new Error("Set the RUNTIME_API_KEY Worker secret to a Runtime API key");
+    this.refuseSubclassSettings();
     this.facade ??= new RuntimeSandbox(
       new Runtime({ apiKey: this.env.RUNTIME_API_KEY, baseUrl: this.env.RUNTIME_API_URL }),
       workerSandboxIdentity(this.ctx.id.toString(), this.configuration),
@@ -371,33 +461,104 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
   async setEnvVars(...args: Parameters<RuntimeSandbox["setEnvVars"]>) {
     return (await this.sandbox()).setEnvVars(...args);
   }
+  // The rest of Cloudflare's 0.x Sandbox, each a call on the Runtime sandbox.
+  async setLabels(labels: Record<string, string>) {
+    return (await this.sandbox()).setLabels(labels);
+  }
+  async execWithSessionToken(command: string, sessionId: string, options?: ExecOptions) {
+    return (await this.sandbox(options?.signal)).execWithSessionToken(command, sessionId, options);
+  }
+  async execStreamWithSessionToken(command: string, sessionId: string, options?: StreamOptions) {
+    return (await this.sandbox(options?.signal)).execStreamWithSessionToken(
+      command,
+      sessionId,
+      options,
+    );
+  }
+  async streamProcessLogs(processId: string, options?: { signal?: AbortSignal }) {
+    return (await this.sandbox(options?.signal)).streamProcessLogs(processId, options);
+  }
+  async cleanupCompletedProcesses(sessionId?: string) {
+    return (await this.sandbox()).cleanupCompletedProcesses(sessionId);
+  }
+  async readFileStream(path: string, options?: { sessionId?: string }) {
+    return (await this.sandbox()).readFileStream(path, options);
+  }
+  async gitCheckout(repoUrl: string, options?: GitCheckoutOptions) {
+    return (await this.sandbox()).gitCheckout(repoUrl, options);
+  }
+  async watch(path: string, options?: WatchOptions) {
+    return (await this.sandbox()).watch(path, options);
+  }
+  async checkChanges(path: string, options?: CheckChangesOptions) {
+    return (await this.sandbox()).checkChanges(path, options);
+  }
+  async mountBucket(bucket: string, mountPath: string, options: MountBucketOptions) {
+    return (await this.sandbox()).mountBucket(bucket, mountPath, options);
+  }
+  async unmountBucket(mountPath: string) {
+    return (await this.sandbox()).unmountBucket(mountPath);
+  }
+  async createCodeContext(options?: CreateContextOptions) {
+    return (await this.sandbox()).createCodeContext(options);
+  }
+  async runCode(code: string, options?: RunCodeOptions) {
+    return (await this.sandbox(options?.signal)).runCode(code, options);
+  }
+  async runCodeStream(code: string, options?: RunCodeOptions) {
+    return (await this.sandbox(options?.signal)).runCodeStream(code, options);
+  }
+  async listCodeContexts() {
+    return (await this.sandbox()).listCodeContexts();
+  }
+  async deleteCodeContext(contextId: string) {
+    return (await this.sandbox()).deleteCodeContext(contextId);
+  }
+  /** Stops the sandbox; its files stay, and the next call starts it again. */
+  async stop(signal?: unknown) {
+    return (await this.sandbox()).stop(signal);
+  }
+  /** A subclass's Cloudflare-only hooks and outbound settings would do
+   * nothing here, so the first call refuses them by name. */
+  private refuseSubclassSettings() {
+    for (const [member, alternative] of Object.entries(SUBCLASS))
+      if ((this as Record<string, unknown>)[member] !== undefined)
+        throw refusal("Cloudflare", `Sandbox.${member}`, alternative);
+    const statics = this.constructor as unknown as Record<string, unknown>;
+    for (const member of STATIC_OUTBOUND)
+      if (statics[member] !== undefined) throw refusal("Cloudflare", `Sandbox.${member}`, OUTBOUND);
+  }
   exposePort(port: number, options: { name?: string; hostname: string; token?: string }) {
     return this.previewOperation(() => this.expose(port, options));
   }
   private async expose(port: number, options: { name?: string; hostname: string; token?: string }) {
     only("Cloudflare Worker exposePort", options, ["name", "hostname", "token"]);
     if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === 3000)
-      throw new TypeError("Preview port must be 1024-65535, excluding 3000");
+      throw new SandboxSecurityError(
+        `Invalid port number: ${port}. Must be 1024-65535, excluding 3000 (sandbox control plane).`,
+        "INVALID_PORT",
+      );
     if (
-      !/^[a-z0-9.-]+$/i.test(options.hostname) ||
+      !/^[a-z0-9.-]+(:\d{1,5})?$/i.test(options.hostname) ||
       options.hostname.startsWith(".") ||
-      options.hostname.endsWith(".")
+      /\.(:|$)/.test(options.hostname)
     )
       throw new TypeError("Preview hostname must be a DNS hostname");
     if (options.hostname.endsWith(".workers.dev"))
       throw new Error(
-        "Port exposure requires a custom domain; .workers.dev does not support wildcard preview subdomains",
+        "Port exposure requires a custom domain. .workers.dev domains do not support wildcard subdomains required for port proxying.",
       );
+    if (options.token !== undefined) validateToken(options.token);
     const existing = await this.ctx.storage.get<{ token: string }>(`runtime.preview.${port}`);
-    const token = options.token ?? existing?.token ?? crypto.randomUUID().replaceAll("-", "");
+    const token = options.token ?? existing?.token ?? newToken();
     const ports = await this.ctx.storage.list<{ token: string; port: number }>({
       prefix: "runtime.preview.",
     });
-    if ([...ports.values()].some((p) => p.port !== port && p.token === token))
-      throw new Error(`Token '${token}' is already in use by another port`);
-    if (!/^[a-z0-9_]{1,63}$/.test(token))
-      throw new TypeError(
-        "Preview token must contain 1-63 lowercase letters, digits or underscores",
+    const taken = [...ports.values()].find((p) => p.port !== port && p.token === token);
+    if (taken)
+      throw new SandboxSecurityError(
+        `Token '${token}' is already in use by port ${taken.port}. Please use a different token.`,
+        "TOKEN_IN_USE",
       );
     const sandbox = await this.sandbox();
     const name = this.configuration.sandboxName!.name;
@@ -407,7 +568,7 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
         "uppercase sandbox IDs in preview hostnames; use normalizeId:true",
       );
     const native = await (await sandbox.native()).previews.create(port, { visibility: "private" });
-    const url = `https://${port}-${name}-${token}.${options.hostname}`;
+    const url = previewUrl(port, name, options.hostname, token);
     await this.ctx.storage.put(`runtime.preview.${port}`, {
       token,
       url,
@@ -440,7 +601,7 @@ export class Sandbox<Env extends RuntimeWorkerEnv = RuntimeWorkerEnv> extends Du
         })
       ).values(),
     ].map((p) => ({
-      url: `https://${p.port}-${this.configuration.sandboxName!.name}-${p.token}.${hostname}`,
+      url: previewUrl(p.port, this.configuration.sandboxName!.name, hostname, p.token),
       port: p.port,
       status: "active" as const,
     }));
@@ -491,6 +652,9 @@ export function getSandbox<T extends Sandbox>(
   id: string,
   options: SandboxOptions = {},
 ): T {
+  for (const [option, alternative] of Object.entries(OPTIONS))
+    if ((options as Record<string, unknown>)[option] !== undefined)
+      throw refusal("Cloudflare", `getSandbox ${option}`, alternative);
   only("Cloudflare Worker getSandbox", options, ["normalizeId", "sleepAfter", "keepAlive"]);
   sanitizeSandboxId(id);
   const name = options.normalizeId ? id.toLowerCase() : id;
@@ -503,12 +667,80 @@ export function getSandbox<T extends Sandbox>(
   // Await configuration for every operation so no request can race name setup.
   return new Proxy(stub, {
     get(target, key) {
+      // Cloudflare's getSandbox adds these on the Worker side; an RPC stub
+      // would answer every name, so refuse them here, by name.
+      if (key === "tunnels") return tunnels;
+      if (key === "wsConnect")
+        return () =>
+          Promise.reject(
+            refusal("Cloudflare", "Sandbox.wsConnect", "connect to the URL exposePort returns"),
+          );
+      if (key === "terminal")
+        return () => Promise.reject(refusal("Cloudflare", "Sandbox.terminal", TERMINAL));
+      if (key === "client")
+        throw refusal("Cloudflare", "Sandbox.client", "Runtime's API is the client");
       const value = Reflect.get(target, key) as unknown;
       if (typeof value !== "function" || key === "then") return value;
       return (...args: unknown[]) =>
         Promise.resolve(configured).then(() => Reflect.apply(value, target, args) as unknown);
     },
   }) as unknown as T;
+}
+
+for (const [member, alternative] of Object.entries(REFUSED))
+  Object.defineProperty(Sandbox.prototype, member, {
+    configurable: true,
+    writable: true,
+    value: (): Promise<never> =>
+      Promise.reject(refusal("Cloudflare", `Sandbox.${member}`, alternative)),
+  });
+/** getSandbox options Cloudflare's class reads that a Runtime sandbox has no
+ * counterpart for. */
+const OPTIONS: Record<string, string> = {
+  containerTimeouts: "a Runtime sandbox has no container start to tune",
+  transport: "Runtime's API is the only transport",
+  enableDefaultSession:
+    "commands share the default session; use createSession() for a separate shell",
+  labels: "call sandbox.setLabels(labels)",
+};
+const TUNNELS = "use exposePort for a URL to a port; Runtime serves it itself";
+const tunnels = Object.fromEntries(
+  ["get", "list", "destroy"].map((method) => [
+    method,
+    () => Promise.reject(refusal("Cloudflare", `Sandbox.tunnels.${method}`, TUNNELS)),
+  ]),
+);
+/** Cloudflare's preview URL for a port: `http` and the given port on a local
+ * hostname, `https` otherwise, built as its SDK builds it. */
+function previewUrl(port: number, sandboxId: string, hostname: string, token: string) {
+  const id = sanitizeSandboxId(sandboxId).toLowerCase();
+  const [host = "", mainPort] = hostname.split(":");
+  const local = ["localhost", "127.0.0.1", "0.0.0.0"].includes(host);
+  const base = new URL(local ? `http://${host}:${mainPort || "80"}` : `https://${hostname}`);
+  base.hostname = `${port}-${id}-${token}.${host}`;
+  return base.toString();
+}
+function validateToken(token: string) {
+  if (token.length === 0)
+    throw new SandboxSecurityError("Custom token cannot be empty.", "INVALID_TOKEN");
+  if (token.length > 16)
+    throw new SandboxSecurityError(
+      `Custom token too long. Maximum 16 characters allowed. Received: ${token.length} characters.`,
+      "INVALID_TOKEN",
+    );
+  if (!/^[a-z0-9_]+$/.test(token))
+    throw new SandboxSecurityError(
+      "Custom token must contain only lowercase letters (a-z), numbers (0-9), and underscores (_). Invalid token provided.",
+      "INVALID_TOKEN",
+    );
+}
+/** 16 characters of a-z, 0-9 and _, as Cloudflare's tokens are. */
+function newToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/[+/]/g, "_")
+    .replace(/=/g, "")
+    .toLowerCase();
 }
 
 function previewRoute(url: URL) {

@@ -1,0 +1,10 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 17)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// This script spawns multiple child processes
+const batch = await sandbox.startProcess(
+	'bash -c "process1 & process2 & process3 & wait"',
+);
+
+// killProcess() terminates the bash process AND all three child processes
+await sandbox.killProcess(batch.id);

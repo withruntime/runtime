@@ -1,0 +1,13 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/code-execution/ (code block 15)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Delete specific context
+await sandbox.deleteCodeContext(context.id);
+console.log("Context deleted");
+
+// Clean up all contexts
+const contexts = await sandbox.listCodeContexts();
+for (const ctx of contexts) {
+	await sandbox.deleteCodeContext(ctx.id);
+}
+console.log("All contexts deleted");

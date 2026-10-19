@@ -24,7 +24,8 @@ module WithRuntime
 
   class Client
     attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :limits, :emails, :referrals,
-                :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp, :agents
+                :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp, :agents,
+                :apps, :functions, :builds
 
     # +api_key+: default RUNTIME_API_KEY, then this machine's saved connection.
     # +base_url+: default RUNTIME_API_URL, then https://api.withruntime.com.
@@ -72,6 +73,10 @@ module WithRuntime
       @sso = SSO.new(@transport)
       @mcp = MCP.new(@transport)
       @agents = Agents.new(@transport)
+      # Private beta: outside it, product_in_beta (403).
+      @apps = Apps.new(@transport, "/v1/apps")
+      @functions = Apps.new(@transport, "/v1/functions")
+      @builds = Builds.new(@transport)
     end
 
     # Renamed on 6 October 2026, one plural word per product: each old name is the product it became, with a warning,

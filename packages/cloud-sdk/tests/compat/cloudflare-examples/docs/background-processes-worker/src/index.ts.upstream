@@ -1,0 +1,36 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 22)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox, parseSSEStream, type LogEvent } from 'withruntime/cloudflare';
+
+export { Sandbox } from 'withruntime/cloudflare';
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // Enable keepAlive for long-running processes
+    const sandbox = getSandbox(env.Sandbox, 'build-job-123', {
+      keepAlive: true
+    });
+
+    try {
+      // Start a long-running build process
+      const build = await sandbox.startProcess('npm run build:production');
+
+      // Monitor progress
+      const logs = await sandbox.streamProcessLogs(build.id);
+
+      // Process can run indefinitely without container shutdown
+      for await (const log of parseSSEStream<LogEvent>(logs)) {
+        console.log(log.data);
+        if (log.data.includes('Build complete')) {
+          break;
+        }
+      }
+
+      return new Response('Build completed');
+    } finally {
+      // Important: Must explicitly destroy when done
+      await sandbox.destroy();
+    }
+  }
+};

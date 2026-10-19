@@ -1332,6 +1332,11 @@ to use instead. `E2B.md`, `DAYTONA.md`, `VERCEL.md` and `BLAXEL.md` in the
 package list every mapping and gap. To move to Runtime's own calls, see
 [migration](./migrate).
 
+A Worker written for Cloudflare's Sandbox SDK (0.x) runs after changing its
+import to `withruntime/cloudflare`, deleting the `containers` block from its
+Wrangler config and adding a `RUNTIME_API_KEY` secret; see
+[change the import](./cloudflare-sandbox-alternative#change-the-import).
+
 ## Configuration
 
 ```ts

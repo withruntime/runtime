@@ -1,0 +1,22 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/expose-services/ (code block 4)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Extract hostname from request
+const { hostname } = new URL(request.url);
+
+// Without custom token - URL changes on restart
+const exposed = await sandbox.exposePort(8080, { hostname });
+// https://8080-sandbox-id-random16chars12.yourdomain.com
+
+// With custom token - URL stays the same across restarts
+const stable = await sandbox.exposePort(8080, {
+	hostname,
+	token: "api-v1",
+});
+// https://8080-sandbox-id-api-v1.yourdomain.com
+// Same URL after container restart ✓
+
+return Response.json({
+	"Temporary URL (changes on restart)": exposed.url,
+	"Stable URL (consistent)": stable.url,
+});

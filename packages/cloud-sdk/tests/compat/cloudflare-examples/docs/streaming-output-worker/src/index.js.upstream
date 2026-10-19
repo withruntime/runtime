@@ -1,0 +1,21 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/streaming-output/ (code block 3)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox } from "withruntime/cloudflare";
+
+export { Sandbox } from "withruntime/cloudflare";
+
+export default {
+	async fetch(request, env) {
+		const sandbox = getSandbox(env.Sandbox, "builder");
+
+		const stream = await sandbox.execStream("npm run build");
+
+		return new Response(stream, {
+			headers: {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache",
+			},
+		});
+	},
+};

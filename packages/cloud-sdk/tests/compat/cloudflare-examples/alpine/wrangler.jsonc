@@ -1,0 +1,27 @@
+// Source: https://github.com/cloudflare/sandbox-sdk/blob/%40cloudflare/sandbox%400.12.10/examples/alpine/wrangler.jsonc
+// Read 18 October 2026. Copied verbatim; the only change is the removed "containers"
+// block: Runtime runs the sandbox, so there is no image to build.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sandbox-alpine-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox"],
+      "tag": "v1"
+    }
+  ]
+}

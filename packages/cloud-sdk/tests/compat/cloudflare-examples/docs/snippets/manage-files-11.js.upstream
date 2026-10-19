@@ -1,0 +1,17 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/manage-files/ (code block 11)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+const result = await sandbox.exists("/workspace/config.json");
+if (!result.exists) {
+	// Create default config
+	await sandbox.writeFile("/workspace/config.json", "{}");
+}
+
+// Check directory
+const dirResult = await sandbox.exists("/workspace/data");
+if (!dirResult.exists) {
+	await sandbox.mkdir("/workspace/data");
+}
+
+// Also available on sessions
+const sessionResult = await session.exists("/workspace/temp.txt");

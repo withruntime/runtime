@@ -1,0 +1,16 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/background-processes/ (code block 1)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+import { getSandbox } from "withruntime/cloudflare";
+
+const sandbox = getSandbox(env.Sandbox, "my-sandbox");
+
+// Start a web server
+const server = await sandbox.startProcess("python -m http.server 8000");
+
+console.log("Server started");
+console.log("Process ID:", server.id);
+console.log("PID:", server.pid);
+console.log("Status:", server.status); // 'running'
+
+// Process runs in background - your code continues

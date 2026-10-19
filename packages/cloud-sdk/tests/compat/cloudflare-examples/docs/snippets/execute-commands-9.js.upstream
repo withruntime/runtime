@@ -1,0 +1,17 @@
+// Source: https://developers.cloudflare.com/sandbox/sdk/guides/execute-commands/ (code block 9)
+// Read 18 October 2026. Copied verbatim; the only change is the package name,
+// "@cloudflare/sandbox" -> "withruntime/cloudflare".
+// Run inline Python
+const result = await sandbox.exec('python -c "print(sum([1, 2, 3, 4, 5]))"');
+console.log("Sum:", result.stdout.trim()); // "15"
+
+// Run a script file
+await sandbox.writeFile(
+	"/workspace/analyze.py",
+	`
+import sys
+print(f"Argument: {sys.argv[1]}")
+`,
+);
+
+await sandbox.exec("python /workspace/analyze.py data.csv");
