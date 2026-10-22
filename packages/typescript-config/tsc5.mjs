@@ -6,12 +6,29 @@
 // This runs the `typescript` package's own command, refuses any version but
 // 5, hands it the arguments unchanged and exits as it did
 // (scripts/tsgo.test.ts). Type checks run TypeScript 7 as `tsgo` (tsgo.mjs).
+//
+// `typescript` is looked up from the package being built (the directory this
+// runs in, which `bun run build` sets), then from here. The public mirror has
+// no root `typescript`, only the one its SDK declares, and an install there
+// links it into that package alone: looking up from here found nothing and the
+// 22 October 2026 npm publish failed (scripts/tsgo.test.ts).
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-const manifest = createRequire(import.meta.url).resolve("typescript/package.json");
+const lookups = [join(process.cwd(), "package.json"), import.meta.url];
+let manifest;
+for (const from of lookups) {
+  try {
+    manifest = createRequire(from).resolve("typescript/package.json");
+    break;
+  } catch {}
+}
+if (!manifest) {
+  console.error(`tsc5: cannot find typescript from ${process.cwd()} or ${import.meta.dirname}`);
+  process.exit(2);
+}
 const { name, version } = JSON.parse(readFileSync(manifest, "utf8"));
 if (name !== "typescript" || !String(version).startsWith("5.")) {
   console.error(`tsc5: typescript is ${name}@${version}, not TypeScript 5`);

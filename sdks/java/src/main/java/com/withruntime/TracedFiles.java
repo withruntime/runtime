@@ -4,8 +4,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The files a traced command opened ({@link ExecOptions#traceFiles()}): what it, and anything it
- * started, read and wrote.
+ * The files a traced command opened ({@link ExecOptions#traceFiles(boolean)}): what it, and
+ * anything it started, read and wrote.
  */
 public final class TracedFiles extends JsonObject {
   TracedFiles(Map<String, Object> raw) {
