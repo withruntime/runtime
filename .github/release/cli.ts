@@ -10,7 +10,14 @@
 import { execFileSync } from "node:child_process";
 import { createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { REGISTRIES, type Target, TARGETS, decide } from "./registries.ts";
+import {
+  REGISTRIES,
+  type Target,
+  TARGETS,
+  decide,
+  onPypi,
+  waitsForFirstUpload,
+} from "./registries.ts";
 import { readVersion } from "./versions.ts";
 import { checkDispatch, fromTag } from "./verify-record.ts";
 
@@ -106,6 +113,22 @@ if (command === "record") {
   const version = mainVersion(t);
   const published = await REGISTRIES[t].read(fetch);
   if (!Array.isArray(published)) refuse(published.unread);
+  // A PyPI project's first upload waits for any before it (waitsForFirstUpload).
+  const lists: Partial<Record<Target, readonly string[]>> = { [t]: published };
+  if (onPypi(t) && !published.length)
+    for (const o of TARGETS.slice(0, TARGETS.indexOf(t)).filter(onPypi)) {
+      const l = await REGISTRIES[o].read(fetch);
+      if (!Array.isArray(l)) refuse(l.unread);
+      lists[o] = l;
+    }
+  const waits = waitsForFirstUpload(t, (o) => lists[o] ?? []);
+  if (waits) {
+    console.error(
+      `${REGISTRIES[t].label} waits for ${waits}'s first upload: PyPI holds one pending publisher for \`release\`.`,
+    );
+    console.log(`version=${version}\ndo=skip`);
+    process.exit(0);
+  }
   const d = decide(version, published, REGISTRIES[t].label);
   if ("refused" in d) refuse(d.refused);
   console.error(

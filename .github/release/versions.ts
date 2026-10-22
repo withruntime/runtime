@@ -8,8 +8,48 @@
 // mirror with its types stripped, so it imports nothing and uses no syntax
 // that has to be compiled.
 
-export type Pkg = "js" | "python" | "langchain" | "go" | "java" | "ruby";
-export const PKGS: readonly Pkg[] = ["js", "python", "langchain", "go", "java", "ruby"];
+export type Pkg =
+  | "js"
+  | "python"
+  | "langchain"
+  | "openai-agents"
+  | "pydantic-ai"
+  | "google-adk"
+  | "smolagents"
+  | "go"
+  | "java"
+  | "ruby";
+export const PKGS: readonly Pkg[] = [
+  "js",
+  "python",
+  "langchain",
+  "openai-agents",
+  "pydantic-ai",
+  "google-adk",
+  "smolagents",
+  "go",
+  "java",
+  "ruby",
+];
+
+/** The Python framework integrations under integrations/, on PyPI as
+ * `<name>-withruntime` (Marc approved publishing them, 22 October 2026):
+ * each one's folder and module, whose pyproject.toml and `__version__` name
+ * its version. */
+export const PYPI_INTEGRATIONS = {
+  "openai-agents": { dir: "integrations/openai-agents", module: "openai_agents_withruntime" },
+  "pydantic-ai": { dir: "integrations/pydantic-ai", module: "pydantic_ai_withruntime" },
+  "google-adk": { dir: "integrations/google-adk", module: "google_adk_withruntime" },
+  smolagents: { dir: "integrations/smolagents", module: "smolagents_withruntime" },
+} as const;
+
+function integration(pkg: keyof typeof PYPI_INTEGRATIONS): Spot[] {
+  const { dir, module } = PYPI_INTEGRATIONS[pkg];
+  return [
+    { path: `${dir}/pyproject.toml`, pattern: /^version = "([^"]*)"$/gm, count: 1 },
+    { path: `${dir}/${module}/__init__.py`, pattern: /^__version__ = "([^"]*)"$/gm, count: 1 },
+  ];
+}
 
 /** A version in a file: the pattern's one group, found exactly `count` times. */
 export type Spot = { path: string; pattern: RegExp; count: number };
@@ -54,6 +94,10 @@ export const VERSION_FILES: Record<Pkg, Spot[]> = {
       count: 1,
     },
   ],
+  "openai-agents": integration("openai-agents"),
+  "pydantic-ai": integration("pydantic-ai"),
+  "google-adk": integration("google-adk"),
+  smolagents: integration("smolagents"),
   go: [{ path: "sdks/go/client.go", pattern: /^const Version = "([^"]*)"$/gm, count: 1 }],
   java: [
     { path: "sdks/java/pom.xml", pattern: POM, count: 1 },
@@ -167,7 +211,8 @@ export function parseChange(path: string, text: string): Change | { refused: str
   if (!CHANGE_FILE.test(path))
     return { refused: `${path} is not a change file's name (${CHANGES}/<pkg>-<words>.txt)` };
   const [first = "", ...rest] = text.split("\n");
-  const m = /^([a-z]+) (patch|minor|major)$/.exec(first.trim());
+  // A package's name may have a hyphen (openai-agents).
+  const m = /^([a-z][a-z-]*) (patch|minor|major)$/.exec(first.trim());
   if (!m || !PKGS.includes(m[1] as Pkg))
     return {
       refused: `${path}'s first line is not "<${PKGS.join("|")}> <patch|minor|major>": ${JSON.stringify(first.slice(0, 80))}`,

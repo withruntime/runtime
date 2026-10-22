@@ -8,12 +8,29 @@
 // older than one customers already have. Node runs this file in the public
 // mirror with its types stripped: it imports nothing.
 
-export type Target = "npm" | "mcp" | "pypi" | "langchain" | "maven" | "rubygems" | "go";
+export type Target =
+  | "npm"
+  | "mcp"
+  | "pypi"
+  | "langchain"
+  | "openai-agents"
+  | "pydantic-ai"
+  | "google-adk"
+  | "smolagents"
+  | "maven"
+  | "rubygems"
+  | "go";
+/** control-fleet's checks/sdks.rs `TARGETS` names the same, in this order
+ * (registries.test.ts holds them together). */
 export const TARGETS: readonly Target[] = [
   "npm",
   "mcp",
   "pypi",
   "langchain",
+  "openai-agents",
+  "pydantic-ai",
+  "google-adk",
+  "smolagents",
   "maven",
   "rubygems",
   "go",
@@ -23,7 +40,17 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export type Registry = {
   /** The package whose version files name the version (versions.ts). */
-  pkg: "js" | "python" | "langchain" | "go" | "java" | "ruby";
+  pkg:
+    | "js"
+    | "python"
+    | "langchain"
+    | "openai-agents"
+    | "pydantic-ai"
+    | "google-adk"
+    | "smolagents"
+    | "go"
+    | "java"
+    | "ruby";
   /** In plain words, for Slack and the logs. */
   label: string;
   /** Every version it lists, or why it could not be read; a package it has
@@ -112,6 +139,17 @@ async function mcpVersions(fetcher: Fetch): Promise<string[] | { unread: string 
   return { unread: "the MCP registry listed more than 10 pages" };
 }
 
+/** A PyPI project: every version it lists (none before its first upload). */
+function pypi(pkg: Registry["pkg"], project: string): Registry {
+  return {
+    pkg,
+    label: `PyPI ${project}`,
+    read: reader(`https://pypi.org/pypi/${project}/json`, "json", (b) =>
+      Object.keys(b?.releases ?? {}),
+    ),
+  };
+}
+
 export const REGISTRIES: Record<Target, Registry> = {
   npm: {
     pkg: "js",
@@ -121,20 +159,12 @@ export const REGISTRIES: Record<Target, Registry> = {
     ),
   },
   mcp: { pkg: "js", label: "the MCP registry (com.withruntime/runtime)", read: mcpVersions },
-  pypi: {
-    pkg: "python",
-    label: "PyPI withruntime",
-    read: reader("https://pypi.org/pypi/withruntime/json", "json", (b) =>
-      Object.keys(b?.releases ?? {}),
-    ),
-  },
-  langchain: {
-    pkg: "langchain",
-    label: "PyPI langchain-withruntime",
-    read: reader("https://pypi.org/pypi/langchain-withruntime/json", "json", (b) =>
-      Object.keys(b?.releases ?? {}),
-    ),
-  },
+  pypi: pypi("python", "withruntime"),
+  langchain: pypi("langchain", "langchain-withruntime"),
+  "openai-agents": pypi("openai-agents", "openai-agents-withruntime"),
+  "pydantic-ai": pypi("pydantic-ai", "pydantic-ai-withruntime"),
+  "google-adk": pypi("google-adk", "google-adk-withruntime"),
+  smolagents: pypi("smolagents", "smolagents-withruntime"),
   maven: {
     pkg: "java",
     label: "Maven Central com.withruntime:withruntime",
@@ -199,6 +229,27 @@ export function decide(
       refused: `${version} is not newer than ${newest}, the newest ${label} has: bump the version past it`,
     };
   return { do: "publish" };
+}
+
+/** Whether a registry is a PyPI project. */
+export const onPypi = (t: Target) => REGISTRIES[t].label.startsWith("PyPI ");
+
+/** Every PyPI project publishes from the environment `release` (main and
+ * publish/* tags only), and PyPI holds one pending publisher (a project
+ * before its first upload) per repository, workflow and environment. So of
+ * the PyPI projects with no upload yet only the first in TARGETS goes; each
+ * after it waits, its pending publisher added once the one before has
+ * uploaded (the RUNBOOK's "Publish the SDKs"). The label of the project it
+ * waits for, or undefined. */
+export function waitsForFirstUpload(
+  target: Target,
+  listed: (t: Target) => readonly string[],
+): string | undefined {
+  if (!onPypi(target) || listed(target).length) return undefined;
+  const ahead = TARGETS.slice(0, TARGETS.indexOf(target)).find(
+    (t) => onPypi(t) && !listed(t).length,
+  );
+  return ahead && REGISTRIES[ahead].label;
 }
 
 /** The registry each client the API names (packages/cloud/src/api/client-version.ts)

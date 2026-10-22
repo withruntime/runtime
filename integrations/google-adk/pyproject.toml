@@ -9,7 +9,7 @@ description = "Runtime sandboxes for Google ADK: a code executor and a sandbox t
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Runtime LLC" }]
-keywords = ["google-adk", "adk", "sandbox", "code-execution", "firecracker", "microvm", "runtime"]
+keywords = ["google adk", "google-adk", "adk", "agent development kit", "code executor", "sandbox", "ai agents", "code execution", "firecracker", "microvm", "runtime"]
 classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
@@ -25,13 +25,13 @@ requires-python = ">=3.10,<4.0"
 dependencies = [
     # CodeExecutionResult.exit_code.
     "google-adk>=2.9",
-    "withruntime>=0.6.1",
+    "withruntime>=0.6.1,<1.0",
 ]
 
 [project.urls]
-Homepage = "https://withruntime.com/docs/frameworks#google-adk"
+Homepage = "https://withruntime.com"
 Documentation = "https://withruntime.com/docs/frameworks#google-adk"
-Source = "https://github.com/withruntime/runtime/tree/main/integrations/google-adk"
+Repository = "https://github.com/withruntime/runtime/tree/main/integrations/google-adk"
 
 [dependency-groups]
 test = ["pytest>=8", "pytest-asyncio>=1.0.0"]

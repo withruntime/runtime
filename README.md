@@ -37,7 +37,7 @@ saved on this machine. A new account starts on a free trial with no card. The
 | `sdks/python`                                                                     | The Python SDK: [`withruntime`](https://pypi.org/project/withruntime/) on PyPI                                              |
 | `sdks/python/integrations/langchain-withruntime`                                  | LangChain and Deep Agents sandbox backend                                                                                   |
 | `sdks/go`, `sdks/java`, `sdks/ruby`                                               | The Go, Java and Ruby SDKs                                                                                                  |
-| `integrations/pydantic-ai`, `integrations/google-adk`                             | Pydantic AI and Google ADK integrations                                                                                     |
+| `integrations/openai-agents`, `pydantic-ai`, `google-adk`, `smolagents`           | OpenAI Agents SDK, Pydantic AI, Google ADK and smolagents integrations, each `<name>-withruntime` on PyPI                   |
 | `integrations/claude-code`, `codex`, `cursor`, `gemini-cli`, `vscode`, `windsurf` | Skills, rules and MCP settings for coding agents                                                                            |
 | `packages/cloud-guide/docs`                                                       | The guides served at [withruntime.com/docs](https://withruntime.com/docs), which the SDK tests check samples against        |
 

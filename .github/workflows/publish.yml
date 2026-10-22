@@ -171,6 +171,11 @@ jobs:
           echo "The MCP registry refused all four tries." >&2
           exit 1
 
+  # Each project's own job: one PyPI refuses never holds back another. All
+  # publish from `release`; PyPI holds one pending publisher per
+  # (repository, workflow, environment), so of the projects with no upload
+  # yet only the first goes, the rest skip (registries.ts
+  # waitsForFirstUpload).
   pypi:
     name: PyPI ${{ matrix.project }}
     needs: [verify]
@@ -189,6 +194,18 @@ jobs:
           - project: langchain-withruntime
             target: langchain
             dir: sdks/python/integrations/langchain-withruntime
+          - project: openai-agents-withruntime
+            target: openai-agents
+            dir: integrations/openai-agents
+          - project: pydantic-ai-withruntime
+            target: pydantic-ai
+            dir: integrations/pydantic-ai
+          - project: google-adk-withruntime
+            target: google-adk
+            dir: integrations/google-adk
+          - project: smolagents-withruntime
+            target: smolagents
+            dir: integrations/smolagents
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

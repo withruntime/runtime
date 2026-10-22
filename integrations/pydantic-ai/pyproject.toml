@@ -9,7 +9,7 @@ description = "Runtime sandboxes as a Pydantic AI toolset: shell, files and list
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Runtime LLC" }]
-keywords = ["pydantic-ai", "sandbox", "code-execution", "firecracker", "microvm", "runtime"]
+keywords = ["pydantic ai", "pydantic-ai", "pydantic", "toolset", "sandbox", "ai agents", "code execution", "firecracker", "microvm", "runtime"]
 classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
@@ -26,13 +26,13 @@ dependencies = [
     # AbstractToolset.for_run, which gives each agent run its own sandbox, and
     # a toolset's get_instructions reaching the model, which 1.73 still drops.
     "pydantic-ai-slim>=1.74",
-    "withruntime>=0.6.1",
+    "withruntime>=0.6.1,<1.0",
 ]
 
 [project.urls]
-Homepage = "https://withruntime.com/docs/frameworks#pydantic-ai"
+Homepage = "https://withruntime.com"
 Documentation = "https://withruntime.com/docs/frameworks#pydantic-ai"
-Source = "https://github.com/withruntime/runtime/tree/main/integrations/pydantic-ai"
+Repository = "https://github.com/withruntime/runtime/tree/main/integrations/pydantic-ai"
 
 [dependency-groups]
 test = ["pytest>=8", "pytest-asyncio>=1.0.0"]
