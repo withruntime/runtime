@@ -111,6 +111,30 @@ to your jobs as `RUNTIME_API_KEY`.
 - Change a key's daily limit, list every key and revoke them at
   [API keys](https://withruntime.com/account/keys).
 
+## Book room for a burst or a pool
+
+```bash no-run
+runtime reservations book --sandboxes 300 --from 21:00 --to 23:00
+runtime reservations book --sandboxes 50 --vcpu 4 --memory 8192 --from now --to 02:00
+runtime reservations keep --sandboxes 40 --snapshot <id> --for-key
+runtime reservations change <id> --snapshot <id>
+runtime reservations ls
+runtime reservations get <id>
+runtime reservations cancel <id>
+```
+
+- The answer is at once. Booked: in the window, creates are never refused for
+  room or limits up to what you booked. Sandboxes you run bill as usual;
+  booked room none of them uses costs {{booked-unused-rate}} per GiB-hour, and
+  the answer says the most that comes to if none run.
+  Declined: the command prints why, the most that fits and the nearest window
+  that fits all of them, and exits with code 1.
+- `--from` and `--to` take an ISO time, `now`, or `HH:MM` on this machine's
+  clock: today, or tomorrow if it has passed. A `--to` before `--from` is the
+  next day. A window is at most 24 hours and starts within 14 days.
+- Size defaults to 2 vCPU, 4096 MiB memory and 4096 MiB disk. `--json` prints the
+  booking.
+
 ## Sandboxes
 
 ```bash
@@ -118,6 +142,7 @@ id=$(runtime sandboxes create --name demo --label team=search)
 runtime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 runtime sandboxes exec "${id}" --cwd /workspace --env API_TOKEN -- env
 runtime sandboxes exec "${id}" --root -- apt-get install -y jq
+runtime sandboxes exec "${id}" --trace-files read.json -- bun test src/a.test.ts
 runtime sandboxes ls
 runtime sandboxes ls --state running --label team=search
 runtime sandboxes get "${id}"
@@ -298,6 +323,22 @@ runtime sandboxes watch "${id}" /workspace --recursive --exclude node_modules --
 runtime sandboxes watch "${id}" /workspace/src --events create,write --include '**/*.py'
 ```
 
+Make a link to one file that anyone can open with no API key. By default it
+downloads the file and lasts an hour; `--put` makes one that takes an upload.
+`--expires` takes `90s`, `10m`, `1h` or `7d` (60 seconds to 7 days):
+
+```bash no-run
+runtime sandboxes link "${id}" /workspace/report.csv --filename report.csv --expires 10m
+runtime sandboxes link "${id}" /workspace/incoming.bin --put --max-bytes 10485760
+runtime sandboxes link "${id}" /workspace/out --archive        # a folder, as a .tar.gz
+runtime sandboxes link revoke "${id}"                          # ends every link of the sandbox
+```
+
+It wakes a paused sandbox unless you pass `--no-wake`, which answers
+`sandbox_paused` instead. A link ends when it expires, when `link revoke` runs,
+when the key that made it is revoked or when the sandbox is deleted
+([links in the API guide](./api#file-links)).
+
 ## Code, previews, network rules and the desktop
 
 ```bash no-run
@@ -375,7 +416,9 @@ runtime secrets set GITHUB_TOKEN --host api.github.com --header Authorization --
 runtime secrets set GITHUB_TOKEN --host api.github.com --allow 'GET,HEAD /repos/acme/*' < token.txt
 runtime secrets set SLACK_APP_TOKEN --host slack.com --only-label role=hub < token.txt   # only sandboxes labelled role=hub
 runtime secrets set DEPLOY_KEY --host api.example.com --only-sandbox "${id}" < key.txt     # only that sandbox
+runtime secrets scope OPENAI_API_KEY --only-app "${app}"                                     # every copy of an App
 runtime secrets set SLACK_APP_TOKEN --host slack.com --all-sandboxes < token.txt           # every sandbox again
+runtime secrets set GITHUB_TOKEN_WEB --host api.github.com --only-label repo=web --env GITHUB_TOKEN < web.txt   # seen as GITHUB_TOKEN
 runtime secrets scope SLACK_APP_TOKEN --only-label role=hub                                  # change who gets it, no value
 runtime secrets set GITHUB_TOKEN --keep-value --allow 'GET /repos/acme/app/*'               # narrow it, no value
 printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
@@ -395,8 +438,12 @@ per rule: `--allow /v1/chat/completions` for every method,
 `--allow 'GET,HEAD /repos/acme/*'` for two. With `--keep-value` (from 0.22.0), `set` reads no value
 and only narrows the `--host` and `--allow` an existing secret has: anything
 wider is refused, since widening needs the value. `--only-label key=value` (once per
-selector) and `--only-sandbox <id>` give it to those sandboxes alone; a new
-value keeps that scope until `--all-sandboxes`. `ls` shows names, hosts,
+selector) and `--only-sandbox <id>` give it to those sandboxes alone, and
+`--only-app <id>` to every copy of that App, whatever its version; a new
+value keeps that scope until `--all-sandboxes`. `--env VAR` puts the
+placeholder in `VAR` instead of `NAME`: secrets scoped to different sandboxes
+may share one, such as a `GITHUB_TOKEN` per repository, and a set that would
+give one sandbox two of them is refused. `ls` shows names, hosts,
 placeholders, rules and which sandboxes get each, never values. See [Security](./security#secrets-sandboxes-never-see).
 
 `--jobs` keeps a copy that [scheduled jobs](./jobs#secrets-in-a-job) put into
@@ -422,6 +469,7 @@ runtime jobs logs "${job}" -f
 runtime jobs trigger "${job}"
 runtime jobs reschedule "${job}" --cron "30 4 * * 1-5" --timezone Europe/Berlin
 runtime jobs pause "${job}"; runtime jobs resume "${job}"; runtime jobs cancel "${job}"
+runtime jobs update "${job}" --image hub:latest --alert-email -- bash -lc 'make report'
 ```
 
 A job runs its command in a fresh sandbox each time, once (`--at`, an ISO time
@@ -431,8 +479,72 @@ A schedule it cannot read is refused naming the field or the timezone, such as
 It takes the sandbox's size flags (`--vcpu`, `--memory`, `--disk`, `--cpu`),
 `--timeout` up to {{job-max-run}}, `--attempts` up to {{job-max-attempts}}
 for a run that exits non-zero, `--secret NAME[=ENV_NAME]` for a secret stored
-with `--jobs`, and `--max-cost` and `--max-total-cost` in dollars. Runs are
-paid sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
+with `--jobs`, and `--max-cost` and `--max-total-cost` in dollars. `--image`
+starts each run from an image of yours, and `--alert-webhook <url>`
+(signed with `--alert-secret NAME`, a secret your key may reveal) or `--alert-email` tells you once
+`--alert-after` runs in a row fail, and once when one succeeds again.
+`runtime jobs update <id>` changes any of these, or the command after `--`, in
+place. Runs are paid sandboxes at the sandbox rates. See [scheduled jobs](./jobs).
+
+<!-- launch: apps -->
+
+## App settings
+
+`runtime apps create` and `runtime apps update` take `--cdn on|off`. On is the
+default: Cloudflare's CDN sits in front of the App's `runtimehost.com` address
+and its custom domains. Off sends visitors straight to Runtime's routers, with
+nothing cached. It is part of the price of Apps and Functions. See
+[App and Function CDN](./api#app-and-function-cdn).
+
+## App logs
+
+```bash check
+runtime apps logs web                         # the newest 100 lines of the last hour
+runtime apps logs web --since 2h --stream stderr --limit 500
+runtime apps logs web --version 3 --copy "${copy}"
+runtime apps logs web --follow                # every line as it comes, until Ctrl-C
+```
+
+`--since` is a time or a duration back from now (`30s`, `15m`, `2h`, `7d`);
+lines are kept 14 days. On a terminal, control characters a copy printed show
+as `\uXXXX`; `--raw` prints them as they are. `--json` prints the page, or
+with `--follow` one event per line. See
+[App and Function logs](./api#app-and-function-logs).
+<!-- /launch: apps -->
+
+<!-- launch: apps -->
+
+## Apps with a volume
+
+```bash no-run
+runtime apps create db --vcpu 1 --memory 1024 --max-copies 1 --volume <volumeId>:/data
+runtime apps update db --stop-grace 60 --health-fail 120
+runtime apps restart db                       # the old copy stops, then the new one boots
+```
+
+The App runs one copy holding the volume; every deploy, rollback and restart
+stops it before the next one starts, and `runtime apps versions` shows each
+one's boot, downtime and replaced copies. See
+[Apps with a volume](./api#apps-with-a-volume).
+<!-- /launch: apps -->
+
+<!-- launch: ci -->
+
+## CI/CD
+
+```bash no-run
+runtime ci connect acme/web --config runtime.yml   # needs a full key
+runtime ci ls --commit $(git rev-parse HEAD)        # its checks, newest first
+runtime ci get <checkId>                            # its jobs in plan order
+runtime ci logs <jobId>                             # a job's log and its sandboxes
+runtime ci tests <repoId> --quarantined             # quarantined test files
+runtime ci flakes                                   # open flaky tests and their owners
+runtime ci flake <flakeId>                          # one flake: its proof and runs
+```
+
+A failed job's sandbox may be kept paused: `runtime sandboxes wake <id>`, then
+`runtime sandboxes shell <id>`. See [CI/CD](./ci).
+<!-- /launch: ci -->
 
 ## SSH and port forwarding
 
@@ -523,8 +635,37 @@ Forks and snapshots:
   until stopped. A retry with the same idempotency key answers the same error.
 - If a fork stops partway and left its source paused, the source stays paused
   and an account notice says so; wake it with `runtime sandboxes wake`.
-- A snapshot is kept as long as you have credit, up to a year from when it was
-  taken (7 days without credit), unless `--retention` gives 1 to 365 days.
+- A snapshot is kept as long as you have credit, with no end date (7 days
+  without credit), unless `--retention` gives 1 to 365 days.
+
+<!-- launch: apps -->
+
+## Apps (private beta)
+
+Apps are open to organizations in their private beta. These commands reach
+into an App's live copy, much as `sandboxes exec` and `sandboxes cp` reach a
+sandbox:
+
+```bash no-run
+runtime apps ls                                          # your Apps, with their live version
+runtime apps copies agents-hub                           # its copies: id, version, region, state
+runtime apps exec agents-hub -- tail -n 50 /srv/app.log
+runtime apps cp agents-hub:/srv/app.log ./               # a file off it
+runtime apps cp ./debug.json agents-hub:/tmp/debug.json  # and onto it
+runtime apps exec agents-hub --copy <copyId> -- ps aux   # one copy in particular
+```
+
+`<app>` is the App's id or its name. Without `--copy`, a command goes to a
+serving copy of the live version. If no copy is serving, the command says so
+and wakes nothing. A request to the App's URL wakes one. `apps exec` takes
+the same `--root`, `--cwd`, `--env`, `--timeout` and `--trace-files` as
+`sandboxes exec`.
+
+A copy holds the App's secrets, so only an owner's or admin's key may reach
+into one. A file written to a copy lasts only as long as that copy: a deploy
+replaces every copy with new ones from the version's image. See
+[the API](./api#commands-and-files-in-an-apps-copy-private-beta).
+<!-- /launch: apps -->
 
 ## Scripts and agents: `--json`
 

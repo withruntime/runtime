@@ -16,13 +16,22 @@ APP_ID = "11111111-1111-4111-8111-111111111111"
 DEPLOY_ID = "22222222-2222-4222-8222-222222222222"
 BUILD_ID = "33333333-3333-4333-8333-333333333333"
 REPO_ID = "44444444-4444-4444-8444-444444444444"
+VOLUME_ID = "55555555-5555-4555-8555-555555555555"
 APP = {"id": APP_ID, "name": "web", "state": "waiting", "error": None}
 BUILD = {"id": BUILD_ID, "repositoryId": REPO_ID, "ref": "main", "state": "queued", "error": None}
 REPO = {"id": REPO_ID, "provider": "github", "repository": "acme/web", "state": "connected", "error": None}
+COPY_ID = "55555555-5555-4555-8555-555555555555"
+APP_LOG = {"lines": [{"at": 1, "stream": "stderr", "copy": COPY_ID, "version": 2, "text": "boom"}],
+           "nextCursor": "older", "hasMore": True}
 
 
 def line(cursor, text):
     return {"type": "line", "cursor": cursor, "at": 1, "step": "build", "text": text, "stream": "stdout"}
+
+
+def app_line(cursor, text):
+    return {"type": "line", "cursor": cursor, "at": 1, "stream": "stdout", "copy": COPY_ID, "version": 2,
+            "text": text}
 
 
 class Stub(BaseHTTPRequestHandler):
@@ -65,11 +74,18 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer({"id": DEPLOY_ID, "version": 2, "url": "https://x/", "state": state})
         if path.endswith("/deploys") or path.endswith("/rollback"):
             return self.answer({"id": DEPLOY_ID, "version": 2, "url": "https://x/", "state": "building"})
+        if path.endswith(":restart"):
+            return self.answer({"id": DEPLOY_ID, "version": 3, "url": "https://x/", "state": "switching",
+                                "restartOf": 2})
         if path.endswith("/versions"):
             return self.answer([{"version": 1, "live": True, "previous": False, "saved": True,
                                  "deploy": DEPLOY_ID, "build": None}])
         if path.endswith("/copies"):
             return self.answer([])
+        if path.endswith("/logs") and query.get("follow") == ["true"]:
+            return self.answer(Stub.follows.pop(0), kind="application/x-ndjson")
+        if path.endswith("/logs") and not path.startswith("/v1/builds/"):
+            return self.answer(APP_LOG)
         if path.startswith("/v1/apps/") or path.startswith("/v1/functions/"):
             if self.command == "DELETE":
                 return self.answer({**APP, "state": "deleting"})
@@ -78,8 +94,6 @@ class Stub(BaseHTTPRequestHandler):
             gets = sum(1 for s in Stub.seen if s[0] == "GET" and s[1] == path)
             return self.answer({**APP, "state": "deleted" if gets > 1 else "deleting"}
                                if Stub.mode == "deleting" else APP)
-        if path.endswith("/logs") and query.get("follow") == ["true"]:
-            return self.answer(Stub.follows.pop(0), kind="application/x-ndjson")
         if path.endswith("/logs"):
             return self.answer({"lines": [], "cursor": None, "state": "failed", "reason": "exit 1",
                                 "failingStep": {"name": "build", "exitCode": 1, "lastLines": ["boom"]},
@@ -120,29 +134,35 @@ class AppsBuildsTest(unittest.TestCase):
     def test_every_app_verb_calls_its_route_with_the_apis_names(self):
         with self.client() as runtime:
             runtime.apps.create(name="web", max_copies=4, vcpu=1, memory_mib=1024, min_copies=1,
-                                health_path="/healthz")
+                                health_path="/healthz", release_watch="rollback", cdn=False)
             runtime.apps.get(APP_ID, wait_for="live", timeout_seconds=5)
             self.assertEqual([a["id"] for a in runtime.apps.list(label=["team:web"])], [APP_ID, "second"])
-            runtime.apps.update(APP_ID, name=None, max_copies=8)
+            runtime.apps.update(APP_ID, name=None, max_copies=8, release_watch="off", cdn=True)
             runtime.apps.deploy(APP_ID, image="web:latest", env={"A": "1"}, keep_env=True)
             runtime.apps.get_deploy(APP_ID, DEPLOY_ID)
             runtime.apps.rollback(APP_ID)
             self.assertTrue(runtime.apps.versions(APP_ID)[0]["live"])
             self.assertEqual(runtime.apps.copies(APP_ID), [])
+            log = runtime.apps.logs(APP_ID, since="15m", version=2, copy=COPY_ID, stream="stderr", limit=50,
+                                    cursor="older")
             runtime.apps.delete(APP_ID)
+        self.assertEqual((log["lines"][0]["text"], log["nextCursor"], log["hasMore"]), ("boom", "older", True))
         base = f"/v1/apps/{APP_ID}"
         self.assertEqual(self.routes(), [
             ("POST", "/v1/apps"), ("GET", base), ("GET", "/v1/apps"), ("GET", "/v1/apps"),
             ("POST", f"{base}:update"), ("POST", f"{base}/deploys"), ("GET", f"{base}/deploys/{DEPLOY_ID}"),
             ("POST", f"{base}/rollback"), ("GET", f"{base}/versions"), ("GET", f"{base}/copies"),
-            ("DELETE", base)])
+            ("GET", f"{base}/logs"), ("DELETE", base)])
+        self.assertEqual(Stub.seen[10][2], {"since": ["15m"], "version": ["2"], "copy": [COPY_ID],
+                                            "stream": ["stderr"], "limit": ["50"], "cursor": ["older"]})
         self.assertEqual(Stub.seen[0][3], {"name": "web", "maxCopies": 4, "vcpu": 1, "memoryMiB": 1024,
-                                           "minCopies": 1, "healthPath": "/healthz"})
+                                           "minCopies": 1, "healthPath": "/healthz",
+                                           "releaseWatch": "rollback", "cdn": False})
         self.assertEqual(Stub.seen[1][2], {"waitFor": ["live"], "timeoutSeconds": ["5"]})
         self.assertEqual(Stub.seen[2][2], {"label": ["team:web"]})
         self.assertEqual(Stub.seen[3][2], {"label": ["team:web"], "cursor": ["page-2"]})
         # name=None clears the name; a field left out is not sent.
-        self.assertEqual(Stub.seen[4][3], {"name": None, "maxCopies": 8})
+        self.assertEqual(Stub.seen[4][3], {"name": None, "maxCopies": 8, "releaseWatch": "off", "cdn": True})
         self.assertEqual(Stub.seen[5][3], {"image": "web:latest", "env": {"A": "1"}, "keepEnv": True})
         self.assertEqual(Stub.seen[7][3], {})
         # Every write carries a key, so the transport's retries never write twice.
@@ -164,6 +184,37 @@ class AppsBuildsTest(unittest.TestCase):
         with self.client() as runtime:
             self.assertEqual(runtime.apps.wait_deploy(APP_ID, DEPLOY_ID, poll=0)["state"], "failed")
             self.assertEqual(runtime.apps.rollback(APP_ID, wait=True, poll=0)["state"], "failed")
+
+    def test_restart_posts_to_its_route_and_with_wait_follows_its_deploy_under_one_key(self):
+        Stub.deploys = ["switching", "live"]
+        with self.client() as runtime:
+            self.assertEqual(runtime.apps.restart(APP_ID)["restartOf"], 2)
+            restarted = runtime.apps.restart(APP_ID, wait=True, poll=0, idempotency_key="restart-1")
+            runtime.functions.restart(APP_ID)
+        self.assertEqual(restarted["state"], "live")
+        base = f"/v1/apps/{APP_ID}"
+        self.assertEqual(self.routes(), [
+            ("POST", f"{base}:restart"), ("POST", f"{base}:restart"), ("GET", f"{base}/deploys/{DEPLOY_ID}"),
+            ("GET", f"{base}/deploys/{DEPLOY_ID}"), ("POST", f"/v1/functions/{APP_ID}:restart")])
+        self.assertEqual([s[3] for s in Stub.seen if s[0] == "POST"], [{}, {}, {}])
+        self.assertEqual(Stub.seen[1][4], "restart-1")
+        self.assertTrue(all(s[4] for s in Stub.seen if s[0] == "POST"))
+
+    def test_a_volume_app_sends_its_volume_grace_and_health_limit_by_the_apis_names(self):
+        with self.client() as runtime:
+            runtime.apps.create(name="db", max_copies=1, vcpu=1, memory_mib=1024,
+                                volume={"volume_id": VOLUME_ID, "path": "/data"}, stop_grace_seconds=120,
+                                health_fail_seconds=300)
+            runtime.apps.update(APP_ID, volume=None)
+            runtime.apps.update(APP_ID, stop_grace_seconds=0, health_fail_seconds=30)
+            runtime.functions.create(max_copies=2, vcpu=1, memory_mib=256, health_fail_seconds=20)
+        self.assertEqual(Stub.seen[0][3], {"name": "db", "maxCopies": 1, "vcpu": 1, "memoryMiB": 1024,
+                                           "volume": {"volumeId": VOLUME_ID, "path": "/data"},
+                                           "stopGraceSeconds": 120, "healthFailSeconds": 300})
+        # volume=None takes it away; left out, it is not sent.
+        self.assertEqual(Stub.seen[1][3], {"volume": None})
+        self.assertEqual(Stub.seen[2][3], {"stopGraceSeconds": 0, "healthFailSeconds": 30})
+        self.assertEqual(Stub.seen[3][3], {"maxCopies": 2, "vcpu": 1, "memoryMiB": 256, "healthFailSeconds": 20})
 
     def test_a_wait_past_its_deadline_says_timeout_and_keeps_the_writes_key(self):
         Stub.deploys = ["warming"]
@@ -197,6 +248,13 @@ class AppsBuildsTest(unittest.TestCase):
             with self.assertRaises(InvalidRequestError):
                 runtime.functions.create(max_copies=1, vcpu=1, memory_mib=256, min_copies=1)
             with self.assertRaises(InvalidRequestError):
+                runtime.functions.create(max_copies=1, vcpu=1, memory_mib=256,
+                                         volume={"volume_id": VOLUME_ID, "path": "/data"})
+            with self.assertRaises(InvalidRequestError):
+                runtime.functions.update(APP_ID, stop_grace_seconds=10)
+            with self.assertRaises(InvalidRequestError):
+                runtime.functions.update(APP_ID, volume=None)
+            with self.assertRaises(InvalidRequestError):
                 runtime.apps.wait(APP_ID, "live", timeout=-1)
             with self.assertRaises(RuntimeAPIError) as caught:
                 list(runtime.builds.logs(BUILD_ID, follow=True, page_cursor="p"))
@@ -205,9 +263,14 @@ class AppsBuildsTest(unittest.TestCase):
 
     def test_functions_share_the_shape_at_their_own_path(self):
         with self.client() as runtime:
-            runtime.functions.create(max_copies=2, vcpu=1, memory_mib=256)
+            runtime.functions.create(max_copies=2, vcpu=1, memory_mib=256, sleep_after_ms=400)
             runtime.functions.deploy(APP_ID, image="fn")
-        self.assertEqual(self.routes(), [("POST", "/v1/functions"), ("POST", f"/v1/functions/{APP_ID}/deploys")])
+            runtime.functions.logs("fn/1")
+        # The id is encoded into the path, as copies() does.
+        self.assertEqual(self.routes(), [("POST", "/v1/functions"), ("POST", f"/v1/functions/{APP_ID}/deploys"),
+                                         ("GET", "/v1/functions/fn%2F1/logs")])
+        self.assertEqual(Stub.seen[2][2], {})
+        self.assertEqual(Stub.seen[0][3]["sleepAfterMs"], 400)
 
     def test_outside_the_beta_the_403_is_the_sdks_permission_error(self):
         Stub.mode = "beta"
@@ -280,28 +343,90 @@ class AppsBuildsTest(unittest.TestCase):
                 list(runtime.builds.logs(BUILD_ID, follow=True))
         self.assertEqual((caught.exception.code, caught.exception.details), ("build_log_interrupted", {"cursor": "c1"}))
 
+    def test_an_app_log_follow_resumes_on_continue_with_its_filters_and_gives_each_line_once(self):
+        Stub.follows = [
+            [app_line("c1", "one"), {"type": "gap", "cursor": "c2"}, app_line("c3", "three"),
+             {"type": "continue", "cursor": "c3"}],
+            # The server resumes exactly at the cursor; a line given again is skipped.
+            [app_line("c3", "three"), app_line("c4", "four"),
+             {"type": "error", "cursor": "c4", "code": "app_deleted", "hint": "The app was deleted."}],
+        ]
+        events = []
+        with self.client() as runtime:
+            with self.assertRaises(RuntimeAPIError) as caught:
+                for event in runtime.apps.logs(APP_ID, follow=True, since="15m", stream="stdout"):
+                    events.append(event)
+        self.assertEqual([e.get("text") or e["type"] for e in events], ["one", "gap", "three", "four"])
+        self.assertEqual((caught.exception.code, caught.exception.hint, caught.exception.details),
+                         ("app_deleted", "The app was deleted.", {"cursor": "c4"}))
+        self.assertEqual(self.routes(), [("GET", f"/v1/apps/{APP_ID}/logs")] * 2)
+        self.assertEqual([s[2] for s in Stub.seen], [
+            {"follow": ["true"], "since": ["15m"], "stream": ["stdout"]},
+            {"follow": ["true"], "since": ["15m"], "stream": ["stdout"], "cursor": ["c3"]}])
+
+    def test_an_app_log_follow_retries_a_dropped_stream_three_times_then_says_where_to_resume(self):
+        Stub.follows = [[app_line("c1", "one")], [], [], []]
+        with self.client() as runtime:
+            with self.assertRaises(RuntimeAPIError) as caught:
+                list(runtime.functions.logs(APP_ID, follow=True))
+        self.assertEqual((caught.exception.code, caught.exception.details), ("app_log_interrupted", {"cursor": "c1"}))
+        self.assertEqual([s[2] for s in Stub.seen],
+                         [{"follow": ["true"]}] + [{"follow": ["true"], "cursor": ["c1"]}] * 3)
+
+    def test_an_app_log_follow_refuses_a_malformed_event_and_a_bad_cursor(self):
+        Stub.follows = [[{"type": "line", "cursor": "c1", "text": 5}]]
+        with self.client() as runtime:
+            with self.assertRaises(RuntimeAPIError) as caught:
+                list(runtime.apps.logs(APP_ID, follow=True))
+            self.assertEqual(caught.exception.code, "app_log_invalid")
+            with self.assertRaises(RuntimeAPIError) as caught:
+                list(runtime.apps.logs(APP_ID, follow=True, cursor="bad\ncursor"))
+            self.assertEqual(caught.exception.code, "invalid_log_options")
+            with self.assertRaises(InvalidRequestError):
+                list(runtime.apps.logs(APP_ID, follow=True, timeout=-1))
+        self.assertEqual(len(Stub.seen), 1)
+
     def test_async_clients_await_and_iterate_the_same_way(self):
         Stub.deploys = ["warming", "live"]
         Stub.follows = [[line("c1", "one"), {"type": "terminal", "cursor": "c1", "state": "succeeded",
-                                             "reason": "built", "failingStep": None}]]
+                                             "reason": "built", "failingStep": None}],
+                        [app_line("c0", "old"), app_line("c1", "one"), {"type": "continue", "cursor": "c1"}],
+                        [{"type": "error", "cursor": "c1", "code": "app_deleted", "hint": "The app was deleted."}]]
 
         async def go():
             async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=2) as runtime:
                 await runtime.apps.create(max_copies=1, vcpu=1, memory_mib=256)
                 ids = [a["id"] async for a in await runtime.apps.list()]
                 deploy = await runtime.apps.deploy(APP_ID, image="web", wait=True, poll=0)
+                Stub.deploys = ["switching", "live"]
+                restarted = await runtime.apps.restart(APP_ID, wait=True, poll=0)
                 build = await runtime.builds.create(REPO_ID, "main")
                 log = await runtime.builds.logs(BUILD_ID)
                 events = [e async for e in runtime.builds.logs(BUILD_ID, follow=True)]
                 repos = await (await runtime.builds.repositories.list()).to_list()
-                return ids, deploy, build, log, events, repos
-        ids, deploy, build, log, events, repos = asyncio.run(go())
+                page = await runtime.apps.logs(APP_ID, limit=1)
+                app_events, code = [], None
+                try:
+                    # Resuming after c0: that line is not given again.
+                    async for event in runtime.functions.logs(APP_ID, follow=True, cursor="c0"):
+                        app_events.append(event)
+                except RuntimeAPIError as error:
+                    code = error.code
+                return ids, deploy, restarted, build, log, events, repos, page, app_events, code
+        ids, deploy, restarted, build, log, events, repos, page, app_events, code = asyncio.run(go())
+        self.assertEqual(restarted["state"], "live")
+        self.assertIn(("POST", f"/v1/apps/{APP_ID}:restart"), self.routes())
         self.assertEqual(ids, [APP_ID, "second"])
         self.assertEqual(deploy["state"], "live")
         self.assertEqual(build["id"], BUILD_ID)
         self.assertEqual(log["state"], "failed")
         self.assertEqual([e["type"] for e in events], ["line", "terminal"])
         self.assertEqual(len(repos), 2)
+        self.assertEqual(page["lines"][0]["text"], "boom")
+        self.assertEqual([e["text"] for e in app_events], ["one"])
+        self.assertEqual(code, "app_deleted")
+        follows = [s[2] for s in Stub.seen if s[1] == f"/v1/functions/{APP_ID}/logs"]
+        self.assertEqual(follows, [{"follow": ["true"], "cursor": ["c0"]}, {"follow": ["true"], "cursor": ["c1"]}])
 
 
 if __name__ == "__main__":

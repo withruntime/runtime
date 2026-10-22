@@ -19,6 +19,7 @@ public final class ExecOptions {
   Consumer<String> onStderr;
   boolean check;
   String idempotencyKey;
+  boolean traceFiles;
 
   /** The working directory. Default /workspace. */
   public ExecOptions cwd(String cwd) {
@@ -83,6 +84,15 @@ public final class ExecOptions {
 
   public ExecOptions idempotencyKey(String key) {
     this.idempotencyKey = key;
+    return this;
+  }
+
+  /**
+   * Sets {@link CommandResult#files()} to the files the command (and anything it started) read and
+   * wrote. An older sandbox answers unsupported_operation: stop and start it, and no command runs.
+   */
+  public ExecOptions traceFiles(boolean trace) {
+    this.traceFiles = trace;
     return this;
   }
 }

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { run, secretsCommand } from "../src/cli";
 import { Runtime } from "../src/client";
 import { ServiceUnavailableError } from "../src/errors";
-import { jobBody } from "../src/products/jobs";
+import { jobBody, type JobCompute } from "../src/products/jobs";
 import { SecretPartlyStoredError } from "../src/products/secrets";
 
 /* runtime.jobs, `runtime job`, and the jobs copy of `runtime secrets`, against
@@ -187,6 +187,7 @@ test("list, runs, run, logs, pause, resume and cancel call their routes", async 
       const jobs = runtime().jobs;
       expect((await jobs.list()).data).toEqual([JOB] as never);
       expect((await jobs.runs(JOB_ID)).data[0]!.id).toBe(RUN_ID);
+      expect((await jobs.runs(JOB_ID, { limit: 1, order: "newest" })).data[0]!.id).toBe(RUN_ID);
       expect((await jobs.run(RUN_ID)).state).toBe("succeeded");
       expect((await jobs.logs(RUN_ID, { cursor: 3 })).complete).toBe(true);
       await jobs.pause(JOB_ID);
@@ -195,6 +196,7 @@ test("list, runs, run, logs, pause, resume and cancel call their routes", async 
       expect(seen.map((s) => s.line)).toEqual([
         "GET /v1/jobs",
         `GET /v1/jobs/${JOB_ID}/runs`,
+        `GET /v1/jobs/${JOB_ID}/runs?limit=1&order=newest`,
         `GET /v1/job-runs/${RUN_ID}`,
         `GET /v1/job-runs/${RUN_ID}/logs?cursor=3`,
         `POST /v1/jobs/${JOB_ID}:pause`,
@@ -289,6 +291,134 @@ test("`runtime jobs trigger` and `reschedule` call the API and refuse mistakes b
   await fails(["reschedule", JOB_ID, "--at", "now", "--timezone", "UTC"], /--timezone goes with/);
   await fails(["reschedule", JOB_ID, "--at", "2020-01-01T00:00:00Z"], /in the past/);
   await fails(["reschedule", "--cron", "* * * * *"], /a job id/);
+});
+
+test("create takes an image and an alert; update changes a job in place through its route", async () => {
+  await withStub(
+    () => JOB,
+    async (seen) => {
+      const jobs = runtime().jobs;
+      const alert = {
+        afterFailures: 3,
+        webhook: { url: "https://example.com/hook", secretId: SECRET_ID },
+      };
+      await jobs.create({
+        name: "hub",
+        schedule: { cron: "* * * * *" },
+        command: ["bash", "-lc", "loop"],
+        image: "hub:latest",
+        alert,
+      });
+      await jobs.update(JOB_ID, {
+        image: "hub@7",
+        command: ["bash", "-lc", "new"],
+        compute: { memoryMiB: 1024 },
+        alert: { email: true },
+      });
+      await jobs.update(JOB_ID, { image: null, alert: null, maxTotalCostMicros: null });
+      expect(JSON.parse(seen[0]!.body)).toMatchObject({ image: "hub:latest", alert });
+      expect(seen.slice(1).map((s) => [s.line, JSON.parse(s.body)])).toEqual([
+        [
+          `POST /v1/jobs/${JOB_ID}:update`,
+          {
+            image: "hub@7",
+            command: { argv: ["bash", "-lc", "new"] },
+            compute: { memoryMiB: 1024 },
+            alert: { email: true },
+          },
+        ],
+        [`POST /v1/jobs/${JOB_ID}:update`, { image: null, alert: null, maxTotalCostMicros: null }],
+      ]);
+      expect(() => jobs.update(JOB_ID, {})).toThrow(/at least one of/);
+      expect(seen).toHaveLength(3);
+    },
+  );
+});
+
+test("`runtime jobs create` and `update` take an image and alert flags", async () => {
+  await withStub(
+    (_, path) =>
+      path === "/v1/egress-secrets"
+        ? { secrets: [] }
+        : path === "/v1/secrets"
+          ? [{ ...COPY, name: "HOOK_SECRET" }]
+          : {
+              ...JOB,
+              version: 2,
+              alert: { afterFailures: 3, webhook: { url: "https://example.com/h" } },
+            },
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await run(
+          [
+            "jobs",
+            "create",
+            "hub",
+            "--cron",
+            "* * * * *",
+            "--image",
+            "hub:latest",
+            "--alert-webhook",
+            "https://example.com/h",
+            "--alert-secret",
+            "HOOK_SECRET",
+            "--alert-after",
+            "3",
+            "--",
+            "bash",
+            "-lc",
+            "loop",
+          ],
+          env,
+          out,
+        ),
+      ).toBe(0);
+      const created = JSON.parse(seen.find((s) => s.line === "POST /v1/jobs")!.body);
+      expect(created).toMatchObject({
+        image: "hub:latest",
+        alert: { afterFailures: 3, webhook: { url: "https://example.com/h", secretId: SECRET_ID } },
+      });
+      expect(
+        await run(
+          [
+            "jobs",
+            "update",
+            JOB_ID,
+            "--image",
+            "hub@8",
+            "--timeout",
+            "600",
+            "--",
+            "bash",
+            "-lc",
+            "new",
+          ],
+          env,
+          out,
+        ),
+      ).toBe(0);
+      expect(lines.at(-1)).toBe(
+        "nightly updated (version 2); its next run uses it. Alerts after 3 failing runs.",
+      );
+      expect(
+        await run(["jobs", "update", JOB_ID, "--no-alert", "--standard-image"], env, out),
+      ).toBe(0);
+      const updates = seen.filter((s) => s.line === `POST /v1/jobs/${JOB_ID}:update`);
+      expect(updates.map((s) => JSON.parse(s.body))).toEqual([
+        { command: { argv: ["bash", "-lc", "new"] }, image: "hub@8", timeoutSeconds: 600 },
+        { image: null, alert: null },
+      ]);
+    },
+  );
+  const { out } = output();
+  const fails = (argv: string[], pattern: RegExp) =>
+    expect(run(["jobs", ...argv], env, out)).rejects.toThrow(pattern);
+  await fails(["update", JOB_ID], /Say what changes/);
+  await fails(["update", JOB_ID, "--image", "a", "--standard-image"], /not both/);
+  await fails(["update", JOB_ID, "--alert-email", "--no-alert"], /not both/);
+  await fails(["update", JOB_ID, "--alert-after", "2"], /--alert-webhook <url> or --alert-email/);
+  await fails(["update", JOB_ID, "--alert-secret", "X"], /give the webhook's URL too/);
 });
 
 test("jobs switched off fail once, with the API's words and a hint that retrying will not help", async () => {
@@ -409,7 +539,10 @@ test("`runtime job logs` takes a job id for its latest run and says how the run 
               { status: 404 },
             )
           : path.endsWith("/runs")
-            ? { items: [{ ...RUN, id: "old" }, RUN], nextCursor: null }
+            ? // Newest first when asked: one call, however long the history.
+              new URL(_request.url).searchParams.get("order") === "newest"
+              ? { items: [RUN], nextCursor: "older" }
+              : { items: [{ ...RUN, id: "old" }, RUN], nextCursor: null }
             : path.endsWith("/logs")
               ? {
                   chunks: [
@@ -424,6 +557,9 @@ test("`runtime job logs` takes a job id for its latest run and says how the run 
       async (seen) => {
         const { out } = output();
         expect(await run(["job", "logs", JOB_ID], env, out)).toBe(0);
+        expect(seen.map((s) => s.line)).toContain(
+          `GET /v1/jobs/${JOB_ID}/runs?limit=1&order=newest`,
+        );
         expect(seen.map((s) => s.line)).toContain(
           `GET /v1/job-runs/${RUN_ID}/logs?cursor=0&limitBytes=65536`,
         );
@@ -634,4 +770,20 @@ test("reveal and rotate reach only the jobs copy; rm deletes every copy", async 
       ).rejects.toThrow(/rotate replaces the copy for jobs/);
     },
   );
+});
+
+test("jobBody sends a job's volumes as given, and refuses a malformed list before sending", () => {
+  const base = { name: "count", schedule: { cron: "0 * * * *" }, command: ["true"] };
+  const volumes = [{ volumeId: "5f8a2b10-3c4d-4e6f-8a9b-0c1d2e3f4a55", path: "/data" }];
+  expect((jobBody({ ...base, compute: { volumes } }).compute as JobCompute).volumes).toEqual(
+    volumes,
+  );
+  for (const bad of [
+    [{ volumeId: "v", path: "data" }],
+    [{ volumeId: "v", path: "/data", mode: "ro" }],
+    Array.from({ length: 5 }, (_, i) => ({ volumeId: "v", path: `/d${i}` })),
+  ])
+    expect(() => jobBody({ ...base, compute: { volumes: bad as JobCompute["volumes"] } })).toThrow(
+      /compute\.volumes is at most 4/,
+    );
 });

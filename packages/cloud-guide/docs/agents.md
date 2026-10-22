@@ -55,12 +55,37 @@ runtime agents create helper --template claude-code --use support \
 | `support` | your customers, one session per customer | 1 vCPU, 1 GiB | 10 s         | 1,000            | API, webhook  |
 | `team`    | your team's code                         | 4 vCPU, 8 GiB | 60 s         | 10               | Slack, GitHub |
 
-The definition takes, besides `command`: `from` (an image of yours, or a
-snapshot), `vcpu`, `memoryMiB`, `instructions` (up to 64 KiB), `env`,
+The definition takes, besides `command`: `from` (an image of yours, a
+snapshot, or `{"repo": "owner/name"}`, a GitHub repository connected to
+CI/CD: each session starts as a copy of its warm snapshot, the repository
+checked out at `/workspace/repo` at its production branch's last passing
+commit with its setup run, and the harness runs there), `vcpu`, `memoryMiB`, `instructions` (up to 64 KiB), `env`,
 `secrets`, `mcp` (MCP servers it may reach), `volumes`, `idlePauseSeconds`,
 `maxSessionSeconds` and `maxConcurrent`. Without a use, an agent's sandbox
 has 4 vCPU and 8 GiB. A change is a new version; sessions already running
 keep theirs.
+
+Or keep your agents in your repo: a `runtime.yml` names them, and one command
+makes your account match it.
+
+```yaml
+agents:
+  fixer:
+    template: claude-code
+    use: team
+    instructionsFile: AGENTS.md
+    triggers:
+      - kind: schedule
+        config: { cron: "0 9 * * 1-5", input: "Fix what failed overnight." }
+```
+
+```bash no-run
+runtime agents init fixer --template claude-code --use team   # writes the section
+runtime agents deploy --dry-run                               # says what it would change
+runtime agents deploy
+```
+
+The whole file, CI and the MCP tool: [set up agents from your repo](./agents-setup).
 
 ## Model keys, any provider
 
@@ -101,7 +126,9 @@ customers (the `support` use) carries the warning
 
 Start a session with its first words. Words with the same `key` join its open
 session instead: one session per Slack thread, pull request or customer of
-yours, keyed as your app chooses.
+yours, keyed as your app chooses. Keys starting `ci-review:` are CI/CD's own,
+for its [review step](./ci#review): a start with one is refused with
+`invalid_request`.
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -149,7 +176,7 @@ and every session under it may cost (default $5), and `maxDayDollars`, what the
 agent may spend in a UTC day (default $100). A session at its cap is stopped
 and ends `stopped` with the reason `budget`; an agent at its day cap starts
 nothing new until the next day. Starting a session, or a child under one, past
-its cap is answered `409` with the code `budget_reached`. Set either cap in the
+its cap is answered `402` with the code `budget_reached`. Set either cap in the
 definition.
 
 ## Watching and replaying
@@ -191,13 +218,105 @@ runtime agents triggers pause <triggerId> --why "Moving to the new help center"
 Each session's harness is given `RUNTIME_AGENT_SESSION`,
 `RUNTIME_AGENT_REPORT_TOKEN` and `RUNTIME_API`, the agent's instructions in
 `~/.runtime-agent/start.md`, and an MCP server, `runtime-agent`
-(`~/.runtime-agent/mcp.json`), with five tools: `reply`, `ask`, `status`,
-`wait` (for the next words) and `done`. The report token reaches only that
-session's log; no API key enters the sandbox.
+(`~/.runtime-agent/mcp.json`), with its tools: `reply`, `ask`, `status`,
+`wait` (for the next words) and `done`; `remember`, `recall`, `search`,
+`list` and `forget` for its [memory](#memory); and `spawn` to start a
+subagent's session. The report token reaches only that session and its
+memory; no API key enters the sandbox.
+
+## Memory
+
+An agent keeps text files across its sessions and searches them: notes on a
+customer, a runbook, what it learned last time. Memory is part of the agent,
+not a disk you attach, so every session reaches it however many run at once.
+A file holds up to 1 MiB of text; an agent holds up to 1 GiB and 100,000 files.
+A write past either is refused with `memory_full` and nothing is written.
+
+The definition says whose memory a session reads:
+
+- `"memory": {"scope": "key"}`, the default for every template: each
+  session key has its own. When your app keys sessions by customer
+  (`customer:42`), one customer's notes never reach another customer's
+  session. A session without a key has no memory, and a session a trigger
+  started has its own key's memory, apart from the API's.
+- `"memory": {"scope": "agent"}`, set on purpose: all the agent's sessions
+  share one memory, for an agent only your own team talks to. A support
+  agent can't share it, so one end user never reads or plants what the next
+  one sees.
+
+A session reads and writes only its own scope, which Runtime derives from the
+definition; the session never chooses it. A subagent reads the memory of the
+session at the top of its tree, whatever key its parent gives it, so a
+customer's session can't start a subagent into another customer's memory. From inside the sandbox the harness
+reaches it at `$RUNTIME_API/v1/agents/sessions/$RUNTIME_AGENT_SESSION/memory`
+with the session's report token.
+
+Seed what every session should know, and read what the agent kept:
+
+```bash no-run
+runtime agents memory put helper faq/refunds.md refunds.md
+runtime agents memory ls helper --scope customer:42
+runtime agents memory search helper "refund policy"
+runtime agents memory cat helper notes.md --scope customer:42
+runtime agents memory rm helper notes.md --scope customer:42
+```
+
+Without `--scope`, `put`, `cat` and `rm` mean the shared memory; `ls` and
+`search` mean every scope. The SDKs have the same five (`agents.memory.list`,
+`search`, `read`, `write`, `delete`), and so does the MCP server
+(`runtime_agents` action `memory`). Deleting an agent deletes its memory.
+
+## Memory
+
+An agent keeps text files across its sessions and searches them: notes on a
+customer, a runbook, what it learned last time. Memory is part of the agent,
+not a disk you attach, so every session reaches it however many run at once.
+A file holds up to 1 MiB of text; an agent holds up to 1 GiB and 100,000 files.
+A write past either is refused with `memory_full` and nothing is written.
+
+The definition says whose memory a session reads:
+
+- `"memory": {"scope": "key"}`, the default for every template: each
+  session key has its own. When your app keys sessions by customer
+  (`customer:42`), one customer's notes never reach another customer's
+  session. A session without a key has no memory, and a session a trigger
+  started has its own key's memory, apart from the API's.
+- `"memory": {"scope": "agent"}`, set on purpose: all the agent's sessions
+  share one memory, for an agent only your own team talks to. A support
+  agent can't share it, so one end user never reads or plants what the next
+  one sees.
+
+A session writes only its own scope, which Runtime derives from the
+definition; the session never chooses it. It also reads the shared files you
+put in the agent's memory yourself (the API's `""` scope): an FAQ or a
+runbook every customer's session needs. A session keeping memory per key
+reads those read-only, never what another session wrote there, and a file of
+its own at the same path hides yours from it alone. A subagent reads the memory of the
+session at the top of its tree, whatever key its parent gives it, so a
+customer's session can't start a subagent into another customer's memory. From inside the sandbox the harness
+reaches it at `$RUNTIME_API/v1/agents/sessions/$RUNTIME_AGENT_SESSION/memory`
+with the session's report token.
+
+Seed what every session should know, and read what the agent kept:
+
+```bash no-run
+runtime agents memory put helper faq/refunds.md refunds.md
+runtime agents memory ls helper --scope customer:42
+runtime agents memory search helper "refund policy"
+runtime agents memory cat helper notes.md --scope customer:42
+runtime agents memory rm helper notes.md --scope customer:42
+```
+
+Without `--scope`, `put`, `cat` and `rm` mean the shared memory; `ls` and
+`search` mean every scope. The SDKs have the same five (`agents.memory.list`,
+`search`, `read`, `write`, `delete`), and so does the MCP server
+(`runtime_agents` action `memory`). Deleting an agent deletes its memory.
 
 ## Price
 
-An agent's sandbox is billed as it runs, the same way as any sandbox; history
-is storage. No session fee, no seats. Your model provider bills your key. The
-rates are in [pricing](./pricing#agents), and an account's limits in
+A session's sandbox costs {{app-cpu-rate}} per active vCPU-hour and
+{{app-memory-rate}} per GiB-hour of memory while it runs, the same as an
+App's; while it waits for words it is paused and pays paused storage. History
+is storage, and so is memory, on the bytes of its files' text and paths. No
+session fee, no seats. Your model provider bills your key. The rates are in [pricing](./pricing#agents), and an account's limits in
 [limits](./limits#what-an-account-holds-and-runs).

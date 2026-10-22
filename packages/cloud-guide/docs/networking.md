@@ -55,6 +55,15 @@ shows a different token and `tokenExpiresAt` than the create did; the token you
 already hold keeps working until its own expiry or a rotate. See [private preview tokens](./api#private-preview-tokens)
 for the supported API and MCP inputs.
 
+### Search engines
+
+No preview address is ever indexed by a search engine, private or public.
+Every answer under `runtimehost.com` carries `X-Robots-Tag: noindex, nofollow`,
+in place of any your server sends, and `/robots.txt` on a preview address is
+Runtime's own, not your server's. For a site that should be found in search,
+add a [custom domain](#custom-domains): it serves your site's own headers and
+`robots.txt` unchanged.
+
 ## Custom domains
 
 ```bash no-run
@@ -464,7 +473,31 @@ Google in 16 ms.
 | `tailscale_failed`    |    422 | Tailscale refused the login, or the sandbox could not reach it     |
 | `tailscale_joined`    |    409 | A fork or memory snapshot of a sandbox on a tailnet                |
 | `network_not_allowed` |    403 | Runtime turned network features off for the account                |
-| `quota_exceeded`      |    409 | A limit above was reached                                          |
+| `quota_exceeded`      |    409 | A limit above was reached: close or delete one first               |
 | `rate_limited`        |    429 | Too many added today                                               |
 | `no_capacity`         |    503 | No public port or dedicated address is free just now               |
-| `network_unavailable` |    503 | The feature is not switched on in this region yet                  |
+| `network_unavailable` |    501 | The feature is not switched on in this region yet                  |
+
+### What a visitor can get
+
+When Runtime's router answers a visit to an App, a balancer or a custom domain
+itself, rather than your code, the answer names its code in the
+`x-runtime-error` header and the body, with the request's id:
+
+| Code                   | Status | Meaning                                                                    |
+| ---------------------- | -----: | -------------------------------------------------------------------------- |
+| `bad_request`          |    400 | No hostname, two Host headers, or a Host that disagrees with the authority |
+| `firewall_denied`      |    403 | The firewall refuses the visitor                                           |
+| `no_route`             |    404 | Nothing is served at this hostname                                         |
+| `misdirected_request`  |    421 | TLS was opened for a name whose certificate does not cover this one        |
+| `rate_limited`         |    429 | The visitor is over the per-address limit (`Retry-After`)                  |
+| `unsupported_protocol` |    501 | CONNECT did not name the websocket protocol                                |
+| `upstream_failed`      |    502 | Every copy tried failed before answering                                   |
+| `machine_no_capacity`  |    503 | No copy had a free slot in time (`Retry-After`)                            |
+| `router_not_ready`     |    503 | A router just started has not yet had its route table (`Retry-After: 1`)   |
+| `network_off`          |    503 | Runtime cut the machine's network                                          |
+
+`router_not_ready` comes only from a router that has never had its table, such
+as a new one: it cannot yet say whether the name is served, so it asks the
+visitor to try again in a second rather than answer `no_route`. Every router
+keeps its table on disk, so a restart serves at once.

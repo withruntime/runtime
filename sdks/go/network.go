@@ -22,6 +22,19 @@ type NetworkPolicy struct {
 	ConnectReason   string     `json:"connectReason"`
 	ForbiddenPorts  []int      `json:"forbiddenPorts"`
 	UpdatedAt       *time.Time `json:"updatedAt"`
+	// Limits: the outbound limits the sandbox's host holds it to. Meeting
+	// one sends the event sandbox.network.limited.
+	Limits NetworkLimits `json:"limits"`
+}
+
+// NetworkLimits are a sandbox's outbound connection limits. Open
+// connections grow with its vCPUs when its organization keeps a top-up;
+// past the rate or the new destinations a connection waits its turn.
+type NetworkLimits struct {
+	Connections             int `json:"connections"`
+	NewConnectionsPerSecond int `json:"newConnectionsPerSecond"`
+	NewConnectionBurst      int `json:"newConnectionBurst"`
+	DestinationsPerMinute   int `json:"destinationsPerMinute"`
 }
 
 // SandboxNetwork is sbx.Network: turn the sandbox's internet off or on,

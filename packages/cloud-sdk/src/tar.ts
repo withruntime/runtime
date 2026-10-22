@@ -483,6 +483,22 @@ async function merge(from: string, to: string, root: string, signal?: AbortSigna
   }
 }
 
+/** A web stream's chunks, read through its reader. The SDK is built with
+ * TypeScript 5, whose DOM types do not make a ReadableStream async iterable
+ * (TypeScript 7's do), so a download's body is read this way in both. */
+async function* chunksOf(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** Unpacks a gzipped tar that arrives as a stream into `target`, refusing any
  * entry that would land outside it, holding no more than a chunk at a time.
  * It unpacks into a folder beside the target and moves it into place only
@@ -490,11 +506,12 @@ async function merge(from: string, to: string, root: string, signal?: AbortSigna
  * behind that could pass for the folder. A target that exists is merged
  * into, files of the same name replaced. */
 export async function unpackStream(
-  source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  from: AsyncIterable<Uint8Array> | Iterable<Uint8Array> | ReadableStream<Uint8Array>,
   target: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
   checkSignal(options.signal);
+  const source = from instanceof ReadableStream ? chunksOf(from) : from;
   const final = resolve(target);
   await mkdir(dirname(final), { recursive: true });
   const staging = await mkdtemp(`${final}.runtime-partial-`);

@@ -64,8 +64,8 @@ sandbox) products. A paused sandbox
 also wakes by itself on the next call, and `Sandbox.get_or_create(name)` returns
 the sandbox with that name or creates it. A sandbox pauses itself after {{idle-pause}}
 with nothing happening in it, keeping its memory and processes, so an
-idle sandbox costs no compute; `idle_pause_seconds` sets {{idle-pause-min}} to {{idle-pause-max}}, or 0 for
-never. One plural word names each product, as in the CLI: `runtime.sandboxes`, `snapshots`, `images`, `volumes`, `jobs`, `domains`, `ports`, `ips` and `networks`. The old singular names (`runtime.sandbox`, `address`, `tunnel` and the rest) still work for now and are listed in the [guide](https://withruntime.com/docs/python). The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
+idle sandbox costs no compute; `idle_pause_seconds` sets {{idle-pause-min}} to {{idle-pause-max}} (a shorter time
+is raised to {{idle-pause-min}}), or 0 for never. One plural word names each product, as in the CLI: `runtime.sandboxes`, `snapshots`, `images`, `volumes`, `jobs`, `domains`, `ports`, `ips` and `networks`. The old singular names (`runtime.sandbox`, `address`, `tunnel` and the rest) still work for now and are listed in the [guide](https://withruntime.com/docs/python). The client has `sandboxes`, `images`, `volumes`, `snapshots`, `jobs`,
 `secrets`, `limits`, `feedback` and `support`; `webhooks`, `events`, `otel` and
 `audit` to watch the account; `domains`, `ports`, `ips` and
 `networks` (with `networks.wireguard`) to connect sandboxes to your own world (paid accounts); and `mcp`,
@@ -217,6 +217,27 @@ domains and preview expiry, restoring a snapshot in place (fork from it
 instead), codegen, `system`, schedules, and Blaxel's agents, models,
 tools, jobs and applications. The sync module is generated from the async one
 by `scripts/generate_dropin_sync.py`.
+
+## Code written for Modal Sandboxes
+
+`withruntime.modal` runs code written for Modal's Sandboxes (`modal` 1.6.2),
+sync and `.aio`. Change the import and set `RUNTIME_API_KEY`:
+
+```python no-run
+from withruntime import modal  # was: import modal
+```
+
+Modal's own sandbox examples run unchanged where they use none of what is
+refused below, and a Modal token is never needed
+or sent. Commands run as root, as in a Modal container. A `timeout` ends the
+sandbox; an `idle_timeout` pauses it with its memory kept, and the next call
+wakes it. Images build from Modal's recipes; `publish(name)` makes a Runtime
+image name that `Image.from_name` finds. Memory snapshots
+(`_experimental_enable_snapshot`) keep the running entrypoint. GPUs, Modal
+Functions and Dicts, named secrets, volumes made on first use, sidecars,
+connect tokens and directory snapshots raise `CompatibilityError` before
+anything is created, naming what to use instead. `COMPATIBILITY.md` lists
+every mapping.
 
 ## Agent frameworks
 

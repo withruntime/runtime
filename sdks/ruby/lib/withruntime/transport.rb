@@ -51,6 +51,10 @@ module WithRuntime
     # could refuse (the leader drill on vin-5, 4 October 2026). It is sent
     # again under the same key.
     ANSWER_START = 125.0
+    # The longest wait a server names that a call sleeps on (seconds). One
+    # longer (a daily cap's hour) is raised at once, still retryable with its
+    # retry_after, for the caller to schedule.
+    LONGEST_WAIT = 60.0
     class << self
       attr_writer :answer_start
 
@@ -375,14 +379,19 @@ module WithRuntime
     # Sends a call, retrying as the rules say, and returns the response once it
     # succeeded. With a block, the body is streamed to it.
     def send_call(http, method, path, query: nil, body: nil, raw: nil, accept: "application/json", wait: nil,
-                  key: nil, no_retry: false, room: 0, timeout: nil, cancel: nil, &stream)
+                  key: nil, no_retry: false, room: nil, timeout: nil, cancel: nil, &stream)
       write = method != "GET"
       key = write ? (key || SecureRandom.uuid) : nil
-      deadline = now + (timeout || @timeout) + room
-      room_until = now + room
+      # room: nil for a call with no room wait; 0 for a create, wake, restart
+      # or fork told at once.
+      deadline = now + (timeout || @timeout) + (room || 0)
+      room_until = now + (room || 0)
       room_attempt = 0
       payload = raw || (body.nil? ? nil : JSON.generate(body))
       attempt = 0
+      # An answer that ran nothing is sent again until the call's deadline
+      # (a Ruby call always has one: its timeout, plus any wait for room).
+      idle_attempt = 0
       # The last try never left, and was sent again at once.
       resent_at_once = false
       loop do
@@ -497,7 +506,9 @@ module WithRuntime
           { "error" => { "message" => text.strip.empty? ? nil : text.strip[0, 500] }.compact }
         end
         failure = Error.from(status, parsed, key)
-        if !no_retry && room.positive? && Error::WAITS_FOR_ROOM.include?(failure.code) && failure.details["field"] != "count"
+        # A quota on what is kept says it never clears by waiting.
+        if !no_retry && room&.positive? && Error::WAITS_FOR_ROOM.include?(failure.code) && failure.details["field"] != "count" &&
+           failure.sent_retryable != false
           room_left = room_until - now
           raise failure if room_left <= 0
 
@@ -506,15 +517,42 @@ module WithRuntime
           pause([room_left, wait_for].min, deadline, write, key, failure, cancel)
           next
         end
-        retryable = [429, 502, 503, 504].include?(status) && !Error::DELIBERATE.include?(failure.code)
-        raise failure if no_retry || !retryable || attempt >= max_retries
+        header = Float(response["Retry-After"], exception: false)
+        header = nil unless header&.positive?
+        # The wait the server names, when it names one.
+        named = failure.retry_after || header
+        # Nothing ran: safe to send again for any call, past max_retries,
+        # with growing waits, until the deadline; then this refusal stands.
+        # A late answer's failure came after the work began, so only a
+        # guest's own refusal (guest_busy, before anything is journaled)
+        # still says nothing ran.
+        if [429, 503].include?(status) && Error::NOTHING_RAN.include?(failure.code) &&
+           failure.sent_retryable != false && (!late || failure.code == "guest_busy")
+          raise failure if named && named > LONGEST_WAIT
 
-        wait_for = failure.retry_after
-        if wait_for.nil?
-          header = Float(response["Retry-After"], exception: false)
-          wait_for = header&.positive? ? header : backoff(attempt)
+          pause_for = [30.0, (named || 0.25) * (2**[idle_attempt, 3].min)].min * (0.9 + (rand * 0.2))
+          idle_attempt += 1
+          raise failure if pause_for >= deadline - now
+
+          pause(pause_for, deadline, write, key, failure, cancel)
+          next
         end
-        pause([30.0, wait_for].min * (0.9 + (rand * 0.2)), deadline, write, key, failure, cancel)
+        # The answer says whether the same call may work again; an older
+        # server that does not say is retried on 429, 502, 503 and 504. A
+        # refusal for room or the account's own limit is the room wait's on a
+        # create, wake, restart or fork; any other call retries what it says.
+        again = if failure.sent_retryable.nil?
+                  [429, 502, 503, 504].include?(status) && !Error::DELIBERATE.include?(failure.code)
+                else
+                  failure.sent_retryable
+                end
+        raise failure if no_retry || !again || (room && Error::WAITS_FOR_ROOM.include?(failure.code)) ||
+                         attempt >= max_retries
+        # A wait longer than a minute (a daily cap) is the caller's to
+        # schedule: the error says when, in retry_after.
+        raise failure if named && named > LONGEST_WAIT
+
+        pause([30.0, named || backoff(attempt)].min * (0.9 + (rand * 0.2)), deadline, write, key, failure, cancel)
         attempt += 1
       end
     end

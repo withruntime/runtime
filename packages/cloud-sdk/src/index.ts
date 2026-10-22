@@ -33,7 +33,17 @@ export {
 export { Tunnel, TunnelStream, type PortForward } from "./tunnel.js";
 export { Page } from "./page.js";
 export type { AccountLimit, KeyLimits } from "./products/limits.js";
+export type { BookRoom, RoomBooking, RoomBookingPage } from "./products/reservations.js";
 export type { AuditEvent, AuditPage } from "./products/audit.js";
+export type {
+  Plan,
+  PlanAddOn,
+  PlanChange,
+  PlanIncluded,
+  PlanLimit,
+  PlanNow,
+  Plans,
+} from "./products/plans.js";
 export type {
   UsageExportQuery,
   UsageExportRow,
@@ -42,6 +52,9 @@ export type {
 export type {
   JobSecret,
   Secret,
+  SecretApiPolicy,
+  SecretGit,
+  SecretGithubApp,
   SecretRule,
   SecretScope,
   SecretUse,
@@ -67,12 +80,15 @@ export type { Volume, VolumeBackup, CreateVolume, VolumeAttachment } from "./pro
 export type {
   CreateJob,
   Job,
+  JobAlert,
+  JobAlertDelivery,
   JobCompute,
   JobDefinition,
   JobLogs,
   JobRun,
   JobRunState,
   JobSchedule,
+  UpdateJob,
 } from "./products/jobs.js";
 export type {
   CheckedDomain,
@@ -185,6 +201,12 @@ export type {
   Agent,
   AgentDefinition,
   AgentEvent,
+  AgentMemoryEntry,
+  AgentMemoryFile,
+  AgentMemoryHit,
+  AgentMemoryPage,
+  AgentMemoryUsage,
+  AgentMemoryWritten,
   AgentSession,
   AgentSessionHandle,
   AgentSessionState,
@@ -198,9 +220,30 @@ export type {
   StartAgentSession,
 } from "./products/agents.js";
 export { AGENT_TEMPLATES, AGENT_USES } from "./products/agents.js";
+// runtime.yml's agents: section; loadAgentsFile reads one from disk
+// (withruntime/agents, Node and Bun only).
+export type {
+  AgentsDeployChange,
+  AgentsDeployOptions,
+  AgentsDeployResult,
+  AgentsFile,
+  AgentsFileAgent,
+  AgentsFileTrigger,
+  AgentsSource,
+} from "./agents-deploy.js";
 export type {
   Container,
   ContainerState,
   CreateContainer,
   UpdateContainer,
 } from "./products/containers.js";
+export type {
+  CiFlake,
+  CiFlakeDetail,
+  CiRepository,
+  CiTestResult,
+  ConnectCiRepository,
+  ListCiFlakes,
+  ListCiRepositories,
+  UpdateCiFlake,
+} from "./products/ci.js";

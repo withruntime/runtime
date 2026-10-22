@@ -18,6 +18,11 @@ export type JobCompute = {
   durationSeconds: number;
   /** The most one run may hold, in microdollars. */
   maxCostMicros?: number;
+  /** Volumes each run's sandbox attaches, at most four, as a sandbox create
+   * takes them. `"rw"` (the default) is read-write, one sandbox at a time, so
+   * what one run writes the next run reads; `"snapshot"` is a read-only copy
+   * as the run starts. The run starts on the volume's server. */
+  volumes?: { volumeId: string; path: string; mode?: "rw" | "snapshot" }[];
 };
 export type JobSchedule =
   | { kind: "once"; /** Unix milliseconds. */ at: number }
@@ -31,6 +36,37 @@ export type JobDefinition = {
   maxTotalCostMicros?: number;
   retry: { maxAttempts: number; backoffSeconds: number };
   secrets: Array<{ name: string; secretId: string }>;
+  /** The id of the image each run starts from; absent, the standard image. */
+  image?: string;
+};
+/** Who hears when a job's runs fail. Once `afterFailures` runs in a row end
+ * failed, timed out or unknown, one alert goes out; once a run succeeds
+ * again, one more says it recovered. A run that will be retried counts at
+ * its last attempt. */
+export type JobAlert = {
+  /** Runs in a row, 1 to 100. Default 1. */
+  afterFailures?: number;
+  /** POSTed the account webhooks' body (`job.run.failed`, `job.recovered`),
+   * signed with the jobs secret `secretId` the way those are signed with
+   * theirs: check it with `verifyWebhook(body, header, secretValue)`. The
+   * key must be allowed to reveal that secret, not only use it. */
+  webhook?: { url: string; secretId?: string };
+  /** Mailed to the job's person: who made it, or whom its key serves. */
+  email?: true;
+};
+/** The last alert a job sent and how its delivery went. */
+export type JobAlertDelivery = {
+  id: string;
+  type: "job.run.failed" | "job.recovered";
+  channel: "webhook" | "email";
+  runId: string;
+  /** `pending` while it is retried (about three days, as webhooks are). */
+  state: "pending" | "succeeded" | "failed";
+  attempts: number;
+  lastStatus: number | null;
+  lastError: string | null;
+  createdAt: number;
+  deliveredAt: number | null;
 };
 export type Job = {
   id: string;
@@ -45,8 +81,16 @@ export type Job = {
   runRequestedAt: number | null;
   /** Why the last due run could not start, retried every 30 seconds:
    * `credits` (add credit), `capacity`, `cost_cap` (maxTotalCostMicros or a
-   * key's daily limit) or `permission` (the key that made the job lost it). */
-  blockedReason: "permission" | "capacity" | "credits" | "cost_cap" | null;
+   * key's daily limit), `permission` (the key that made the job lost it, or
+   * may not use a volume it attaches) or `volume` (a volume it attaches is
+   * deleted, not ready, or attached read-write to another sandbox). */
+  blockedReason: "permission" | "capacity" | "credits" | "cost_cap" | "volume" | null;
+  alert: (JobAlert & { afterFailures: number }) | null;
+  /** Runs in a row that ended failing, until one succeeds. */
+  failingRuns: number;
+  /** When its alert went out, while its runs keep failing; Unix ms. */
+  alertingSince: number | null;
+  lastAlert: JobAlertDelivery | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -115,6 +159,32 @@ export type CreateJob = {
   secrets?: Array<{ name: string; secretId: string }>;
   /** The most every run of this job together may hold, in microdollars. */
   maxTotalCostMicros?: number;
+  /** An image of this account each run starts from: its id, name (its
+   * `latest` tag), `name:tag` or `name@version`, resolved to its id now, as
+   * an App deploy takes it. Default: the standard image. */
+  image?: string;
+  /** Tell a webhook or the job's person when runs fail, and when they
+   * recover. */
+  alert?: JobAlert;
+};
+/** What `jobs.update` changes; everything left out stays. The name stays,
+ * and the schedule moves with `reschedule`. */
+export type UpdateJob = {
+  command?: CreateJob["command"];
+  /** null: back to the standard image. */
+  image?: string | null;
+  /** The fields given; the rest stay. `volumes` replaces the whole list
+   * (`[]`: none). */
+  compute?: Partial<JobCompute>;
+  /** The whole list, replacing the one before. */
+  secrets?: Array<{ name: string; secretId: string }>;
+  /** null: no alert. */
+  alert?: JobAlert | null;
+  timeoutSeconds?: number;
+  /** The fields given; the rest stay. */
+  retry?: Partial<{ maxAttempts: number; backoffSeconds: number }>;
+  /** null: no cap. */
+  maxTotalCostMicros?: number | null;
 };
 
 /** The size a run gets when `compute` leaves a field out: the sandbox
@@ -140,6 +210,7 @@ export const JOB_LIMITS = {
   maxDurationSeconds: 3600,
   maxAttempts: 5,
   maxSecrets: 16,
+  maxVolumes: 4,
 };
 
 function invalid(message: string, field: string): RuntimeError {
@@ -216,7 +287,28 @@ export function jobBody(input: CreateJob): Record<string, unknown> {
       given.durationSeconds ??
       Math.min(JOB_LIMITS.maxDurationSeconds, timeoutSeconds + JOB_DEFAULTS.startSeconds),
     ...(given.maxCostMicros === undefined ? {} : { maxCostMicros: given.maxCostMicros }),
+    ...(given.volumes === undefined ? {} : { volumes: given.volumes }),
   };
+  // The API checks each volume is the key's, in the job's region; this
+  // catches a malformed list before anything is sent.
+  if (compute.volumes !== undefined) {
+    const volumes: unknown = compute.volumes;
+    if (
+      !Array.isArray(volumes) ||
+      volumes.length > JOB_LIMITS.maxVolumes ||
+      volumes.some(
+        (v: { volumeId?: unknown; path?: unknown; mode?: unknown } | null) =>
+          typeof v?.volumeId !== "string" ||
+          typeof v.path !== "string" ||
+          !v.path.startsWith("/") ||
+          (v.mode !== undefined && v.mode !== "rw" && v.mode !== "snapshot"),
+      )
+    )
+      throw invalid(
+        `compute.volumes is at most ${JOB_LIMITS.maxVolumes} of { volumeId, path: "/data", mode?: "rw" | "snapshot" }.`,
+        "compute.volumes",
+      );
+  }
   if (compute.vcpu > JOB_LIMITS.maxVcpu || compute.memoryMiB > JOB_LIMITS.maxMemoryMiB)
     throw invalid(
       `A run's sandbox is at most ${JOB_LIMITS.maxVcpu} vCPU and ${JOB_LIMITS.maxMemoryMiB / 1024} GiB of memory; asked for ${compute.vcpu} vCPU and ${compute.memoryMiB} MiB.`,
@@ -251,13 +343,29 @@ export function jobBody(input: CreateJob): Record<string, unknown> {
     ...(input.maxTotalCostMicros === undefined
       ? {}
       : { maxTotalCostMicros: input.maxTotalCostMicros }),
+    ...(input.image === undefined ? {} : { image: input.image }),
+    ...(input.alert === undefined ? {} : { alert: input.alert }),
   };
+}
+
+/** The API's update body from `UpdateJob`: a command as an argv array is
+ * sent as `{ argv }`; the rest as given. */
+export function jobUpdateBody(input: UpdateJob): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(input)) if (value !== undefined) body[field] = value;
+  if (Array.isArray(input.command)) body.command = { argv: input.command };
+  if (!Object.keys(body).length)
+    throw invalid(
+      "update takes at least one of command, image, compute, secrets, alert, timeoutSeconds, retry or maxTotalCostMicros.",
+      "update",
+    );
+  return body;
 }
 
 const enc = encodeURIComponent;
 
-/** The API answers a product switched off where it runs with 503
- * `unavailable` and words that do not name it ("This product is not enabled
+/** The API answers a product switched off where it runs with 501 (503
+ * from an older server) `unavailable` and words that do not name it ("This product is not enabled
  * on this deployment."). This names the product, keeps the code, status and
  * request id, and says no retry will change it. */
 export function switchedOff(product: string) {
@@ -304,7 +412,7 @@ export function jobs(transport: Transport) {
   };
   const runs = async (
     jobId: string,
-    query: { limit?: number; cursor?: string } = {},
+    query: { limit?: number; cursor?: string; order?: "oldest" | "newest" } = {},
     options?: RequestOptions,
   ): Promise<Page<JobRun>> => {
     const page = await t.json<Wire<JobRun>>({
@@ -332,7 +440,10 @@ export function jobs(transport: Transport) {
     list,
     get: (id: string, options?: RequestOptions) =>
       t.json<Job>({ method: "GET", path: `/v1/jobs/${enc(id)}`, ...options }),
-    /** A job's runs, oldest first: each attempt of each occurrence. */
+    /** A job's runs, oldest first: each attempt of each occurrence.
+     * `{ order: "newest" }`: newest first, so the last run is one call.
+     *
+     *   const [last] = (await runtime.jobs.runs(job.id, { limit: 1, order: "newest" })).data; */
     runs,
     /** One run by its id. */
     run: (runId: string, options?: RequestOptions) =>
@@ -370,6 +481,19 @@ export function jobs(transport: Transport) {
         method: "POST",
         path: `/v1/jobs/${enc(id)}:reschedule`,
         body: { schedule: jobSchedule(schedule) },
+        ...options,
+      }),
+    /** Change a job in place: its command, image, compute, secrets, alert,
+     * timeout or retry. Its id, history and schedule stay; a run already
+     * started finishes as it began, and the next run is the new job.
+     *
+     *   await runtime.jobs.update(job.id, { image: "hub:latest" });
+     *   await runtime.jobs.update(job.id, { alert: { afterFailures: 3, email: true } }); */
+    update: (id: string, changes: UpdateJob, options?: RequestOptions) =>
+      t.json<Job>({
+        method: "POST",
+        path: `/v1/jobs/${enc(id)}:update`,
+        body: jobUpdateBody(changes),
         ...options,
       }),
   };

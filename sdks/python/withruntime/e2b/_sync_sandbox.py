@@ -951,10 +951,31 @@ class Sandbox:
                                       disk_used=None, disk_total=m["diskLimitBytes"]))
         return out
 
+    def download_url(self, path: str, user: Optional[str] = None,
+                           use_signature_expiration: Optional[int] = None) -> str:
+        """A signed URL anyone can open without a key to download ``path``.
+        ``use_signature_expiration`` is the lifetime in seconds (default 3600,
+        at most 7 days). ``user`` is ignored: a link reads as the sandbox's own user."""
+        target = self.files._path(path, None)
+        link = _guard("file", lambda: self.runtime.files.download_url(
+            target, expires_in_seconds=3600 if use_signature_expiration is None else use_signature_expiration))
+        return link["url"]
+
+    def upload_url(self, path: Optional[str] = None, user: Optional[str] = None,
+                         use_signature_expiration: Optional[int] = None) -> str:
+        """A signed URL anyone can PUT a raw body to without a key, writing
+        ``path``. Runtime's links are made for one file, so ``path`` is required.
+        ``use_signature_expiration`` is the lifetime in seconds (default 3600,
+        at most 7 days). ``user`` is ignored: a link writes as the sandbox's own user."""
+        if path is None:
+            raise ValueError("Runtime's upload URL is made for one file: pass the file's path.")
+        target = self.files._path(path, None)
+        link = _guard("file", lambda: self.runtime.files.upload_url(
+            target, expires_in_seconds=3600 if use_signature_expiration is None else use_signature_expiration))
+        return link["url"]
+
     update_network = staticmethod(core.unsupported(
         "E2B's network rules (update_network)", "Use sandbox.runtime.network.set(internet=..., allow=[...])."))
-    upload_url = staticmethod(core.unsupported("Signed upload URLs", "Use sandbox.files.write(path, data)."))
-    download_url = staticmethod(core.unsupported("Signed download URLs", "Use sandbox.files.read(path, 'bytes')."))
     get_mcp_token = staticmethod(core.unsupported("E2B's MCP gateway", "Runtime's MCP server is `npx withruntime mcp`."))
 
 

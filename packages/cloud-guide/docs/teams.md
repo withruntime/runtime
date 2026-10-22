@@ -157,6 +157,9 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
   with `403 forbidden`, before any build is read. Deploy builds with a key
   made on the website. It asks an App for at most 2 `minCopies`, 2 `spares`
   and 20 `maxCopies`; make a larger App with a key made on the website. It
+  may set an App's `releaseWatch` to `alert` or `rollback`, never `off`, which
+  would stop the owners hearing of a release that got worse: that is refused
+  with `403 forbidden`. It
   cannot give an App or Function a name one of the account's own Apps holds:
   create or rename answers `409 name_taken`. The account's own settings are
   refused with `403 forbidden`,
@@ -316,7 +319,7 @@ From code, a key reads and sets its own person's, never anyone else's:
 MCP, `runtime_account` action `emails` reads them. Reading them needs a key
 that reads usage, and changing them a key for every action: a read-only or
 limited key is answered 403 `forbidden` and changes nothing. A key with no
-person (a wallet account's) has none, and is answered 409 `no_person`.
+person (a wallet account's) has none, and is answered 403 `no_person`.
 
 ## Closing the account
 

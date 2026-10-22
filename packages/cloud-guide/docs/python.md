@@ -10,7 +10,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.21.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.31.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -506,7 +506,9 @@ except RuntimeAPIError as error:
     print(error.code, error.hint, error.request_id)
 ```
 
-The classes match the JavaScript SDK: `AuthenticationError`,
+The classes match the JavaScript SDK (`no_capacity` is a `ServiceUnavailableError`;
+`no_credit_running_limit` and a `quota_exceeded` on what runs at once are a
+`RateLimitError`, and a `quota_exceeded` on what is kept a `ConflictError`): `AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `ConflictError`,
 `InvalidRequestError`, `RateLimitError`, `ServiceUnavailableError`,
 `AccountBlockedError` (from 0.7.0), `ConnectionError` and `CommandError`, all
@@ -514,8 +516,10 @@ subclasses of `withruntime.RuntimeAPIError`. `RuntimeAPIError` and
 `RuntimeConnectionError` name the SDK errors without hiding Python's built-in
 `RuntimeError` and `ConnectionError`. The old exports remain aliases of the
 same classes, so existing catches keep working. Every write carries an idempotency
-key, made for you; transport failures, 429 and 503 are retried with the same
-key, so a retry never makes two sandboxes or runs a command twice. An answer
+key, made for you; transport failures and every answer that says `retryable: true`
+are retried after its `Retry-After`, with the same key, so a retry never makes
+two sandboxes or runs a command twice. A wait over 60 seconds is not slept on:
+the error is returned at once, with `retry_after_ms`. An answer
 that ran nothing (`guest_busy`, `busy`, `rate_limited`) is sent again until the
 call's deadline, or for five minutes without one, past `max_retries`.
 Interrupted complete response bodies are retried with the same key too;
@@ -609,7 +613,7 @@ with Runtime() as runtime:
 
 Store an API key once with `runtime.secrets`, naming the hosts it may go to.
 Every sandbox of the account then has an environment variable of that name
-holding a placeholder, and the host's proxy swaps in the real value on HTTPS
+(or `env`) holding a placeholder, and the host's proxy swaps in the real value on HTTPS
 requests to those hosts. The value is sealed and never returned:
 
 ```python check
@@ -636,6 +640,11 @@ Replacing a secret keeps its placeholder, so
 running sandboxes use the new value. See
 [security](./security#secrets-sandboxes-never-see) for the limits and what is
 never rewritten.
+
+With `env="GITHUB_TOKEN"`, sandboxes see the placeholder in that variable instead of
+the secret's name, so secrets scoped (`only`) to different sandboxes can
+share one, such as a `GITHUB_TOKEN` for each repository; a store that would
+give one sandbox two of them is refused.
 
 ## Images, volumes and snapshots
 
@@ -706,7 +715,8 @@ Forks and snapshots:
   `memory_mib` and `disk_mib` you pass (a disk at least the saved size). A
   copy of a memory snapshot is always the snapshot's size. Both modes pause a
   running source until capture finishes, then wake it; an already paused
-  source stays paused.
+  source stays paused. A disk snapshot's pause first waits for the sandbox
+  to write out what it holds in memory: a few seconds at most while it writes.
 
 Where deferred compression has been qualified and enabled, a memory
 snapshot can be `"ready"` with `compressionPending` set to `True`
@@ -924,6 +934,28 @@ print(latest, verify_webhook.__name__)
 pushes events and metrics to an OpenTelemetry endpoint. See
 [metrics and webhooks](./observability).
 
+<!-- launch: ci -->
+
+## CI/CD (beta)
+
+```python check
+from withruntime import Runtime
+
+with Runtime() as runtime:
+    repo = runtime.ci.repositories.connect("acme/web")
+    for check in runtime.ci.checks.list(repository_id=repo["id"], state=["failed"]):
+        detail = runtime.ci.checks.get(check["id"])
+        job = runtime.ci.jobs.get(detail["jobs"][0]["id"])
+        print(check["commit"], job["name"], job["log"][-200:])
+```
+
+CI/CD runs a repository's checks as jobs in sandboxes. It is in a private beta:
+an account outside it gets `PermissionDeniedError` with code
+`product_in_beta`. `checks.list()` and `tests.list(repository_id)` page like
+the other lists (`limit` 1 to 100). A failed job's `sandboxIds` may be kept
+paused, to wake and look into. `AsyncRuntime` has the same methods, awaited.
+<!-- /launch: ci -->
+
 ## Account API calls
 
 ```python check
@@ -970,6 +1002,7 @@ from withruntime.e2b import Sandbox  # was: from e2b import Sandbox
 from withruntime.daytona import Daytona  # was: from daytona import Daytona
 from withruntime.vercel import sandbox  # was: from vercel import sandbox
 from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance
+from withruntime import modal  # was: import modal (0.23.0 and later)
 ```
 
 The adapters translate supported calls to Runtime's native sandbox, with the

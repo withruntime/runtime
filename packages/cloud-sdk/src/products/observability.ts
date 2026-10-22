@@ -60,6 +60,7 @@ export type WebhookEventType =
   | "sandbox.files.changed"
   | "sandbox.out_of_memory"
   | "sandbox.secret_not_applied"
+  | "sandbox.network.limited"
   | "snapshot.ready"
   | "snapshot.failed"
   | "snapshot.deleted"
@@ -73,7 +74,9 @@ export type WebhookEventType =
   | "upstream_proxy.set"
   | "upstream_proxy.removed"
   | "credit.low"
-  | "credit.empty";
+  | "credit.empty"
+  | "job.run.failed"
+  | "job.recovered";
 /** An event as /v1/events lists it and a webhook delivers it. */
 export type RuntimeEvent = {
   id: string;

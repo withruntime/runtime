@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { productSwitchedOff } from "../switched-off.js";
 
 /* Blaxel's error classes by the same names, so a
    `catch (e) { if (e instanceof ResponseError) ... }` or an
@@ -178,7 +179,7 @@ export function translate(error: unknown): unknown {
       ),
       { cause: error },
     );
-  if (error.status === 503 && error.code.endsWith("_unavailable"))
+  if (productSwitchedOff(error))
     return new NotSupportedError(
       error.code.replace(/_unavailable$/, ""),
       error.hint ?? "",

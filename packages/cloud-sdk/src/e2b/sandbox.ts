@@ -19,7 +19,7 @@ import {
   SandboxNotFoundError,
   TemplateError,
 } from "./errors.js";
-import { Filesystem } from "./filesystem.js";
+import { absolute, Filesystem } from "./filesystem.js";
 import { Pty } from "./pty.js";
 
 /* E2B's Sandbox over Runtime's. Every call is one or a few calls of the
@@ -220,6 +220,15 @@ function snapshotMemory(
       `${field} must be one of: ${SNAPSHOT_MODES.join(", ")} (got ${JSON.stringify(mode)}).`,
     );
   return mode === "full";
+}
+
+type FileUrlOpts = { user?: string; useSignatureExpiration?: number };
+
+/** A link's lifetime in whole seconds, one hour unless given, held to Runtime's 60 s to 7 days. */
+function linkLifetime(opts: FileUrlOpts): number {
+  const asked = opts.useSignatureExpiration;
+  if (asked === undefined) return 3600;
+  return Math.min(604800, Math.max(60, Math.ceil(asked)));
 }
 
 const filesOnlyPause = () =>
@@ -807,14 +816,26 @@ export class Sandbox {
       "Use sandbox.runtime.network.set({ internet, allow, deny }).",
     );
   }
-  uploadUrl(): Promise<never> {
-    return unsupported("Signed upload URLs", "Use sandbox.files.write(path, data).");
-  }
-  downloadUrl(): Promise<never> {
-    return unsupported(
-      "Signed download URLs",
-      "Use sandbox.files.read(path, { format: 'bytes' }).",
+  /** E2B's signed upload URL: anyone can PUT a body to it, with no key.
+   * Runtime's links name one file, so `path` is required. `useSignatureExpiration`
+   * is the lifetime in seconds (one hour by default, at most 7 days); `user`
+   * is ignored, a link writes as the sandbox's own user. */
+  async uploadUrl(path?: string, opts: FileUrlOpts = {}): Promise<string> {
+    if (path === undefined)
+      throw new InvalidArgumentError(
+        "Runtime's upload URL is made for one file: pass the file's path.",
+      );
+    const link = await guard("file", () =>
+      this.#runtime.files.uploadUrl(absolute(path), { expiresInSeconds: linkLifetime(opts) }),
     );
+    return link.url;
+  }
+  /** E2B's signed download URL: anyone can open it, with no key. See `uploadUrl`. */
+  async downloadUrl(path: string, opts: FileUrlOpts = {}): Promise<string> {
+    const link = await guard("file", () =>
+      this.#runtime.files.downloadUrl(absolute(path), { expiresInSeconds: linkLifetime(opts) }),
+    );
+    return link.url;
   }
   getMcpUrl(): never {
     throw new NotSupportedError(

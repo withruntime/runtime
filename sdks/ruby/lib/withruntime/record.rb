@@ -47,6 +47,17 @@ module WithRuntime
     end
   end
 
+  # The files a traced command (+trace_files: true+) opened: +read+ is every
+  # file and directory it, and anything it started, opened (sorted absolute
+  # paths with links resolved, directories ending in "/"); +written+ every file
+  # it wrote. +truncated+ means some paths are missing, so do not treat the
+  # lists as complete.
+  class TracedFiles < Record
+    def read = self["read"] || []
+    def written = self["written"] || []
+    def truncated = self["truncated"] == true
+  end
+
   # A finished command. A timeout is a result (+timed_out+), not an exception.
   class CommandResult < Record
     def exit_code = self["exitCode"]
@@ -54,6 +65,9 @@ module WithRuntime
     def stderr = self["stderr"] || ""
     def timed_out = self["timedOut"] == true
     def ok? = !timed_out && exit_code == 0
+
+    # The files it read and wrote when it ran with +trace_files: true+; nil otherwise.
+    def files = self["files"] && TracedFiles.new(self["files"])
   end
 
   # One page of a list. +next_page+ reads the one after it; +each+ walks every

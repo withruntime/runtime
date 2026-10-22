@@ -150,6 +150,17 @@ SSH calls refuse; use `npx withruntime sandboxes ssh <id>`. In Python,
 snapshot's `ttl_seconds` is whole days. Commands run as the user `runtime`
 (with `sudo`), not root, so write to `/workspace` or `/tmp`.
 
+**From Modal Sandboxes:** change `from "modal"` to `from "withruntime/modal"`
+(Python `import modal` to `from withruntime import modal`), SDK 0.25.0 and
+later (Python 0.23.0). Modal's own sandbox examples run unchanged where they
+use none of what is refused below, and no Modal
+token is needed or sent. Commands run as root, as in a Modal container. A
+`timeout` ends the sandbox, and an `idle_timeout` pauses it with its memory
+kept until the next call wakes it. GPUs, Modal Functions, named secrets,
+volumes made on first use, sidecars, connect tokens and directory snapshots
+throw `CompatibilityError` before anything is created, naming what to use
+instead ([Modal](./modal-sandbox-alternative#what-the-drop-in-refuses)).
+
 **From E2B:** change `from "e2b"` to `from "withruntime/e2b"` (Python
 `from withruntime.e2b import ...`, SDK 0.4.0 and later). Errors stay E2B's:
 `commands.run` throws `CommandExitError` (Python `CommandExitException`) on a
@@ -185,6 +196,41 @@ The Worker's `getSandbox(env.Sandbox, name)` then reaches a Runtime sandbox
 kept for that name. Backups, tunnels, terminals and outbound interception
 refuse by name and say what to use instead; a sandbox holds at most 4 code
 contexts ([Cloudflare](./cloudflare-sandbox-alternative#change-the-import)).
+
+**From Fly Machines:** code that calls Fly's Machines API (`api.machines.dev`)
+runs on Runtime after one address change. Run `npx withruntime fly-api`, which
+answers the Machines API on `http://127.0.0.1:4280` as your Runtime login, and
+point the client there: `FLY_API_HOSTNAME` in Fly's own examples,
+`FLY_FLAPS_BASE_URL` for Fly's Go client (fly-go), or the base URL of your HTTP
+client. On 18 October 2026 we ran the 22 curl examples on Fly's
+[Machines API pages](https://fly.io/docs/machines/api/machines-resource/)
+unchanged this way, and fly-go 0.11.6's flaps client unchanged. A Node service
+can answer the same calls itself with `machinesApi()` from `withruntime/fly`, a
+fetch handler. Your Fly token is never sent anywhere; to run as another Runtime
+key, send it (`rtcloud_...`) as the bearer token. Served on anything but
+`127.0.0.1`, every request must carry its own Runtime key.
+`npx withruntime compare --from fly-machines` prices your usage at Fly Machines'
+rates, and `npx withruntime switch --from fly-machines` records the switch.
+
+- A machine is a sandbox, an app a label on it. Its `config.image` is built
+  once into a Runtime image, with Fly's `init` (`exec`, `entrypoint`, `cmd`)
+  and `files`, and the image's command is the machine's main process.
+- Answered: apps, create, get, list (by `metadata.*`), update (env, metadata
+  and restart policy), delete (`force`), start, stop, suspend, restart, wait,
+  exec, signal, ps, events, versions, metadata and leases.
+- The restart policy is kept: `always` and `on-failure` (up to `max_retries`,
+  10 by default, in five minutes) start the main process again when it exits,
+  and `no` lets the machine stop. A main process that exits stops the machine,
+  and `auto_destroy` deletes it.
+- `suspend` keeps the main process running, and `stop` keeps the disk; `start`
+  of a stopped machine runs the main process again. Fly resets a stopped
+  Machine's root disk.
+- `services` (and cordon), `mounts`, `checks`, `processes`, GPUs, `files` from
+  secrets and regions other than `iad` answer 400 naming Runtime's alternative
+  (previews, volumes, an image ready check, secrets), before anything is made.
+  A size change in `update` says plainly when it is not available. Runtime
+  runs in one region, us-east in northern Virginia; Fly's `iad` is Ashburn,
+  Virginia.
 
 ### Map the calls
 

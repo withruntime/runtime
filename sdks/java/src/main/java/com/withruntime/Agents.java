@@ -22,12 +22,14 @@ public final class Agents {
   private final Transport t;
   private final Sessions sessions;
   private final Triggers triggers;
+  private final AgentMemory memory;
   // Approvals come next, with their own table: agents().approvals().list() and answer(...).
 
   Agents(Transport transport) {
     this.t = transport;
     this.sessions = new Sessions(transport);
     this.triggers = new Triggers(transport);
+    this.memory = new AgentMemory(transport);
   }
 
   static String path(String agent) {
@@ -42,6 +44,11 @@ public final class Agents {
   /** What starts sessions besides the API: Slack, GitHub, a schedule, a webhook. */
   public Triggers triggers() {
     return triggers;
+  }
+
+  /** Each agent's built-in memory: files its sessions keep and search, shared or one key's alone. */
+  public AgentMemory memory() {
+    return memory;
   }
 
   /**
@@ -110,7 +117,7 @@ public final class Agents {
    * Starts a session with these words; every other argument may be null. A key, your own name for
    * the conversation ({@code customer:42}, {@code ticket:981}), joins the open session with the
    * same key instead, and the words go to it: {@link AgentSession#joined()} says which. An agent at
-   * its day's budget is refused with a Conflict, budget_reached.
+   * its day's budget is refused with budget_reached (402).
    */
   public AgentSession start(
       String agent, String input, String key, Map<String, String> labels, String idempotencyKey) {

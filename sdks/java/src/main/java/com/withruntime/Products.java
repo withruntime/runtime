@@ -48,7 +48,8 @@ public final class Products {
      * With only ({@code Map.of("labels", List.of(Map.of("role", "hub")), "sandboxes", List.of(id))}):
      * only those sandboxes get the secret instead of every sandbox of the organization. Those whose
      * labels hold every pair of any one selector in labels (1 to 8 selectors), and those named in
-     * sandboxes (1 to 100 ids). Null when replacing a secret: the scope it has stays, so a new value
+     * sandboxes (1 to 100 ids), and every copy of the Apps named in apps (1 to 100 App ids). Null
+     * when replacing a secret: the scope it has stays, so a new value
      * never widens who gets it; an empty map is every sandbox again.
      */
     public JsonObject set(
@@ -58,12 +59,40 @@ public final class Products {
         String header,
         String format,
         Map<String, Object> only) {
+      return set(name, value, hosts, header, format, only, null);
+    }
+
+    /**
+     * With policy, any of these fields as the API takes them (null leaves them out): {@code rules}
+     * (a list of {@code {methods, paths}}), {@code githubApp} ({@code {id, installation,
+     * repositories, permissions, api}}: the value is then the App's PEM private key, and the secret
+     * takes no header or format), {@code git} ({@code {push: [branch patterns]}}; an empty list is
+     * no push at all) and {@code api} ({@code {callsPerHour, writesPerHour, keep, copies, fresh,
+     * graphql: {path, mutations}}}), and {@code env}: the environment variable sandboxes see it in,
+     * when not the secret's name. Secrets scoped to different sandboxes may share one, such as one
+     * GITHUB_TOKEN per repository; a write that would put two in one sandbox is refused (409); absent
+     * when replacing, the variable it has stays. The answer and {@link #list} return them under
+     * the same names.
+     */
+    public JsonObject set(
+        String name,
+        String value,
+        List<String> hosts,
+        String header,
+        String format,
+        Map<String, Object> only,
+        Map<String, Object> policy) {
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("value", value);
       body.put("hosts", hosts);
       if (header != null) body.put("header", header);
       if (format != null) body.put("format", format);
       if (only != null) body.put("only", only);
+      if (policy != null) {
+        for (String field : List.of("rules", "githubApp", "git", "api", "env")) {
+          if (policy.get(field) != null) body.put(field, policy.get(field));
+        }
+      }
       return new JsonObject(t.object(new Transport.Call("PUT", path(name)).body(body)));
     }
 
@@ -157,6 +186,105 @@ public final class Products {
       body.put("enabled", enabled);
       return new JsonObject(t.object(new Transport.Call("POST", "/v1/account/emails:update").body(body)))
           .getObjects("settings");
+    }
+  }
+
+  /**
+   * {@code runtime.plans()}: monthly plans whose fee is prepaid usage. The fee comes back as plan
+   * usage, spent first each month at the same measured prices, plus a bonus for committing; plan
+   * usage left at the period's end ends with it. Money is integer microdollars in strings.
+   *
+   * <p>Every change answers {@code checkoutUrl} (where a person starts a first plan or a trial in the
+   * browser, null once the change was made) and {@code current} (the plan as it is now). Each has an
+   * overload taking an {@code idempotencyKey}, which may be null: one is made per call then.
+   */
+  public static final class Plans {
+    private final Transport t;
+
+    Plans(Transport transport) {
+      this.t = transport;
+    }
+
+    /**
+     * {@code current} (the plan you hold, or null: planId, name, status, interval, periodStart,
+     * periodEnd, trialEndsAt, cancelAtPeriodEnd, nextPlanId, startedAt, addOns, autoUpgrade,
+     * planUsage) and {@code plans} (every plan you may choose: id, name, card, feeMicros,
+     * yearlyFeeMicros, bonusMicros, trialDays, firstPeriodDouble, support, collection, contract,
+     * position, included, limits, features, addOns).
+     */
+    public JsonObject list() {
+      return new JsonObject(t.object(new Transport.Call("GET", "/v1/plans")));
+    }
+
+    private JsonObject change(String method, String path, Map<String, Object> body, String key) {
+      Transport.Call call = new Transport.Call(method, path).key(key);
+      return new JsonObject(t.object(body == null ? call : call.body(body)));
+    }
+
+    /**
+     * Start a plan, or move to another, monthly. With no plan, answers {@code checkoutUrl}. A dearer
+     * plan starts at once, prorated; a cheaper one at {@code periodEnd} ({@code nextPlanId}).
+     */
+    public JsonObject choose(String plan) {
+      return choose(plan, null, null);
+    }
+
+    /** {@link #choose(String)} with {@code interval} month or year (ten months for twelve). */
+    public JsonObject choose(String plan, String interval) {
+      return choose(plan, interval, null);
+    }
+
+    /** {@link #choose(String, String)}; {@code interval} and {@code idempotencyKey} may be null. */
+    public JsonObject choose(String plan, String interval, String idempotencyKey) {
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("plan", plan);
+      if (interval != null) body.put("interval", interval);
+      return change("POST", "/v1/plans/choose", body, idempotencyKey);
+    }
+
+    /** End the plan at {@code periodEnd}. */
+    public JsonObject cancel() {
+      return cancel(null);
+    }
+
+    public JsonObject cancel(String idempotencyKey) {
+      return change("POST", "/v1/plans/cancel", Map.of(), idempotencyKey);
+    }
+
+    /** Keep a plan you cancelled, before {@code periodEnd}. */
+    public JsonObject resume() {
+      return resume(null);
+    }
+
+    public JsonObject resume(String idempotencyKey) {
+      return change("POST", "/v1/plans/resume", Map.of(), idempotencyKey);
+    }
+
+    /** Add an add-on by id: charged now for the rest of the period, prorated, then with the plan. */
+    public JsonObject addOn(String id) {
+      return addOn(id, null);
+    }
+
+    public JsonObject addOn(String id, String idempotencyKey) {
+      return change("POST", "/v1/plans/add-ons", Map.of("addOn", id), idempotencyKey);
+    }
+
+    /** Remove an add-on: its charge stops now, and it holds to {@code periodEnd}. */
+    public JsonObject removeAddOn(String id) {
+      return removeAddOn(id, null);
+    }
+
+    public JsonObject removeAddOn(String id, String idempotencyKey) {
+      return change("DELETE", "/v1/plans/add-ons/" + Transport.segment(id), null, idempotencyKey);
+    }
+
+    /** Move up a plan by itself when a limit refuses, or not. Owners, and keys an owner made. */
+    public JsonObject autoUpgrade(boolean on) {
+      return autoUpgrade(on, null);
+    }
+
+    public JsonObject autoUpgrade(boolean on, String idempotencyKey) {
+      return change("PUT", "/v1/plans/auto-upgrade", Map.of("on", on), idempotencyKey);
     }
   }
 

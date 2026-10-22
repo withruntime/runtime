@@ -113,7 +113,9 @@ may reach.
   from an image only: a deploy that names a `build` answers 403
   `outside_compartment`, as builds and repositories do. It cannot give an
   App or Function a name one of the account's own Apps holds: create or
-  rename answers 409 `name_taken`.
+  rename answers 409 `name_taken`. It may set an App's `releaseWatch` to
+  `alert` or `rollback`, never `off`, which would stop the owners hearing of
+  a release that got worse: that answers 403 `forbidden`.
 - Anything outside its compartment answers 404 `not_found`, exactly as an id
   that does not exist. No key outside it reaches in either, read-only keys
   included, except an account-wide key, which sees everything in the account.
@@ -161,8 +163,8 @@ nothing in the guest, root included, can go around it.
   (`GET /v1/notices`) says what was seen and what was done. It stays paused
   or stopped, with its files kept, until support lifts it: a wake, restart, snapshot or fork of it, or a start
   from a snapshot of it, answers `sandbox_halted` until then. An account that
-  has paid is never suspended for it; an account without credit that probes internal
-  addresses is. Traffic that looks like a flood, repeated attempts on the
+  has paid is never suspended for it; an account that has never paid is, for
+  any of them. Traffic that looks like a flood, repeated attempts on the
   closed mail ports, or full CPU beside a mining pool's website is only
   recorded for a person to look at.
 - Services that exist only to catch a security test's call-back, such as
@@ -272,7 +274,9 @@ deletes it there. The value is typed once and never shown again.
   allows, by method and path, decided for each request on a connection. A path
   is exact (`/v1/chat/completions`) or a prefix ending in `/*`
   (`/repos/acme/*`), which covers the paths under it but not `/repos/acme`
-  or `/repos/acme/`. The path is compared as sent, the query left out. A
+  or `/repos/acme/`. A segment that is `*` alone, before the end, names any
+  one segment: `/repos/acme/app/pulls/*/comments` allows a pull request's
+  comments and nothing else under it. The path is compared as sent, the query left out. A
   request whose path a server could read two ways gets no secret that has
   rules: one with `.` or `..` segments, a doubled slash (`//`), an escaped
   slash, letter, digit or dot (`%2F`, `%2e`), a semicolon or a backslash.
@@ -328,11 +332,20 @@ deletes it there. The value is typed once and never shown again.
   ```
 
   Each `--only-label` is one selector (`role=hub,tier=prod` needs both);
-  `--only-sandbox` names a sandbox by id, up to 100. In the SDKs,
-  `only: { labels: [{ role: "hub" }], sandboxes: ["<id>"] }` (a dict in Python
-  and Ruby, `Only: &withruntime.SecretScope{...}` in Go, a map in Java, passed
-  to `secrets.set` or `secrets.scope`); in the API and MCP tool, the same
-  `only` object. Replacing a secret's value without
+  `--only-sandbox` names a sandbox by id, up to 100. `--only-app <app id>`
+  gives it to every copy of an App: its copies get new ids at every deploy,
+  restart and scale-up, and each has the secret from its first request,
+  while no other sandbox can join (only Runtime makes an App's copies). The
+  App's deploy names the secrets its copies see as environment variables,
+  `secrets: ["OPENAI_API_KEY"]`, with a key that may reveal secrets; later
+  deploys by such a key, and pushes to the connected repository's production
+  branch with unchanged build settings, keep them. A key that may only
+  deploy cannot hand its own code the App's secrets: such a deploy is
+  refused. A copy holds the placeholder, never the value. In the SDKs,
+  `only: { labels: [{ role: "hub" }], sandboxes: ["<id>"], apps: ["<app id>"] }`
+  (a dict in Python and Ruby, `Only: &withruntime.SecretScope{...}` in Go, a
+  map in Java, passed to `secrets.set` or `secrets.scope`); in the API and MCP
+  tool, the same `only` object. Replacing a secret's value without
   `only` keeps the scope it has, so a new value never reaches more sandboxes
   than the old one did; `--all-sandboxes` (`only: {}`) gives it to every
   sandbox again. `runtime secrets scope` (`PUT /v1/egress-secrets/{name}/sandboxes`,
@@ -346,6 +359,30 @@ deletes it there. The value is typed once and never shown again.
   sandboxes you are guarding. A scope is free on
   every account. An upstream proxy's credential is sent for every sandbox the
   proxy covers, whatever its scope.
+
+- A secret's name is also the environment variable its sandboxes see, unless
+  you give `env`: then they see the placeholder in that variable instead.
+  Several secrets may share one variable when each is scoped to sandboxes the
+  others do not reach, such as one GitHub token per repository, each seen as
+  `GITHUB_TOKEN`:
+
+  ```bash no-run
+  runtime secrets set GITHUB_TOKEN_WEB --host api.github.com --only-label repo=web --env GITHUB_TOKEN < web.txt
+  runtime secrets set GITHUB_TOKEN_API --host api.github.com --only-label repo=api --env GITHUB_TOKEN < api.txt
+  ```
+
+  A sandbox labelled `repo=web` sees only `GITHUB_TOKEN_WEB`'s placeholder in
+  `GITHUB_TOKEN`, and its requests carry only that token. In the SDKs and the
+  API, `env: "GITHUB_TOKEN"` on `secrets.set`. A store or scope change that
+  would let one sandbox get two secrets of the same variable (one of them
+  reaching every sandbox, or a sandbox in both scopes now) is refused (409,
+  `conflict`); a sandbox labelled into both later sees the first by name, and
+  both reach it, as their scopes say. Replacing a value without `env` keeps
+  the variable; the secret's own name as `env` gives the name back. A variable Runtime sets in every
+  sandbox, or one that decides what its programs load or trust (such as `PATH`,
+  `LD_PRELOAD`, `SSL_CERT_FILE` or `HTTPS_PROXY`), cannot be a secret's `env`. A
+  sandbox's `secrets` list, `--secret` on a create and `runtime secrets ls`
+  name secrets by name, not variable.
 
 - A jobs secret (`--jobs`) is stored by one key and is that key's: your other
   keys cannot use it until you share it with
@@ -439,6 +476,100 @@ deletes it there. The value is typed once and never shown again.
   own limit, {{paid-secrets}} per account ([jobs](./jobs#secrets-in-a-job)). The API is `PUT /v1/egress-secrets/{name}`, `GET /v1/egress-secrets`
   and `DELETE /v1/egress-secrets/{name}`; the MCP tool is
   `runtime_secrets`, with `set`, `list` and `delete`.
+
+### GitHub: an App's tokens, branch limits and API budgets
+
+**Give agents GitHub without giving them a token that can do everything.** A
+secret can hold a GitHub App's private key, limit which branches a push may
+update, and cap each sandbox's calls. Our servers enforce all of it on the
+way out, so a hijacked agent can't get past it.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+await runtime.secrets.set("GITHUB_AGENTS", {
+  value: process.env.GITHUB_APP_PRIVATE_KEY ?? "",
+  hosts: ["github.com", "api.github.com"],
+  githubApp: {
+    id: 123456,
+    installation: 7890123,
+    repositories: ["my-app"],
+    permissions: { contents: "write", pull_requests: "write" },
+  },
+  git: { push: ["refs/heads/task/{label.task}", "refs/heads/task/{label.task}--*"] },
+  api: { callsPerHour: 400, writesPerHour: 120, keep: 1000, copies: true, fresh: 10 },
+  only: { labels: [{ purpose: "agent" }] },
+});
+```
+
+The same fields go to `PUT /v1/egress-secrets/{name}` and to every SDK
+(`withruntime` 0.25.0 for JavaScript, 0.23.0 for Python, Go 0.12.0, Java and
+Ruby 0.11.0: `github_app`, `git` and `api` in Python and Ruby, `GithubApp`, `Git`
+and `API` in Go, the policy map in Java). Reading the secret returns them,
+never the key. They only narrow what a secret does, so they are free.
+
+- **`githubApp`**: the value is the App's private key (PEM). Our servers
+  sign the App's token request and use the installation token GitHub gives
+  back, narrowed to `repositories` and `permissions` when you name them. The
+  token goes as `Authorization: Bearer` to the API and as git's
+  `x-access-token` to `git` over HTTPS, so `git clone`, `git push` and `gh`
+  work with no credential in the sandbox. The key itself goes into no
+  request. A token is made on first use and again before it ends. While one
+  is being made a request gets `503` with `Retry-After: 1`. If GitHub refuses
+  the App a token, requests get `502` with GitHub's reason until a try
+  succeeds; another try comes 30 seconds after a refusal. A GitHub App secret
+  takes no `header` or `format`. For GitHub Enterprise Server, `api` is
+  `https://<host>/api/v3`, a public name among the secret's hosts.
+- **`git.push`**: the branches a push may update, each `refs/heads/` then a
+  name, with `*` only at the end. `{label.task}` stands for the sandbox's own
+  `task` label (any label key works), so each agent pushes only its own
+  branch. A label stands right below a fixed first segment
+  (`refs/heads/task/{label.task}`, never `refs/heads/{label.task}`), then `/`,
+  `--` or the end of the pattern, and each first segment takes one label key
+  across all your secrets (`task/` can't take both `{label.task}` and
+  `{label.name}`), so no two sandboxes name the same branch. A value is the branch of the first sandbox your
+  account made with it, and stays that sandbox's after it is deleted, so a
+  later sandbox with the same value never pushes to a finished agent's open
+  pull request. Give the label when you create the sandbox: once made, a
+  sandbox's value of a label a push pattern names can't change. A sandbox
+  pushes nothing a label names when it lacks that label, when the label's
+  value holds `/`, `*` or `--` or ends in `-`, when an earlier sandbox had
+  the same value, or when a key in a compartment made it. Any other ref, a tag or a delete is refused before
+  anything reaches GitHub, and `git push` prints why:
+  `! [remote rejected] HEAD -> main (GITHUB_AGENTS pushes only …)`.
+  `push: []` makes the secret fetch-only. The API can't get around the
+  limits. With `git`, the secret makes an API write only when its `rules`
+  name it, so a secret without rules writes nothing through the API. It makes
+  a GraphQL mutation only when `api.graphql` lists it. Even then it never
+  writes a file, merges, makes or deletes a ref, renames or protects a
+  branch, or makes a release, and never makes a GraphQL mutation that does
+  (such as `createCommitOnBranch`, `updateRef` or `mergePullRequest`). Each
+  gets `403` with `x-runtime-egress: secret-git`. A `PATCH` of a branch the
+  patterns allow still goes. A GitHub App secret with `git` must name its
+  tokens' `permissions`, without `admin`, `administration` or `secrets`, and
+  with `workflows`, `actions` and `environments` at most `read`.
+- **`api.callsPerHour` and `api.writesPerHour`**: the most calls, and writes
+  (any method but GET, HEAD and OPTIONS, or a GraphQL mutation), each sandbox
+  makes with the secret in an hour. Past either, `429` with `Retry-After`.
+  `writesPerHour: 0` means read-only. A clone or push is not counted.
+- **`api.keep`**: calls left for everyone else. No call goes while GitHub's
+  last `x-ratelimit-remaining` for that bucket (core, graphql or search) is at
+  or below `keep`, until its reset: `429` with `Retry-After`. Your own
+  services keep the last of the hour.
+- **`api.copies` and `api.fresh`**: a GET over HTTP/2 is answered from this
+  server's copy while GitHub answers `304` to its ETag (a `304` costs no
+  GitHub calls), shared by every sandbox the secret reaches on that server.
+  With `fresh` (1 to 300 seconds), a copy that young is answered without
+  asking, GraphQL queries included. Past a sandbox's hour its earlier reads
+  are still answered from the copy. Each such answer carries
+  `x-runtime-copy`: `revalidated`, `fresh` or `unasked`. Answers with
+  `no-store`, `set-cookie` or `Vary: *`, and GraphQL answers holding
+  `errors`, are never kept.
+- **`api.graphql`**: `{ mutations: ["addComment", "createPullRequest"] }`. A
+  query always goes, and a mutation only when every one in the request is
+  listed. Anything else is refused with `403`. `path` is where GraphQL is
+  served, `/graphql` unless you say (`/api/graphql` on Enterprise Server).
 
 ### A secret your sandbox checks on requests it receives
 

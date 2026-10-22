@@ -141,6 +141,27 @@ file. A caller-supplied `idempotency_key:` also makes a complete large-file
 write safe to repeat; each upload phase keeps its own stable key. On an
 older guest, setting a mode also needs the exec grant for its chmod fallback.
 
+### Links
+
+A link is a secret URL anyone can open with no API key: a GET downloads the
+file (Range works, so videos play and downloads resume), and a PUT with the raw
+body uploads it atomically. A link expires in 1 hour by default, at most 7 days.
+`revoke_links` ends every link made for the sandbox, and revoking the key that
+made a link ends its links too.
+
+```ruby
+require "withruntime"
+
+runtime = WithRuntime::Client.new
+sbx = runtime.sandboxes.create
+sbx.files.write("/workspace/report.csv", "a,b\n1,2\n")
+down = sbx.files.download_url("/workspace/report.csv", filename: "report.csv", expires_in_seconds: 600)
+up = sbx.files.upload_url("/workspace/incoming.bin", max_bytes: 10 * 1024 * 1024)
+puts down["url"], down["expiresAt"], up["url"]
+sbx.files.revoke_links
+sbx.stop
+```
+
 ## Pause, wake, fork and snapshot
 
 ```ruby
@@ -348,6 +369,28 @@ runtime.events.list(type: "sandbox.stopped").each { |event| puts "#{event.create
 `runtime.otel.create(endpoint: ...)` pushes events and metrics to an
 OpenTelemetry endpoint. See [metrics and webhooks](./observability).
 
+<!-- launch: ci -->
+
+## CI/CD (beta)
+
+```ruby check
+require "withruntime"
+
+runtime = WithRuntime::Client.new
+repo = runtime.ci.repositories.connect("acme/web")
+runtime.ci.checks.list(repository_id: repo.id, state: ["failed"]).each do |check|
+  job = runtime.ci.jobs.get(runtime.ci.checks.get(check.id).jobs.first["id"])
+  puts "#{check.commit} #{job.name}: #{job.log[-200..]}"
+end
+```
+
+CI/CD runs a repository's checks as jobs in sandboxes. It is in a private beta:
+an account outside it gets `PermissionDeniedError` with code `product_in_beta`.
+`checks.list` and `tests.list(repository_id)` page like the other lists
+(`limit` 1 to 100). A failed job's `sandbox_ids` may be kept paused, to wake
+and look into.
+<!-- /launch: ci -->
+
 ## Errors and retries
 
 ```ruby
@@ -368,12 +411,20 @@ Every error is a `WithRuntime::Error` with `code`, `message`, `hint`,
 `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`,
 `ConflictError`, `InvalidRequestError`, `RateLimitError`,
 `ServiceUnavailableError`, `ConnectionError` and `CommandError`, the same
-classes as the JavaScript, Python, Go and Java SDKs.
+classes as the JavaScript, Python, Go and Java SDKs. `no_capacity` raises
+`ServiceUnavailableError`; `no_credit_running_limit` and a `quota_exceeded` on
+what runs at once raise `RateLimitError`, and a `quota_exceeded` on what is
+kept raises `ConflictError`.
 
 Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures, 429, 502, 503 and 504 are retried
-with the same key, so a retry never makes two sandboxes or runs a command
-twice. `retryable?` says whether trying the same call again may work.
+client's own retries. Transport failures and every answer that says
+`retryable: true` are retried after its `Retry-After`, up to the maximum number
+of retries, with the same key, so a retry never makes two sandboxes or runs a
+command twice. A wait over 60 seconds is not slept on: the error is returned at
+once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
+`rate_limited`) is sent again until the call's deadline, or for five minutes
+without one, past the maximum. `retryable?` says whether trying the same call again
+may work.
 
 **A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full

@@ -11,6 +11,10 @@
 #   puts sbx.exec("python3 /workspace/invoice.py", check: true).stdout
 #   sbx.stop
 #
+# Agents are set up from a runtime.yml in your repo by the CLI, which makes
+# the account's agents match the file: npx withruntime agents deploy. This
+# gem has no deploy of its own.
+#
 # The guide is at https://withruntime.com/docs/ruby.
 require "json"
 require "openssl"
@@ -26,10 +30,12 @@ require_relative "withruntime/wallet"
 require_relative "withruntime/tar"
 require_relative "withruntime/sandbox"
 require_relative "withruntime/products"
+require_relative "withruntime/reservations"
 require_relative "withruntime/agents"
 require_relative "withruntime/images"
 require_relative "withruntime/apps"
 require_relative "withruntime/builds"
+require_relative "withruntime/ci"
 require_relative "withruntime/containers"
 require_relative "withruntime/network_products"
 require_relative "withruntime/parity_products"

@@ -1,4 +1,4 @@
-"""Generated synchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.6."""
+"""Generated synchronous Prime sandbox adapter. Contract: prime-sandboxes 0.4.7."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -156,6 +156,12 @@ class SandboxClient:
         if p.get("lan_network_id") is not None:
             # 0.4.6 joins the LAN once the sandbox runs; refuse before making one.
             raise CompatibilityError(_LAN)
+        if p.get("arch") == "arm64":
+            raise CompatibilityError("Prime arch='arm64' is not supported: Runtime sandboxes run on amd64 (x86_64); "
+                                     "omit arch or pass 'amd64'")
+        if p.get("checkpoint_id") and p.get("arch") is not None:
+            # Prime's platform refuses it: a restore keeps its checkpoint's architecture.
+            raise APIError("omit arch when restoring a checkpoint")
         for key in ("gpu_count", "gpu_type", "team_id", "advanced_configs", "secrets", "idle_timeout_minutes"):
             if p.get(key):
                 raise CompatibilityError(f"Prime {key} cannot yet retain its upstream behavior")
@@ -357,7 +363,7 @@ class SandboxClient:
                     code="NOT_FOUND" if error.status == 404 else "CONFLICT", message=str(error)))
         return DeleteSandboxCheckpointsResponse(deleted=deleted, errors=errors)
 
-    def create_lan_network(self, name, team_id=None):
+    def create_lan_network(self, name, team_id=None, rules=None):
         raise CompatibilityError(_LAN)
 
     def list_lan_networks(self, team_id=None):

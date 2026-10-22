@@ -139,3 +139,56 @@ test("the templates and uses are the shared data file's", () => {
   ]);
   expect(Object.keys(api.uses)).toEqual(["support", "team"]);
 });
+
+test("memory: list pages with its usage, search, read, write and delete, each scope in the query", async () => {
+  const entry = (path: string, scope = "") => ({
+    scope,
+    path,
+    bytes: 10,
+    updatedAt: "2025-10-09T08:53:20.000Z",
+    updatedBy: "key_1",
+  });
+  const usage = { bytes: 20, files: 2, limitBytes: 1073741824, limitFiles: 100000 };
+  const { api, calls } = fake((call) => {
+    if (call.path === "/v1/agents/dev/memory" && call.query?.q !== undefined)
+      return { data: [{ ...entry("a.md"), snippet: "**tea**", rank: 0.5 }], nextCursor: null };
+    if (call.path === "/v1/agents/dev/memory")
+      return call.query?.cursor
+        ? { data: [entry("b.md", "customer:1")], nextCursor: null, usage }
+        : { data: [entry("a.md")], nextCursor: "c1", usage };
+    if (call.method === "PUT")
+      return { scope: "customer:1", path: "b.md", bytes: 4, created: true, updatedAt: "x" };
+    if (call.method === "DELETE") return { deleted: true };
+    return { ...entry("a.md"), content: "tea" };
+  });
+  const page = await api.memory.list("dev", { prefix: "a", limit: 1 });
+  expect(page.usage).toEqual(usage);
+  expect((await page.toArray()).map((f) => `${f.scope}/${f.path}`)).toEqual([
+    "/a.md",
+    "customer:1/b.md",
+  ]);
+  expect((await api.memory.search("dev", "tea", { scope: "" }))[0]!.snippet).toBe("**tea**");
+  expect((await api.memory.read("dev", "a.md")).content).toBe("tea");
+  expect((await api.memory.write("dev", "b.md", "more", { scope: "customer:1" })).created).toBe(
+    true,
+  );
+  expect(await api.memory.delete("dev", "notes/x y.md", { scope: "customer:1" })).toBe(true);
+  expect(calls.map((c) => [c.method, c.path, c.query, c.body])).toEqual([
+    ["GET", "/v1/agents/dev/memory", { prefix: "a", limit: 1 }, undefined],
+    ["GET", "/v1/agents/dev/memory", { prefix: "a", limit: 1, cursor: "c1" }, undefined],
+    ["GET", "/v1/agents/dev/memory", { scope: "", q: "tea" }, undefined],
+    ["GET", "/v1/agents/dev/memory/content", { scope: "", path: "a.md" }, undefined],
+    [
+      "PUT",
+      "/v1/agents/dev/memory/content",
+      { scope: "customer:1", path: "b.md" },
+      { content: "more" },
+    ],
+    [
+      "DELETE",
+      "/v1/agents/dev/memory/content",
+      { scope: "customer:1", path: "notes/x y.md" },
+      undefined,
+    ],
+  ]);
+});

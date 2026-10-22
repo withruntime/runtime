@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from .._errors import DELIBERATE as _SWITCHED_OFF
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Daytona's names and parents ---------------------------------
@@ -183,7 +184,7 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
     message = "\n".join(parts)
     status, code = error.status, error.code or ""
     out: DaytonaError
-    if status == 503 and code.endswith("_unavailable"):
+    if code.endswith("_unavailable") and (status == 501 or (status == 503 and code in _SWITCHED_OFF)):
         out = NotSupportedError(code[: -len("_unavailable")], error.hint or "", message)
     elif code == "file_not_found" or (status == 404 and subject == "file"):
         out = DaytonaFileNotFoundError(message)

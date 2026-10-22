@@ -140,10 +140,12 @@ class DaytonaDownloadLabels(unittest.TestCase):
 
     def test_batch_deadline_stops_before_the_next_file(self):
         client, sandbox = self.sync_client()
-        self.world.delay = 0.1
+        # The first file's answer outlasts the batch's deadline, which is long
+        # enough that a busy check machine still sends that first request.
+        self.world.delay = 1.0
         try:
             with self.assertRaises(Exception):
-                sandbox.fs.download_files([FileDownloadRequest(source="one"), FileDownloadRequest(source="two")], timeout=0.01)
+                sandbox.fs.download_files([FileDownloadRequest(source="one"), FileDownloadRequest(source="two")], timeout=0.3)
             self.assertEqual(len(self.world.requests), 1)
         finally:
             client.close()

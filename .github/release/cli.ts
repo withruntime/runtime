@@ -12,7 +12,7 @@ import { createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { REGISTRIES, type Target, TARGETS, decide } from "./registries.ts";
 import { readVersion } from "./versions.ts";
-import { checkDispatch } from "./verify-record.ts";
+import { checkDispatch, fromTag } from "./verify-record.ts";
 
 const read = (path: string) => {
   try {
@@ -49,17 +49,58 @@ if (command === "record") {
   } catch {
     refuse("the workflow's RELEASE_SIGN_PUB is not a public key");
   }
+  // vin-1's own SDK key, when the workflow pins one: its records name
+  // CI/CD's pass (verify-record.ts SDKS_CHECK_VIN1).
+  let vin1Pub;
+  if (process.env.RELEASE_SIGN_PUB_VIN1?.trim()) {
+    try {
+      vin1Pub = createPublicKey(process.env.RELEASE_SIGN_PUB_VIN1);
+    } catch {
+      refuse("the workflow's RELEASE_SIGN_PUB_VIN1 is not a public key");
+    }
+  }
   const message = execFileSync("git", ["log", "-1", "--format=%B", "HEAD"], { encoding: "utf8" });
+  let commit = process.env.COMMIT ?? "";
+  let record = process.env.RECORD ?? "";
+  // A push of vin-1's tag publish/<commit>: the record is its message.
+  if (process.env.GITHUB_EVENT_NAME === "push") {
+    const ref = process.env.GITHUB_REF ?? "";
+    // Each answer, or undefined when the command failed.
+    const git = (...args: string[]) => {
+      try {
+        return execFileSync("git", args, { encoding: "utf8" }).trim();
+      } catch {
+        return undefined;
+      }
+    };
+    const main = "refs/remotes/origin/main";
+    git("fetch", "-q", "--no-tags", "origin", `+${ref}:${ref}`, `+refs/heads/main:${main}`);
+    const head = git("rev-parse", "HEAD") ?? "";
+    const tagged = fromTag({
+      ref,
+      type: git("cat-file", "-t", ref) ?? "",
+      tag: git("cat-file", "-p", ref) ?? "",
+      tagged: git("rev-parse", `${ref}^{commit}`) ?? "",
+      head,
+      onMain: git("merge-base", "--is-ancestor", head, main) !== undefined,
+    });
+    if ("refused" in tagged) refuse(tagged.refused);
+    commit = tagged.commit;
+    record = tagged.record;
+  }
+  const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
   const why = checkDispatch({
-    commit: process.env.COMMIT ?? "",
-    record: process.env.RECORD ?? "",
+    commit,
+    record,
     message,
     pub,
+    vin1Pub,
+    tree,
     now: new Date(),
     verify,
   });
   if (why) refuse(why);
-  console.error(`The hub's signed record holds for ${process.env.COMMIT}.`);
+  console.error(`The signed record holds for ${process.env.COMMIT}.`);
 } else if (command === "decide") {
   const t = target(arg);
   const version = mainVersion(t);

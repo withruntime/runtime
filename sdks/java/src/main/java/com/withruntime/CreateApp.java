@@ -50,6 +50,14 @@ public final class CreateApp extends Params<CreateApp> {
     return set("spares", spares);
   }
 
+  /**
+   * Functions only (an App is refused it): 250 to 5000 ms, default 1000. At most how long a copy stays awake after its
+   * last request ends. Awake time with no request in flight is not billed.
+   */
+  public CreateApp sleepAfterMs(int sleepAfterMs) {
+    return set("sleepAfterMs", sleepAfterMs);
+  }
+
   /** The port the server listens on, 1 to 65535; default 8080. */
   public CreateApp port(int port) {
     return set("port", port);
@@ -58,5 +66,22 @@ public final class CreateApp extends Params<CreateApp> {
   /** A path answering 200 when healthy; left out, a copy is healthy once its port accepts. */
   public CreateApp healthPath(String path) {
     return set("healthPath", path);
+  }
+
+  /**
+   * Cloudflare's CDN in front of the App's addresses; default true. False sends visitors straight
+   * to Runtime's routers, with nothing cached.
+   */
+  public CreateApp cdn(boolean cdn) {
+    return set("cdn", cdn);
+  }
+
+  /**
+   * What happens when a new version's errors or speed get clearly worse in its first 15 minutes:
+   * "alert" (the default) tells the owners, "rollback" also goes back to the previous version,
+   * "off" does neither.
+   */
+  public CreateApp releaseWatch(String mode) {
+    return set("releaseWatch", mode);
   }
 }

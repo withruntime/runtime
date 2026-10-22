@@ -1,7 +1,10 @@
 package com.withruntime;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -201,6 +204,173 @@ public final class Apps {
   /** Every copy, with its version, region, state and when that state began. */
   public List<AppCopy> copies(String id) {
     return items(t.json(new Transport.Call("GET", path(id, "/copies"))), AppCopy::new);
+  }
+
+  /** The newest 100 lines of the last hour, oldest first. */
+  public AppLogPage logs(String id) {
+    return logs(id, null);
+  }
+
+  /**
+   * The newest lines of a window, oldest first; {@link AppLogPage#nextCursor()} reads the next
+   * older page with the same since, version, copy and stream.
+   */
+  public AppLogPage logs(String id, AppLogsOptions options) {
+    AppLogsOptions o = options == null ? new AppLogsOptions() : options;
+    return new AppLogPage(t.object(logsCall(id, o, o.cursor)));
+  }
+
+  private Transport.Call logsCall(String id, AppLogsOptions o, String cursor) {
+    return new Transport.Call("GET", path(id, "/logs"))
+        .query("since", o.since)
+        .query("version", o.version)
+        .query("copy", o.copy)
+        .query("stream", o.stream)
+        .query("limit", o.limit)
+        .query("cursor", cursor);
+  }
+
+  /**
+   * The newest 100 lines of the last hour, then new lines as the copies print them, until it is
+   * closed.
+   */
+  public EventStream<AppLogEvent> followLogs(String id) {
+    return followLogs(id, null);
+  }
+
+  /**
+   * Follows the log as the copies print it: the newest {@code limit} lines since {@code since}
+   * first, or the lines after {@code cursor}, then new ones, until it is closed. The server's
+   * continuation every few minutes is followed from its cursor, a dropped connection is reopened
+   * from the last cursor up to three times in a row, and a line seen twice is given once. An error
+   * event throws with its code and hint; every failure carries {@code details.cursor} to resume
+   * from.
+   */
+  public EventStream<AppLogEvent> followLogs(String id, AppLogsOptions options) {
+    AppLogsOptions o = options == null ? new AppLogsOptions() : options;
+    if (o.cursor != null && !Builds.validCursor(o.cursor))
+      throw Builds.failure("invalid_log_options", "Use the opaque cursor of a followed event.", o.cursor);
+    return new LogFollow(id, o);
+  }
+
+  /** A followed log: one connection at a time, reopened from the last cursor. */
+  private final class LogFollow extends EventStream<AppLogEvent> {
+    private final String id;
+    private final AppLogsOptions options;
+    private final Transport.Cancellation cancellation = new Transport.Cancellation();
+    // Opaque positions cannot be ordered: a line is known by its cursor.
+    private final Set<String> seen = new LinkedHashSet<>();
+    private String cursor;
+    private int failures;
+    private EventStream<JsonObject> current;
+
+    LogFollow(String id, AppLogsOptions options) {
+      this.id = id;
+      this.options = options;
+      this.cursor = options.cursor;
+      if (cursor != null) seen.add(cursor);
+    }
+
+    private RuntimeCloudException invalid(String hint) {
+      return Builds.failure("app_log_invalid", hint, cursor);
+    }
+
+    @Override
+    AppLogEvent pull() {
+      while (!isClosed()) {
+        if (current == null)
+          current = t.events(logsCall(id, options, cursor).query("follow", "true").cancellation(cancellation), JsonObject::new);
+        JsonObject event;
+        try {
+          if (!current.hasNext()) {
+            dropped(false);
+            continue;
+          }
+          event = current.next();
+        } catch (RuntimeCloudException.Connection lost) {
+          if (isClosed()) return null;
+          // HTTP refusals and protocol errors are actionable, not connection loss.
+          if (!"connection_error".equals(lost.code())) throw lost;
+          dropped(false);
+          continue;
+        } catch (RuntimeCloudException refused) {
+          if (isClosed()) return null;
+          if ("unexpected_answer".equals(refused.code()))
+            throw invalid("The log contained invalid JSON; retry from details.cursor.");
+          throw refused;
+        }
+        AppLogEvent out = handle(event.raw());
+        if (out != null) return out;
+      }
+      return null;
+    }
+
+    /** One event; null when it is not given out. */
+    private AppLogEvent handle(Map<String, Object> event) {
+      Object at = event.get("cursor");
+      if (at != null && !Builds.validCursor(at)) throw invalid("Retry from the last received cursor.");
+      String eventCursor = (String) at;
+      String type = event.get("type") instanceof String text ? text : "";
+      switch (type) {
+        case "line" -> {
+          if (eventCursor == null
+              || !(event.get("text") instanceof String)
+              || !("stdout".equals(event.get("stream")) || "stderr".equals(event.get("stream")))
+              || !(event.get("at") instanceof Long || event.get("at") instanceof Integer))
+            throw invalid("Retry the log from the last received cursor.");
+          if (!seen.add(eventCursor)) return null;
+          if (seen.size() > 10_000) {
+            Iterator<String> oldest = seen.iterator();
+            oldest.next();
+            oldest.remove();
+          }
+          cursor = eventCursor;
+          failures = 0;
+          return new AppLogEvent(event);
+        }
+        case "gap" -> {
+          if (eventCursor != null) cursor = eventCursor;
+          return new AppLogEvent(event);
+        }
+        case "continue" -> {
+          if (eventCursor != null) cursor = eventCursor;
+          dropped(true);
+          return null;
+        }
+        case "error" -> {
+          String code = event.get("code") instanceof String given && !given.isEmpty() ? given : "app_log_failed";
+          String hint = event.get("hint") instanceof String said && !said.isEmpty() ? said : "Follow again from details.cursor.";
+          throw Builds.failure(code, hint, cursor);
+        }
+        // An event type this version does not know is skipped, so a long follow outlives it.
+        default -> {
+          return null;
+        }
+      }
+    }
+
+    /** The connection ended: reopen it from the cursor after a pause, or give up. */
+    private void dropped(boolean continued) {
+      current.close();
+      current = null;
+      if (!continued && ++failures > 3)
+        throw Builds.failure("app_log_interrupted", "Follow again with followLogs(id, new AppLogsOptions().cursor(details.cursor)).", cursor);
+      // A disconnected service or repeated continuations must not busy-loop.
+      try {
+        cancellation.await(Duration.ofMillis(50L * Math.max(1, failures)));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        close();
+      }
+    }
+
+    @Override
+    public void close() {
+      super.close();
+      cancellation.cancel();
+      EventStream<JsonObject> active = current;
+      if (active != null) active.close();
+    }
   }
 
   private static <T> List<T> items(Object answer, Function<Map<String, Object>, T> make) {

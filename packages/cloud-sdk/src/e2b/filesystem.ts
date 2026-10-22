@@ -85,7 +85,7 @@ export interface FilesystemListOpts extends FilesystemRequestOpts {
 /** Runtime's home, where E2B's relative paths land. */
 const HOME = "/workspace";
 
-function absolute(path: string) {
+export function absolute(path: string) {
   return path.startsWith("/") ? path : `${HOME}/${path.replace(/^\.\//, "")}`;
 }
 

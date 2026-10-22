@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import IO, Any, Callable, Dict, List, Literal, Optional, TypedDict, Union
 
+from .._errors import DELIBERATE as _SWITCHED_OFF
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: E2B's names and parents ------------------------------------
@@ -1006,7 +1007,7 @@ def translate(error: BaseException, subject: str = "other") -> BaseException:
         out = SandboxNotRunningException(message)
     elif code in ("sandbox_not_ready", "host_unavailable"):
         out = SandboxUnreachableException(message)
-    elif status == 503 and code.endswith("_unavailable"):
+    elif code.endswith("_unavailable") and (status == 501 or (status == 503 and code in _SWITCHED_OFF)):
         out = NotSupportedException(code[: -len("_unavailable")], error.hint or "", message)
     elif code == "public_preview_not_allowed":
         # A 403 about the sandbox's funding, not the key.

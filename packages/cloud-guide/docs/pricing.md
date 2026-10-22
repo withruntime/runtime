@@ -64,6 +64,57 @@ is a paid account with no top-up, and runs {{startup-builds}} image builds at
 once, and up to {{startup-at-once-most}} sandboxes at once if it asks; after
 them, it is a paid account once it holds credit it bought.
 
+<!-- launch: plans -->
+
+## Plans
+
+A plan is a monthly commitment, and its whole fee comes back as usage. Every
+meter keeps the price on this page, so you still pay only for what runs.
+
+|                                         | Free                 | Pro                                    | Pro Max           | Scale                  | Enterprise              |
+| --------------------------------------- | -------------------- | -------------------------------------- | ----------------- | ---------------------- | ----------------------- |
+| Monthly fee                             | none                 | $25                                    | $100              | $500                   | $2,500                  |
+| Usage included each month               | the Free tier, below | $25                                    | $100              | $500                   | $2,500                  |
+| First month                             |                      | usage doubled                          | usage doubled     | usage doubled          | usage doubled           |
+| Yearly                                  |                      | $250, 12 months for 10                 | $1,000            | $5,000                 | $25,000                 |
+| Sandboxes at once                       | 2                    | {{paid-sandboxes}}                     | 250               | 500                    | 2,000                   |
+| vCPUs / memory across running sandboxes | 8 / 16 GiB           | {{account-vcpus}} / {{account-memory}} | 500 / 1,000 GiB   | 1,000 / 2,000 GiB      | 4,000 / 8 TiB           |
+| Traffic out included                    | 10 GB                | from usage                             | from usage        | from usage             | from usage              |
+| Storage kept (of it, snapshots)         | 50 GiB (20 GiB)      | 1 TiB (500 GiB)                        | 2 TiB (1 TiB)     | 4 TiB (2 TiB)          | from 8 TiB (from 4 TiB) |
+| Roles and the support agent             |                      | yes                                    | yes               | yes                    | yes                     |
+| Single sign-on and a year of audit log  |                      | add-ons                                | add-ons           | yes                    | yes                     |
+| Support                                 | docs                 | the support agent                      | the support agent | shared Slack, priority | dedicated Slack         |
+
+- **Free replaces the free usage above once plans start.** Each month after
+  the 14-day trial it gives sandboxes for 5 vCPU-hours,
+  2 at once; one App of 256 MiB that sleeps after 5 minutes idle, on a
+  runtimehost.com address; 10,000 Function calls; 100 CI/CD runner-minutes; 10 GB of traffic out.
+- **Apps, Functions and Agents** cost {{app-cpu-rate}} per active vCPU-hour
+  and {{app-memory-rate}} per GiB-hour; **CI/CD** costs {{ci-minute-rate}}
+  per vCPU-minute with {{ci-memory-per-vcpu}} of memory each, billed by the second
+  with no minimum. Sandboxes keep the rates above.
+- **Traffic out costs {{outbound-rate}} per GB,** served from the CDN's cache
+  or not, drawn from the plan's usage like everything else.
+- **A plan's usage is spent first each month,** then free usage and credit
+  Runtime gave, then credit you bought. What the month's usage doesn't reach
+  ends with the month; your credit never does.
+- **The first month on a paid plan, and after an upgrade, includes twice the
+  plan's usage.**
+- **Try Pro for 14 days with no card,** once per person.
+- **Pro's add-ons,** monthly: 50 more sandboxes at once $25, single sign-on
+  $150, the audit log kept a year $50, a dedicated outbound address $25.
+- **An upgrade starts at once,** charged for the rest of the month. A
+  downgrade or a cancel waits for the end of the month you paid for. Nothing
+  is refunded, because the fee is already usage.
+- **Limits are ceilings, not reserved room.** When the servers are full, a new
+  sandbox is refused with `no_capacity` whatever the plan.
+- **Without a plan nothing changes.** Every meter keeps the price on this page,
+  so you still pay only for what runs.
+
+Choose a plan at [Usage & billing](https://withruntime.com/account/billing).
+
+<!-- /launch: plans -->
+
 ## How many at once
 
 One paid sandbox can have up to **{{max-vcpu}} vCPUs and {{max-memory}} of memory**, at the same
@@ -102,6 +153,11 @@ level is missing: "needs credit" or "needs a kept top-up".
 
 These limits are a starting point, not a price tier. To run more, write to
 support with the numbers you need ([feedback and support](./feedback-and-support)).
+For a burst of hundreds for a few hours, [book the room](./reservations): your
+limits rise by what you booked for the window. Sandboxes you run bill as
+usual; booked room none of them uses costs a quarter of the memory rate,
+**{{booked-unused-rate}} per GiB-hour**, with no CPU charge, and nothing if you
+cancel at least an hour before the start ([what it costs](./reservations#what-it-costs)).
 Every limit, with credit and without, is listed in [limits](./limits).
 Past a limit, a create returns `quota_exceeded`, saying which limit and, for
 a new account, when it lifts, and costs nothing. An account without credit runs {{trial-sandboxes}} at once, at most {{no-credit-total}} in all, keeps at most {{no-credit-kept}} sandboxes and makes at most {{no-credit-daily}} a day; its scheduled jobs wait for credit ([free usage](./included-usage)).
@@ -113,11 +169,13 @@ A paused sandbox keeps its files and memory for **{{paused-storage-rate}} per de
 sandbox keeps its disk the same way, at the same rate, for as long as a paused
 one, until you delete it; only a delete removes a disk. One made by an older
 client (a JavaScript or Python SDK before 0.12.0, Go, Java or Ruby before
-0.2.0, or raw HTTP without `x-runtime-client: http/2026-10-04`) is kept free
-for three days after it stops, with one notice a day before, and then deleted.
-The version counts, not its date: JavaScript 0.11.1 and 0.11.2 and Python
-0.11.1 came out after 4 October and still stop to clean up at the end of a
-`with` or `await using` block, so they are older clients.
+0.2.0, or raw HTTP without `x-runtime-client: http/2026-10-04`) is kept the same
+way in an account with credit, a card saved or a past purchase, and if its
+credit runs out it is still kept at least 30 days from the stop; in an account
+with none of these it is kept free for three days after it stops, with one
+notice a day before, and then deleted. The version counts, not its date: JavaScript 0.11.1 and 0.11.2 and
+Python 0.11.1 came out after 4 October and still stop to clean up at the end of
+a `with` or `await using` block, so they are older clients.
 
 - **What counts:** disk and memory-snapshot blocks the sandbox alone owns. Shared
   base-image blocks and snapshot safety overhead are left out. Where the
@@ -137,8 +195,9 @@ days count from each pause, and using the sandbox ends the count, so with
 `:retention` at 1 an idle pause is a day from deletion: for dates you set
 this way, the warning email below goes at most once a day for the account,
 listing every sandbox due, and only while its deletion is still due. `null` keeps it while you have credit again. When
-credit runs out it is kept seven more days, with a notice first, and a top-up
-before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free.
+credit runs out it is kept 30 more days in an account that has bought credit
+or saved a card, seven in one that has done neither, with a notice first, and
+a top-up before then keeps it again. Each pause replaces the previous saved state. On an account without credit, a paused sandbox is kept seven days for free.
 `:retention` on a sandbox made without credit answers `retention_unavailable`:
 its days cannot be set. Once
 the account holds credit, a sandbox paused without credit is kept as a paid one is,
@@ -156,10 +215,12 @@ storage is still charged from the moment it paused, as above.
 
 ## Agents
 
-An agent's session runs in a sandbox of its own, billed as any sandbox:
-{{cpu-rate}} per active vCPU-hour and {{memory-rate}} per reserved GiB-hour of
-memory while it runs, and [paused storage](#paused-storage) while it waits for
-words. There is no session fee and no seat; your model provider bills your key.
+An agent's session runs in a sandbox of its own, at Agents' own rates, the
+same as Apps': **{{app-cpu-rate}} per active vCPU-hour** and
+**{{app-memory-rate}} per GiB-hour of memory** while it runs, and
+[paused storage](#paused-storage) while it waits for words. Its traffic is
+charged as any sandbox's. There is no session fee and no seat; your model
+provider bills your key.
 
 A session's history and files are storage, counted with your saved copies:
 they share the free {{free-saved-copies}} a month ([free usage](./included-usage)),
@@ -181,6 +242,33 @@ GiB-hour of memory**, while it runs. Containers have no price of their own. Cont
 ([Containers](./containers)).
 
 <!-- /launch: containers -->
+
+<!-- launch: apps -->
+
+## Apps
+
+An App's copy is billed while it is awake: **{{app-cpu-rate}} per active
+vCPU-hour** for the CPU it uses, never below the {{cpu-floor}} floor, and
+**{{app-memory-rate}} per GiB-hour of memory**. A copy its server holds frozen
+between requests costs nothing for that time. The saved copies of an App's
+live and previous versions pay [paused storage](#paused-storage), as a
+snapshot does. Outbound traffic and a running disk past 10 GiB are billed as a
+sandbox's. There is no fee per App or per deploy.
+
+<!-- /launch: apps -->
+
+<!-- launch: functions -->
+
+## Functions
+
+A Function's copies are billed as an App's: {{app-cpu-rate}} per active
+vCPU-hour and {{app-memory-rate}} per GiB-hour of memory while awake, nothing
+while asleep, and its saved copies as paused storage. Calls cost
+**{{function-calls-rate}} per million**, counting every answer its copies
+give, errors included; each account's first {{free-function-calls}} calls a
+calendar month are free. There is no fee per Function or per deploy.
+
+<!-- /launch: functions -->
 
 ## Snapshots, images and volumes
 
@@ -218,7 +306,7 @@ microdollars. The volume rate is the reserved disk rate: a volume holds its whol
 size on its server from the moment you create it.
 
 Building an image is free (without credit it counts toward the free usage, unless it fails through a fault of ours),
-and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, up to a year from when it was taken (7 days without credit), unless you choose 1 to 365 days. A snapshot's copy
+and so is the snapshot a fork takes for itself and deletes. A snapshot is kept as long as you have credit, with no end date (7 days without credit), unless you choose 1 to 365 days. A snapshot's copy
 off its server is part of the snapshot and costs nothing more. Volume backups cost **{{backup-rate}} per decimal GB per 30-day month**; a
 backup made before this price keeps {{backup-rate-before}} until {{backup-raise-date}}. Backups are charged on
 `storedBytes` after a backup is copied and checked ([storage and backups](./storage)).
@@ -227,6 +315,11 @@ Every volume is backed up off its server daily unless you turn that off.
 The [free usage](./included-usage) stores your first three images and your first 10 GiB of
 volumes free, for as long as you keep them. They are never charged, even after
 you add credit. Deleting one frees its place. Snapshots are not part of that free storage.
+
+How much an account stores is limited in GiB: 500 GiB in all and 250 GiB of
+snapshots with credit, 50 GiB and 20 GiB without. Past a limit nothing is
+deleted; new snapshots, images, backups and volumes are refused until there is room
+([limits](./limits#storage)).
 
 An item's rate is fixed when you make it. A new price reaches items that
 already exist only from a date announced ahead, here and in the
@@ -239,19 +332,45 @@ the item can be charged for that hour; the charge is what it used, and the rest
 is released. Each hour settles within a minute of its end, usually seconds, and
 is in the [usage export](./api#export-settled-usage) from then.
 
-<!-- launch: builds -->
+<!-- launch: apps -->
 
-## Builds
+## Apps
 
-A build runs on a builder, a sandbox of 8 vCPUs and 8 GiB in your account,
-at the sandbox rates: **{{cpu-rate}} per active vCPU-hour** and
-**{{memory-rate}} per reserved GiB-hour of memory**, while it runs. Builds
-have no price of their own. A 70-second build costs at most
-{{=$4 8 * 70 / 3600 * cpu-rate + 8 * 70 / 3600 * memory-rate}}, all 8 vCPUs
-busy throughout. A warm builder and a build's saved server are snapshots,
-charged at the [snapshot rate](#snapshots-images-and-volumes). Builds need
-credit on the account ([Builds](./builds)).
-<!-- /launch: builds -->
+An App's copies are machines on the Sandboxes meter, billed at the Apps
+rate: **{{app-cpu-rate}} per active vCPU-hour** and
+**{{app-memory-rate}} per GiB-hour of memory** while a copy is awake. Its
+disk past the first {{running-disk-included}} bills as a sandbox's, and its
+traffic out as a sandbox's outbound traffic.
+There is no fee per App, per request or per deploy.
+
+- **Copies kept awake.** `minCopies` keeps that many copies awake whether or
+  not requests come, so they pay memory all the time. One copy of 1 vCPU and
+  1 GiB kept awake for a 30-day month costs {{=$2 720 * app-memory-rate}}
+  in memory, plus the CPU it uses.
+- **Frozen copies are free.** A copy that has gone quiet freezes, and an App
+  keeps its spares frozen for the next burst; a frozen or parked copy pays
+  nothing.
+- **Saved copies.** The live and the previous version each keep a saved copy
+  (a snapshot of the warm server), billed as a snapshot,
+  **{{paused-storage-rate}} per decimal GB per 30-day month**. An App with
+  `minCopies: 0` and no requests pays only these.
+
+<!-- /launch: apps -->
+
+<!-- launch: ci -->
+
+## CI/CD
+
+A check machine costs **{{ci-vcpu-minute}} per vCPU-minute**, with
+{{ci-gib-per-vcpu}} of memory per vCPU, billed by the second from when it
+starts to when it's deleted, with no minimum and nothing rounded up. That is
+{{ci-2vcpu-minute}} a minute for a 2-vCPU job. A job of 90 seconds on a 4-vCPU
+machine costs {{=$4 4 * 90 / 60 * ci-vcpu-minute}}. A job that passed before
+isn't run, so it costs nothing. There's no fee per user, per repository or per
+check. A warm snapshot is charged at the [snapshot
+rate](#snapshots-images-and-volumes) while it's kept ([CI/CD](./ci)).
+
+<!-- /launch: ci -->
 
 ## Network products
 
@@ -278,6 +397,30 @@ sends and `egress.served` for what it serves, and
 `GET /v1/usage` answers the month so far under `outbound`: what was sent, what
 the allowance covered, and what the rest cost. At {{outbound-rate}}, 1 TB past the
 allowance costs {{=$0 1000 * outbound-rate}}.
+
+<!-- launch: apps -->
+
+What Cloudflare's cache serves for an App's addresses and custom domains,
+without asking the App, is outbound traffic too: the same
+{{outbound-rate}} per decimal GB, from the same monthly allowance as your
+sandboxes. The bytes are read from Cloudflare's analytics an hour at a time
+and charged once for each hour, within about half an hour of its end. They
+show in `GET /v1/usage` under `outbound`, with your sandboxes' traffic. An App
+made without credit sends for free and uses none of the allowance.
+
+<!-- /launch: apps -->
+
+<!-- launch: functions -->
+
+What Cloudflare's cache serves for a Function's addresses and custom domains,
+without calling the Function, is outbound traffic too: the same
+{{outbound-rate}} per decimal GB, from the same monthly allowance as your
+sandboxes. The bytes are read from Cloudflare's analytics an hour at a time
+and charged once for each hour, within about half an hour of its end. They
+show in `GET /v1/usage` under `outbound`, with your sandboxes' traffic. A Function
+made without credit sends for free and uses none of the allowance.
+
+<!-- /launch: functions -->
 
 A paid sandbox moves up to {{paid-daily-transfer}} a day, in and out together, and an account without credit {{trial-daily-transfer}} a day across all its sandboxes; [the network](./sandbox-environment#the-network) has the speeds.
 
@@ -395,16 +538,18 @@ to email, hears it.
 Storage charges stop at zero, and your balance never goes below it. You never
 owe money. Nothing is lost straight away:
 
-- The item is kept for **seven days**. An account notice tells you the date, and
-  a second notice warns you a day before it. Notices go to your account inbox
+- A stopped or paused sandbox's disk is kept for **30 days** in an account
+  that has bought credit or saved a card. Any other item, and every item in an
+  account that has done neither, is kept for **seven days**. An account notice
+  tells you the date, and a second notice warns you a day before it. Notices go to your account inbox
   (`runtime_notices` in MCP), and the day-before warning is also emailed to the
   account's owners, from Runtime, one email for everything it covers.
-- Add credit within those seven days and charging starts again from then. The
+- Add credit within those days and charging starts again from then. The
   days it went unpaid are written off: they are never charged, now or later.
-- After seven days unpaid, the item is deleted. A volume that a sandbox still
-  uses is deleted once that sandbox lets it go.
+- Once those days pass unpaid, the item is deleted. A volume that a sandbox
+  still uses is deleted once that sandbox lets it go.
 
-Paused sandboxes follow the same seven-day rule.
+Paused sandboxes follow the same rule.
 
 ## When a payment is under review
 

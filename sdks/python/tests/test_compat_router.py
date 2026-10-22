@@ -52,7 +52,7 @@ class Router(unittest.TestCase):
         # exercise the supported commands/files on a native-created sandbox.
         with self.assertRaises(PrimeAPIError) as failure:
             sdk.create(CreateSandboxRequest(name="prime-python", docker_image="python:3.12-slim"))
-        self.assertEqual(failure.exception.status, 503)
+        self.assertEqual(failure.exception.status, 501)  # a switched-off product (503 before October 2026)
         self.assertIsInstance(failure.exception.__cause__, ServiceUnavailableError)
         box = client.sandboxes.create()
         try:

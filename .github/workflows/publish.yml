@@ -6,8 +6,11 @@
 # main repository; export.sh copies it here.
 #
 # The first job checks the record with the signer's public key below, so a
-# run nobody at Runtime asked for publishes nothing. Then each registry's job,
-# in the environment `release` (main only): it skips a version the registry
+# run nobody at Runtime asked for publishes nothing. vin-1 starts it without
+# a token: it pushes an annotated tag publish/<commit> on a commit of main,
+# the record its message, with the mirror's deploy key. Then each registry's
+# job, in the environment `release` (main and publish/* tags): it skips a
+# version the registry
 # has and refuses one at or below its newest, then publishes. npm, PyPI and
 # RubyGems trust this workflow by OIDC (no token anywhere); Maven Central and
 # the MCP registry read the environment's secrets. The Go module is released
@@ -25,6 +28,10 @@ on:
         description: "The hub's signed release record for it, base64"
         required: true
         type: string
+  # vin-1 publishes without a token: it pushes an annotated tag
+  # publish/<commit> with its deploy key, the record its message.
+  push:
+    tags: ["publish/*"]
 
 permissions: {}
 
@@ -40,17 +47,29 @@ env:
     -----BEGIN PUBLIC KEY-----
     MCowBQYDK2VwAyEAcqHpPZc8FIhBBb7LQZU86rx/QNZHwDZQSm+6tWzx7Ws=
     -----END PUBLIC KEY-----
+  # vin-1's own SDK key (control-fleet checks/sdks.rs), whose records name
+  # CI/CD's pass of the commit, never the hub's full check. Empty: none
+  # pinned, and only the hub's records publish.
+  RELEASE_SIGN_PUB_VIN1: |
+    -----BEGIN PUBLIC KEY-----
+    MCowBQYDK2VwAyEA3nVBtUcNe1HKAs9BkGjajvTJELj42/r5nvVF5jcxKlo=
+    -----END PUBLIC KEY-----
 
 jobs:
   verify:
-    name: The hub's signed record
-    if: github.ref == 'refs/heads/main'
+    name: The signed record
+    # The hub's dispatch on main, or vin-1's tag publish/<commit>: an
+    # annotated tag on a commit of main whose message is the record. Only
+    # the hub's App and deploy keys may make a tag here (the rulesets).
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     # The mirror commit checked here is the one every job publishes from.
     outputs:
-      sha: ${{ github.sha }}
+      sha: ${{ steps.record.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,14 +78,17 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # The inputs reach the check as data only (the environment), never as
-      # code; it refuses a commit that is not 40 hex and a record that is not
-      # base64 under 4 KiB before it reads them.
+      # The inputs (or the tag) reach the check as data only (the
+      # environment, git), never as code; it refuses a commit that is not 40
+      # hex and a record that is not base64 under 4 KiB before it reads them.
       - name: Check the record
+        id: record
         env:
           COMMIT: ${{ inputs.commit }}
           RECORD: ${{ inputs.record }}
-        run: node .github/release/cli.ts record
+        run: |
+          node .github/release/cli.ts record
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   npm:
     name: npm withruntime

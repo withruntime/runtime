@@ -6,12 +6,14 @@ from typing import Any, Optional
 
 
 # A product switched off on this deployment, or paused on purpose: the API
-# answers these 503s in fixed words (serverFault "off" in
-# packages/cloud/src/api/respond.ts) and retrying cannot change them.
-# host_unavailable and busy pass, and are retried.
-DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previews_unavailable",
+# answers these 501 (503 from an older server) and retrying cannot change them.
+# host_unavailable and busy pass, and are retried. A server that says
+# ``retryable`` in its answer is believed first; this is the fallback.
+DELIBERATE = frozenset({"unavailable", "unsupported", "fork_unavailable", "previews_unavailable", "file_links_unavailable",
                         "network_unavailable", "network_rules_unavailable", "secrets_unavailable",
-                        "identity_unavailable", "env_unavailable", "resize_unavailable"})
+                        "identity_unavailable", "env_unavailable", "resize_unavailable",
+                        "feature_unavailable", "delete_unavailable", "switch_image_unavailable",
+                        "switching_paused", "schema_migration_required", "storage_unavailable"})
 # Refusals that guarantee nothing ran: a sandbox running as many commands as it
 # can (guest_busy), and the API's own limits, which answer before any work
 # starts (busy, rate_limited). Sending such a call again is always safe, so the
@@ -33,7 +35,7 @@ class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0
     def __init__(self, message: str, *, code: str = "request_failed", status: int = 0,
                  request_id: Optional[str] = None, hint: Optional[str] = None,
                  details: Optional[dict[str, Any]] = None, idempotency_key: Optional[str] = None,
-                 retry_after_ms: Optional[int] = None) -> None:
+                 retry_after_ms: Optional[int] = None, retryable: Optional[bool] = None) -> None:
         super().__init__(message)
         self.message = message
         self.code = code
@@ -43,19 +45,29 @@ class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0
         self.details = details
         self.idempotency_key = idempotency_key
         self.retry_after_ms = retry_after_ms
+        # The answer's own ``retryable``, when the server sent one.
+        self.sent_retryable = retryable
 
     @property
     def retryable(self) -> bool:
-        """Retrying this exact call is safe and may work. True for no_capacity
+        """Retrying this exact call is safe and may work: what the answer said
+        (``retryable``), and for an older server that did not say, True for no_capacity
         and no_credit_running_limit as well, which clear by themselves when a host frees room
         or a sandbox without credit stops. sandboxes.create already waits for those (see
         wait_for_capacity), so seeing one from a create means the wait ran out
         or was switched off."""
+        if self.sent_retryable is not None:
+            return self.sent_retryable
         if self.code in DELIBERATE:
             return False
         if self.code in _PASSING:
             # A fork asking for more copies than an account without credit runs at once never fits.
             return (self.details or {}).get("field") != "count"
+        # The account at one of its limits (a 429): some free when its own work
+        # ends, some only when something is deleted, so the same call again is
+        # no answer by itself.
+        if self.code == "quota_exceeded":
+            return False
         return self.status in (0, 429, 502, 503, 504)
 
     def __str__(self) -> str:
@@ -124,7 +136,9 @@ def error_for(status: int, body: Any, key: Optional[str]) -> RuntimeError:
         request_id=error.get("requestId"), hint=error.get("hint"),
         details=error.get("details") if isinstance(error.get("details"), dict) else None,
         idempotency_key=key,
-        retry_after_ms=error.get("retryAfterMs") if isinstance(error.get("retryAfterMs"), int) else None)
+        retry_after_ms=error.get("retryAfterMs") if isinstance(error.get("retryAfterMs"), int)
+        and not isinstance(error.get("retryAfterMs"), bool) else None,
+        retryable=error.get("retryable") if isinstance(error.get("retryable"), bool) else None)
     message = str(error.get("message", f"Runtime request failed ({status})."))
     cls: type[RuntimeError] = RuntimeError
     if kwargs["code"] == "account_blocked":

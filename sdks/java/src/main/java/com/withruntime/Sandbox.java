@@ -223,7 +223,7 @@ public final class Sandbox implements AutoCloseable {
    * #stop()}, {@link #stopKeepAlive()} or {@link #close()}: every {@code every} it extends the
    * limit so that {@code margin} remains, never more than the hour ahead the API allows. A sandbox
    * with no time limit needs none and is only watched. Running time is billed as it is used. A
-   * paused sandbox is left paused; a stopped one ends the loop.
+   * paused sandbox is left paused; a stopped or deleted one ends the loop.
    */
   public synchronized void keepAlive(Duration every, Duration margin, Consumer<Exception> onError) {
     stopKeepAlive();
@@ -253,6 +253,12 @@ public final class Sandbox implements AutoCloseable {
               if (need >= 1) extend(Duration.ofSeconds(Math.min(3600, need)));
             }
           } catch (RuntimeException error) {
+            // Gone (deleted elsewhere, or by its own time limit): nothing to keep alive, and asking
+            // again would only be refused.
+            if (error instanceof RuntimeCloudException refused && refused.status() == 404) {
+              timer.shutdown();
+              return;
+            }
             if (onError != null) onError.accept(error);
           }
         },
@@ -292,7 +298,9 @@ public final class Sandbox implements AutoCloseable {
                 new Transport.Call("POST", path(":fork"))
                     .body(options.toMap())
                     .waitSeconds(60)
-                    .key(options.idempotencyKey)));
+                    .key(options.idempotencyKey)
+                    // Its key replays a refusal for room or a limit, so it is told at once.
+                    .room(Duration.ZERO)));
     List<Sandbox> copies = new ArrayList<>();
     for (JsonObject copy : reply.getObjects("sandboxes")) copies.add(new Sandbox(t, copy.raw()));
     return copies;
@@ -340,6 +348,7 @@ public final class Sandbox implements AutoCloseable {
       body.put("stdinBase64", Base64.getEncoder().encodeToString(options.stdin));
     Duration timeout = options.timeout != null ? options.timeout : fallback;
     if (timeout != null) body.put("timeoutMs", timeout.toMillis());
+    if (options.traceFiles) body.put("traceFiles", true);
     return body;
   }
 
@@ -392,6 +401,7 @@ public final class Sandbox implements AutoCloseable {
               fields.put("exitCode", event.get("exitCode"));
               fields.put("timedOut", event.timedOut());
               fields.put("durationMs", event.get("durationMs"));
+              if (event.has("files")) fields.put("files", event.get("files"));
             }
             default -> {}
           }
@@ -462,6 +472,7 @@ public final class Sandbox implements AutoCloseable {
     ExecOptions exec = new ExecOptions().cwd(options.cwd).user(options.user);
     exec.env = options.env;
     exec.timeout = options.timeout;
+    exec.traceFiles = options.traceFiles;
     Map<String, Object> body = commandBody(command, exec, null);
     if (options.pipeStdin) body.put("stdinMode", "pipe");
     else if (options.stdin != null)

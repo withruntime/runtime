@@ -348,6 +348,14 @@ export class FakeSandbox {
         sandbox.fileMap.set(path, typeof data === "string" ? new TextEncoder().encode(data) : data);
         return { path, size: data.length };
       },
+      async downloadUrl(path: string, options: Record<string, unknown>) {
+        world.record("files.downloadUrl", path, options);
+        return { url: `https://files.example.test/dl${path}`, method: "GET", path };
+      },
+      async uploadUrl(path: string, options: Record<string, unknown>) {
+        world.record("files.uploadUrl", path, options);
+        return { url: `https://files.example.test/up${path}`, method: "PUT", path };
+      },
       async list(path: string, options: Record<string, unknown>) {
         world.record("files.list", path, options);
         if (sandbox.listing) return sandbox.listing;

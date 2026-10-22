@@ -6,10 +6,10 @@ import {
   RuntimeError,
   WAITS_FOR_ROOM,
 } from "./errors.js";
-import { describeRoute, envFetch, openWebSocket } from "./proxy.js";
+import { describeRoute, envFetch, openWebSocket, untrustedCertificate } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.23.0";
+export const VERSION = "0.33.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -107,6 +107,11 @@ export type Call = RequestOptions & {
 /** How long an answer that ran nothing (NOTHING_RAN) is retried for a call
  * that has no deadline of its own. */
 const NOTHING_RAN_MS = 300_000;
+
+/** The longest wait the SDK sleeps on for a retry. A refusal that names a
+ * longer one (a daily cap, about an hour) is thrown at once, still
+ * retryable and with its `retryAfterMs`, for the caller to schedule. */
+const LONGEST_RETRY_WAIT_MS = 60_000;
 
 /** How long one attempt waits for its answer to start. The API starts every
  * answer within 120 s: Caddy answers 503 itself past that, and a longer call
@@ -412,6 +417,19 @@ export class Transport {
       this.#routed && !cancelled
         ? describeRoute(`${this.baseUrl}${call.path}`, cause)
         : { via: "" };
+    // A certificate this machine does not trust answered, most often a proxy
+    // that inspects TLS: said as that, never as "no answer" (18 October 2026,
+    // the published CLI on Node behind such a proxy, where Bun trusted it).
+    const certificate = cancelled ? undefined : untrustedCertificate(cause);
+    if (certificate)
+      return new ConnectionError({
+        message: `Runtime at ${this.baseUrl}${route.via} could not be reached: the TLS certificate presented is not one this machine trusts (${certificate}).`,
+        hint: "A proxy or firewall that inspects TLS signs with its own authority: point NODE_EXTRA_CA_CERTS at its certificate (Node), or add it to the system's trusted certificates.",
+        code: "connection_error",
+        status: 0,
+        ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
+        cause,
+      });
     return new ConnectionError({
       message: cancelled
         ? "The call was cancelled or ran past its deadline."
@@ -557,6 +575,8 @@ export class Transport {
           parsed = { error: { message: text.slice(0, 500) || `HTTP ${status}` } };
         }
         const error = errorFor(status, parsed, key);
+        const header = Number(response.headers.get("retry-after"));
+        const headerMs = Number.isFinite(header) && header > 0 ? header * 1000 : undefined;
         // A full house: wait for a slot or for room, then send the same call
         // again. A request that can never fit (a fork of more copies than the
         // trial runs) is not waited for.
@@ -564,7 +584,9 @@ export class Transport {
           retry &&
           roomMs > 0 &&
           WAITS_FOR_ROOM.has(error.code) &&
-          error.details?.field !== "count"
+          error.details?.field !== "count" &&
+          // A quota on what is kept says it never clears by waiting.
+          error.sentRetryable !== false
         ) {
           const left = roomUntil - performance.now();
           if (left <= 0) throw error;
@@ -584,23 +606,31 @@ export class Transport {
         if (
           [429, 503].includes(status) &&
           NOTHING_RAN.has(error.code) &&
+          error.sentRetryable !== false &&
           (!late || error.code === "guest_busy")
         ) {
-          const header = Number(response.headers.get("retry-after"));
-          const base =
-            error.retryAfterMs ?? (Number.isFinite(header) && header > 0 ? header * 1000 : 250);
+          const named = error.retryAfterMs ?? headerMs;
+          if (named !== undefined && named > LONGEST_RETRY_WAIT_MS) throw withWait(error, named);
+          const base = named ?? 250;
           const pause =
             Math.min(30_000, base * 2 ** Math.min(idleAttempt++, 3)) * (0.9 + Math.random() * 0.2);
           if (pause >= idleUntil() - performance.now()) throw error;
           await this.#retryAfter(error, pause, signal, gate);
           continue;
         }
-        const retryable = [429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code);
+        // The API says whether the same request may succeed; an older
+        // server is judged by its status. A refusal for room or for the
+        // account's own limit is the room wait's above on a create, wake or
+        // restart, which set waitForCapacityMs (0 fails at once); any other
+        // call retries what the answer says.
+        const retryable =
+          (error.sentRetryable ??
+            ([429, 502, 503, 504].includes(status) && !DELIBERATE.has(error.code))) &&
+          !(call.waitForCapacityMs !== undefined && WAITS_FOR_ROOM.has(error.code));
         if (!retry || !retryable || attempt >= this.#maxRetries) throw error;
-        const header = Number(response.headers.get("retry-after"));
-        const wait =
-          error.retryAfterMs ??
-          (Number.isFinite(header) && header > 0 ? header * 1000 : backoff(attempt));
+        const named = error.retryAfterMs ?? headerMs;
+        if (named !== undefined && named > LONGEST_RETRY_WAIT_MS) throw withWait(error, named);
+        const wait = named ?? backoff(attempt);
         await this.#rest(Math.min(30_000, wait) * (0.9 + Math.random() * 0.2), signal, gate);
       } catch (cause) {
         // Deliberate API refusals and unusable proxy settings cannot be
@@ -907,6 +937,14 @@ export function neverSent(cause: unknown): boolean {
     at = (at as { cause?: unknown }).cause;
   }
   return false;
+}
+
+/** `error` thrown for a wait too long to sleep on, carrying that wait as
+ * `retryAfterMs` when only the Retry-After header named it. */
+function withWait(error: RuntimeError, ms: number): RuntimeError {
+  if (error.retryAfterMs === undefined)
+    (error as { retryAfterMs?: number }).retryAfterMs = Math.round(ms);
+  return error;
 }
 
 function backoff(attempt: number): number {

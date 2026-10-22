@@ -104,7 +104,9 @@ class HTTPDeadline(unittest.TestCase):
             # The native transport names an expired deadline as its own typed
             # error, during a retry wait as during a read.
             with self.assertRaises(RuntimeError) as caught:
-                with request_scope(.03):
+                # Long enough that a busy check machine still sends the first
+                # call, far under the 10 s Retry-After asks for.
+                with request_scope(.3):
                     transport.json("GET", "/retry")
             self.assertEqual(caught.exception.code, "request_timeout")
             # Retry-After asks for 10 s: well under that proves the deadline

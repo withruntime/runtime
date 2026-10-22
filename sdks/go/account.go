@@ -102,6 +102,199 @@ func (s *ReferralService) Get(ctx context.Context) (*ReferralSummary, error) {
 	return &summary, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/referrals"}, &summary)
 }
 
+// Plan is one monthly plan: a fee that comes back as plan usage, spent first
+// each month at the same measured prices, plus a bonus for committing. Money
+// is integer microdollars in strings.
+type Plan struct {
+	// ID is what Choose takes.
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Card is shared by plans shown as one card with a switch, such as Pro
+	// and its larger option; nil for a card of its own.
+	Card *string `json:"card"`
+	// FeeMicros is the monthly fee, before tax; "0" for Free.
+	FeeMicros string `json:"feeMicros"`
+	// YearlyFeeMicros is a year paid at once, ten months' fee for twelve; nil
+	// without a yearly price.
+	YearlyFeeMicros *string `json:"yearlyFeeMicros"`
+	// BonusMicros is usage given on top of the fee each month.
+	BonusMicros string `json:"bonusMicros"`
+	// TrialDays is the days of trial, no card; 0 for none.
+	TrialDays int `json:"trialDays"`
+	// FirstPeriodDouble: the first month on the plan, and the first after an
+	// upgrade to it, holds twice its usage.
+	FirstPeriodDouble bool `json:"firstPeriodDouble"`
+	// Support is docs, agent, slack or dedicated.
+	Support string `json:"support"`
+	// Collection is card (the fee is charged to the card the plan saves) or
+	// invoice (a contract, invoiced).
+	Collection string `json:"collection"`
+	// Contract is true for a contract made for your organization alone.
+	Contract bool `json:"contract"`
+	// Position is the catalogue's order: the next plan up is next.
+	Position int `json:"position"`
+	// Included is usage the plan includes each month beside its fee.
+	Included []PlanIncluded `json:"included"`
+	// Limits is what the plan raises; a plan never lowers a limit you have.
+	Limits []PlanLimit `json:"limits"`
+	// Features is what the plan turns on: sso, roles, audit, support-agent...
+	Features []string `json:"features"`
+	// AddOns are what AddOn takes, charged monthly beside the fee.
+	AddOns []PlanAddOn `json:"addOns"`
+}
+
+// PlanIncluded is usage a plan includes each month, such as Apps' traffic out.
+type PlanIncluded struct {
+	Product  string  `json:"product"`
+	Meter    string  `json:"meter"`
+	Quantity float64 `json:"quantity"`
+	// Unit is such as GB.
+	Unit string `json:"unit"`
+}
+
+// PlanLimit is one ceiling a plan raises.
+type PlanLimit struct {
+	// Limit is as GET /v1/limits and quota_exceeded name it: sandbox.count.
+	Limit string `json:"limit"`
+	// Max is nil for no limit at all.
+	Max *int64 `json:"max"`
+}
+
+// PlanAddOn is an add-on a plan offers.
+type PlanAddOn struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// FeeMicros is monthly, beside the plan's fee.
+	FeeMicros string `json:"feeMicros"`
+	// Limits is what it adds to a limit.
+	Limits []PlanAddOnLimit `json:"limits"`
+	// Feature is the feature it turns on, if any.
+	Feature *string `json:"feature"`
+}
+
+// PlanAddOnLimit is how much an add-on adds to one limit.
+type PlanAddOnLimit struct {
+	Limit string `json:"limit"`
+	Add   int64  `json:"add"`
+}
+
+// PlanNow is the plan your organization holds.
+type PlanNow struct {
+	PlanID string `json:"planId"`
+	Name   string `json:"name"`
+	// Status is incomplete, trialing, active, past_due or canceled.
+	Status string `json:"status"`
+	// Interval is month or year.
+	Interval    string     `json:"interval"`
+	PeriodStart *time.Time `json:"periodStart"`
+	// PeriodEnd is the next fee, or the end of a cancelled plan.
+	PeriodEnd *time.Time `json:"periodEnd"`
+	// TrialEndsAt is when a trial ends; nil outside one.
+	TrialEndsAt *time.Time `json:"trialEndsAt"`
+	// CancelAtPeriodEnd is true once a cancel takes effect at PeriodEnd.
+	CancelAtPeriodEnd bool `json:"cancelAtPeriodEnd"`
+	// NextPlanID is the plan a downgrade moves to at PeriodEnd.
+	NextPlanID *string        `json:"nextPlanId"`
+	StartedAt  time.Time      `json:"startedAt"`
+	AddOns     []PlanAddOnNow `json:"addOns"`
+	// AutoUpgrade: an owner said yes to moving up a plan when a limit refuses.
+	AutoUpgrade bool `json:"autoUpgrade"`
+	// PlanUsage is this period's plan usage, spent before any credit; nil
+	// with none.
+	PlanUsage *PlanUsage `json:"planUsage"`
+}
+
+// PlanAddOnNow is an add-on the plan holds.
+type PlanAddOnNow struct {
+	ID       string `json:"id"`
+	Quantity int64  `json:"quantity"`
+	// EndsAt is when a removed add-on stops; nil while it renews.
+	EndsAt *time.Time `json:"endsAt"`
+}
+
+// PlanUsage is this period's plan usage; it ends with the period.
+type PlanUsage struct {
+	GrantedMicros string    `json:"grantedMicros"`
+	LeftMicros    string    `json:"leftMicros"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+// Plans is what List answers: the plan you are on (nil with none) and every
+// plan you may choose.
+type Plans struct {
+	Current *PlanNow `json:"current"`
+	Plans   []Plan   `json:"plans"`
+}
+
+// PlanChange is what every change answers: a link where a person starts a
+// first plan or a trial in the browser, or the plan as changed.
+type PlanChange struct {
+	CheckoutURL *string  `json:"checkoutUrl"`
+	Current     *PlanNow `json:"current"`
+}
+
+// PlanChooseOptions are Choose's options; nil is monthly.
+type PlanChooseOptions struct {
+	// Interval is month or year (ten months' fee for twelve); monthly when
+	// empty.
+	Interval string
+}
+
+// PlanService is client.Plans: monthly plans whose fee is prepaid usage. The
+// fee comes back as plan usage, spent first each month at the same measured
+// prices; plan usage left at the period's end ends with it.
+type PlanService struct{ c *Client }
+
+func (s *PlanService) change(ctx context.Context, method, path string, body any) (*PlanChange, error) {
+	var change PlanChange
+	return &change, s.c.do(ctx, &call{method: method, path: path, body: body}, &change)
+}
+
+// List returns the plan you are on and every plan you may choose.
+func (s *PlanService) List(ctx context.Context) (*Plans, error) {
+	var plans Plans
+	return &plans, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/plans"}, &plans)
+}
+
+// Choose starts a plan by id, or moves to another. With no plan, it answers
+// CheckoutURL, where a person starts it. A dearer plan starts at once,
+// prorated; a cheaper one at PeriodEnd (NextPlanID).
+func (s *PlanService) Choose(ctx context.Context, plan string, opts *PlanChooseOptions) (*PlanChange, error) {
+	body := map[string]any{"plan": plan}
+	if opts != nil && opts.Interval != "" {
+		body["interval"] = opts.Interval
+	}
+	return s.change(ctx, http.MethodPost, "/v1/plans/choose", body)
+}
+
+// Cancel ends the plan at PeriodEnd.
+func (s *PlanService) Cancel(ctx context.Context) (*PlanChange, error) {
+	return s.change(ctx, http.MethodPost, "/v1/plans/cancel", map[string]any{})
+}
+
+// Resume keeps a plan you cancelled, before PeriodEnd.
+func (s *PlanService) Resume(ctx context.Context) (*PlanChange, error) {
+	return s.change(ctx, http.MethodPost, "/v1/plans/resume", map[string]any{})
+}
+
+// AddOn adds an add-on by id: charged now for the rest of the period,
+// prorated, then with the plan.
+func (s *PlanService) AddOn(ctx context.Context, addOn string) (*PlanChange, error) {
+	return s.change(ctx, http.MethodPost, "/v1/plans/add-ons", map[string]any{"addOn": addOn})
+}
+
+// RemoveAddOn removes an add-on: its charge stops now, and it holds to
+// PeriodEnd.
+func (s *PlanService) RemoveAddOn(ctx context.Context, addOn string) (*PlanChange, error) {
+	return s.change(ctx, http.MethodDelete, "/v1/plans/add-ons/"+url.PathEscape(addOn), nil)
+}
+
+// AutoUpgrade turns on or off moving up a plan by itself when a limit
+// refuses. Owners, and keys an owner made.
+func (s *PlanService) AutoUpgrade(ctx context.Context, on bool) (*PlanChange, error) {
+	return s.change(ctx, http.MethodPut, "/v1/plans/auto-upgrade", map[string]any{"on": on})
+}
+
 // SwitchingSummary is whether a switch can be recorded and what it paid.
 type SwitchingSummary struct {
 	Enabled   bool     `json:"enabled"`

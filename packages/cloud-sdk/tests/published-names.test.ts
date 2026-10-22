@@ -12,6 +12,11 @@ const leaks: [string, RegExp][] = [
   ["commit hash", /\((?:[0-9a-f]{9,40})\)/],
   ["agent instruction file", /\b(?:AGENTS|ROOT)\.md\b/],
 ];
+/** A customer's AGENTS.md named as data, in a string (`runtime agents init`
+ * reads the repo's own, as Codex and others do), is no leak; anywhere else,
+ * a comment included, it is. */
+const DATA_ALLOWED = new Set(["agent instruction file"]);
+const strings = /"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g;
 
 function* files(dir: string): Generator<string> {
   for (const name of readdirSync(dir)) {
@@ -31,7 +36,8 @@ describe("published sources", () => {
           .split("\n")
           .forEach((line, i) => {
             for (const [what, re] of leaks) {
-              if (re.test(line)) found.push(`${file.slice(root.length + 1)}:${i + 1} ${what}`);
+              const read = DATA_ALLOWED.has(what) ? line.replace(strings, '""') : line;
+              if (re.test(read)) found.push(`${file.slice(root.length + 1)}:${i + 1} ${what}`);
             }
           });
       }

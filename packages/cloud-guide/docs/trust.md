@@ -46,10 +46,14 @@ The full list, with what each company does and where, is on the
 
 - **In transit:** every connection to Runtime, and from Runtime to its
   database, uses TLS, and the database's certificate is verified.
-- **Backups of your sandboxes and volumes** are encrypted with a key that
+- **Copies of your volumes and snapshots** are encrypted with a key that
   belongs to your organization alone, before they leave the server. Deleting
-  the organization destroys that key first, so every copy becomes unreadable at
-  once ([storage and backups](./storage#encryption-and-deletion)).
+  the organization destroys that key first, so those copies become unreadable
+  at once ([storage and backups](./storage#encryption-and-deletion)).
+- **Each server's nightly backup** is encrypted with that server's own key
+  before it leaves the server. It is kept 30 days, and its pieces leave the
+  storage within 44, so what a closed organization had on that server is gone
+  from these backups by then.
 - **The nightly copy of our database** is encrypted to a key held offline, so
   neither the storage provider nor the website can read it.
 - **Stored secrets** are sealed, never returned by any API, and never written
@@ -62,8 +66,9 @@ The full list, with what each company does and where, is on the
 - **Two-step sign-in** with a passkey or an authenticator app, which an owner
   can require of everyone in the account, and sign-in with a passkey alone
   ([two-step sign-in](./security#two-step-sign-in)).
-- **Four roles** (owner, admin, developer, billing) and keys scoped to named
-  operations, read-only keys and daily spending limits per key.
+- **Four roles** (owner, admin, developer, billing), read-only keys,
+  compartments that wall a group of keys off from the rest of the account, and
+  daily spending limits per key ([keys](./security#read-only-keys-and-daily-limits)).
 - **An audit log** of every change to the account, who made it, from where and
   how, kept at least 400 days ([teams and the audit log](./teams)).
 
@@ -77,17 +82,19 @@ The full list, with what each company does and where, is on the
   ([uptime promise](/legal/sla)).
 - **The database** can be rewound to any moment in the last 24 hours, and a
   sealed copy goes off-site every night and is kept 30 days, locked so it cannot
-  be deleted early. A restore from that copy is drilled every month.
+  be deleted early. A restore from that copy was last tested on
+  27 September 2026.
 - **Volumes are backed up off their server every day.** A snapshot survives
   loss of its server once its off-server copy is checked, shown by
-  `backedUp: true` ([storage and backups](./storage)).
+  `backedUp: true` ([storage and backups](./storage)). Every week one backed-up
+  item is restored and checked against the checksum recorded when it was saved.
 
 ## How Runtime is run
 
 The service uses the following operational controls.
 
-- **Access.** Production is reached only with named keys, never passwords, and
-  only by the people who operate it.
+- **Access.** Production is reached only by the people and systems that
+  operate it, and actions on customers' resources are recorded.
 - **Change.** Changes are in version control and pass repository checks before
   they are pushed. The checks cover formatting, dependency advisories, linting,
   types, builds and tests for the affected packages. A production website
@@ -98,7 +105,9 @@ The service uses the following operational controls.
 - **Monitoring.** Security events, such as an account locked after wrong
   two-step codes, every sign-in to the operator's dashboard and a backup that
   did not complete, are reviewed automatically every ten minutes, and the
-  operator is alerted to anything unusual.
+  operator is alerted to anything unusual. The servers' sign-in logs and the
+  log of every release signed are copied off the servers every day and kept a
+  year, where the key that writes them cannot delete them.
 - **Incidents.** A written procedure covers containing an incident, keeping the
   evidence, finding who is affected and telling them without undue delay, as
   the [data processing addendum](/legal/dpa) promises.
@@ -107,7 +116,3 @@ The service uses the following operational controls.
   processing agreement.
 - **Retention and deletion.** What is kept, and for how long, is in the
   [privacy policy](/legal/privacy).
-
-| Check                              | How often   | Last done         |
-| ---------------------------------- | ----------- | ----------------- |
-| Restore the database from its copy | Every month | 27 September 2026 |

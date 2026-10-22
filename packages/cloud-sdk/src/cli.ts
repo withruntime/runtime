@@ -25,8 +25,11 @@ import type { MetricRange, SandboxMetrics, WebhookEventType } from "./products/o
 import type { SwitchingSummary, SwitchProvider } from "./products/switching.js";
 import type { LimitedKeyAction } from "./products/api-keys.js";
 import type { SecretRule, SecretScope, SecretUse } from "./products/secrets.js";
-import type { Job } from "./products/jobs.js";
+import type { Job, JobAlert, UpdateJob } from "./products/jobs.js";
+import type { PlanNow } from "./products/plans.js";
+import type { RoomBooking } from "./products/reservations.js";
 import type { InterpreterLanguage } from "./products/interpreter.js";
+import type { Image } from "./products/images.js";
 
 /* runtime <product> <verb>, and account commands at the top level. */
 
@@ -73,21 +76,27 @@ Account
   usage export --since <UTC time> --until <UTC time>
                                                Every settlement in the range as CSV; --json, each page
   limits                                       Whether this key is read-only, and its daily spending limit
+  reservations book --sandboxes <n> --from <time> --to <time> [--vcpu <n>] [--memory <MiB>]
+            [--disk <MiB>] [--region <r>]      Hold room for a burst: confirmed or declined at once
+  reservations ls | get <id> | cancel <id>     Your bookings; cancel gives the room back
   secrets set <NAME> --host <host>... [--header <name> [--format '<text {value}>']]
             [--allow '[GET,HEAD] /path/*']...  Store a secret sandboxes use without seeing it; the
             [--only-label key=value[,k=v]]...  value is read from standard input, never an argument.
             [--only-sandbox <id>]...           --allow (paid): only these methods and paths get it.
-            [--all-sandboxes]                  --only-label: only sandboxes with those labels (each
-                                               flag one selector, any may match); --only-sandbox:
-                                               only that sandbox. A new value keeps the scope;
-                                               --all-sandboxes gives it to every sandbox again
+            [--only-app <app id>]...           --only-label: only sandboxes with those labels (each
+            [--all-sandboxes] [--env <VAR>]    flag one selector, any may match); --only-sandbox:
+                                               only that sandbox; --only-app: every copy of that App,
+                                               any version. A new value keeps the scope;
+                                               --all-sandboxes gives it to every sandbox again.
+                                               --env: the variable sandboxes see it in, if not NAME;
+                                               secrets scoped to different sandboxes may share one
   secrets set <NAME> --keep-value [--host <host>]... [--allow '[GET] /path']...
                                                Narrow where it goes without its value: a subset of
                                                its hosts, only requests its rules allow now.
                                                Anything wider needs the value
   secrets set <NAME> --jobs [--host ...]       A copy scheduled jobs put in their environment
                                                (job create --secret NAME); with --host, both
-  secrets scope <NAME> --only-label k=v... | --only-sandbox <id>... | --all-sandboxes
+  secrets scope <NAME> --only-label k=v... | --only-sandbox <id>... | --only-app <id>... | --all-sandboxes
                                                Change which sandboxes get it; no value needed
   secrets ls | get <NAME>                      Names, hosts, placeholders and jobs versions, never values
   secrets rotate <NAME>                        A new version of the jobs copy, from standard input
@@ -101,6 +110,13 @@ Account
                                                A new API key for CI, approved by an owner in the browser
   referrals                                    Your referral link: you both get up to $1,000, then
                                                you earn 10% of what they spend for 12 months
+  plans                                        The plans you can choose and yours: a monthly fee
+                                               that comes back as usage, spent first (beta)
+  plans choose <plan> [--yearly] | cancel | resume
+                                               Start or change a plan (a first one opens a payment
+                                               page), end it at the period's end, or keep it (beta)
+  plans add-on <id> | remove-add-on <id>       Add an add-on to the plan, or stop one (beta)
+  plans auto-upgrade on|off                    Move up a plan by itself when a limit refuses (beta)
   compare --from <provider> [--days 30]        What your usage would cost at e2b, daytona, vercel,
                                                modal, cloudflare, fly, blaxel, lambda-microvms,
                                                freestyle, prime and others, and what you save
@@ -118,6 +134,7 @@ Account
   support deny <actionId> --conversation <id>
   docs [topic]                                 Print a docs page (start, cli, api, python...)
   mcp                                          Serve MCP on stdio for agents that need it
+  fly-api [--port 4280]                        Answer Fly Machines API calls here, with Runtime sandboxes
 
 Connect
   sandboxes ssh <id|name> [-- <command...>]    Log in over SSH; \`runtime sandboxes ssh help\` for editors
@@ -144,7 +161,9 @@ Products
   volumes    Persistent disks to attach to sandboxes
   jobs       A command in a fresh sandbox, once or on a cron schedule, with its logs
   apps       Your web server from an image or a build, copies started by requests (beta)
+  functions  Your HTTP handler from an image or a build, asleep until calls come (beta)
   builds     A connected repository's commits built into what an App deploys (beta)
+  ci         CI/CD: each push and pull request of a repository checked in sandboxes (beta)
   containers One OCI image's process on its own microVM, at the sandbox rates (beta)
   agents     Claude Code, Codex, Gemini CLI or your own agent in a sandbox per session (beta)
   domains    Your own hostname for a sandbox's port, with HTTPS
@@ -178,7 +197,8 @@ const SANDBOX_HELP = `runtime sandboxes <command>
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
   get <id>                                                    One sandbox, in full
-  exec <id> [--cwd /workspace] [--env K[=V]]... [--timeout <s>] [--root] -- <command...>
+  exec <id> [--cwd /workspace] [--env K[=V]]... [--timeout <s>] [--root]
+       [--trace-files <file.json>] -- <command...>
                                               Run and stream output; exits with its code.
                                               --root runs it as root: no sudo needed
   spawn <id> [--pty] [--root] -- <command...> Start in the background; prints a process id
@@ -205,6 +225,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
                                               Change its size by a restart: the whole disk stays and
                                               --disk only grows it; programs stop (snapshot it first
                                               to keep memory)
+  resize <id> --disk 20480                    Grow a running sandbox's disk live, programs running
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K[=V]]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none]
@@ -236,6 +257,11 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   preview rotate <id> <port>                  Refuse every token given out for a private port so
                                               far; prints the new token
   previews <id>                               Every shared port
+  link <id> <path> [--put] [--expires 1h] [--filename n] [--max-bytes n] [--archive] [--no-wake]
+                                              A link anyone can open with no key: GET downloads the
+                                              file (--archive: a folder as .tar.gz), --put uploads to it;
+                                              --expires 60s to 7d, 1h by default
+  link revoke <id>                            End every link made for the sandbox so far
   unshare <id> <port>                         Stop sharing a port
   session create <id> [--origin <url>]... [--ttl <s>] [--name <n>]
                                               A token a web page uses for this sandbox's commands,
@@ -341,7 +367,7 @@ function parse(
 }
 
 /** Options given once per item, which a plural takes as a comma list. */
-const LISTS: ReadonlySet<string> = new Set(["host", "allow", "deny", "connect"]);
+const LISTS: ReadonlySet<string> = new Set(["host", "allow", "deny", "connect", "snapshot"]);
 
 /** The declared option a mistyped one most likely meant. --memory-mib for
  * --memory, --timeout-seconds for --timeout: the SDK's spelling of an option is
@@ -424,11 +450,32 @@ const kit = {
   table: (rows: string[][]) => table(rows),
   usage: (message: string) => usage(message),
   unknown: (what: string, word: string, choices: readonly string[]) => unknown(what, word, choices),
+  /** `sandboxes exec`'s run and output, for any machine that execs. */
+  execute: (
+    machine: Pick<Sandbox, "id" | "exec">,
+    command: string[],
+    args: Args,
+    out: Out,
+    env: NodeJS.ProcessEnv,
+  ) => execute(machine, command, args, out, integer(args, "timeout"), env),
+  copyFile: (
+    from: string,
+    to: string,
+    use: (id: string) => Promise<Pick<Sandbox, "files">>,
+    side: string,
+  ) => copyFile(from, to, use, side),
 };
 export type CliKit = typeof kit;
 
 /** The product being run, so a mistake points at its own help. */
 let product = "";
+/** `90`, `90s`, `30m`, `1h` or `7d`, in seconds. */
+function durationSeconds(text: string): number {
+  const found = /^(\d{1,7})([smhd]?)$/.exec(text.trim());
+  if (!found) throw usage(`--expires takes a number of seconds or 30m, 1h, 7d; not ${text}.`);
+  return Number(found[1]) * { "": 1, s: 1, m: 60, h: 3600, d: 86_400 }[found[2]!]!;
+}
+
 function usage(message: string) {
   return new RuntimeError({
     message,
@@ -476,7 +523,9 @@ const COMMANDS = [
   "sso",
   "secrets",
   "keys",
+  "reservations",
   "referrals",
+  "plans",
   "compare",
   "switch",
   "ls",
@@ -484,13 +533,16 @@ const COMMANDS = [
   "support",
   "docs",
   "mcp",
+  "fly-api",
   "sandboxes",
   "snapshots",
   "images",
   "volumes",
   "jobs",
   "apps",
+  "functions",
   "builds",
+  "ci",
   "containers",
   "agents",
   "domains",
@@ -512,10 +564,13 @@ const OWN_HELP = [
   "volumes",
   "jobs",
   "apps",
+  "functions",
   "builds",
+  "ci",
   "containers",
   "agents",
   "keys",
+  "reservations",
   "webhooks",
   "webhook",
   "billing",
@@ -562,6 +617,7 @@ const SANDBOX_VERBS = [
   "run-code",
   "preview",
   "previews",
+  "link",
   "unshare",
   "session",
   "network",
@@ -691,6 +747,34 @@ function describe(info: SandboxInfo): string {
   ]);
 }
 
+/** `cp` between this machine and a sandbox or an App's copy: exactly one
+ * side is `<id>:/path`. A destination ending in / (or a local directory)
+ * takes the source's own name inside it, as cp does. */
+async function copyFile(
+  from: string,
+  to: string,
+  use: (id: string) => Promise<Pick<Sandbox, "files">>,
+  side: string,
+): Promise<void> {
+  const source = remote(from);
+  const target = remote(to);
+  const inside = (dir: string, path: string) =>
+    `${dir.replace(/\/+$/, "")}/${path.replace(/\/+$/, "").split("/").pop()}`;
+  if (source && !target) {
+    const local = await import("node:fs/promises").then((fs) => fs.stat(to).catch(() => null));
+    await (
+      await use(source.id)
+    ).files.download(
+      source.path,
+      to.endsWith("/") || local?.isDirectory() ? inside(to, source.path) : to,
+    );
+  } else if (!source && target)
+    await (
+      await use(target.id)
+    ).files.upload(from, target.path.endsWith("/") ? inside(target.path, from) : target.path);
+  else throw usage(`Name exactly one side as ${side}:/path.`);
+}
+
 /** Resolves `<id>:/path` into its parts, or undefined for a local path. */
 function remote(spec: string): { id: string; path: string } | undefined {
   const match = /^([A-Za-z0-9][A-Za-z0-9_.-]{0,127}):(\/.*)$/.exec(spec);
@@ -789,7 +873,8 @@ export async function run(
     const args = parse(
       rest,
       [...CREATE_FLAGS, "keep", "root"],
-      [...CREATE_VALUES, "cwd", "env"],
+      // execute() reads --trace-files for run as for exec.
+      [...CREATE_VALUES, "cwd", "env", "trace-files"],
       `${me} sandboxes run -- python3 < invoice.py`,
     );
     const commandLine = args.rest ?? args.positional;
@@ -807,8 +892,8 @@ export async function run(
     // SIGINT and normal completion share one delete, with an absolute
     // deadline across its retries, so cleanup cannot hang. A delete, not a
     // stop: a stopped sandbox keeps its disk, billed, and an account without
-    // credit keeps at most 10, so ten runs that only stopped refused the
-    // eleventh (no_credit_kept_limit, 0685). --keep is how to keep one.
+    // credit keeps at most 5, so five runs that only stopped refused the
+    // sixth (no_credit_kept_limit). --keep is how to keep one.
     const stop = () =>
       (cleanup ??= (async () => {
         const signal = AbortSignal.timeout(30_000);
@@ -1017,6 +1102,7 @@ export async function run(
     return 0;
   }
   if (command === "keys") return keys(rest, env, out);
+  if (command === "reservations") return reservationsCommand(rest, env, out);
   if (command === "sso") {
     const status = await (await client(env)).sso.get();
     print(
@@ -1148,6 +1234,140 @@ export async function run(
     );
     return 0;
   }
+  if (command === "plans") {
+    product = "plans";
+    const args = parse(rest, ["yearly"], []);
+    const [verb, id, extra] = args.positional;
+    const runtime = await client(env);
+    const usd = (micros: string) =>
+      `$${(Number(BigInt(micros) / 10_000n) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "-");
+    const yearly = args.flags.get("yearly")?.at(-1) === "true";
+    if (yearly && verb !== "choose") throw usage("--yearly goes with plans choose <plan>.");
+    const now = (current: PlanNow | null) =>
+      !current
+        ? "No plan: you pay for what runs from your credit."
+        : [
+            `Your plan: ${current.name} (${current.planId}), ${current.status.replace("_", " ")}, ${current.interval === "year" ? "yearly" : "monthly"}.`,
+            current.status === "trialing" && current.trialEndsAt
+              ? `The trial ends on ${day(current.trialEndsAt)}.`
+              : undefined,
+            current.cancelAtPeriodEnd
+              ? `It ends on ${day(current.periodEnd)}; \`${me} plans resume\` keeps it.`
+              : current.nextPlanId
+                ? `It moves to ${current.nextPlanId} on ${day(current.periodEnd)}.`
+                : `Next fee on ${day(current.periodEnd)}.`,
+            current.planUsage
+              ? `Plan usage left: ${usd(current.planUsage.leftMicros)} of ${usd(current.planUsage.grantedMicros)}, until ${day(current.planUsage.expiresAt)}.`
+              : undefined,
+            current.addOns.length
+              ? `Add-ons: ${current.addOns
+                  .map(
+                    (a) =>
+                      `${a.id}${a.quantity > 1 ? ` x${a.quantity}` : ""}${a.endsAt ? ` (ends ${day(a.endsAt)})` : ""}`,
+                  )
+                  .join(", ")}.`
+              : undefined,
+            current.autoUpgrade
+              ? `Auto-upgrade: on; a create a limit refuses moves you up a plan. \`${me} plans auto-upgrade off\` stops it.`
+              : "Auto-upgrade: off.",
+          ]
+            .filter((line) => line !== undefined)
+            .join("\n");
+    if (verb === undefined || verb === "ls") {
+      if (id !== undefined) throw usage(`Unexpected ${id}.`);
+      const r = await runtime.plans.list();
+      const amount = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+      print(
+        [
+          now(r.current),
+          "",
+          r.plans.length
+            ? table([
+                ["plan", "name", "fee a month", "a year", "bonus", "trial", "support"],
+                ...r.plans.map((p) => [
+                  p.id,
+                  p.name,
+                  p.collection === "invoice" ? "invoiced" : usd(p.feeMicros),
+                  p.yearlyFeeMicros === null ? "-" : usd(p.yearlyFeeMicros),
+                  BigInt(p.bonusMicros) > 0n ? usd(p.bonusMicros) : "-",
+                  p.trialDays > 0 ? `${p.trialDays} days` : "-",
+                  p.support,
+                ]),
+              ])
+            : "No plans are offered yet.",
+          ...r.plans
+            .filter((p) => p.included.length || p.limits.length || p.addOns.length)
+            .flatMap((p) => [
+              "",
+              `${p.id}:`,
+              ...(p.included.length
+                ? [
+                    `  includes ${p.included.map((i) => `${amount(i.quantity)} ${i.unit} of ${i.product} ${i.meter}`).join(", ")} a month`,
+                  ]
+                : []),
+              ...(p.limits.length
+                ? [
+                    `  limits ${p.limits.map((l) => `${l.limit} ${l.max === null ? "unlimited" : l.max}`).join(", ")}`,
+                  ]
+                : []),
+              ...(p.addOns.length
+                ? [
+                    `  add-ons ${p.addOns.map((a) => `${a.id} (${usd(a.feeMicros)} a month)`).join(", ")}`,
+                  ]
+                : []),
+            ]),
+          "",
+          "A plan's fee comes back as plan usage, spent first each month at the same measured prices;",
+          `usage left at the period's end ends with it. Choose one: ${me} plans choose <plan> [--yearly].`,
+        ].join("\n"),
+        r,
+      );
+      return 0;
+    }
+    if (verb === "choose" || verb === "cancel" || verb === "resume") {
+      if (verb === "choose" && !id) throw usage(`Say which plan: ${me} plans choose <plan>.`);
+      if ((verb === "choose" ? extra : id) !== undefined)
+        throw usage(`Unexpected ${verb === "choose" ? extra : id}.`);
+      const r =
+        verb === "choose"
+          ? await runtime.plans.choose(id!, yearly ? { interval: "year" } : {})
+          : verb === "cancel"
+            ? await runtime.plans.cancel()
+            : await runtime.plans.resume();
+      print(
+        r.checkoutUrl
+          ? `A person chooses it and pays the first month here, then the plan starts:\n${r.checkoutUrl}`
+          : now(r.current),
+        r,
+      );
+      return 0;
+    }
+    if (verb === "add-on" || verb === "remove-add-on") {
+      if (!id) throw usage(`Say which add-on: ${me} plans ${verb} <id>.`);
+      if (extra !== undefined) throw usage(`Unexpected ${extra}.`);
+      const r =
+        verb === "add-on" ? await runtime.plans.addOn(id) : await runtime.plans.removeAddOn(id);
+      print(
+        r.checkoutUrl
+          ? `A person confirms it here, then the add-on starts:\n${r.checkoutUrl}`
+          : now(r.current),
+        r,
+      );
+      return 0;
+    }
+    if (verb === "auto-upgrade") {
+      if (id !== "on" && id !== "off")
+        throw usage(`Say on or off: ${me} plans auto-upgrade on|off.`);
+      if (extra !== undefined) throw usage(`Unexpected ${extra}.`);
+      const r = await runtime.plans.autoUpgrade(id === "on");
+      print(now(r.current), r);
+      return 0;
+    }
+    throw usage(
+      `Unknown plans command ${verb}: ls, choose <plan> [--yearly], cancel, resume, add-on <id>, remove-add-on <id> or auto-upgrade on|off.`,
+    );
+  }
   if (command === "compare" || command === "switch") return switching(command, rest, env, out);
   if (command === "mcp") {
     const { serveMcp } = await import("./mcp.js");
@@ -1157,6 +1377,24 @@ export async function run(
        for several seconds after the client asked it to go. */
     await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
     process.exit(0);
+  }
+  if (command === "fly-api") {
+    const args = parse(rest, [], ["port", "host"]);
+    const { serveMachinesApi } = await import("./fly/index.js");
+    const served = await serveMachinesApi({
+      client: await client(env),
+      port: args.flags.has("port") ? portOf(flag(args, "port"), "4280") : 4280,
+      hostname: flag(args, "host") ?? "127.0.0.1",
+    });
+    out.write(
+      `Fly Machines API on ${served.url}: point FLY_API_HOSTNAME (fly-admin's apiUrl, fly-go's FLY_FLAPS_BASE_URL) here.\nEach request runs as this login, or as the Runtime key (rtcloud_...) in its bearer token. Ctrl-C stops it.\n`,
+    );
+    await new Promise<void>((resolve) => {
+      process.once("SIGINT", resolve);
+      process.once("SIGTERM", resolve);
+    });
+    await served.close();
+    return 0;
   }
   if (command === "docs") {
     const topic = rest[0] ?? "index";
@@ -1285,9 +1523,17 @@ export async function run(
     product = "apps";
     return (await import("./apps-cli.js")).appsCommand(rest, env, out, () => client(env), kit);
   }
+  if (command === "function" || command === "functions") {
+    product = "functions";
+    return (await import("./apps-cli.js")).functionsCommand(rest, env, out, () => client(env), kit);
+  }
   if (command === "build" || command === "builds") {
     product = "builds";
     return (await import("./apps-cli.js")).buildsCommand(rest, out, () => client(env), kit);
+  }
+  if (command === "ci") {
+    product = "ci";
+    return (await import("./ci-cli.js")).ciCommand(rest, out, () => client(env), kit);
   }
   if (command === "container" || command === "containers") {
     product = "containers";
@@ -1674,6 +1920,10 @@ const DROP_IN: Partial<Record<SwitchProvider, { js: string; py?: string; also?: 
     js: 'import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"',
     py: "from withruntime.blaxel import SandboxInstance  # was: from blaxel.core import SandboxInstance",
   },
+  modal: {
+    js: 'import { ModalClient } from "withruntime/modal"; // was: from "modal"',
+    py: "from withruntime import modal  # was: import modal",
+  },
   // A Worker-only SDK: no Python. More than the import changes, so say what.
   cloudflare: {
     js: 'import { getSandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"',
@@ -1681,8 +1931,19 @@ const DROP_IN: Partial<Record<SwitchProvider, { js: string; py?: string; also?: 
   },
 };
 
-/** How to move a rival's code across, when one import does it. */
-export function dropInLines(provider: SwitchProvider | undefined): string[] {
+/** Fly's Machines API moves by its address, not an import: the lines of the
+ * Fly guide's "From Machines". */
+const FLY_MACHINES = [
+  "Your Fly Machines code runs on Runtime with one address changed:",
+  "  npx withruntime fly-api   # answers on http://127.0.0.1:4280 as your Runtime login",
+  "  export FLY_API_HOSTNAME=http://127.0.0.1:4280     # Fly's curl examples",
+  "  export FLY_FLAPS_BASE_URL=http://127.0.0.1:4280   # fly-go, Fly's Go client",
+];
+
+/** How to move a rival's code across, when one import (or, for Fly's
+ * Machines, one address) does it. `from` is the name the caller gave. */
+export function dropInLines(provider: SwitchProvider | undefined, from?: string): string[] {
+  if (from === "fly-machines") return FLY_MACHINES;
   const drop = provider && DROP_IN[provider];
   if (!drop) return [];
   return [
@@ -1816,14 +2077,13 @@ async function switching(
       );
       return 0;
     }
-    const provider = SWITCH_FROM[from];
-    if (!provider || from === "fly-machines")
-      throw unknown("provider", from, Object.keys(RIVAL_NAMES));
+    const provider = Object.hasOwn(SWITCH_FROM, from) ? SWITCH_FROM[from] : undefined;
+    if (!provider) throw unknown("provider", from, Object.keys(SWITCH_FROM));
     const summary = await api.record({ provider });
     print(
       [
         `Recorded: switching from ${RIVAL_NAMES[provider]}. ${welcomeLine(summary) ?? ""}`.trim(),
-        ...dropInLines(provider),
+        ...dropInLines(provider, from),
       ].join("\n"),
       summary,
     );
@@ -1880,7 +2140,7 @@ async function switching(
   const rival = Object.hasOwn(SWITCH_FROM, from) ? SWITCH_FROM[from] : undefined;
   const line = switchingLine(c.switching, rival);
   if (line) lines.push("", line);
-  const drop = dropInLines(rival);
+  const drop = dropInLines(rival, from);
   if (drop.length) lines.push("", ...drop);
   print(lines.join("\n"), c);
   return 0;
@@ -2074,11 +2334,13 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         throw usage(
           `Name a new size, e.g. ${me} sandboxes resize ${sbx.id} --memory 4096 --restart`,
         );
-      if (!args.flags.has("restart"))
+      // A disk alone grows live, or is refused saying it needs --restart.
+      const live = size.vcpu === undefined && size.memoryMiB === undefined;
+      if (!live && !args.flags.has("restart"))
         throw usage(
           `A resize restarts it: its whole disk stays and its programs stop. Add --restart to say so, or snapshot it first (${me} sandboxes snapshot ${sbx.id}) to keep its memory too.`,
         );
-      await sbx.resize(size, { restart: true });
+      await sbx.resize(size, { restart: args.flags.has("restart") });
       print(describe(sbx.info), sbx.info);
       return 0;
     }
@@ -2303,7 +2565,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const args = parse(
         rest,
         ["root"],
-        ["cwd", "env", "timeout"],
+        ["cwd", "env", "timeout", "trace-files"],
         `${me} sandboxes exec <id> -- ls -la`,
       );
       const command = args.rest ?? args.positional.slice(1);
@@ -2449,25 +2711,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     }
     case "cp": {
       const [from, to] = parse(rest, ["r", "recursive"], []).positional;
-      const source = remote(need(from, "a source"));
-      const target = remote(need(to, "a destination"));
-      // A destination ending in / (or a local directory) takes the source's
-      // own name inside it, as cp does.
-      const inside = (dir: string, path: string) =>
-        `${dir.replace(/\/+$/, "")}/${path.replace(/\/+$/, "").split("/").pop()}`;
-      if (source && !target) {
-        const local = await import("node:fs/promises").then((fs) => fs.stat(to!).catch(() => null));
-        await (
-          await use(source.id)
-        ).files.download(
-          source.path,
-          to!.endsWith("/") || local?.isDirectory() ? inside(to!, source.path) : to!,
-        );
-      } else if (!source && target)
-        await (
-          await use(target.id)
-        ).files.upload(from!, target.path.endsWith("/") ? inside(target.path, from!) : target.path);
-      else throw usage("Name exactly one side as <sandbox-id>:/path.");
+      await copyFile(need(from, "a source"), need(to, "a destination"), use, "<sandbox-id>");
       print(`Copied ${from} to ${to}.`, { from, to });
       return 0;
     }
@@ -2500,6 +2744,38 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           ? preview.url
           : `${preview.urlWithToken ?? preview.url}\nPrivate: send the header x-runtime-preview-token: ${preview.token} (expires ${preview.tokenExpiresAt}).`,
         preview,
+      );
+      return 0;
+    }
+    case "link": {
+      if (rest[0] === "revoke") {
+        const sbx = await use(need(rest[1], "runtime sandboxes link revoke <id>"));
+        const revoked = await sbx.files.revokeLinks();
+        print(`Every link made for ${sbx.id} until now is refused.`, revoked);
+        return 0;
+      }
+      const args = parse(rest, ["put", "archive", "no-wake"], ["expires", "filename", "max-bytes"]);
+      const example = "runtime sandboxes link <id> /workspace/report.pdf";
+      const path = need(args.positional[1], example);
+      const sbx = await use(need(args.positional[0], example));
+      const expires = flag(args, "expires");
+      const expiresInSeconds = expires === undefined ? undefined : durationSeconds(expires);
+      const wake = has(args, "no-wake") ? false : undefined;
+      const link = has(args, "put")
+        ? await sbx.files.uploadUrl(path, {
+            expiresInSeconds,
+            maxBytes: integer(args, "max-bytes"),
+            wake,
+          })
+        : await sbx.files.downloadUrl(path, {
+            expiresInSeconds,
+            filename: flag(args, "filename"),
+            archive: has(args, "archive") || undefined,
+            wake,
+          });
+      print(
+        `${link.url}\n${link.method === "PUT" ? `Upload: curl -T <file> '${link.url}'` : `Download: curl -fLo ${JSON.stringify(link.filename ?? link.path.split("/").pop() ?? "file")}${link.archive ? ".tar.gz" : ""} '${link.url}'`} (works until ${link.expiresAt}).`,
+        link,
       );
       return 0;
     }
@@ -2736,21 +3012,23 @@ export function parseSecretRules(values: string[]): SecretRule[] {
   }
   return [...byMethods.values()];
 }
-/** `--only-label role=hub,tier=x --only-sandbox <id>`: a sandbox whose labels
- * hold every pair of any one --only-label gets the secret, and so does each
- * --only-sandbox. `--all-sandboxes`: every sandbox again. Nothing: undefined,
- * so a replacement keeps the scope it has. */
+/** `--only-label role=hub,tier=x --only-sandbox <id> --only-app <id>`: a
+ * sandbox whose labels hold every pair of any one --only-label gets the
+ * secret, and so does each --only-sandbox and every copy of each --only-app.
+ * `--all-sandboxes`: every sandbox again. Nothing: undefined, so a
+ * replacement keeps the scope it has. */
 export function parseSecretScope(
   labels: string[] | undefined,
   sandboxes: string[] | undefined,
   all: boolean,
+  apps?: string[],
 ): SecretScope | undefined {
-  if (all && (labels?.length || sandboxes?.length))
+  if (all && (labels?.length || sandboxes?.length || apps?.length))
     throw usage(
-      "--all-sandboxes gives the secret to every sandbox; leave out --only-label and --only-sandbox.",
+      "--all-sandboxes gives the secret to every sandbox; leave out --only-label, --only-sandbox and --only-app.",
     );
   if (all) return {};
-  if (!labels?.length && !sandboxes?.length) return undefined;
+  if (!labels?.length && !sandboxes?.length && !apps?.length) return undefined;
   const selectors = (labels ?? []).map((text) => {
     const selector: Record<string, string> = {};
     for (const pair of text.split(",").filter(Boolean)) {
@@ -2763,19 +3041,22 @@ export function parseSecretScope(
       throw usage(`--only-label takes key=value pairs, such as role=hub; got "${text}".`);
     return selector;
   });
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   for (const id of sandboxes ?? [])
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
-      throw usage(`--only-sandbox takes a sandbox id; "${id}" is not one.`);
+    if (!uuid.test(id)) throw usage(`--only-sandbox takes a sandbox id; "${id}" is not one.`);
+  for (const id of apps ?? [])
+    if (!uuid.test(id))
+      throw usage(`--only-app takes an App's id (GET /v1/apps lists them); "${id}" is not one.`);
+  const ids = (list: string[]) => [...new Set(list.map((id) => id.toLowerCase()))];
   return {
     ...(selectors.length ? { labels: selectors } : {}),
-    ...(sandboxes?.length
-      ? { sandboxes: [...new Set(sandboxes.map((id) => id.toLowerCase()))] }
-      : {}),
+    ...(sandboxes?.length ? { sandboxes: ids(sandboxes) } : {}),
+    ...(apps?.length ? { apps: ids(apps) } : {}),
   };
 }
 /** Who gets a secret, in a few words. */
 export const scopeText = (only: SecretScope | undefined) =>
-  only && (only.labels?.length || only.sandboxes?.length)
+  only && (only.labels?.length || only.sandboxes?.length || only.apps?.length)
     ? [
         ...(only.labels ?? []).map((selector) =>
           Object.entries(selector)
@@ -2783,6 +3064,7 @@ export const scopeText = (only: SecretScope | undefined) =>
             .join(","),
         ),
         ...(only.sandboxes ?? []),
+        ...(only.apps ?? []).map((id) => `app ${id}`),
       ].join(" | ")
     : "all";
 const ruleText = (rules: SecretRule[] | undefined) =>
@@ -2812,7 +3094,9 @@ export async function secretsCommand(
       "version",
       "only-label",
       "only-sandbox",
+      "only-app",
       "agent",
+      "env",
     ],
   );
   const print = (human: string, value: unknown) =>
@@ -2822,7 +3106,7 @@ export async function secretsCommand(
       ? table([
           ["name", "hosts", "header", "placeholder", "allow", "sandboxes", "jobs"],
           ...list.map(({ name, sandboxes: secret, jobs }) => [
-            name,
+            secret?.env ? `${name} (as ${secret.env})` : name,
             secret ? secret.hosts.join(",") : "-",
             secret?.header ? `${secret.header}: ${secret.format ?? "{value}"}` : "-",
             secret ? secret.placeholder : "-",
@@ -2862,7 +3146,9 @@ export async function secretsCommand(
         args.flags.has("allow") ||
         args.flags.has("only-label") ||
         args.flags.has("only-sandbox") ||
-        args.flags.has("all-sandboxes"))
+        args.flags.has("only-app") ||
+        args.flags.has("all-sandboxes") ||
+        args.flags.has("env"))
     )
       throw usage(
         `rotate replaces the copy for jobs. ${jobsOnly}; to change the sandboxes' copy, set it again with --host.`,
@@ -2876,7 +3162,9 @@ export async function secretsCommand(
         args.flags.has("format") ||
         args.flags.has("only-label") ||
         args.flags.has("only-sandbox") ||
-        args.flags.has("all-sandboxes")
+        args.flags.has("only-app") ||
+        args.flags.has("all-sandboxes") ||
+        args.flags.has("env")
       )
         throw usage(
           `--keep-value changes only --host and --allow, and only to narrower ones. Change who gets it with \`${me} secrets scope\`; anything else needs the value.`,
@@ -2924,6 +3212,10 @@ export async function secretsCommand(
       return 0;
     }
     if (!hosts.length) {
+      if (args.flags.has("env"))
+        throw usage(
+          "--env names the variable sandboxes see the secret in, so it needs --host; a job names its variable on jobs create (--secret NAME=VAR).",
+        );
       const saved = await runtime.secrets.set(name, { value, jobs: true });
       print(
         `Stored ${name} for jobs, version ${saved.jobs.version}. Bind it: ${me} jobs create ... --secret ${name}`,
@@ -2933,12 +3225,14 @@ export async function secretsCommand(
     }
     const header = flag(args, "header");
     const format = flag(args, "format");
+    const variable = flag(args, "env");
     const allow = args.flags.get("allow");
     const rules = allow ? parseSecretRules(allow) : undefined;
     const only = parseSecretScope(
       args.flags.get("only-label"),
       args.flags.get("only-sandbox"),
       has(args, "all-sandboxes"),
+      args.flags.get("only-app"),
     );
     const saved = await runtime.secrets.set(name, {
       value,
@@ -2947,13 +3241,15 @@ export async function secretsCommand(
       ...(format ? { format } : {}),
       ...(rules ? { rules } : {}),
       ...(only ? { only } : {}),
+      ...(variable ? { env: variable } : {}),
       ...(jobs ? { jobs: true as const } : {}),
     });
+    const sees = `${saved.env ?? saved.name}=${saved.placeholder}`;
     print(
       [
         saved.only
-          ? `Stored ${saved.name}. Only these sandboxes get it and see ${saved.name}=${saved.placeholder}: ${scopeText(saved.only)}.`
-          : `Stored ${saved.name}. Every sandbox sees ${saved.name}=${saved.placeholder}.`,
+          ? `Stored ${saved.name}. Only these sandboxes get it and see ${sees}: ${scopeText(saved.only)}.`
+          : `Stored ${saved.name}. Every sandbox sees ${sees}.`,
         saved.header
           ? `Requests to ${saved.hosts.join(", ")} get ${saved.header}: ${saved.format ?? "{value}"} over HTTPS.`
           : `Over HTTPS to ${saved.hosts.join(", ")}, the placeholder becomes the value in the Authorization header or another credential header (x-api-key, x-goog-api-key); in the URL it stays a placeholder.`,
@@ -2977,10 +3273,11 @@ export async function secretsCommand(
       args.flags.get("only-label"),
       args.flags.get("only-sandbox"),
       has(args, "all-sandboxes"),
+      args.flags.get("only-app"),
     );
     if (!only)
       throw usage(
-        "Say who gets it: --only-label key=value (once per selector), --only-sandbox <id>, or --all-sandboxes.",
+        "Say who gets it: --only-label key=value (once per selector), --only-sandbox <id>, --only-app <app id>, or --all-sandboxes.",
       );
     const saved = await (await client(env)).secrets.scope(name, only);
     print(
@@ -3370,6 +3667,242 @@ async function nameSaved(env: NodeJS.ProcessEnv) {
   }
 }
 
+const RESERVATIONS_HELP = `runtime reservations <command>
+
+  book --sandboxes <n> --from <time> --to <time> [--vcpu <n>] [--memory <MiB>]
+       [--disk <MiB>] [--region <region>]
+      Hold room for n sandboxes of one size for a window of up to 24 hours that
+      starts within 14 days. The answer is at once: booked, or declined with
+      the most that fits and the nearest window that fits all of them (exit
+      code 1). In the window, creates are never refused for room or limits up
+      to what you booked. Sandboxes you run bill as usual; booked room none
+      of them uses costs a quarter of the memory rate, and the answer says the
+      most that comes to if none run. A time is an ISO time, now, or HH:MM on this machine's clock: today, or tomorrow when it
+      has passed. --to before --from means the next day.
+  keep --sandboxes <n> [--snapshot <id>]... [--for-key] [--vcpu <n>]
+       [--memory <MiB>] [--disk <MiB>] [--region <region>]
+      Standing room: hold room for n sandboxes from now until you cancel it,
+      for a pool that deletes a sandbox after each use and makes another.
+      With --snapshot, on the servers holding those snapshots, at their size.
+      --for-key keeps it for this key's sandboxes alone. Room none of them
+      uses costs a quarter of the memory rate every hour it is held.
+  change <id> [--sandboxes <n>] [--snapshot <id>]...
+      Change standing room in place; it moves or grows only when all of it fits.
+  ls [--limit <n>] [--before <next>]
+                          Your bookings, newest first
+  get <id>                One booking, with how much of it is in use
+  cancel <id>             Give the room back
+
+  runtime reservations book --sandboxes 300 --from 21:00 --to 23:00
+  runtime reservations book --sandboxes 50 --vcpu 4 --memory 8192 --from now --to 02:00
+  runtime reservations keep --sandboxes 40 --snapshot <id> --for-key
+
+A booking is the whole account's: a compartment's key cannot book or read one.
+`;
+
+/** A booking's time on the command line: an ISO time, `now`, or HH:MM on this
+ * machine's clock. HH:MM is the next such time at or after `after` (the
+ * window's start for `--to`, so an end before the start is the next day, and
+ * `now` for `--from`: today, or tomorrow once it has passed). */
+export function bookingTime(name: string, value: string, now: number, after: number = now): Date {
+  if (value === "now") return new Date(now);
+  const clock = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (clock) {
+    const [hours, minutes] = [Number(clock[1]), Number(clock[2])];
+    if (hours > 23 || minutes > 59) throw usage(`--${name} ${value} is not a time of day.`);
+    const at = new Date(after);
+    at.setHours(hours, minutes, 0, 0);
+    // A start a minute or less ago still reads as now; the server treats it so.
+    if (at.getTime() < after - (after === now ? 60_000 : 0)) at.setDate(at.getDate() + 1);
+    return at;
+  }
+  const at = Date.parse(value);
+  if (Number.isNaN(at))
+    throw usage(
+      `--${name} takes an ISO time such as 2026-10-17T21:00:00Z, HH:MM or now; got ${value}.`,
+    );
+  return new Date(at);
+}
+
+/** The words for a booking: the line for a confirmed one, the server's message
+ * and what would fit for a declined one. */
+function bookingText(b: RoomBooking): string {
+  if (b.standing) {
+    const where = b.snapshots.length ? " on the servers holding its snapshots" : "";
+    const whose = b.forKey ? " for this key" : "";
+    if (b.status === "confirmed") {
+      const unused =
+        b.unusedRateMicros !== "0"
+          ? ` Room none of your sandboxes uses costs $${Number(b.unusedRateMicros) / 1e6} per GiB-hour: at most $${(Math.ceil(Number(b.unusedPerHourMicros) / 10_000) / 100).toFixed(2)} an hour if none run.`
+          : "";
+      return `Holding ${b.sandboxes} sandboxes (${b.vcpu} vCPU, ${b.memoryMiB} MiB) in ${b.region}${where}${whose} until you cancel; ${b.inUse} in use. Creates up to that are never refused for room or limits.${unused} id ${b.id}`;
+    }
+    if (b.status === "cancelled")
+      return `Cancelled the standing room for ${b.sandboxes} sandboxes in ${b.region}. id ${b.id}`;
+    return [b.message, `Largest that fits: ${b.largestSandboxes} sandboxes.`].join("\n");
+  }
+  const window = `from ${new Date(b.startsAt).toLocaleString()} to ${new Date(b.endsAt!).toLocaleString()}`;
+  if (b.status === "confirmed") {
+    const booked = `Booked ${b.sandboxes} sandboxes (${b.vcpu} vCPU, ${b.memoryMiB} MiB) in ${b.region} ${window}. Creates in the window are never refused for room or limits up to that.`;
+    // Bookings made before unused room had a price are never charged for it.
+    const unused =
+      b.unusedRateMicros && b.unusedRateMicros !== "0"
+        ? ` Room none of your sandboxes uses costs $${Number(b.unusedRateMicros) / 1e6} per GiB-hour: at most $${(Math.ceil(Number(b.unusedMaxMicros) / 10_000) / 100).toFixed(2)} if none run, nothing if cancelled at least an hour before the start.`
+        : "";
+    return `${booked}${unused} id ${b.id}`;
+  }
+  if (b.status === "cancelled")
+    return `Cancelled the booking of ${b.sandboxes} sandboxes in ${b.region} ${window}. id ${b.id}`;
+  return [
+    b.message,
+    `Largest that fits: ${b.largestSandboxes} sandboxes.`,
+    b.nearestWindow
+      ? `Nearest window for all ${b.sandboxes}: from ${new Date(b.nearestWindow.startsAt).toLocaleString()} to ${new Date(b.nearestWindow.endsAt).toLocaleString()}.`
+      : `No window in the next 14 days holds all ${b.sandboxes}.`,
+  ].join("\n");
+}
+
+async function reservationsCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  out: Out,
+): Promise<number> {
+  product = "reservations";
+  const [verb, ...rest] = argv;
+  const print = (human: string, value: unknown) =>
+    out.write(out.json ? JSON.stringify(value) : human);
+  if (!verb || verb === "help" || verb === "--help" || verb === "-h") {
+    print(named(RESERVATIONS_HELP), { usage: named(RESERVATIONS_HELP) });
+    return 0;
+  }
+  if (verb === "book") {
+    const args = parse(rest, [], ["sandboxes", "from", "to", "vcpu", "memory", "disk", "region"]);
+    const count = integer(args, "sandboxes");
+    const from = flag(args, "from");
+    const to = flag(args, "to");
+    if (count === undefined || !from || !to || args.positional.length)
+      throw usage(
+        `Usage: ${named("runtime reservations book --sandboxes <n> --from <time> --to <time>")}`,
+      );
+    const now = Date.now();
+    const startsAt = bookingTime("from", from, now);
+    const endsAt = bookingTime("to", to, now, startsAt.getTime());
+    const vcpu = integer(args, "vcpu");
+    const memoryMiB = integer(args, "memory");
+    const diskMiB = integer(args, "disk");
+    const region = flag(args, "region");
+    const booking = await (
+      await client(env)
+    ).reservations.create({
+      sandboxes: count,
+      startsAt,
+      endsAt,
+      ...(vcpu !== undefined ? { vcpu } : {}),
+      ...(memoryMiB !== undefined ? { memoryMiB } : {}),
+      ...(diskMiB !== undefined ? { diskMiB } : {}),
+      ...(region ? { region } : {}),
+    });
+    print(bookingText(booking), booking);
+    return booking.status === "declined" ? 1 : 0;
+  }
+  if (verb === "keep") {
+    const args = parse(
+      rest,
+      ["for-key"],
+      ["sandboxes", "snapshot", "vcpu", "memory", "disk", "region"],
+    );
+    const count = integer(args, "sandboxes");
+    if (count === undefined || args.positional.length)
+      throw usage(
+        `Usage: ${named("runtime reservations keep --sandboxes <n> [--snapshot <id>]...")}`,
+      );
+    const vcpu = integer(args, "vcpu");
+    const memoryMiB = integer(args, "memory");
+    const diskMiB = integer(args, "disk");
+    const region = flag(args, "region");
+    const snapshots = args.flags.get("snapshot") ?? [];
+    const booking = await (
+      await client(env)
+    ).reservations.keep({
+      sandboxes: count,
+      ...(snapshots.length ? { snapshots } : {}),
+      ...(has(args, "for-key") ? { forKey: true } : {}),
+      ...(vcpu !== undefined ? { vcpu } : {}),
+      ...(memoryMiB !== undefined ? { memoryMiB } : {}),
+      ...(diskMiB !== undefined ? { diskMiB } : {}),
+      ...(region ? { region } : {}),
+    });
+    print(bookingText(booking), booking);
+    return booking.status === "declined" ? 1 : 0;
+  }
+  if (verb === "change") {
+    const args = parse(rest, [], ["sandboxes", "snapshot"]);
+    const id = args.positional[0];
+    const count = integer(args, "sandboxes");
+    const snapshots = args.flags.get("snapshot");
+    if (!id || args.positional.length > 1 || (count === undefined && !snapshots?.length))
+      throw usage(
+        `Usage: ${named("runtime reservations change <id> [--sandboxes <n>] [--snapshot <id>]...")}`,
+      );
+    const booking = await (
+      await client(env)
+    ).reservations.update(id, {
+      ...(count !== undefined ? { sandboxes: count } : {}),
+      ...(snapshots?.length ? { snapshots } : {}),
+    });
+    print(bookingText(booking), booking);
+    return 0;
+  }
+  if (verb === "ls" || verb === "list") {
+    const args = parse(rest, [], ["limit", "before"]);
+    if (args.positional.length) throw usage(`Usage: ${named("runtime reservations ls")}`);
+    const limit = integer(args, "limit");
+    const cursor = flag(args, "before");
+    const page = await (
+      await client(env)
+    ).reservations.list({
+      ...(limit !== undefined ? { limit } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
+    print(
+      page.items.length
+        ? table([
+            ["ID", "STATE", "SANDBOXES", "SIZE", "REGION", "FROM", "TO", "IN USE"],
+            ...page.items.map((b) => [
+              b.id,
+              b.status === "confirmed" ? (b.phase ?? "confirmed") : b.status,
+              String(b.sandboxes),
+              `${b.vcpu} vCPU, ${b.memoryMiB} MiB`,
+              b.region,
+              new Date(b.startsAt).toLocaleString(),
+              b.endsAt ? new Date(b.endsAt).toLocaleString() : "until cancelled",
+              b.status === "confirmed" ? `${b.inUse} (peak ${b.peakInUse})` : "-",
+            ]),
+          ]) + (page.nextCursor ? `\nMore: ${me} reservations ls --before ${page.nextCursor}` : "")
+        : "No bookings.",
+      page,
+    );
+    return 0;
+  }
+  if (verb === "get" || verb === "cancel") {
+    const args = parse(rest, [], []);
+    const id = args.positional[0];
+    if (!id || args.positional.length > 1)
+      throw usage(`Usage: ${named(`runtime reservations ${verb} <id>`)}`);
+    const api = (await client(env)).reservations;
+    const booking = await (verb === "get" ? api.get(id) : api.cancel(id));
+    print(
+      bookingText(booking) +
+        (verb === "get" && booking.status === "confirmed"
+          ? `\nIn use now: ${booking.inUse} (peak ${booking.peakInUse}). Estimate at most ${usdOf(booking.estimateMicros)}.`
+          : ""),
+      booking,
+    );
+    return 0;
+  }
+  throw unknown("reservations command", verb, ["book", "keep", "change", "ls", "get", "cancel"]);
+}
+
 /** Dollars from integer microdollars, for a person to read: "$5.00". */
 const usdOf = (micros: number | string) =>
   `$${(Number(BigInt(micros) / 10_000n) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -3641,13 +4174,17 @@ const IMAGE_HELP = `runtime images <command>
   build [<folder>] [--dockerfile|-f <Dockerfile>] | --from <image> | --pip <pkg>... --apt <pkg>... --npm <pkg>...
         [--name <name>] [--tag|-t name[:tag]]... [--target <stage>] [--build-arg K=V]... [--no-cache]
         [--start <command>] [--ready-port <port> | --ready-command <command>]
-        [--max-image-mib 8192] [--disk-mib <1024-32768>] [--timeout <seconds>]
+        [--max-image-mib 8192] [--disk-mib <1024-32768>] [--timeout <seconds>] [--keep <n>]
                         Build and stream the log; prints the image id when ready.
                         --disk-mib sizes the build's scratch disk, where earlier
-                        stages and the context live.
-                        A Dockerfile's folder is the context: everything its
-                        .dockerignore leaves in (100 MiB compressed at most) is
-                        sent, and a rebuild sends only what changed.
+                        stages and the context live. --keep, once it is ready,
+                        deletes the name's older versions but the newest n
+                        (this one among them) and any an App still needs.
+                        The folder is the context (without one, the
+                        Dockerfile's own folder): everything its .dockerignore
+                        leaves in (100 MiB compressed at most) is sent, and a
+                        rebuild sends only what changed. -f is read from where
+                        you run the command, as docker build reads it.
   ls                    Your images
   versions <name>       Every version of a name, newest first
   get <image>           One image: an id, name, name:tag or name@version
@@ -3688,7 +4225,46 @@ const IMAGE_BUILD_VALUES = [
   "max-image-mib",
   "disk-mib",
   "timeout",
+  "keep",
 ];
+
+/** `images build --keep n`: the name's versions older than its newest n,
+ * deleted once `built` is ready, so a name rebuilt on each merge does not keep
+ * every version (21 October 2026: our website's App, rebuilt from main on
+ * each merge, held 221 images on one server, 24 GiB more a day). A
+ * version an App still needs is refused by the API (image_in_use) and kept; a
+ * build still running is never touched; any other failure is said and kept,
+ * since the build itself is done. */
+async function keepNewest(
+  api: Awaited<ReturnType<typeof client>>["images"],
+  built: Image,
+  keep: number,
+  out: Out,
+): Promise<{ deleted: string[]; kept: { id: string; code: string }[] }> {
+  // Newest first; the build just made is never among those deleted, even when
+  // a later build of the name finished first.
+  const older = (await (await api.list({ name: built.name!, limit: 100 })).toArray(Infinity))
+    .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))
+    .slice(keep)
+    .filter(
+      (image) => image.id !== built.id && (image.state === "ready" || image.state === "failed"),
+    );
+  const deleted: string[] = [];
+  const kept: { id: string; code: string }[] = [];
+  for (const image of older) {
+    const named = `${image.name}@${image.version}`;
+    try {
+      await api.delete(image.id);
+      deleted.push(image.id);
+      if (!out.json) out.error(`Deleted ${named}`);
+    } catch (error) {
+      if (!(error instanceof RuntimeError)) throw error;
+      kept.push({ id: image.id, code: error.code });
+      if (!out.json) out.error(`Kept ${named}: ${error.message}`);
+    }
+  }
+  return { deleted, kept };
+}
 
 export async function imageCommand(
   argv: string[],
@@ -3760,10 +4336,25 @@ export async function imageCommand(
       let input: Parameters<typeof api.build>[0];
       if (fromDockerfile) {
         const context = resolve(folder ?? dirname(dockerfile!));
-        const file = resolve(context, dockerfile ?? "Dockerfile");
-        const text = await readFile(file, "utf8").catch(() => {
-          throw usage(`No Dockerfile at ${file}.`);
-        });
+        // -f is read from where the command runs, as `docker build` reads it;
+        // a path inside the folder still works, as it always has. Before, a
+        // relative -f was read inside the folder only, and without a folder
+        // twice over: apps/web/apps/web/Dockerfile (18 October 2026).
+        const files = dockerfile
+          ? [...new Set([resolve(dockerfile), resolve(context, dockerfile)])]
+          : [join(context, "Dockerfile")];
+        let file = files[0]!;
+        let text: string | undefined;
+        for (const candidate of files) {
+          text = await readFile(candidate, "utf8").catch(() => undefined);
+          if (text !== undefined) {
+            file = candidate;
+            break;
+          }
+        }
+        if (text === undefined) throw usage(`No Dockerfile at ${files.join(" or ")}.`);
+        if (!out.json && file !== join(context, "Dockerfile"))
+          out.error(`Using the Dockerfile ${file}`);
         input = {
           ...common,
           dockerfile: text,
@@ -3778,10 +4369,18 @@ export async function imageCommand(
           ...common,
           recipe: Object.fromEntries(Object.entries(recipe).filter(([, v]) => v.length)),
         };
+      const keep = integer(args, "keep");
+      if (keep !== undefined && (keep < 1 || !name))
+        throw usage("--keep takes 1 or more, and a --name or -t for the versions it keeps.");
       const built = await api.build(input, {
         ...(out.json ? {} : { onLog: (line) => out.error(line.text) }),
       });
-      print(built.id, built);
+      if (keep === undefined) {
+        print(built.id, built);
+        return 0;
+      }
+      const kept = await keepNewest(api, built, keep, out);
+      print(built.id, { ...built, ...kept });
       return 0;
     }
     case "ls":
@@ -3921,16 +4520,33 @@ const JOB_HELP = `runtime jobs <command>
   create <name> (--cron "<min hour day month weekday>" [--timezone Europe/Berlin] | --at <time|now>)
          [--vcpu 2] [--memory 4096] [--disk 4096] [--cpu shared|reserved] [--cpu-floor <thousandths>]
          [--timeout 1800] [--attempts 1] [--backoff 30] [--secret NAME[=ENV_NAME]]...
-         [--cwd /workspace/dir] [--max-cost <usd>] [--max-total-cost <usd>] [--region r] -- <command...>
+         [--cwd /workspace/dir] [--max-cost <usd>] [--max-total-cost <usd>] [--region r]
+         [--image <name[:tag]|name@version|id>] [--alert-webhook <https url> [--alert-secret NAME]]
+         [--alert-email] [--alert-after <runs>] [--volume <volumeId>:/data[:snapshot]]...
+         -- <command...>
                                               Schedule it; prints its id. Nothing runs until its time.
                                               --at takes an ISO time (2026-10-01T03:00:00Z) or now.
                                               The command runs as given, no shell: -- bash -lc '...'
                                               --attempts: tries per occurrence when it exits non-zero, 1 to 5.
                                               --secret: a secret stored with --jobs, in the run's
                                               environment as ENV_NAME (NAME by default)
+                                              --image: an image of yours each run starts from
+                                              --alert-*: when --alert-after runs in a row (1) fail, POST
+                                              the webhook (signed with the jobs secret NAME) or email
+                                              you; once more when a run succeeds again
+                                              --volume: a volume every run attaches, read-write one
+                                              run at a time (or :snapshot, a read-only copy), so what
+                                              one run writes there the next one reads; the job runs
+                                              in the volume's region unless --region says otherwise
+  update <id> [--image <ref> | --standard-image] [--vcpu ..] [--memory ..] [--disk ..] [--timeout ..]
+         [--attempts ..] [--backoff ..] [--secret NAME[=ENV_NAME]]... [--cwd ..] [--max-total-cost <usd>]
+         [--volume <volumeId>:/data[:snapshot]]... [--no-volumes]
+         [--alert-webhook <url> [--alert-secret NAME]] [--alert-email] [--alert-after <runs>] [--no-alert]
+         [-- <command...>]                    Change it in place: the next run uses it; history stays.
+                                              --secret and --volume replace the whole list
   ls                                          Your jobs: state, schedule and next run
   get <id>                                    One job, in full
-  runs <id>                                   Its runs: state, exit code, when
+  runs <id> [--all]                           Its newest 100 runs (--all: every one, oldest first)
   logs <runId|jobId> [-f] [--raw]             A run's output (a job id: its latest run); -f follows it;
                                               on a terminal control characters show as \\uXXXX
                                               unless --raw
@@ -3944,9 +4560,61 @@ const JOB_HELP = `runtime jobs <command>
 Examples
   runtime jobs create nightly --cron "0 3 * * *" --timezone Europe/Berlin -- python3 /workspace/report.py
   runtime jobs create once --at now -- bash -lc 'echo hello from a job'
+  runtime jobs create count --cron "0 * * * *" --volume <volumeId>:/data -- bash -lc 'date >> /data/runs'
   runtime jobs trigger <jobId> && runtime jobs logs <jobId> -f
   runtime jobs reschedule <jobId> --cron "30 4 * * 1-5" --timezone Europe/Berlin
+  runtime jobs update <jobId> --image hub:latest --alert-webhook https://example.com/hook --alert-after 3
 `;
+
+/** The `--alert-*` flags of create and update, as a job's alert; undefined
+ * when none is given. The secret is a jobs secret, by name. */
+async function alertFlags(
+  args: ReturnType<typeof parse>,
+  runtime: Awaited<ReturnType<typeof client>>,
+): Promise<JobAlert | undefined> {
+  const url = flag(args, "alert-webhook");
+  const secret = flag(args, "alert-secret");
+  const email = has(args, "alert-email");
+  const after = integer(args, "alert-after");
+  if (secret !== undefined && url === undefined)
+    throw usage("--alert-secret signs the --alert-webhook: give the webhook's URL too.");
+  if (url === undefined && !email) {
+    if (after !== undefined)
+      throw usage("--alert-after says when to alert: give --alert-webhook <url> or --alert-email.");
+    return undefined;
+  }
+  let secretId: string | undefined;
+  if (secret !== undefined) {
+    secretId = (await runtime.secrets.all()).find((s) => s.name === secret)?.jobs?.id;
+    if (!secretId)
+      throw usage(
+        `${secret} has no copy for jobs. Store one: printf %s "$VALUE" | ${me} secrets set ${secret} --jobs`,
+      );
+  }
+  return {
+    ...(after !== undefined ? { afterFailures: after } : {}),
+    ...(url !== undefined ? { webhook: { url, ...(secretId ? { secretId } : {}) } } : {}),
+    ...(email ? { email: true as const } : {}),
+  };
+}
+/** `--secret NAME[=ENV_NAME]`, each a jobs secret by name. */
+async function secretFlags(
+  args: ReturnType<typeof parse>,
+  runtime: Awaited<ReturnType<typeof client>>,
+): Promise<Array<{ name: string; secretId: string }> | undefined> {
+  const bindings = args.flags.get("secret") ?? [];
+  if (!bindings.length) return undefined;
+  const known = await runtime.secrets.all();
+  return bindings.map((binding) => {
+    const [secret, env = secret] = binding.split("=", 2) as [string, string | undefined];
+    const found = known.find((s) => s.name === secret)?.jobs;
+    if (!found)
+      throw usage(
+        `${secret} has no copy for jobs. Store one: printf %s "$VALUE" | ${me} secrets set ${secret} --jobs`,
+      );
+    return { name: env, secretId: found.id };
+  });
+}
 
 const when = (ms: number | null | undefined) => (ms == null ? "-" : new Date(ms).toISOString());
 function scheduleText(job: Job): string {
@@ -3980,7 +4648,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
     case "create": {
       const args = parse(
         rest,
-        [],
+        ["alert-email"],
         [
           "cron",
           "timezone",
@@ -3998,6 +4666,11 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
           "max-cost",
           "max-total-cost",
           "region",
+          "image",
+          "alert-webhook",
+          "alert-secret",
+          "alert-after",
+          "volume",
         ],
         `${me} jobs create <name> --cron "0 3 * * *" -- python3 -c '...'`,
       );
@@ -4019,21 +4692,15 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
       const backoff = integer(args, "backoff");
       if (backoff !== undefined && attempts === undefined)
         throw usage("--backoff goes with --attempts: the seconds between tries.");
-      const bindings = args.flags.get("secret") ?? [];
-      let secrets: Array<{ name: string; secretId: string }> | undefined;
-      if (bindings.length) {
-        const known = await runtime.secrets.all();
-        secrets = bindings.map((binding) => {
-          const [secret, env = secret] = binding.split("=", 2) as [string, string | undefined];
-          const found = known.find((s) => s.name === secret)?.jobs;
-          if (!found)
-            throw usage(
-              `${secret} has no copy for jobs. Store one: printf %s "$VALUE" | ${me} secrets set ${secret} --jobs`,
-            );
-          return { name: env, secretId: found.id };
-        });
-      }
+      const secrets = await secretFlags(args, runtime);
+      const alert = await alertFlags(args, runtime);
       const cwd = flag(args, "cwd");
+      const volumes = (args.flags.get("volume") ?? []).map(attachment);
+      // A run starts on its volumes' server, so the job is in their region
+      // unless --region says otherwise (and the API names the mismatch).
+      const region =
+        flag(args, "region") ??
+        (volumes.length ? (await runtime.volumes.get(volumes[0]!.volumeId)).region : undefined);
       const job = await api.create({
         name,
         schedule:
@@ -4054,10 +4721,11 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
           ...(integer(args, "cpu-floor") !== undefined
             ? { cpuFloorMillis: integer(args, "cpu-floor")! }
             : {}),
-          ...(flag(args, "region") ? { region: flag(args, "region")! } : {}),
+          ...(region ? { region } : {}),
           ...(usdMicros(args, "max-cost") !== undefined
             ? { maxCostMicros: usdMicros(args, "max-cost")! }
             : {}),
+          ...(volumes.length ? { volumes } : {}),
         },
         ...(attempts !== undefined
           ? { retry: { maxAttempts: attempts, backoffSeconds: backoff ?? 30 } }
@@ -4066,6 +4734,8 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
         ...(usdMicros(args, "max-total-cost") !== undefined
           ? { maxTotalCostMicros: usdMicros(args, "max-total-cost")! }
           : {}),
+        ...(flag(args, "image") ? { image: flag(args, "image")! } : {}),
+        ...(alert ? { alert } : {}),
       });
       if (!out.json)
         out.error(
@@ -4102,8 +4772,13 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
       return 0;
     }
     case "runs": {
-      const jobId = need(rest[0], "a job id");
-      const all = await (await api.runs(jobId, { limit: 100 })).toArray(Infinity);
+      // The newest hundred, newest first: a job every minute holds thousands.
+      // --all: every run, oldest first.
+      const args = parse(rest, ["all"], []);
+      const jobId = need(args.positional[0], "a job id");
+      const all = has(args, "all")
+        ? await (await api.runs(jobId, { limit: 100 })).toArray(Infinity)
+        : (await api.runs(jobId, { limit: 100, order: "newest" })).data;
       print(
         all.length
           ? table([
@@ -4138,8 +4813,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
       } catch (error) {
         if (!(error instanceof NotFoundError)) throw error;
         // A job's id: its latest run.
-        const runs = await (await api.runs(id, { limit: 100 })).toArray(Infinity);
-        const latest = runs.at(-1);
+        const [latest] = (await api.runs(id, { limit: 1, order: "newest" })).data;
         if (!latest) {
           const job = await api.get(id);
           print(`${job.name} has not run yet. Next run ${when(job.nextRunAt)}.`, {
@@ -4201,6 +4875,98 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
       );
       return 0;
     }
+    case "update": {
+      const args = parse(
+        rest,
+        ["alert-email", "no-alert", "standard-image", "no-volumes"],
+        [
+          "image",
+          "vcpu",
+          "memory",
+          "disk",
+          "cpu",
+          "cpu-floor",
+          "timeout",
+          "attempts",
+          "backoff",
+          "secret",
+          "cwd",
+          "max-cost",
+          "max-total-cost",
+          "alert-webhook",
+          "alert-secret",
+          "alert-after",
+          "volume",
+        ],
+        `${me} jobs update <id> --image hub:latest`,
+      );
+      const id = need(args.positional[0], "a job id");
+      if (flag(args, "image") !== undefined && has(args, "standard-image"))
+        throw usage("Give --image <ref> or --standard-image, not both.");
+      const volumes = (args.flags.get("volume") ?? []).map(attachment);
+      if (volumes.length && has(args, "no-volumes"))
+        throw usage("Give --volume to set the volumes or --no-volumes to remove them, not both.");
+      const alert = await alertFlags(args, runtime);
+      if (alert && has(args, "no-alert"))
+        throw usage("Give --alert-* to set the alert or --no-alert to remove it, not both.");
+      const argv = args.rest ?? [];
+      const cwd = flag(args, "cwd");
+      if (cwd !== undefined && !argv.length)
+        throw usage(
+          `--cwd goes with the command: ${me} jobs update ${id} --cwd ${cwd} -- <command...>`,
+        );
+      const compute = {
+        ...(integer(args, "vcpu") !== undefined ? { vcpu: integer(args, "vcpu")! } : {}),
+        ...(integer(args, "memory") !== undefined ? { memoryMiB: integer(args, "memory")! } : {}),
+        ...(integer(args, "disk") !== undefined ? { diskMiB: integer(args, "disk")! } : {}),
+        ...(flag(args, "cpu")
+          ? { cpuMode: oneOf(args, "cpu", ["shared", "reserved"] as const) }
+          : {}),
+        ...(integer(args, "cpu-floor") !== undefined
+          ? { cpuFloorMillis: integer(args, "cpu-floor")! }
+          : {}),
+        ...(usdMicros(args, "max-cost") !== undefined
+          ? { maxCostMicros: usdMicros(args, "max-cost")! }
+          : {}),
+        ...(volumes.length ? { volumes } : {}),
+        ...(has(args, "no-volumes") ? { volumes: [] } : {}),
+      };
+      const retry = {
+        ...(integer(args, "attempts") !== undefined
+          ? { maxAttempts: integer(args, "attempts")! }
+          : {}),
+        ...(integer(args, "backoff") !== undefined
+          ? { backoffSeconds: integer(args, "backoff")! }
+          : {}),
+      };
+      const secrets = await secretFlags(args, runtime);
+      const changes: UpdateJob = {
+        ...(argv.length ? { command: cwd ? { argv, cwd } : argv } : {}),
+        ...(flag(args, "image") ? { image: flag(args, "image")! } : {}),
+        ...(has(args, "standard-image") ? { image: null } : {}),
+        ...(Object.keys(compute).length ? { compute } : {}),
+        ...(Object.keys(retry).length ? { retry } : {}),
+        ...(integer(args, "timeout") !== undefined
+          ? { timeoutSeconds: integer(args, "timeout")! }
+          : {}),
+        ...(secrets ? { secrets } : {}),
+        ...(usdMicros(args, "max-total-cost") !== undefined
+          ? { maxTotalCostMicros: usdMicros(args, "max-total-cost")! }
+          : {}),
+        ...(alert ? { alert } : {}),
+        ...(has(args, "no-alert") ? { alert: null } : {}),
+      };
+      if (!Object.keys(changes).length)
+        throw usage(
+          `Say what changes: ${me} jobs update ${id} --image hub:latest, --timeout 600, --alert-email, or -- <new command...>`,
+        );
+      const job = await api.update(id, changes);
+      print(
+        `${job.name} updated (version ${job.version}); its next run uses it.${job.alert ? ` Alerts after ${job.alert.afterFailures} failing run${job.alert.afterFailures === 1 ? "" : "s"}.` : ""}`,
+        job,
+      );
+      return 0;
+    }
     case "reschedule": {
       const args = parse(
         rest,
@@ -4235,6 +5001,7 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
     "resume",
     "trigger",
     "reschedule",
+    "update",
     "cancel",
   ]);
 }
@@ -4628,7 +5395,7 @@ function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait
 /** Runs a command in a sandbox, streaming its output, and answers its exit code
  * (124 on a timeout), so a script's `set -e` behaves. */
 async function execute(
-  sbx: Sandbox,
+  sbx: Pick<Sandbox, "id" | "exec">,
   command: string[],
   args: Args,
   out: Out,
@@ -4638,6 +5405,12 @@ async function execute(
   ownInterrupt = true,
 ): Promise<number> {
   const target = command.length === 1 ? command[0]! : command;
+  // Only `sandboxes exec` takes --trace-files; `run`, `apps exec` and the
+  // drop-in machines' exec share this runner without it.
+  const traced =
+    !(args.flags instanceof Flags) || args.flags.known.has("trace-files")
+      ? flag(args, "trace-files")
+      : undefined;
   const extras = await import("./cli-extras.js");
   const stdin = await extras.pipedStdin();
   const options = {
@@ -4646,6 +5419,7 @@ async function execute(
     ...(args.flags.has("env") ? { env: envPairs(args, env) } : {}),
     ...(has(args, "root") ? { user: "root" as const } : {}),
     ...(timeout !== undefined ? { timeoutMs: timeout * 1000 } : {}),
+    ...(traced ? { traceFiles: true } : {}),
   };
   // Ctrl-C stops the command in the sandbox too, and says so; without this
   // the CLI exited and the command ran on unseen.
@@ -4669,6 +5443,8 @@ async function execute(
   } finally {
     process.off("SIGINT", onInterrupt);
   }
+  // What it read and wrote, as JSON, for a cache keyed by what a test read.
+  if (traced) await writeFile(traced, `${JSON.stringify(result.files ?? null)}\n`);
   if (out.json) out.write(JSON.stringify(result));
   // Here the output streamed, whose timeout is 24 hours unless one was given
   // (Sandbox.exec); `--json` answers the result and prints no such line.
@@ -4737,11 +5513,22 @@ export function describeError(error: unknown, json: boolean): string {
           requestId: error.requestId,
           idempotencyKey: error.idempotencyKey,
           details: error.details,
+          retryable: error.retryable,
+          ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
         },
       });
     // In the command line's words: the option, not the request's field.
     const { message, hint } = cliRefusal(error);
-    return `Error [${error.code}]: ${message}${hint ? `\nHint: ${hint}` : ""}${
+    // Said only when the same command, run again, may work: and when, if the
+    // API named it (a daily cap's hour).
+    const again = error.retryable
+      ? `\nRetryable: yes${
+          error.retryAfterMs !== undefined
+            ? `, after ${Math.max(1, Math.ceil(error.retryAfterMs / 1000))} s`
+            : ""
+        }`
+      : "";
+    return `Error [${error.code}]: ${message}${hint ? `\nHint: ${hint}` : ""}${again}${
       error.requestId
         ? // A refusal of what was sent is the caller's to fix; only a failure
           // of ours is worth a report.

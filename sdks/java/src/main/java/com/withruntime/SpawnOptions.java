@@ -18,6 +18,7 @@ public final class SpawnOptions {
   Integer cols;
   Integer rows;
   String idempotencyKey;
+  boolean traceFiles;
 
   public SpawnOptions cwd(String cwd) {
     this.cwd = cwd;
@@ -62,6 +63,12 @@ public final class SpawnOptions {
 
   public SpawnOptions idempotencyKey(String key) {
     this.idempotencyKey = key;
+    return this;
+  }
+
+  /** Record the files it opens: read them with {@link SandboxProcess#files()} once it has ended. */
+  public SpawnOptions traceFiles(boolean trace) {
+    this.traceFiles = trace;
     return this;
   }
 }

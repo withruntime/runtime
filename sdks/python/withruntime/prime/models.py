@@ -1,4 +1,4 @@
-"""Sandbox request/value surface pinned to prime-sandboxes 0.4.6."""
+"""Sandbox request/value surface pinned to prime-sandboxes 0.4.7."""
 from dataclasses import dataclass, field
 from typing import Optional
 from .._compat import Model
@@ -61,6 +61,9 @@ class CreateSandboxRequest:
     #: A filesystem checkpoint to restore (0.4.2): its files, without
     #: docker_image or disk_size_gb, which come from the checkpoint.
     checkpoint_id: Optional[str] = None
+    #: The CPU architecture (0.4.7); None is amd64. Runtime runs amd64 only, so
+    #: create refuses arm64 before anything is made.
+    arch: Optional[str] = None
     start_command: Optional[StartCommand] = None
     cpu_cores: float = 1.0
     memory_gb: float = 1.0
@@ -95,6 +98,8 @@ class CreateSandboxRequest:
                 raise ValueError("docker_image is required unless checkpoint_id is set")
             if self.disk_size_gb is None:
                 self.disk_size_gb = 5.0
+        if self.arch not in (None, "amd64", "arm64"):
+            raise ValueError("arch must be 'amd64' or 'arm64'")
         if isinstance(self.start_command, dict):
             try:
                 self.start_command = StartCommand(**self.start_command)

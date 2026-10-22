@@ -3,6 +3,7 @@ package withruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"net/http"
@@ -39,16 +40,40 @@ type App struct {
 	MemoryMiB   int    `json:"memoryMiB"`
 	Port        int    `json:"port"`
 	HealthPath  string `json:"healthPath,omitempty"`
+	// CDN is whether Cloudflare's CDN is in front of the App's addresses
+	// (its runtimehost.com address and its custom domains). False sends
+	// visitors straight to Runtime's routers, with nothing cached.
+	CDN bool `json:"cdn"`
 	// ReleaseWatch is what Runtime does when a new version's errors or
 	// speed get clearly worse in its first 15 minutes: alert (tell the
 	// owners), rollback (go back and tell them) or off.
-	ReleaseWatch    string         `json:"releaseWatch,omitempty"`
-	CreatedAt       int64          `json:"createdAt"`
-	UpdatedAt       int64          `json:"updatedAt"`
-	DeletedAt       *int64         `json:"deletedAt"`
-	Error           *ResourceError `json:"error"`
-	LiveVersion     *int           `json:"liveVersion"`
-	PreviousVersion *int           `json:"previousVersion"`
+	ReleaseWatch string `json:"releaseWatch,omitempty"`
+	// SleepAfterMs is a Function's: 250 to 5000, zero for an App.
+	SleepAfterMs int            `json:"sleepAfterMs,omitempty"`
+	CreatedAt    int64          `json:"createdAt"`
+	UpdatedAt    int64          `json:"updatedAt"`
+	DeletedAt    *int64         `json:"deletedAt"`
+	Error        *ResourceError `json:"error"`
+	LiveVersion  *int           `json:"liveVersion"`
+	// URL is its address for life, its name then its account's
+	// (https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/). A rename leaves it as it is;
+	// its id's address (https://<id without dashes>.runtimehost.com/)
+	// answers too.
+	URL             string `json:"url"`
+	PreviousVersion *int   `json:"previousVersion"`
+	// Line is where a copy short of room stands while it waits in its
+	// region's line: its account's lane, its place (1 is next), how many
+	// wait ahead by lane, and why. Higher lanes get room first. Nil while
+	// nothing of it waits.
+	Line *AppLine `json:"line,omitempty"`
+}
+
+// AppLine is an App's place in its region's line for room.
+type AppLine struct {
+	Lane  string         `json:"lane"`
+	Place int            `json:"place"`
+	Ahead map[string]int `json:"ahead"`
+	Words string         `json:"words"`
 }
 
 // CreateAppOptions are an App's or a Function's settings. Defaults belong
@@ -72,11 +97,22 @@ type CreateAppOptions struct {
 	Concurrency int `json:"concurrency,omitempty"`
 	// Spares is 0 to 16 copies kept ready; 2 unless set.
 	Spares *int `json:"spares,omitempty"`
+	// SleepAfterMs is 250 to 5000, for Functions only (an App is refused
+	// it); 1000 unless set. It is at most how long a copy stays awake after
+	// its last request ends before it goes back to sleep: copies whose
+	// requests come closer together than this stay awake between them, and
+	// a lone first request may sleep sooner, from 250 ms. Awake time with
+	// no request in flight is not billed.
+	SleepAfterMs *int `json:"sleepAfterMs,omitempty"`
 	// Port is 1 to 65535; 8080 unless set.
 	Port int `json:"port,omitempty"`
 	// HealthPath starts with /, no whitespace, at most 256 characters.
 	// Leave it empty to check whether the port accepts connections.
 	HealthPath string `json:"healthPath,omitempty"`
+	// CDN puts Cloudflare's CDN in front of the App's addresses; on (true)
+	// unless set. Point it at false to send visitors straight to Runtime's
+	// routers, with nothing cached.
+	CDN *bool `json:"cdn,omitempty"`
 	// ReleaseWatch is alert unless set; rollback is opted into.
 	ReleaseWatch   string `json:"releaseWatch,omitempty"`
 	IdempotencyKey string `json:"-"`
@@ -89,22 +125,25 @@ type UpdateAppOptions struct {
 	ClearName bool `json:"-"`
 	// Labels replaces every label; an empty, non-nil map removes them all.
 	Labels map[string]string `json:"labels,omitempty"`
-	// MinCopies is for Apps only.
+	// MinCopies is for Apps only; SleepAfterMs (250 to 5000) for Functions only.
 	MinCopies      *int    `json:"minCopies,omitempty"`
 	MaxCopies      *int    `json:"maxCopies,omitempty"`
 	Concurrency    *int    `json:"concurrency,omitempty"`
 	Spares         *int    `json:"spares,omitempty"`
+	SleepAfterMs   *int    `json:"sleepAfterMs,omitempty"`
 	VCPU           *int    `json:"vcpu,omitempty"`
 	MemoryMiB      *int    `json:"memoryMiB,omitempty"`
 	Port           *int    `json:"port,omitempty"`
 	HealthPath     *string `json:"healthPath,omitempty"`
+	CDN            *bool   `json:"cdn,omitempty"`
 	ReleaseWatch   *string `json:"releaseWatch,omitempty"`
 	IdempotencyKey string  `json:"-"`
 }
 
 // AppDeployError is why a deploy failed or was superseded.
 type AppDeployError struct {
-	// Code is deploy_build_failed, deploy_health_failed or deploy_superseded.
+	// Code is deploy_build_failed, deploy_health_failed, deploy_stop_failed,
+	// deploy_switch_failed or deploy_superseded.
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Hint       string `json:"hint"`
@@ -179,6 +218,58 @@ type AppCopy struct {
 	// State is starting, serving, draining, frozen or parked.
 	State string `json:"state"`
 	Since int64  `json:"since"`
+}
+
+// AppLogsOptions choose which lines Logs and FollowLogs read, every field
+// optional.
+type AppLogsOptions struct {
+	// Since is an RFC 3339 time or a duration back from now (30s, 15m, 2h,
+	// 7d): 1h unless set, at most 14 days back.
+	Since string
+	// Version keeps only that version's copies' lines.
+	Version int
+	// Copy keeps only one copy's lines, by its id.
+	Copy string
+	// Stream is stdout or stderr.
+	Stream string
+	// Limit is 1 to 500 lines; 100 unless set. A first follow starts with
+	// the newest Limit lines.
+	Limit int
+	// Cursor reads the next older page (a page's NextCursor), or resumes a
+	// follow where it stopped (an event's Cursor).
+	Cursor string
+}
+
+// AppLogLine is one line a copy printed.
+type AppLogLine struct {
+	// At is Unix milliseconds.
+	At int64 `json:"at"`
+	// Stream is stdout or stderr.
+	Stream  string  `json:"stream"`
+	Copy    *string `json:"copy"`
+	Version *int    `json:"version"`
+	Text    string  `json:"text"`
+}
+
+// AppLogPage is the newest lines in the window, oldest first. NextCursor
+// reads the next older page with the same options.
+type AppLogPage struct {
+	Lines      []AppLogLine `json:"lines"`
+	NextCursor *string      `json:"nextCursor"`
+	HasMore    bool         `json:"hasMore"`
+}
+
+// AppLogEvent is one event of a followed log. Type is line (AppLogLine's
+// fields) or gap (lines were dropped before they could be read; the follow
+// goes on). Cursor is where to resume.
+type AppLogEvent struct {
+	Type    string  `json:"type"`
+	Cursor  *string `json:"cursor"`
+	At      int64   `json:"at"`
+	Stream  string  `json:"stream"`
+	Copy    *string `json:"copy"`
+	Version *int    `json:"version"`
+	Text    string  `json:"text"`
 }
 
 // AppGetOptions let the server hold the answer until the resource reaches
@@ -453,6 +544,177 @@ func (s *AppService) Versions(ctx context.Context, id string) ([]AppVersion, err
 func (s *AppService) Copies(ctx context.Context, id string) ([]AppCopy, error) {
 	var copies []AppCopy
 	return copies, s.c.do(ctx, &call{method: http.MethodGet, path: s.path(id, "/copies")}, &copies)
+}
+
+func appLogQuery(opts *AppLogsOptions) url.Values {
+	query := url.Values{}
+	if opts != nil {
+		setQuery(query, "since", opts.Since, "version", itoa(opts.Version), "copy", opts.Copy,
+			"stream", opts.Stream, "limit", itoa(opts.Limit), "cursor", opts.Cursor)
+	}
+	return query
+}
+
+// Logs reads what its copies printed: the newest lines in the window
+// (the last hour unless opts.Since says), oldest first. Pass NextCursor as
+// opts.Cursor, with the same options, for the page before. opts may be nil.
+func (s *AppService) Logs(ctx context.Context, id string, opts *AppLogsOptions) (*AppLogPage, error) {
+	var page AppLogPage
+	return &page, s.c.do(ctx, &call{method: http.MethodGet, path: s.path(id, "/logs"), query: appLogQuery(opts)}, &page)
+}
+
+// FollowLogs streams what its copies print until ctx is cancelled (which
+// ends it with a timeout error, errors.Is context.Canceled). A first follow
+// starts with the newest opts.Limit lines since opts.Since; opts.Cursor
+// resumes from an event's Cursor instead. It reconnects by itself each time
+// the server ends a follow, and from the last line it yielded when the
+// connection drops (three times in a row at most, then app_log_interrupted).
+// Every error's Details["cursor"] is where to resume. opts may be nil.
+//
+//	for event, err := range client.Apps.FollowLogs(ctx, id, nil) {
+//		if err != nil { return err }
+//		if event.Type == "line" { fmt.Println(event.Text) }
+//	}
+func (s *AppService) FollowLogs(ctx context.Context, id string, opts *AppLogsOptions) iter.Seq2[AppLogEvent, error] {
+	if opts == nil {
+		opts = &AppLogsOptions{}
+	}
+	return func(yield func(AppLogEvent, error) bool) {
+		var cursor *string
+		if opts.Cursor != "" {
+			start := opts.Cursor
+			cursor = &start
+			if !validCursor(cursor) {
+				yield(AppLogEvent{}, logFailure("invalid_log_options", "Use the Cursor of an event this follow yielded.", cursor))
+				return
+			}
+		}
+		// The server ends each follow after about 2 minutes: the request
+		// must outlive it.
+		timeout := max(3*time.Minute, s.c.timeout)
+		// Opaque positions cannot be ordered or incremented: a line seen
+		// before a reconnect is known by its cursor.
+		seen := map[string]bool{}
+		var order []string
+		if cursor != nil {
+			seen[*cursor] = true
+			order = append(order, *cursor)
+		}
+		fail := func(err error) { yield(AppLogEvent{}, err) }
+		invalid := func() { fail(logFailure("app_log_invalid", "Retry the follow from the last received cursor.", cursor)) }
+		failures := 0
+		for {
+			if ctx.Err() != nil {
+				fail(s.c.connectionError(ctx, false, "", ctx.Err()))
+				return
+			}
+			query := appLogQuery(opts)
+			query.Set("follow", "true")
+			query.Del("cursor")
+			if cursor != nil {
+				query.Set("cursor", *cursor)
+			}
+			continued := false
+			var lost error
+		stream:
+			for event, err := range events[json.RawMessage](ctx, s.c, &call{method: http.MethodGet, path: s.path(id, "/logs"), query: query, timeout: timeout}) {
+				if err != nil {
+					if ctx.Err() != nil {
+						fail(s.c.connectionError(ctx, false, "", err))
+						return
+					}
+					var syntax *json.SyntaxError
+					if errors.As(err, &syntax) {
+						fail(logFailure("app_log_invalid", "The log contained invalid JSON; retry from details.cursor.", cursor))
+						return
+					}
+					// HTTP refusals are actionable, not connection loss; the
+					// transport itself retried the retryable ones.
+					if failure, ok := asError(err); !ok || failure.Status != 0 {
+						fail(err)
+						return
+					}
+					lost = err
+					break stream
+				}
+				var e struct {
+					AppLogEvent
+					Code string `json:"code"`
+					Hint string `json:"hint"`
+				}
+				if json.Unmarshal(event, &e) != nil {
+					invalid()
+					return
+				}
+				if e.Cursor != nil && !validCursor(e.Cursor) {
+					invalid()
+					return
+				}
+				switch e.Type {
+				case "line":
+					if (e.Stream != "stdout" && e.Stream != "stderr") || e.At < 0 || !validCursor(e.Cursor) {
+						invalid()
+						return
+					}
+					if seen[*e.Cursor] {
+						continue
+					}
+					seen[*e.Cursor] = true
+					order = append(order, *e.Cursor)
+					if len(order) > 10_000 {
+						delete(seen, order[0])
+						order = order[1:]
+					}
+					cursor = e.Cursor
+					failures = 0
+					if !yield(e.AppLogEvent, nil) {
+						return
+					}
+				case "gap":
+					if !validCursor(e.Cursor) {
+						invalid()
+						return
+					}
+					cursor = e.Cursor
+					if !yield(e.AppLogEvent, nil) {
+						return
+					}
+				case "continue":
+					// A null cursor: nothing was printed yet, so the next
+					// follow starts where this one did.
+					if e.Cursor != nil {
+						cursor = e.Cursor
+					}
+					continued = true
+					break stream
+				case "error":
+					if e.Code == "" || e.Hint == "" {
+						invalid()
+						return
+					}
+					fail(logFailure(e.Code, e.Hint, cursor))
+					return
+				default:
+					invalid()
+					return
+				}
+			}
+			if !continued {
+				failures++
+				if failures > 3 {
+					failure := logFailure("app_log_interrupted", "Reconnect with FollowLogs and AppLogsOptions{Cursor: details.cursor}.", cursor)
+					failure.Err = lost
+					fail(failure)
+					return
+				}
+			}
+			// A disconnected service or repeated continues must not busy-loop.
+			if sleep(ctx, time.Duration(50*max(1, failures))*time.Millisecond) != nil {
+				fail(s.c.connectionError(ctx, false, "", ctx.Err()))
+				return
+			}
+		}
+	}
 }
 
 // withKey makes the write's idempotency key before the first try, so every

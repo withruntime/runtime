@@ -28,8 +28,69 @@ as reviewed and unsupported, and `bun run compat:upstream` flags any other relea
 | Fly Sprites | `@fly/sprites` 0.2.3                    | `withruntime/sprites`     | `SpritesClient`, create/lookup/list/delete/restart; `exec`, `execFile`, Node streams and event-based `spawn`; attachable native processes; binary/text/JSON files, directory traversal, append, chmod, chown and `asRoot` through sudo, file watches; preview access settings; checkpoints as disk snapshots; domain network policy; session kill; port watcher and port proxy; `APIError` with the vendor's limit codes |
 | Freestyle   | `freestyle` 0.2.20                      | `withruntime/freestyle`   | `Freestyle`, VM create/ref/get/list/start/pause/delete/update; command execution, binary/text files and streams, filesystem metadata; native snapshots; explicit deny-all or outbound-public firewall intent                                                                                                                                                                                                             |
 | Morph       | `morphcloud` 0.0.20                     | `withruntime/morph`       | `MorphCloudClient`, images list, snapshot create/get/list/delete/metadata and cached `setup` chains, instance start/boot/get/list/stop/pause/resume/branch/snapshot, metadata, wake-on, TTL at start, streamed exec, HTTP services as previews, file `sync`                                                                                                                                                              |
-| Modal       | `modal` 0.11.1                          | `withruntime/modal`       | `ModalClient`, app-name grouping, registry images and Dockerfile layers, CPU sandbox create/get/list/name lookup, text/binary process streams and stdin, command completion, filesystem transfer and metadata, tags, encrypted public previews, outbound allowlists, memory snapshot capture                                                                                                                             |
+| Modal       | `modal` 0.11.1                          | `withruntime/modal`       | `ModalClient`, app-name grouping, registry images and Dockerfile layers, CPU sandbox create/get/list/name lookup, idle timeout, text/binary process streams and stdin, commands as root, command completion, filesystem transfer, metadata and watches, tags, encrypted public previews, outbound domain and CIDR allowlists, filesystem and memory snapshot capture                                                     |
 | Cloudflare  | `@cloudflare/sandbox` 0.12.10 (0.x API) | `withruntime/cloudflare`  | `getSandbox`, named Runtime sandboxes, explicit execution sessions, text exec and SSE output, background processes, logs/signals/waits, binary/text files, recursive listings, environment updates, signed Runtime previews, conditional Worker Durable Object entry, Worker preview proxy, destruction                                                                                                                  |
+
+### Modal's own examples, live (18 October 2026)
+
+Every sandbox example of Modal's JavaScript SDK (`js/examples` at
+`js/v0.11.1`, 26 files; `sandbox-gpu.ts` needs a GPU and the Functions
+examples call deployed Functions, so they are not run) is copied verbatim
+into `tests/fixtures/modal`, with only the import changed, and run against
+real Runtime sandboxes by `scripts/compatibility-modal-examples-live.ts`
+(opt-in, `--run`; each sandbox capped at two cents and five minutes, deleted
+when its example ends). What failed, and what changed:
+
+- A layer's `secrets` (`image-building.ts`) stay refused, now naming the
+  alternative: a Runtime build keeps its build arguments in the image's build
+  plan, history and cache key, so a secret is used at run time
+  (`sandboxes.create(app, image, { secrets })` or `runtime.secrets.set`).
+- `idleTimeoutMs` (`sandbox-tunnels.ts`) was refused; it is Runtime's idle
+  pause (10 s at least), memory kept. `timeoutMs` under a minute is kept by
+  the client, with Runtime's minute as the bound if the client goes away.
+- Commands ran as the sandbox user, so `mkdir /app` failed
+  (`sandbox-filesystem-snapshot.ts`); the entrypoint, `exec` and readiness
+  probes now run as root, as in a Modal container.
+- `poll()` after the sandbox ended (`sandbox-poll.ts`) threw; it answers the
+  exit code it saw, or 137 for a process killed with its sandbox.
+- `experimentalOptions` were refused as unknown; `enable_exit_snapshot`
+  refuses naming `snapshotFilesystem()` before `terminate()`.
+- Allowlists were an intersection; Modal's domain and CIDR allowlists are a
+  union, and `*.x` also allows `x`.
+- `client.functions`, `functionCalls`, `cls` and `queues` were undefined;
+  each call refuses, naming Runtime's alternative.
+- A file watch in Alpine (no python3) failed, and its retry hid why. The
+  server now runs the watcher on Runtime's own Python, in every image, and a
+  retried start replays the first (`packages/cloud/src/watch/client.ts`).
+- A snapshot of a running sandbox could fail when another call (the
+  entrypoint's open output stream) woke it mid-capture. A call's wake now
+  waits for the capture (`cloud_wake_waits_for_capture` migration,
+  `packages/cloud/src/api/guest-call.ts`).
+
+`tests/compat/modal-examples.test.ts` fails on the old adapter.
+`compat-inventory.json` records 226 present, 163 refused and 0 missing of 389.
+
+### Fly Machines API (18 October 2026)
+
+Fly publishes no TypeScript SDK for Machines; its users call the REST API at
+`api.machines.dev` with curl or an HTTP client, or through fly-go. So
+`withruntime/fly` answers the HTTP API itself: `machinesApi()` is a fetch
+handler, `serveMachinesApi()` and `npx withruntime fly-api` serve it on a port.
+Of the spec's 29 machine routes, 24 are answered (list, create, get, update,
+delete, start, stop, suspend, restart, wait, exec, signal, ps, events, versions,
+metadata in all six forms, lease get/acquire/release) and 5 refuse: the memory
+limit's get, set and reclaim (resize the machine instead), and cordon and
+uncordon (no services). Apps, the org's machines and the region list are
+answered too. Restart policies `always` and `on-failure` (with `max_retries`)
+are kept by a supervisor loop around the main process. `services`, `mounts`,
+`checks`, `processes`, GPUs, `files` from secrets and regions other than `iad`
+answer 400 naming the alternative.
+Evidence: `tests/compat/fly-contract.test.ts`;
+`scripts/compatibility-fly-docs-live.ts --run`, which runs the 22 curl
+examples of Fly's Machines API pages verbatim
+(`tests/compat/fly-docs/machines-api-examples.sh`, superfly/docs at 15f58f1f,
+read 18 October 2026) and fly-go 0.11.6's flaps client unchanged
+(`tests/compat/fly-go`) on the real API; and `scripts/compatibility-fly-live.ts --run`.
 
 ### Modal 0.11.1 review (16 October 2026)
 
@@ -86,7 +147,7 @@ all 73 inventory items are present or refused, none missing. How it maps:
 - `branch(n)` is one fork with the snapshot kept: copies keep memory and
   running processes.
 - `ttlSeconds` is the time limit (60 to 86400); `ttlAction` stop deletes,
-  pause pauses. Runtime also pauses an idle sandbox after a minute and wakes
+  pause pauses. Runtime also pauses an idle sandbox after five minutes and wakes
   it on the next request, which Morph does not.
 - `exposeHttpService` is a preview: public with no `auth_mode` (needs a kept
   top-up), private with `api_key` (send its token as `x-runtime-preview-token`).
@@ -341,7 +402,7 @@ Remaining implementation work is tracked only in the repository `WORKLIST.md`.
 | CodeSandbox | No browser editor/Pitcher protocol, browser-session tokens, interpreters, live VM resizing, fork tier changes, read-only or global editor sessions, or private host-token emulation. Configured tasks run under a guest supervisor and setup steps under a guest runner, both started by the adapter and surviving client disconnects; a task's port must be configured with `task.preview.port`, because automatic task-to-port discovery is refused. Private host-only preview requests fail explicitly; native signed preview URLs remain available. Public port discovery lists registered previews, not all listening sockets. Default workspace is prepared at `/project/sandbox`. Command restart preserves the originating client's captured argv, environment and working directory; a command discovered by another client refuses restart because its private spawn recipe is unavailable. |
 | Sprites     | No control-mode WebSocket protocol, managed services, in-place checkpoint restore (start a new sandbox from the snapshot), checkpoint history filters, network presets (`include`), an allow rule inside a denied wildcard (Runtime's deny always wins), privilege or resource policies, `maxRunAfterDisconnect`, Fly token exchange or Sprite list streaming; each is refused by name. A checkpoint is a Runtime disk snapshot (files, not running processes); the Sprite pauses for the moment it takes. An allow rule makes an allowlist, as Sprites' DNS allowlist does. The port watcher polls `ss` once a second. Session handles use native process IDs, not tmux. The sprite URL maps port 8080. File bytes and process byte streams preserve binary data.                                                                                                                                    |
 | Freestyle   | Provider catalog snapshot slugs are not Runtime snapshots and are refused. Firewall support is limited to an explicit empty rule set or the exact allow-public-outbound shape; arbitrary rule selectors, TLS policies and private networks are refused. No automatic-restart guarantee, retention scheduler, placement constraints, live resize, Linux-user switching, PTY namespace, public IPv6 or account-owned egress address emulation. Native snapshot retention is positive whole days.                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Modal       | CPU sandboxes only; different resource reservation/limit values, fractional CPU, GPU and foreign placement are refused. Named Apps group Runtime sandboxes; they do not deploy Functions. Registry authentication uses Runtime's registry configuration. No Functions/Cls, volumes/bucket mounts, GPU image steps, readiness probes, sidecars, directory mounts, filesystem-only images from snapshots, or snapshot restoration API. Entry-point completion stops the sandbox while the originating client is alive; the native lease remains the bound if that client disappears. A different client can reconnect using the saved entrypoint process ID.                                                                                                                                                                                                                                            |
+| Modal       | CPU sandboxes only; different resource reservation/limit values, fractional CPU, GPU and foreign placement are refused. Named Apps group Runtime sandboxes; they do not deploy Functions. Registry authentication uses Runtime's registry configuration. Commands run as root. No Functions/Cls/queues, named secrets, volumes made on first use, GPU image steps, sidecars, connect tokens, proxies, directory or exit snapshots, or snapshot restoration API; each refuses naming the alternative. Entry-point completion stops the sandbox while the originating client is alive; the native lease remains the bound if that client disappears. A different client can reconnect using the saved entrypoint process ID.                                                                                                                                                                            |
 | Cloudflare  | The conditional Worker entry supplies a Durable Object bridge and custom-hostname preview proxy; infrastructure configuration must still remove the vendor Container declaration and provide Runtime secrets. Cloudflare's examples run live under `wrangler dev` (above); custom preview routing has no live public-hostname acceptance evidence. At most 4 interpreter contexts. No isolated PID namespaces, backup format, terminal WebSocket protocol, custom process IDs or provider cleanup-record semantics. Foreground named sessions use resident Bash; background processes inherit exported state/cwd but do not yet inherit every local variable/function/option.                                                                                                                                                                                                                         |
 
 ## Keeping compatibility current

@@ -25,11 +25,14 @@ from .jobs import switched_off
 class SecretScope(TypedDict, total=False):
     """Which sandboxes get a secret: those whose labels hold every pair of any
     one selector in ``labels`` (1 to 8 selectors of 1 to 8 pairs, including
-    sandboxes created or labelled later), and those named in ``sandboxes``
-    (1 to 100 ids). A secret as returned carries it as ``only``; absent means
-    every sandbox of the organization."""
+    sandboxes created or labelled later), those named in ``sandboxes``
+    (1 to 100 ids), and every copy of the Apps named in ``apps`` (1 to 100
+    App ids, any version a key that may reveal secrets deployed). A secret as
+    returned carries it as ``only``; absent means every sandbox of the
+    organization."""
     labels: list[dict[str, str]]
     sandboxes: list[str]
+    apps: list[str]
 
 
 class _RulePaths(TypedDict):
@@ -42,8 +45,66 @@ class SecretRule(_RulePaths, total=False):
     methods: list[str]
 
 
+class _GithubAppIds(TypedDict):
+    id: int
+    installation: int
+
+
+class SecretGithubApp(_GithubAppIds, total=False):
+    """A GitHub App the servers act as: ``id`` is the App's id and
+    ``installation`` the installation's id. ``repositories`` are the
+    repositories each token reaches, by name (every repository of the
+    installation when absent). ``permissions`` is what each token may do, such
+    as ``{"contents": "write"}`` (``read``, ``write`` or ``admin``), at most
+    what the App holds (all of them when absent). ``api`` is the App's API on
+    GitHub Enterprise Server (``https://<host>/api/v3``; one of the secret's
+    hosts); default ``https://api.github.com``."""
+    repositories: list[str]
+    permissions: dict[str, str]
+    api: str
+
+
+class SecretGit(TypedDict):
+    """What a git push over HTTPS carrying the secret may update. ``push`` are
+    the branches: ``refs/heads/`` then a name, with ``*`` only at the end for
+    any name that begins so, and ``{label.<key>}`` for the sandbox's own label
+    of that key (a sandbox without it pushes nothing it names). Empty: no push
+    at all."""
+    push: list[str]
+
+
+class _GraphqlMutations(TypedDict):
+    mutations: list[str]
+
+
+class SecretGraphql(_GraphqlMutations, total=False):
+    """``mutations`` a request may make; any other is refused with 403. A query
+    always goes. ``path`` is where GraphQL is served (default ``/graphql``)."""
+    path: str
+
+
+class SecretApiPolicy(TypedDict, total=False):
+    """Each sandbox's hour with the secret, the far end's reserve, GraphQL's
+    mutations and shared copies. ``callsPerHour`` is the most requests each
+    sandbox makes with the secret in an hour (past it, 429 with ``Retry-After``).
+    ``writesPerHour`` is the most writes (any method but GET, HEAD and OPTIONS;
+    a GraphQL mutation); 0 is none. ``keep`` is the calls the far end keeps for
+    others: none is sent while its ``x-ratelimit-remaining`` says this many or
+    fewer are left, until its reset. ``copies`` answers reads (GET over HTTP/2)
+    from the server's copy while the far end answers 304 to its ETag, shared by
+    every sandbox the secret reaches on that server. ``fresh`` (1 to 300, with
+    ``copies``) is the seconds a copy is answered without asking the far end,
+    GraphQL queries included."""
+    callsPerHour: int
+    writesPerHour: int
+    keep: int
+    copies: bool
+    fresh: int
+    graphql: SecretGraphql
+
+
 def _unavailable(error: Exception) -> bool:
-    return isinstance(error, RuntimeError) and (error.code == "unavailable" or error.status == 503)
+    return isinstance(error, RuntimeError) and (error.code == "unavailable" or error.status in (501, 503))
 
 
 class AsyncSecrets:
@@ -102,7 +163,10 @@ class AsyncSecrets:
                 try:
                     return await replay()
                 except RuntimeError as again:
-                    if again.status != 409:
+                    # Not this request's earlier send: a conflict, or its key
+                    # held by another request (idempotency_conflict, 422; 409
+                    # from an older server).
+                    if again.status != 409 and again.code != "idempotency_conflict":
                         raise
             raise
 
@@ -119,7 +183,9 @@ class AsyncSecrets:
 
     async def set(self, name: str, *, value: str, hosts: Optional[list[str]] = None, header: Optional[str] = None,
                   format: Optional[str] = None, rules: Optional[list[SecretRule]] = None,
-                  only: Optional[SecretScope] = None, jobs: bool = False,
+                  only: Optional[SecretScope] = None, github_app: Optional[SecretGithubApp] = None,
+                  git: Optional[SecretGit] = None, api: Optional[SecretApiPolicy] = None, env: Optional[str] = None,
+                  jobs: bool = False,
                   idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Store or replace a secret. ``value`` is visible ASCII and spaces, at
         most 8 KiB. ``hosts`` are names or ``*.domain``. ``header`` (with
@@ -133,10 +199,26 @@ class AsyncSecrets:
         Without rules, every request to the hosts; replacing a secret without
         rules clears them.
 
-        ``only`` (``{"labels": [{"role": "hub"}], "sandboxes": [id]}``) gives the
-        secret to those sandboxes instead of every sandbox of the organization.
-        Left out when replacing a secret, the scope it has stays, so a new value
-        never widens who gets it; ``{}`` is every sandbox again.
+        ``only`` gives the secret to those sandboxes alone (see ``SecretScope``);
+        ``{}`` is every sandbox of the organization again. Absent when replacing
+        a secret: the scope it has stays, so a new value never widens who gets it.
+
+        ``github_app`` makes ``value`` a GitHub App's private key (PEM, many
+        lines); the servers make the App's installation tokens themselves, each
+        for an hour. The key goes into no request, and each request the rules
+        allow carries the current token, as ``Authorization: Bearer`` to the API
+        and as git's ``x-access-token`` to git over HTTPS. It takes no ``header``
+        or ``format``. ``git`` limits what a git push may update, such as
+        ``{"push": ["refs/heads/task/{label.task}"]}``; a push to any other ref,
+        a tag, or a delete is refused before it leaves the server. ``api`` sets
+        each sandbox's hour with the secret, the far end's reserve, GraphQL's
+        mutations and shared copies. The answer and ``list`` return all three
+        as ``githubApp``, ``git`` and ``api``.
+
+        ``env`` is the environment variable sandboxes see it in, when not the
+        secret's name. Secrets scoped to different sandboxes may share one, such
+        as one GITHUB_TOKEN per repository; a write that would put two in one
+        sandbox is refused (409). Absent when replacing: the variable it has stays.
 
         ``jobs=True`` also keeps a copy scheduled jobs can use (up to 64 KiB of
         UTF-8 without ``hosts``); setting it again rotates it. With both, a jobs
@@ -156,6 +238,14 @@ class AsyncSecrets:
                 body["rules"] = rules
             if only is not None:
                 body["only"] = only
+            if github_app is not None:
+                body["githubApp"] = github_app
+            if git is not None:
+                body["git"] = git
+            if api is not None:
+                body["api"] = api
+            if env is not None:
+                body["env"] = env
             part = f"{idempotency_key}:sandboxes"[:128] if idempotency_key and jobs else idempotency_key
             saved = await self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}", body=body,
                                        idempotency_key=part)

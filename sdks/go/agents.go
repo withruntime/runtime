@@ -29,6 +29,9 @@ type AgentService struct {
 	// Templates are ready definitions for the harnesses Runtime knows, and
 	// the presets for the two uses (your customers, your team).
 	Templates *AgentTemplateService
+	// Memory is each agent's built-in memory: text files its sessions keep
+	// across sessions and search, shared or one key's alone.
+	Memory *AgentMemoryService
 	// Approvals (Agents.Approvals.List and Answer) come in a later release.
 }
 
@@ -38,6 +41,7 @@ func newAgentService(c *Client) *AgentService {
 		Sessions:  &AgentSessionService{c: c},
 		Triggers:  &AgentTriggerService{c: c},
 		Templates: &AgentTemplateService{},
+		Memory:    &AgentMemoryService{c: c},
 	}
 }
 
@@ -48,7 +52,7 @@ func newAgentService(c *Client) *AgentService {
 type AgentDefinition struct {
 	// Command starts the harness in the sandbox.
 	Command string `json:"command,omitempty"`
-	// From is the image or snapshot the sandbox starts from.
+	// From is the image, snapshot or repository the sandbox starts from.
 	From *AgentFrom `json:"from,omitempty"`
 	// VCPU is 1, 2, 4, 8 or 16 (4 unless set). A definition From a snapshot
 	// takes no VCPU or MemoryMiB (400 invalid_request): a snapshot keeps its
@@ -77,7 +81,7 @@ type AgentDefinition struct {
 	MaxSessionDollars float64 `json:"maxSessionDollars,omitempty"`
 	// MaxDayDollars caps the agent's sessions started that UTC day (more
 	// than 0, at most 100000, default 100): past it, it starts nothing new
-	// (409 budget_reached, errors.Is ErrConflict) until the next day.
+	// (402 budget_reached) until the next day.
 	MaxDayDollars float64 `json:"maxDayDollars,omitempty"`
 	// Template is the use it was made for: "support" or "team".
 	Template string `json:"template,omitempty"`
@@ -86,11 +90,15 @@ type AgentDefinition struct {
 	Extra map[string]any `json:"-"`
 }
 
-// AgentFrom is where a session's sandbox starts: an image or a snapshot id,
-// one of the two.
+// AgentFrom is where a session's sandbox starts, one of the three: an image,
+// a snapshot id, or a GitHub repository connected to CI/CD ("owner/name"),
+// whose warm snapshot each session starts as a copy of: checked out at
+// /workspace/repo at its production branch's last passing commit, set up,
+// the harness run there.
 type AgentFrom struct {
 	Image    string `json:"image,omitempty"`
 	Snapshot string `json:"snapshot,omitempty"`
+	Repo     string `json:"repo,omitempty"`
 }
 
 // AgentMCPServer is a remote MCP server (an https URL) the harness may use.

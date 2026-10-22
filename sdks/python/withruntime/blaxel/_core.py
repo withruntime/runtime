@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple, TypedDict, Union
 
 from .._compat_lease import no_limit  # noqa: F401 - the adapter's name for it
+from .._errors import DELIBERATE as _SWITCHED_OFF
 from .._errors import RuntimeError as _SDKError
 
 # ---- errors: Blaxel's names --------------------------------------------------
@@ -301,7 +302,7 @@ def translate(error: BaseException, subject: str = "sandbox") -> BaseException:
     message = "\n".join(parts)
     code = error.code or ""
     out: Exception
-    if error.status == 503 and code.endswith("_unavailable"):
+    if code.endswith("_unavailable") and (error.status == 501 or (error.status == 503 and code in _SWITCHED_OFF)):
         out = NotSupportedError(code[: -len("_unavailable")], error.hint or "", message)
     elif subject in _KINDS:
         out = _KINDS[subject](message, error.status or None, code)

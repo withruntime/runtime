@@ -336,6 +336,55 @@ one uploads in parts. A downloaded folder is unpacked as it arrives and lands
 in place only once it has all arrived: one cut short is `download_incomplete`
 and writes nothing.
 
+### Links
+
+A link is a secret URL anyone can open with no API key: a GET downloads the
+file (Range works, so videos play and downloads resume), and a PUT with the raw
+body uploads it atomically. A link expires in 1 hour by default, at most 7 days.
+`RevokeLinks` ends every link made for the sandbox, and revoking the key that
+made a link ends its links too.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"withruntime.com/go"
+)
+
+func main() {
+	ctx := context.Background()
+	client, err := withruntime.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	sbx, err := client.Sandboxes.Create(ctx, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer sbx.Stop(context.Background(), nil)
+
+	down, err := sbx.Files.DownloadURL(ctx, "/workspace/report.csv", &withruntime.DownloadURLOptions{
+		Filename:         "report.csv",
+		ExpiresInSeconds: 600,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	up, err := sbx.Files.UploadURL(ctx, "/workspace/incoming.bin", &withruntime.UploadURLOptions{MaxBytes: 10 << 20})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(down.URL, down.ExpiresAt, up.URL)
+	if _, err := sbx.Files.RevokeLinks(ctx); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
 ## Pause, wake, extend, fork and snapshot
 
 ```go
@@ -780,12 +829,20 @@ Every error is a `*withruntime.Error` with `Code`, `Message`, `Hint`,
 `RequestID`, `Status` and `Details`. `errors.Is` matches it against
 `ErrAuthentication`, `ErrPermissionDenied`, `ErrNotFound`, `ErrConflict`,
 `ErrInvalidRequest`, `ErrRateLimited`, `ErrServiceUnavailable` and
-`ErrConnection`, the same classes as the JavaScript and Python SDKs.
+`ErrConnection`, the same classes as the JavaScript and Python SDKs. `no_capacity` matches
+`ErrServiceUnavailable`; `no_credit_running_limit` and a `quota_exceeded` on
+what runs at once match `ErrRateLimited`, and a `quota_exceeded` on what is
+kept matches `ErrConflict`.
 
 Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures, 429, 502, 503 and 504 are retried
-with the same key, so a retry never makes two sandboxes or runs a command
-twice. `Retryable()` says whether trying the same call again may work.
+client's own retries. Transport failures and every answer that says
+`retryable: true` are retried after its `Retry-After`, up to the maximum number
+of retries, with the same key, so a retry never makes two sandboxes or runs a
+command twice. A wait over 60 seconds is not slept on: the error is returned at
+once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
+`rate_limited`) is sent again until the call's deadline, or for five minutes
+without one, past the maximum. `Retryable()` says whether trying the same call again
+may work.
 
 **A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
@@ -1055,5 +1112,56 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println(gateway.Servers, gateway.Warnings) // Connect with gateway.Headers; keep its token private.
+}
+```
+
+## CI/CD (beta)
+
+`client.CI` reads CI/CD, which checks every push and pull request of a
+connected GitHub repository in sandboxes. `CI.Repositories` has `Connect`,
+`List` and `Disconnect` (only a full key connects one); `CI.Checks.List` and
+`Get`, `CI.Jobs.Get` (with the tail of the job's log) and `CI.Tests.List`
+read what ran. Times are milliseconds since the epoch, lists page like the
+others, and an account outside the beta gets `product_in_beta` (403).
+
+```go check
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"withruntime.com/go"
+)
+
+func main() {
+	ctx := context.Background()
+	client, err := withruntime.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	repository, err := client.CI.Repositories.Connect(ctx, "acme/web", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for check, err := range client.CI.Checks.All(ctx, &withruntime.CICheckListOptions{RepositoryID: repository.ID, State: []string{"failed"}}) {
+		if err != nil {
+			log.Fatal(err)
+		}
+		detail, err := client.CI.Checks.Get(ctx, check.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, job := range detail.Jobs {
+			if job.State == "failed" {
+				failed, err := client.CI.Jobs.Get(ctx, job.ID)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Println(job.Name, failed.Log) // job.SandboxIDs may still be paused, to wake and look into.
+			}
+		}
+	}
 }
 ```

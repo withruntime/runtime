@@ -13,7 +13,7 @@ export type Snapshot = {
   name: string | null;
   sourceSandboxId: string;
   shape: { vcpu: number; memoryMiB: number; diskMiB: number; memoryGuarantee: string };
-  /** Null: kept while your account has credit, up to a year from when it was taken. */
+  /** Null: kept while your account has credit, with no end date. */
   retentionDays: number | null;
   /** True while raw fork memory awaits verified compression. The snapshot
    * remains ready for starts on its current host, with no storage charge or

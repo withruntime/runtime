@@ -24,10 +24,14 @@ import type { RequestOptions, Transport } from "../transport.js";
 export type AgentDefinition = {
   /** What runs the harness, from the sandbox's home. */
   command: string;
-  /** Where each session's sandbox starts: an image of yours, or a snapshot
-   * of a machine you set up by hand (a harness logged in to your own
-   * subscription included). The default image has Node and Python. */
-  from?: { image: string } | { snapshot: string };
+  /** Where each session's sandbox starts: an image of yours; a snapshot of
+   * a machine you set up by hand (a harness logged in to your own
+   * subscription included); or a GitHub repository connected to CI/CD,
+   * `owner/name`, whose warm snapshot (checked out at /workspace/repo at its
+   * production branch's last passing commit, set up) each session starts
+   * as a copy of, its harness run there. The default image has Node and
+   * Python. */
+  from?: { image: string } | { snapshot: string } | { repo: string };
   /** 1, 2, 4, 8 or 16; default 4. */
   vcpu?: number;
   /** 512 to 65536, a multiple of 256; default 8192 (8 GiB). */
@@ -52,8 +56,17 @@ export type AgentDefinition = {
   maxSessionSeconds?: number;
   /** Sessions running at once; more wait, queued. Default 10. */
   maxConcurrent?: number;
+  /** What one session may cost, its subagents' sessions included, in
+   * dollars; it stops with reason `budget` there. Default 5. */
+  maxSessionDollars?: number;
+  /** What the agent's sessions may cost in a day, in dollars; past it the
+   * agent starts nothing new (`budget_reached`) until the next. Default 100. */
+  maxDayDollars?: number;
   /** The use it was set up for (`uses`). */
   template?: "support" | "team";
+  /** Whose memory a session reads: `key` (the default), each session key
+   * its own; `agent`, one all its sessions share, never a support agent's. */
+  memory?: { scope: "key" | "agent" };
 };
 export type Agent = {
   id: string;
@@ -111,6 +124,8 @@ export type AgentTrigger = {
   pausedAt: string | null;
   pausedWhy: string | null;
   createdAt: string;
+  /** When it last changed: made, paused or resumed. */
+  updatedAt: string;
   /** A webhook's secret, which each of its calls carries: answered once,
    * when it is added, and never again. Keep it where you keep your keys. */
   secret?: string;
@@ -136,6 +151,48 @@ export type CreateAgentTrigger =
 /** The five harnesses' names, so `templates["claude-code"]` is known to be there. */
 export type AgentTemplateKey =
   "claude-code" | "codex" | "gemini-cli" | "claude-agent-sdk" | "openai-agents-sdk";
+
+/** A file of an agent's memory (`memory.list`). `scope` is whose: empty for
+ * the shared memory, which every session reads (one keeping memory per key
+ * reads what you wrote there, and never changes it), or a session key
+ * (`customer:42`) for that key's alone. */
+export type AgentMemoryEntry = {
+  scope: string;
+  path: string;
+  /** Its text and path, in bytes, as billed. */
+  bytes: number;
+  updatedAt: string;
+  /** A key's principal id, or session:<id> when the agent wrote it. */
+  updatedBy: string;
+};
+export type AgentMemoryFile = AgentMemoryEntry & { content: string };
+export type AgentMemoryHit = {
+  scope: string;
+  path: string;
+  /** Its words around the match, matches in **bold**. */
+  snippet: string;
+  /** Higher is better. */
+  rank: number;
+  bytes: number;
+  updatedAt: string;
+};
+export type AgentMemoryWritten = {
+  scope: string;
+  path: string;
+  bytes: number;
+  /** True for a new file, false for one replaced. */
+  created: boolean;
+  updatedAt: string;
+};
+/** The agent's whole memory, every scope: what storage is billed on. */
+export type AgentMemoryUsage = {
+  bytes: number;
+  files: number;
+  limitBytes: number;
+  limitFiles: number;
+};
+export type AgentMemoryPage = Page<AgentMemoryEntry> & { readonly usage: AgentMemoryUsage };
+
 /** A harness, as data (packages/cloud-guide/agent-templates.json, the same
  * in every SDK and the guide). `definition` is what an agent's definition
  * takes from it; add a use's (`uses`) and your instructions. */
@@ -219,6 +276,11 @@ export const AGENT_TEMPLATES: Readonly<Record<AgentTemplateKey, AgentTemplate>> 
     definition: { command: "python3 ~/agent.py", secrets: ["OPENAI_API_KEY"] },
   },
 };
+
+/** A harness by a key read from a file or a flag, or undefined. */
+export function agentTemplate(key: string): AgentTemplate | undefined {
+  return Object.hasOwn(AGENT_TEMPLATES, key) ? AGENT_TEMPLATES[key as AgentTemplateKey] : undefined;
+}
 export const AGENT_USES: Readonly<Record<"support" | "team", AgentUse>> = {
   support: {
     key: "support",
@@ -348,6 +410,34 @@ export function agents(t: Transport) {
       listSessions({ ...query, cursor }, options),
     );
   };
+  const listMemory = async (
+    agent: string,
+    query: { scope?: string; prefix?: string; cursor?: string; limit?: number } = {},
+    options?: RequestOptions,
+  ): Promise<AgentMemoryPage> => {
+    const page = await t.json<Wire<AgentMemoryEntry> & { usage: AgentMemoryUsage }>({
+      method: "GET",
+      path: `/v1/agents/${enc(agent)}/memory`,
+      query,
+      ...options,
+    });
+    return Object.assign(
+      new Page(page.data, page.nextCursor, (cursor) =>
+        listMemory(agent, { ...query, cursor }, options),
+      ),
+      { usage: page.usage },
+    );
+  };
+  const memoryFile = (
+    method: "GET" | "PUT" | "DELETE",
+    agent: string,
+    path: string,
+    scope = "",
+  ) => ({
+    method,
+    path: `/v1/agents/${enc(agent)}/memory/content`,
+    query: { scope, path },
+  });
   return {
     /** An agent: a name and a definition its sessions start from. */
     create: (input: CreateAgent, options?: RequestOptions) =>
@@ -440,6 +530,65 @@ export function agents(t: Transport) {
           ...options,
         });
       },
+    },
+    /** Its built-in memory: text files kept across sessions, which the
+     * agent reads, writes and searches from inside its sessions. A scope is
+     * whose: "" (the default) for what every session reads, or a session key
+     * ("customer:42") for that key's alone. Up to 1 MiB a file, 1 GiB and
+     * 100,000 files an agent, billed as storage. */
+    memory: {
+      /** Its files by scope and path, a page at a time, with its usage.
+       * Without scope, every scope. */
+      list: listMemory,
+      /** The files whose words or paths match, best first, each with a
+       * snippet: words, "a phrase", or, -not. Without scope, every scope. */
+      search: async (
+        agent: string,
+        q: string,
+        query: { scope?: string; limit?: number } = {},
+        options?: RequestOptions,
+      ): Promise<AgentMemoryHit[]> =>
+        (
+          await t.json<{ data: AgentMemoryHit[] }>({
+            method: "GET",
+            path: `/v1/agents/${enc(agent)}/memory`,
+            query: { ...query, q },
+            ...options,
+          })
+        ).data,
+      /** One file, with its text; not_found when there is none. */
+      read: (
+        agent: string,
+        path: string,
+        query: { scope?: string } = {},
+        options?: RequestOptions,
+      ) => t.json<AgentMemoryFile>({ ...memoryFile("GET", agent, path, query.scope), ...options }),
+      /** Seeds or replaces a file. */
+      write: (
+        agent: string,
+        path: string,
+        content: string,
+        query: { scope?: string } = {},
+        options?: RequestOptions,
+      ) =>
+        t.json<AgentMemoryWritten>({
+          ...memoryFile("PUT", agent, path, query.scope),
+          body: { content },
+          ...options,
+        }),
+      /** Answers whether there was a file. */
+      delete: async (
+        agent: string,
+        path: string,
+        query: { scope?: string } = {},
+        options?: RequestOptions,
+      ): Promise<boolean> =>
+        (
+          await t.json<{ deleted: boolean }>({
+            ...memoryFile("DELETE", agent, path, query.scope),
+            ...options,
+          })
+        ).deleted,
     },
     /** The harnesses, as data: claude-code, codex, gemini-cli,
      * claude-agent-sdk, openai-agents-sdk. */

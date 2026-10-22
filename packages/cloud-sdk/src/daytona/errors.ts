@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { productSwitchedOff } from "../switched-off.js";
 
 /* Daytona's error classes by the same names and parents, so a
    `catch (e) { if (e instanceof DaytonaNotFoundError) ... }` written for
@@ -139,7 +140,7 @@ export function translate(error: unknown, subject: Subject = "other"): unknown {
     .filter(Boolean)
     .join("\n");
   let out: DaytonaError;
-  if (error.status === 503 && error.code.endsWith("_unavailable"))
+  if (productSwitchedOff(error))
     out = new NotSupportedError(error.code.replace(/_unavailable$/, ""), error.hint ?? "", message);
   else if (error.code === "file_not_found" || (error.status === 404 && subject === "file"))
     out = new DaytonaFileNotFoundError(message);

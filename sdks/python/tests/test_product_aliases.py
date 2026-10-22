@@ -64,7 +64,7 @@ class ProductAliases(unittest.TestCase):
         self.assertIn("runtime.sandbox is now runtime.sandboxes.", [str(w.message) for w in said])
         self.assertIn("runtime.tunnel is now runtime.networks.wireguard.", [str(w.message) for w in said])
         self.assertTrue(all(w.category is FutureWarning for w in said))
-        for command in ("billing", "account", "secrets", "webhooks", "events", "referrals"):
+        for command in ("billing", "account", "secrets", "webhooks", "events", "referrals", "plans"):
             self.assertIsNotNone(getattr(runtime, command))
         self.assertFalse(hasattr(runtime, "secret"))
         self.assertFalse(hasattr(runtime, "event"))

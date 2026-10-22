@@ -24,7 +24,8 @@ In your account, [Volumes](https://withruntime.com/account/volumes) lists each
 volume with how full it is, the sandbox it is attached to and its backups, and
 lets you create a volume, back it up now, change its backup policy, restore
 a backup as a new volume, or delete a volume or backup. You can attach a
-volume when creating a new sandbox. A stop keeps a sandbox's disk, so its
+volume when creating a new sandbox, and a [scheduled job](./jobs#keep-data-between-runs)
+attaches one to each of its runs. A stop keeps a sandbox's disk, so its
 volume stays attached until that sandbox is deleted. Spending and deletion ask for
 confirmation using the console agent's existing permissions.
 
@@ -239,6 +240,10 @@ await sbx.exec("ls /data");
   was written is refused rather than restored.
 - When an organization is deleted, its key is destroyed first, which makes every
   copy it had unreadable at once, and then the copies themselves are deleted.
+- Apart from these copies, each server's own nightly backup is encrypted with
+  that server's key, not your organization's. It is kept 30 days, and its pieces
+  leave the object store within 44, so what a closed organization had on that
+  server is gone from these backups by then.
 
 ## Limits and price
 

@@ -19,9 +19,9 @@ const map = (
 ).browser;
 const STUB = join(ROOT, "src/browser-stub.ts");
 
-async function build(useMap: boolean) {
+async function build(useMap: boolean, entry = "src/index.ts") {
   return Bun.build({
-    entrypoints: [join(ROOT, "src/index.ts")],
+    entrypoints: [join(ROOT, entry)],
     target: "browser",
     format: "esm",
     throw: false,
@@ -66,4 +66,26 @@ test("the SDK bundles for a browser, with no Node built-in at the top of the bun
 
 test("without the browser field the same build fails", async () => {
   expect((await build(false)).success).toBe(false);
+});
+
+/* `withruntime/agents` in a browser resolves to its "browser" condition: the
+ * client without the runtime.yml loader (node:fs). Bundled from what the
+ * condition names, it imports no Node built-in. */
+test("withruntime/agents bundles for a browser through its browser condition", async () => {
+  const exports = (
+    JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      exports: Record<string, Record<string, string>>;
+    }
+  ).exports["./agents"]!;
+  const entry = exports.browser!.replace("./dist/", "src/").replace(/\.js$/, ".ts");
+  expect(Object.keys(exports).indexOf("browser")).toBeLessThan(
+    Object.keys(exports).indexOf("import"),
+  );
+  const bundled = await build(true, entry);
+  expect(bundled.logs.filter((log) => log.level === "error").map(String)).toEqual([]);
+  expect(bundled.success).toBe(true);
+  const text = await bundled.outputs[0]!.text();
+  expect(text.match(/^import .* from "node:[^"]+";$/gm) ?? []).toEqual([]);
+  expect(text).not.toContain("LineCounter");
+  expect(text).toContain("checkAgentsFile");
 });

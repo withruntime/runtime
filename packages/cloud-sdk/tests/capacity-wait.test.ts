@@ -1,9 +1,15 @@
 import { expect, test } from "bun:test";
-import { ConflictError, Runtime } from "../src/index";
+import { RateLimitError, Runtime } from "../src/index";
 
 /* A create that finds every trial slot, the account's quota or the region full
    waits for room and sends the same call again, instead of failing a CI job
    that burst past its limit (judge panel, 23 September 2026). */
+
+const STATUS: Record<string, number> = {
+  no_capacity: 503,
+  quota_exceeded: 429,
+  no_credit_running_limit: 429,
+};
 
 const running = { id: "sbx", kind: "sandbox", state: "running", status: "active" };
 
@@ -19,7 +25,8 @@ function refusing(
     paths.push(new URL(url).pathname);
     const next = refusals.shift();
     if (!next) return Response.json(running);
-    const status = next.status ?? 409;
+    // As the API answers them since 17 October 2026.
+    const status = next.status ?? STATUS[next.code] ?? 409;
     return Response.json(
       {
         error: {
@@ -88,8 +95,8 @@ test("when the wait runs out, the original refusal is thrown", async () => {
     .sandboxes.create({})
     .catch((e: unknown) => e);
   const took = performance.now() - started;
-  expect(error).toBeInstanceOf(ConflictError);
-  expect(error).toMatchObject({ code: "no_credit_running_limit", status: 409 });
+  expect(error).toBeInstanceOf(RateLimitError);
+  expect(error).toMatchObject({ code: "no_credit_running_limit", status: 429 });
   expect(keys.length).toBeGreaterThan(2);
   expect(took).toBeGreaterThanOrEqual(190);
   expect(took).toBeLessThan(1500);
@@ -129,8 +136,8 @@ test("a request that can never fit is not waited for, and a fork never waits", a
     if (init.method === "GET") return Response.json(running);
     if (new URL(url).pathname.endsWith(":fork")) forks++;
     return Response.json(
-      { error: { code: "no_credit_running_limit", status: 409, message: "full", retryAfterMs: 5 } },
-      { status: 409 },
+      { error: { code: "no_credit_running_limit", status: 429, message: "full", retryAfterMs: 5 } },
+      { status: 429 },
     );
   }) as unknown as typeof fetch;
   const sbx = await client(forking).sandboxes.get("sbx");
@@ -168,7 +175,7 @@ test("Sandbox.create takes the create options, as runtime.sandboxes.create does"
   const { fetcher, keys } = refusing([{ code: "no_credit_running_limit" }]);
   await expect(
     Sandbox.create({}, { client: client(fetcher), waitForCapacityMs: 0 }),
-  ).rejects.toBeInstanceOf(ConflictError);
+  ).rejects.toBeInstanceOf(RateLimitError);
   expect(keys).toHaveLength(1);
 });
 
@@ -182,8 +189,8 @@ function fullServer(refusals: number) {
     keys.push(new Headers(init.headers).get("idempotency-key"));
     if (refusals-- <= 0) return Response.json(running);
     return Response.json(
-      { error: { code: "no_capacity", status: 409, message: "full", retryAfterMs: 5 } },
-      { status: 409 },
+      { error: { code: "no_capacity", status: 503, message: "full", retryAfterMs: 5 } },
+      { status: 503 },
     );
   }) as unknown as typeof fetch;
   return { fetcher, keys };
@@ -217,18 +224,19 @@ test("a wake with waitForCapacityMs 0, on the client or the call, fails at once"
 });
 
 test("a wait for room moves the call's deadline on, and never spends the caller's own timeoutMs", async () => {
-  // Two waits of 40 ms each, against a call given 30 ms: the waits are the
-  // room's, so the wake still lands.
+  // Two waits of 250 ms each, against a call given 200 ms: the waits are the
+  // room's, so the wake still lands. (30 ms against 40 ms waits ran out on a
+  // loaded machine before the first wait, on the requests' own time.)
   let refusals = 2;
   const fetcher = (async (_url: string, init: RequestInit) => {
     if (init.method === "GET") return Response.json({ ...running, state: "paused" });
     if (refusals-- <= 0) return Response.json(running);
     return Response.json(
-      { error: { code: "no_capacity", status: 409, message: "full", retryAfterMs: 40 } },
-      { status: 409 },
+      { error: { code: "no_capacity", status: 503, message: "full", retryAfterMs: 250 } },
+      { status: 503 },
     );
   }) as unknown as typeof fetch;
   const sbx = await client(fetcher).sandboxes.get("sbx");
-  await sbx.wake({ timeoutMs: 30 });
+  await sbx.wake({ timeoutMs: 200 });
   expect(sbx.state).toBe("running");
 });

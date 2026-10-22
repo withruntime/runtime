@@ -119,6 +119,13 @@ class SecretsTest(unittest.TestCase):
         expected = {"value": "ghp_x", "hosts": ["api.github.com"], "rules": rules}
         self.assertEqual([seen[2] for seen in Stub.seen], [expected, expected])
 
+    def test_env_is_sent_only_when_given(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.set("GH_REPO_A", value="ghp_x", hosts=["api.github.com"], env="GITHUB_TOKEN")
+            runtime.secrets.set("GH_REPO_A", value="ghp_x", hosts=["api.github.com"])
+        base = {"value": "ghp_x", "hosts": ["api.github.com"]}
+        self.assertEqual([seen[2] for seen in Stub.seen], [{**base, "env": "GITHUB_TOKEN"}, base])
+
     def test_only_and_scope_are_sent_sync_and_async(self):
         only = {"labels": [{"role": "hub"}], "sandboxes": ["ef01c6ef-6648-450b-acd2-6fe82ac31960"]}
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
@@ -144,6 +151,37 @@ class SecretsTest(unittest.TestCase):
             ("PUT", f"{path}/sandboxes", {}),
             ("PUT", "/v1/egress-secrets/A%20B/sandboxes", only),
         ])
+
+    def test_github_app_git_api_and_only_are_sent_sync_and_async(self):
+        pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----"
+        github_app = {"id": 12345, "installation": 67890, "repositories": ["runtime-cloud"],
+                      "permissions": {"contents": "write"}, "api": "https://github.example.com/api/v3"}
+        git = {"push": ["refs/heads/task/{label.task}", "refs/heads/task/{label.task}--*"]}
+        api = {"callsPerHour": 500, "writesPerHour": 0, "keep": 100, "copies": True, "fresh": 60,
+               "graphql": {"path": "/api/graphql", "mutations": ["createPullRequest"]}}
+        only = {"labels": [{"role": "hub"}]}
+        hosts = ["api.github.com", "github.com"]
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.set("GITHUB_APP", value=pem, hosts=hosts, github_app=github_app, git=git, api=api,
+                                only=only)
+            runtime.secrets.set("NO_PUSH", value=pem, hosts=hosts, github_app=github_app, git={"push": []})
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                await runtime.secrets.set("GITHUB_APP", value=pem, hosts=hosts, github_app=github_app, git=git,
+                                          api=api, only=only)
+
+        asyncio.run(go())
+        expected = {"value": pem, "hosts": hosts, "only": only, "githubApp": github_app, "git": git, "api": api}
+        self.assertEqual(Stub.seen[0][2], expected)
+        self.assertEqual(Stub.seen[1][2]["git"], {"push": []})
+        self.assertNotIn("api", Stub.seen[1][2])
+        self.assertEqual(Stub.seen[2][2], expected)
+        # Nothing set: no policy field is sent at all.
+        Stub.seen = []
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.set("K", value="v", hosts=["a.example.com"])
+        self.assertEqual(Stub.seen[0][2], {"value": "v", "hosts": ["a.example.com"]})
 
 
 class UpstreamProxyStub(BaseHTTPRequestHandler):

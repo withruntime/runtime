@@ -20,9 +20,11 @@ import {
 import { Transport, timeoutSignal, type RequestOptions } from "./transport.js";
 import type {
   CommandResult,
+  TracedFiles,
   DeletedSandbox,
   ExecOptions,
   FileEntry,
+  FileLink,
   OutputEvent,
   BinaryOutputEvent,
   ProcessInfo,
@@ -122,6 +124,7 @@ function commandBody(command: string | readonly string[], options: ExecOptions) 
         ? { stdin: options.stdin }
         : { stdinBase64: toBase64(options.stdin) }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.traceFiles ? { traceFiles: true } : {}),
   };
 }
 
@@ -244,6 +247,13 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       } finally {
         clearTimeout(timer);
       }
+      // A stream the server ended (continue) is followed to its exit, which
+      // names no files: they are the process's own to read.
+      const files =
+        exit?.files ??
+        (options.traceFiles && processId && exit?.state
+          ? await new Process(this.#t, this.id, { id: processId } as ProcessInfo).files()
+          : undefined);
       result = {
         exitCode: exit?.exitCode ?? null,
         ...out,
@@ -252,6 +262,7 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
         ...(exit?.durationMs === undefined ? {} : { durationMs: exit.durationMs }),
         ...(processId ? { processId } : {}),
         ...(exit?.outOfMemory ? { outOfMemory: exit.outOfMemory } : {}),
+        ...(files ? { files } : {}),
       };
     }
     if (options.check && (result.exitCode !== 0 || result.timedOut)) throw new CommandError(result);
@@ -478,6 +489,8 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       path: `/v1/sandboxes/${enc(this.id)}:fork`,
       body,
       wait: 60,
+      // Its key replays a refusal for room or a limit, so it is told at once.
+      waitForCapacityMs: 0,
       ...requestOnly({ idempotencyKey, signal, timeoutMs }),
     });
     const sandboxes = reply.sandboxes.map((info) => new Sandbox(this.#t, info));
@@ -535,9 +548,11 @@ function cutOff(error: unknown): boolean {
   return (
     !(error instanceof RuntimeError) ||
     error instanceof ConnectionError ||
-    ((error instanceof RateLimitError || error instanceof ServiceUnavailableError) &&
-      [429, 502, 503, 504].includes(error.status) &&
-      !DELIBERATE.has(error.code))
+    // The API says whether it passes; an older server is judged by status.
+    (error.sentRetryable ??
+      ((error instanceof RateLimitError || error instanceof ServiceUnavailableError) &&
+        [429, 502, 503, 504].includes(error.status) &&
+        !DELIBERATE.has(error.code)))
   );
 }
 
@@ -920,6 +935,14 @@ export class Process {
       ...options,
     });
   }
+  /** What a process spawned with `traceFiles` opened and wrote. Known once it
+   * has ended: a running one answers 409 process_running. */
+  files(): Promise<TracedFiles> {
+    return this.t.json<TracedFiles>({
+      method: "GET",
+      path: `/v1/sandboxes/${enc(this.sandboxId)}/processes/${enc(this.id)}/files`,
+    });
+  }
   async refresh(): Promise<ProcessInfo> {
     this.info = await this.t.json<ProcessInfo>({
       method: "GET",
@@ -987,7 +1010,11 @@ export class Terminal {
     });
   }
   write(data: string | Uint8Array): void {
-    this.socket.send(typeof data === "string" ? new TextEncoder().encode(data) : data);
+    // A view of shared memory is refused by WebSocket.send: the bytes it
+    // takes are an ArrayBuffer's, which TypeScript 7's DOM types ask for.
+    this.socket.send(
+      typeof data === "string" ? new TextEncoder().encode(data) : (data as Uint8Array<ArrayBuffer>),
+    );
   }
   resize(cols: number, rows: number): void {
     this.socket.send(JSON.stringify({ type: "resize", cols, rows }));
@@ -1434,6 +1461,50 @@ export class Files {
       ...request,
     });
   }
+  /** A link anyone can open with no API key to download this file, for a
+   * browser or another service: Range works, so videos play and downloads
+   * resume. One hour by default, at most 7 days (`expiresInSeconds`).
+   * `filename` makes it a download with that name; `archive: true` links a
+   * folder as a .tar.gz. Revoking the key that made it ends it, as does
+   * `revokeLinks()`. */
+  async downloadUrl(
+    path: string,
+    options: RequestOptions & {
+      expiresInSeconds?: number;
+      filename?: string;
+      wake?: boolean;
+      archive?: boolean;
+    } = {},
+  ): Promise<FileLink> {
+    const { expiresInSeconds, filename, wake, archive, ...request } = options;
+    return this.t.json<FileLink>({
+      method: "POST",
+      path: this.#path("/files:link"),
+      body: { path, method: "GET", expiresInSeconds, filename, wake, archive },
+      ...request,
+    });
+  }
+  /** A link anyone can PUT a file's bytes to, with no API key: the body
+   * becomes the file at `path`, whole or not at all, up to `maxBytes` (5 GiB
+   * at most; the body must arrive within 5 minutes). */
+  async uploadUrl(
+    path: string,
+    options: RequestOptions & { expiresInSeconds?: number; maxBytes?: number; wake?: boolean } = {},
+  ): Promise<FileLink> {
+    const { expiresInSeconds, maxBytes, wake, ...request } = options;
+    return this.t.json<FileLink>({
+      method: "POST",
+      path: this.#path("/files:link"),
+      body: { path, method: "PUT", expiresInSeconds, maxBytes, wake },
+      ...request,
+    });
+  }
+  /** Ends every link made for this sandbox so far; links made after work. */
+  async revokeLinks(
+    options: RequestOptions = {},
+  ): Promise<{ sandboxId: string; revokedAt: string }> {
+    return this.t.json({ method: "POST", path: this.#path("/files:revoke-links"), ...options });
+  }
   /** Packs a directory as archive bytes; `gzip: false` returns plain tar.
    * Exclusions are relative paths, not globs. `user: root` selects guest root. */
   async archive(
@@ -1665,7 +1736,7 @@ export class Files {
     });
     const { unpackStream } = await import("./tar.js");
     try {
-      await unpackStream(archive as unknown as AsyncIterable<Uint8Array>, localPath, {
+      await unpackStream(archive, localPath, {
         signal: scope.request.signal,
       });
     } finally {

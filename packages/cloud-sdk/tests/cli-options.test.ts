@@ -153,7 +153,7 @@ test("a create waiting for a trial slot says so on standard error, once", async 
               retryAfterMs: 5,
             },
           },
-          { status: 409 },
+          { status: 429 },
         )
       : Response.json(info)) as unknown as typeof fetch;
   const lines: string[] = [];
@@ -290,4 +290,21 @@ test("--root runs exec and spawn as root; without it the request names no user",
   const spawned = await cli(["sandbox", "spawn", SANDBOX, "--root", "--", "nginx"]);
   const start = spawned.sent.find((request) => request.path.endsWith("/processes"));
   expect(start?.body).toMatchObject({ command: "nginx", user: "root" });
+});
+
+test("jobs update --volume replaces a job's volumes, --no-volumes removes them, and not both", async () => {
+  const job = "7b1c2d3e-4f50-4617-8a9b-0c1d2e3f4a5b";
+  const volume = "5f8a2b10-3c4d-4e6f-8a9b-0c1d2e3f4a55";
+  const update = (r: Awaited<ReturnType<typeof cli>>) =>
+    r.sent.find((request) => request.path.endsWith(":update"))?.body;
+  const set = await cli(["jobs", "update", job, "--volume", `${volume}:/data:snapshot`]);
+  expect(update(set)).toEqual({
+    compute: { volumes: [{ volumeId: volume, path: "/data", mode: "snapshot" }] },
+  });
+  expect(update(await cli(["jobs", "update", job, "--no-volumes"]))).toEqual({
+    compute: { volumes: [] },
+  });
+  const both = await cli(["jobs", "update", job, "--volume", `${volume}:/data`, "--no-volumes"]);
+  expect(both.error?.message).toContain("not both");
+  expect(update(both)).toBeUndefined();
 });

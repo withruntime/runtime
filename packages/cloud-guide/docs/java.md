@@ -10,11 +10,11 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.9.0</version>
+  <version>0.17.0</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.9.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.17.0")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
@@ -334,12 +334,20 @@ Every exception is a `RuntimeCloudException` (unchecked) with `code()`,
 `getMessage()`, `hint()`, `requestId()`, `status()` and `details()`. Its
 subclasses are `Authentication`, `PermissionDenied`, `NotFound`, `Conflict`,
 `InvalidRequest`, `RateLimited`, `ServiceUnavailable`, `Connection` and
-`Command`, the same classes as the JavaScript, Python and Go SDKs.
+`Command`, the same classes as the JavaScript, Python and Go SDKs. `no_capacity` is
+`ServiceUnavailable`; `no_credit_running_limit` and a `quota_exceeded` on what
+runs at once are `RateLimited`, and a `quota_exceeded` on what is kept is
+`Conflict`.
 
 Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures, 429, 502, 503 and 504 are retried
-with the same key, so a retry never makes two sandboxes or runs a command
-twice. `retryable()` says whether trying the same call again may work.
+client's own retries. Transport failures and every answer that says
+`retryable: true` are retried after its `Retry-After`, up to the maximum number
+of retries, with the same key, so a retry never makes two sandboxes or runs a
+command twice. A wait over 60 seconds is not slept on: the error is returned at
+once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
+`rate_limited`) is sent again until the call's deadline, or for five minutes
+without one, past the maximum. `retryable()` says whether trying the same call again
+may work.
 
 **A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
 account is at its limit (`quota_exceeded`) or the region is full
@@ -522,3 +530,43 @@ server's status for failures. Interrupted waits stop promptly.
 `sbx.desktop().recordings()` has `start`, `get`, `list`, `stop`, `download`
 and `delete`. Downloads return MP4 bytes. Recordings live on the sandbox's
 own disk and count toward that disk's space.
+
+<!-- launch: ci -->
+
+## CI/CD (beta)
+
+`runtime.ci()` reads CI/CD, which checks every push and pull request of a
+connected GitHub repository in sandboxes. `ci().repositories()` has `connect`,
+`list` and `disconnect` (only a full key connects one); `ci().checks().list`
+and `get`, `ci().jobs().get` (with the tail of the job's log) and
+`ci().tests().list` read what ran. Times are milliseconds since the epoch,
+lists are `Page`s like the others, and an account outside the beta gets
+`PermissionDenied` with code `product_in_beta`.
+
+```java check
+import com.withruntime.CiCheck;
+import com.withruntime.CiCheckDetail;
+import com.withruntime.CiJob;
+import com.withruntime.CiRepository;
+import com.withruntime.ConnectCiRepository;
+import com.withruntime.ListCiChecks;
+import com.withruntime.RuntimeClient;
+
+public class CiExample {
+  public static void main(String[] args) {
+    RuntimeClient runtime = RuntimeClient.create();
+    CiRepository repository = runtime.ci().repositories().connect(new ConnectCiRepository("acme/web"));
+    for (CiCheck check : runtime.ci().checks().list(new ListCiChecks().repositoryId(repository.id()).state("failed"))) {
+      CiCheckDetail detail = runtime.ci().checks().get(check.id());
+      for (CiJob job : detail.jobs()) {
+        if (job.state().equals("failed")) {
+          System.out.println(job.name() + "\n" + runtime.ci().jobs().get(job.id()).log());
+          System.out.println(job.sandboxIds()); // A failure's sandbox may be paused: wake it to look in.
+        }
+      }
+    }
+  }
+}
+```
+
+<!-- /launch: ci -->

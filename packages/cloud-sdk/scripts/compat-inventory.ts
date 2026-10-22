@@ -210,7 +210,7 @@ export const SOURCES: readonly Source[] = [
   {
     provider: "prime",
     language: "python",
-    upstream: { dir: "pypi/prime-sandboxes@0.4.6", entry: "prime_sandboxes" },
+    upstream: { dir: "pypi/prime-sandboxes@0.4.7", entry: "prime_sandboxes" },
     runtime: "sdks/python/withruntime/prime",
     constructed: ["APIClient", "AsyncAPIClient", "SandboxClient", "AsyncSandboxClient"],
     outside: ["Config"],

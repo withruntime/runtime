@@ -281,6 +281,103 @@ func (f *Files) Rename(ctx context.Context, from, to string, overwrite bool) err
 	return f.c.do(ctx, &call{method: http.MethodPost, path: f.path("/files:rename"), body: body}, nil)
 }
 
+// FileLink is a secret, expiring URL for one file. It opens with no API key: GET
+// downloads (Range works), PUT with the raw body uploads atomically.
+type FileLink struct {
+	URL       string    `json:"url"`
+	Method    string    `json:"method"`
+	Path      string    `json:"path"`
+	SandboxID string    `json:"sandboxId"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Filename  string    `json:"filename,omitempty"`
+	MaxBytes  int64     `json:"maxBytes,omitempty"`
+	Archive   bool      `json:"archive,omitempty"`
+}
+
+// RevokedLinks is the answer to Files.RevokeLinks.
+type RevokedLinks struct {
+	SandboxID string    `json:"sandboxId"`
+	RevokedAt time.Time `json:"revokedAt"`
+}
+
+// DownloadURLOptions for Files.DownloadURL. ExpiresInSeconds is 3600 when 0
+// and at most 604800. Filename makes the download save under that name.
+// Wake true wakes a paused sandbox even when it does not wake itself; false
+// makes the link answer 409 sandbox_paused; nil follows the sandbox. Archive
+// links a folder as a .tar.gz.
+type DownloadURLOptions struct {
+	ExpiresInSeconds int
+	Filename         string
+	Wake             *bool
+	Archive          bool
+}
+
+// UploadURLOptions for Files.UploadURL. ExpiresInSeconds is 3600 when 0 and
+// at most 604800. MaxBytes caps the body (5 GiB, also the most, when 0).
+// Wake is as in DownloadURLOptions.
+type UploadURLOptions struct {
+	ExpiresInSeconds int
+	MaxBytes         int64
+	Wake             *bool
+}
+
+func (f *Files) link(ctx context.Context, body map[string]any) (*FileLink, error) {
+	var link FileLink
+	if err := f.c.do(ctx, &call{method: http.MethodPost, path: f.path("/files:link"), body: body}, &link); err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
+// DownloadURL makes a link anyone can open with no API key to download a
+// file. It lasts an hour by default, at most 7 days.
+func (f *Files) DownloadURL(ctx context.Context, name string, opts *DownloadURLOptions) (*FileLink, error) {
+	body := map[string]any{"path": name, "method": "GET"}
+	if opts != nil {
+		if opts.ExpiresInSeconds != 0 {
+			body["expiresInSeconds"] = opts.ExpiresInSeconds
+		}
+		if opts.Filename != "" {
+			body["filename"] = opts.Filename
+		}
+		if opts.Wake != nil {
+			body["wake"] = *opts.Wake
+		}
+		if opts.Archive {
+			body["archive"] = true
+		}
+	}
+	return f.link(ctx, body)
+}
+
+// UploadURL makes a link anyone can PUT a raw body to with no API key; the
+// body becomes the file at name, whole or not at all. It lasts an hour by
+// default, at most 7 days.
+func (f *Files) UploadURL(ctx context.Context, name string, opts *UploadURLOptions) (*FileLink, error) {
+	body := map[string]any{"path": name, "method": "PUT"}
+	if opts != nil {
+		if opts.ExpiresInSeconds != 0 {
+			body["expiresInSeconds"] = opts.ExpiresInSeconds
+		}
+		if opts.MaxBytes != 0 {
+			body["maxBytes"] = opts.MaxBytes
+		}
+		if opts.Wake != nil {
+			body["wake"] = *opts.Wake
+		}
+	}
+	return f.link(ctx, body)
+}
+
+// RevokeLinks ends every link made for the sandbox so far.
+func (f *Files) RevokeLinks(ctx context.Context) (*RevokedLinks, error) {
+	var reply RevokedLinks
+	if err := f.c.do(ctx, &call{method: http.MethodPost, path: f.path("/files:revoke-links")}, &reply); err != nil {
+		return nil, err
+	}
+	return &reply, nil
+}
+
 // Upload copies a local file or directory into the sandbox. A directory
 // travels as one gzipped tar to the API's folder routes, and the sandbox's
 // own tar unpacks it as it arrives, making the folder and its parents.

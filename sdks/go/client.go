@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.10.0"
+const Version = "0.18.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -40,10 +40,15 @@ type Client struct {
 	Secrets *SecretService
 	// Limits says what this key may do and spend.
 	Limits *LimitService
+	// Reservations book room for a burst, or keep standing room until
+	// cancelled.
+	Reservations *ReservationService
 	// Emails are which of Runtime's optional emails this key's person gets.
 	Emails *EmailService
 	// Referrals is the account's referral link and what it earned.
 	Referrals *ReferralService
+	// Plans are monthly plans whose fee is prepaid usage.
+	Plans *PlanService
 	// Switching compares usage with a rival's rates and records a switch.
 	Switching *SwitchingService
 	// Events lists the account's lifecycle events.
@@ -77,6 +82,9 @@ type Client struct {
 	Functions *AppService
 	// Builds builds connected repositories. Private beta.
 	Builds *BuildService
+	// CI checks connected repositories on each push and pull request.
+	// Private beta.
+	CI *CIService
 	// Containers run one OCI image's process each on its own microVM, at
 	// the sandbox rates. Private beta.
 	Containers *ContainerService
@@ -236,8 +244,10 @@ func New(options ...Option) (*Client, error) {
 	c.Volumes = &VolumeService{c: c}
 	c.Secrets = &SecretService{c: c}
 	c.Limits = &LimitService{c: c}
+	c.Reservations = &ReservationService{c: c}
 	c.Emails = &EmailService{c: c}
 	c.Referrals = &ReferralService{c: c}
+	c.Plans = &PlanService{c: c}
 	c.Switching = &SwitchingService{c: c}
 	c.Events = &EventService{c: c}
 	c.Webhooks = &WebhookService{c: c}
@@ -257,6 +267,7 @@ func New(options ...Option) (*Client, error) {
 	c.Apps = &AppService{c: c, base: "/v1/apps", apps: true}
 	c.Functions = &AppService{c: c, base: "/v1/functions"}
 	c.Builds = &BuildService{c: c, Repositories: &RepositoryService{c: c}}
+	c.CI = newCIService(c)
 	c.Containers = &ContainerService{c: c}
 	return c, nil
 }

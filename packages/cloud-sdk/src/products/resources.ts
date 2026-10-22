@@ -6,7 +6,8 @@ import { pause } from "../wait.js";
 /** The five verbs every resource product shares (CLOUD.md section 4, "One
  * shape for every interface"; packages/cloud/src/api/resource-product.ts),
  * and following one to a state. A product builds its client on these and
- * adds only its own verbs. */
+ * adds only its own verbs. Plain request builders over Transport: nothing
+ * runs at import, no dependency beyond this package. */
 export type ResourceRecord = {
   id: string;
   state: string;

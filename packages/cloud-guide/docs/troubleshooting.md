@@ -102,19 +102,19 @@ Node from nodejs.org reads no such file, so it starts either way.
 
 ## Creation is refused
 
-| Code                      | What it means                                                                               | What to do                                                                       |
-| ------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `no_credit_running_limit` | Four sandboxes without credit are already running; `details` names them                     | Stop or pause one, or retry once one ends                                        |
-| `no_credit_domain_limit`  | Your email domain's eight shared slots without credit are all running                       | Stop or pause one, or add credit                                                 |
-| `included_usage_used_up`  | This month's free usage, or a product's share of it, is used                                | Add credit, or wait for the 1st (UTC)                                            |
-| `no_credit_size_limit`    | A sandbox without credit is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk              | Omit the size fields for the default                                             |
-| `invalid_request`         | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                 |
-| `invalid_region`          | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                 |
-| `no_capacity`, `busy`     | No host has room right now                                                                  | Wait `Retry-After`, then retry with the same idempotency key and a growing delay |
-| `image_not_found`         | `image` names nothing in your account; the message lists the name's tags                    | Name one it lists, or build a public image first                                 |
-| `volume_not_ready`        | A volume it names, or one you back up, is still `creating` (a restore is too until checked) | Wait until the volume reads `ready`, then try again                              |
+| Code                      | What it means                                                                               | What to do                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `no_credit_running_limit` | Four sandboxes without credit are already running; `details` names them                     | Stop or pause one, or retry once one ends                                                                                          |
+| `no_credit_domain_limit`  | Your email domain's eight shared slots without credit are all running                       | Stop or pause one, or add credit                                                                                                   |
+| `included_usage_used_up`  | This month's free usage, or a product's share of it, is used                                | Add credit, or wait for the 1st (UTC)                                                                                              |
+| `no_credit_size_limit`    | A sandbox without credit is at most 2 vCPU, 4 GiB of memory and 10 GiB of disk              | Omit the size fields for the default                                                                                               |
+| `invalid_request`         | `details.issues` names every wrong field                                                    | Fix the named fields; unknown fields are refused                                                                                   |
+| `invalid_region`          | `details.available` lists your regions                                                      | Use a region listed for your account, or omit it                                                                                   |
+| `no_capacity`, `busy`     | No host has room right now (503)                                                            | Wait `Retry-After`, then retry with the same idempotency key and a growing delay; for a planned burst, [book room](./reservations) |
+| `image_not_found`         | `image` names nothing in your account; the message lists the name's tags                    | Name one it lists, or build a public image first                                                                                   |
+| `volume_not_ready`        | A volume it names, or one you back up, is still `creating` (a restore is too until checked) | Wait until the volume reads `ready`, then try again                                                                                |
 
-**`no_credit_running_limit` is temporary:** a slot frees when any sandbox without credit stops or pauses.
+**`no_credit_running_limit` is temporary:** it answers 429 with `Retry-After: 5`, and a slot frees when any sandbox without credit stops or pauses.
 
 - Retry with the same idempotency key, a growing delay and a bounded deadline,
   or stop or pause one of the sandboxes `details` names.
@@ -201,14 +201,14 @@ still unknown, inspect its files and `processes` before repeating a side effect.
 
 ## The service returns 401, 403, 409, 429 or 5xx
 
-| Response           | What to check                                                                                                                              | Safe next step                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| 401                | Missing, expired or revoked key; wrong API origin                                                                                          | Check `npx withruntime whoami` or the secret-manager configuration         |
-| 403                | Owner approval, key scope, account suspension or resource ownership                                                                        | Confirm the account and permitted action; do not work around a refusal     |
-| 409                | The resource's state: paused (`sandbox_paused` with `autoWake` off says so), stopped, not ready, or an account without credit at its limit | Resolve that state (`wake`, or `autoWake: true`), then retry               |
-| 422                | The idempotency key was used before with a different body                                                                                  | Same key, same body; or a new key for genuinely new work                   |
-| 429                | Request rate or concurrent work exceeded the server's bound                                                                                | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
-| 5xx or no response | The write may already have reached the server                                                                                              | Retry identical input with the same idempotency key and inspect state      |
+| Response           | What to check                                                                                                | Safe next step                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 401                | Missing, expired or revoked key; wrong API origin                                                            | Check `npx withruntime whoami` or the secret-manager configuration         |
+| 403                | Owner approval, key scope, account suspension or resource ownership                                          | Confirm the account and permitted action; do not work around a refusal     |
+| 409                | The resource's state: paused (`sandbox_paused` with `autoWake` off says so), stopped, or a name already held | Resolve that state (`wake`, or `autoWake: true`), then retry               |
+| 422                | Well formed but not possible as asked, such as an idempotency key used before with a different body          | Same key, same body; or a new key for genuinely new work                   |
+| 429                | Your own limit: request rate, concurrent work, a quota or a daily cap                                        | Respect `Retry-After`, add a growing delay, and reduce concurrent requests |
+| 5xx or no response | The write may already have reached the server                                                                | Retry identical input with the same idempotency key and inspect state      |
 
 A 5xx whose message says the fault is ours was reported to us when it happened,
 with its `requestId`. [API errors and retries](./api) describes the full
@@ -325,6 +325,12 @@ runs, so wait for it to stop before comparing the total.
 **Check `pausedExpiresAt`, available credit and the error code.** Wake needs
 room on the original host for CPU, memory, the full disk allowance and its next
 snapshot. A full host can refuse restoration while preserving the saved state.
+When the host is short only because of work Runtime runs at the lowest
+priority there (such as Runtime's own CI), the wake pauses that work and waits
+up to 20 seconds for the room before it answers `no_capacity`. A request
+that would wake a sandbox while a snapshot of it is being taken waits for the
+snapshot to finish, then wakes it; past the request's own deadline it answers
+`snapshot_capturing` (409), and a retry once the snapshot is over wakes it.
 
 - Do not delete it as a retry step.
 - Missing memory images are an error, not an instruction to claim a fresh boot
@@ -346,8 +352,13 @@ sandbox then stays in the state it was moving from (`starting`, `resuming`,
 `pausing` or `stopping`), with its files kept and nothing charged, and its
 answer carries `operationFailed`: the action (`start`, `wake`, `pause`, `stop`
 or `delete`) and when it failed. Every command and wake on it answers
-`operation_failed` (503) at once instead of waiting, and our operators are
+`operation_failed` (500) at once instead of waiting, and our operators are
 alerted. Retrying the same call does not help; a stop or a delete does.
+A wake or pause that gave up because its machine held the sandbox for our
+operators is asked again every five minutes: once the machine has let it
+go, the sandbox is `paused` again (with `stopReason: "pause_failed"` and
+`memoryRestored: false` on its next wake if its memory could not be kept),
+and its next command wakes it.
 
 | What you see                                   | What it means                                                                                                                                                                                       |
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -355,7 +366,7 @@ alerted. Retrying the same call does not help; a stop or a delete does.
 | `fence_conflict` in an operation's result      | The machine would not take the wake as asked, so the sandbox was put back to paused with its files                                                                                                  |
 | `pause_failed` with `memoryRestored: false`    | The programs that were running are gone; the files are kept, and the next wake starts fresh from the disk                                                                                           |
 | `resuming` or `pending` for more than a minute | An operation on the sandbox cannot finish, and calls on it wait behind it                                                                                                                           |
-| `operation_failed` (503), or `operationFailed` | The operation gave up. Stop the sandbox to keep its disk and restart it later, or delete it                                                                                                         |
+| `operation_failed` (500), or `operationFailed` | The operation gave up. Stop the sandbox to keep its disk and restart it later, or delete it                                                                                                         |
 | `wake_refused` (503)                           | A wake or restart was refused at once by a fault of ours, before anything ran or was charged. The sandbox stays as it was with its files kept, and we were alerted. Retry the wake in a few minutes |
 
 - Your other sandboxes are not affected: a stuck operation holds one sandbox.

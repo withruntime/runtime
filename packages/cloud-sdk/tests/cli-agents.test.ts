@@ -266,3 +266,82 @@ test("sessions delete removes an ended session and its log", async () => {
     },
   );
 });
+
+test("memory ls, search, cat, put and rm send what the API takes, the shared scope by default", async () => {
+  const file = (path: string, scope = "") => ({
+    scope,
+    path,
+    bytes: 12,
+    updatedAt: "2025-10-09T08:53:20.000Z",
+    updatedBy: "key_1",
+  });
+  const usage = { bytes: 24, files: 2, limitBytes: 1073741824, limitFiles: 100000 };
+  await withStub(
+    ({ method, path, query }) => {
+      if (method === "GET" && path === "/v1/agents/helper/memory")
+        return query.has("q")
+          ? {
+              data: [{ ...file("faq.md"), snippet: "our **refund**\npolicy", rank: 1 }],
+              nextCursor: null,
+            }
+          : { data: [file("faq.md"), file("tone.md", "customer:42")], nextCursor: null, usage };
+      if (method === "GET" && path === "/v1/agents/helper/memory/content")
+        return { ...file("faq.md"), content: "Refunds within 30 days." };
+      if (method === "PUT" && path === "/v1/agents/helper/memory/content")
+        return {
+          scope: query.get("scope"),
+          path: query.get("path"),
+          bytes: 12,
+          created: true,
+          updatedAt: "x",
+        };
+      if (method === "DELETE" && path === "/v1/agents/helper/memory/content")
+        return { deleted: false };
+    },
+    async (lines, sent) => {
+      await run(["agents", "memory", "ls", "helper"], env, out(lines));
+      await run(["agents", "memory", "search", "helper", "refund", "policy"], env, out(lines));
+      await run(["agents", "memory", "cat", "helper", "faq.md"], env, out(lines));
+      await run(
+        [
+          "agents",
+          "memory",
+          "put",
+          "helper",
+          "tone.md",
+          "--content",
+          "Formal.",
+          "--scope",
+          "customer:42",
+        ],
+        env,
+        out(lines),
+      );
+      await run(["agents", "memory", "rm", "helper", "old.md"], env, out(lines));
+      expect(sent.map((s) => `${s.method} ${s.path} ${s.query.toString()}`)).toEqual([
+        "GET /v1/agents/helper/memory limit=1000",
+        "GET /v1/agents/helper/memory q=refund+policy",
+        "GET /v1/agents/helper/memory/content scope=&path=faq.md",
+        "PUT /v1/agents/helper/memory/content scope=customer%3A42&path=tone.md",
+        "DELETE /v1/agents/helper/memory/content scope=&path=old.md",
+      ]);
+      expect(sent[3]!.body).toEqual({ content: "Formal." });
+      expect(lines[0]).toContain("(shared)");
+      expect(lines[0]).toContain("customer:42");
+      expect(lines[0]).toContain("2 files, 24 bytes in all");
+      expect(lines[1]).toContain("our **refund** policy");
+      expect(lines[2]).toBe("Refunds within 30 days.");
+      expect(lines[3]).toBe("Wrote tone.md in customer:42: 12 bytes.");
+      expect(lines[4]).toBe("No old.md in (shared).");
+    },
+  );
+  await expect(run(["agents", "memory", "search", "helper"], env, out([]))).rejects.toThrow(
+    "Give the words",
+  );
+  await expect(run(["agents", "memory", "lsx"], env, out([]))).rejects.toThrow("Did you mean ls?");
+  // A put with no text named never reads stdin: a CI step with nothing piped
+  // in is told what to give, and no file is replaced with nothing.
+  await expect(run(["agents", "memory", "put", "helper", "tone.md"], env, out([]))).rejects.toThrow(
+    "- for stdin",
+  );
+});

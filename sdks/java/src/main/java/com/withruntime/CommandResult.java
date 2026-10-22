@@ -45,6 +45,11 @@ public final class CommandResult extends JsonObject {
     return getString("processId");
   }
 
+  /** The files it read and wrote when it ran with {@link ExecOptions#traceFiles}; null otherwise. */
+  public TracedFiles files() {
+    return has("files") ? new TracedFiles(map(get("files"))) : null;
+  }
+
   /** Exit code 0 and no timeout. */
   public boolean ok() {
     return !timedOut() && Integer.valueOf(0).equals(exitCode());

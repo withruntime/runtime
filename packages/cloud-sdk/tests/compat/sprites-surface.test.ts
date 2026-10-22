@@ -194,7 +194,7 @@ test("parseAPIError reads the vendor's body and rate-limit headers", () => {
 test("Runtime's refusals reach Sprites callers as APIError with the vendor's limit codes", async () => {
   for (const [code, status, check] of [
     ["quota_exceeded", 429, "isConcurrentLimitExceeded"],
-    ["no_credit_running_limit", 409, "isConcurrentLimitExceeded"],
+    ["no_credit_running_limit", 429, "isConcurrentLimitExceeded"],
     ["rate_limited", 429, "isCreationRateLimited"],
   ] as const) {
     const f = fake({

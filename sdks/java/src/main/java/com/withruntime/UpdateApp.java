@@ -34,6 +34,11 @@ public final class UpdateApp extends Params<UpdateApp> {
     return set("spares", spares);
   }
 
+  /** Functions only: 250 to 5000 ms. */
+  public UpdateApp sleepAfterMs(int sleepAfterMs) {
+    return set("sleepAfterMs", sleepAfterMs);
+  }
+
   public UpdateApp vcpu(int vcpu) {
     return set("vcpu", vcpu);
   }
@@ -48,5 +53,15 @@ public final class UpdateApp extends Params<UpdateApp> {
 
   public UpdateApp healthPath(String path) {
     return set("healthPath", path);
+  }
+
+  /** Cloudflare's CDN in front of the App's addresses; false sends visitors straight to the routers. */
+  public UpdateApp cdn(boolean cdn) {
+    return set("cdn", cdn);
+  }
+
+  /** "alert", "rollback" or "off"; see {@link CreateApp#releaseWatch}. */
+  public UpdateApp releaseWatch(String mode) {
+    return set("releaseWatch", mode);
   }
 }

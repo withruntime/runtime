@@ -62,6 +62,10 @@ class SwitchImage(unittest.TestCase):
         # optional accepts the call too.
         sbx.switch_image("app:v2")
         self.expect_switch(Stub.seen)
+        # A disk alone grows live: restart=False asks for that or a refusal.
+        sbx.resize(disk_mib=20480, restart=False)
+        self.assertEqual(Stub.seen[-1][1:3],
+                         (f"/v1/sandboxes/{SANDBOX}:resize", {"restart": False, "diskMiB": 20480}))
 
     def test_async(self):
         async def main():
@@ -75,6 +79,8 @@ class SwitchImage(unittest.TestCase):
                 method, path, body, _ = Stub.seen[-1]
                 self.assertEqual((method, path, body),
                                  ("POST", f"/v1/sandboxes/{SANDBOX}:resize", {"restart": True, "vcpu": 2}))
+                await sbx.resize(disk_mib=20480, restart=False)
+                self.assertEqual(Stub.seen[-1][2], {"restart": False, "diskMiB": 20480})
         asyncio.run(main())
 
 

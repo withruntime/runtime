@@ -20,6 +20,15 @@ public final class App extends JsonObject {
     return getString("name");
   }
 
+  /**
+   * Its address for life, its name then its account's: https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/. A
+   * rename leaves it as it is; its id's address (https://&lt;id without
+   * dashes&gt;.runtimehost.com/) answers too.
+   */
+  public String url() {
+    return getString("url");
+  }
+
   public Map<String, String> labels() {
     return getStringMap("labels");
   }
@@ -44,6 +53,15 @@ public final class App extends JsonObject {
     return getLong("previousVersion");
   }
 
+  /**
+   * While a copy waits for room in its region: its account's lane, its place in line (1 is next),
+   * how many wait ahead by lane ("ahead") and why ("words"). Higher lanes get room first. Null
+   * while nothing of it waits.
+   */
+  public JsonObject line() {
+    return has("line") ? getObject("line") : null;
+  }
+
   public int minCopies() {
     return (int) getLong("minCopies", 0);
   }
@@ -60,6 +78,11 @@ public final class App extends JsonObject {
   /** Copies kept ready beyond those serving. */
   public int spares() {
     return (int) getLong("spares", 0);
+  }
+
+  /** A Function's: at most how long a copy stays awake after its last request ends, 250 to 5000 ms; 0 for an App. */
+  public int sleepAfterMs() {
+    return (int) getLong("sleepAfterMs", 0);
   }
 
   public int vcpu() {
@@ -79,7 +102,15 @@ public final class App extends JsonObject {
     return getString("healthPath");
   }
 
-  /** What a new version's failures after it went live do: rollback, alert or off; null if unset. */
+  /**
+   * Whether Cloudflare's CDN is in front of the App's addresses (its runtimehost.com address and its
+   * custom domains). False sends visitors straight to Runtime's routers, with nothing cached.
+   */
+  public boolean cdn() {
+    return !Boolean.FALSE.equals(get("cdn"));
+  }
+
+  /** What a new version that got worse after it went live does: alert (the default), rollback or off. */
   public String releaseWatch() {
     return getString("releaseWatch");
   }

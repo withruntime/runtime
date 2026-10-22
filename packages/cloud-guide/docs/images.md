@@ -18,6 +18,14 @@ runtime images build . -t web:v1
 runtime sandboxes create --image web:v1
 ```
 
+A Dockerfile somewhere else goes with `-f`, read from where you run the
+command, as `docker build` reads it; a path inside the folder works too. In a
+monorepo, the repository is the context and the app's Dockerfile names it:
+
+```bash no-run
+runtime images build . -f apps/web/Dockerfile -t web:v1
+```
+
 ```ts check
 import { readFile } from "node:fs/promises";
 import { Runtime } from "withruntime";
@@ -175,7 +183,18 @@ runtime images rm web@1
 ```
 
 Deleting a version removes its tags too. Sandboxes already started from it
-keep running.
+keep running. A version an App still needs, the one it runs, the one it would
+roll back to, or one it is deploying, is not deleted: the answer is
+`image_in_use` (409), naming the App.
+
+A name rebuilt on every change, such as a site deployed on each merge, keeps
+every version until you delete it, and each counts toward your image disk.
+`--keep` deletes the older ones once the new build is ready, keeping the
+newest that many and any an App still needs:
+
+```bash no-run
+runtime images build . -t web:"$(git rev-parse --short HEAD)" --keep 3
+```
 
 ## Move a sandbox to a new version
 
@@ -282,7 +301,11 @@ A start that finds no copy boots the image: measured on 8 October 2026, about
 Each server keeps its own copies, so the first create of a size on a server
 that has none boots. A pilot's servers keep one at the pilot's size from the start. Each copy
 is your account's alone, goes when the image is deleted, and is neither
-charged nor counted toward your image disk quota.
+charged nor counted toward your image disk quota. A server keeps an image's
+started copies while sandboxes are created from it there: once none has been
+for 2 days, and the image has been on that server at least as long, the
+copies go. The next sandbox of it on that server boots the image, and the
+copies are kept again from then on.
 
 ## Faster rebuilds
 

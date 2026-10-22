@@ -6,11 +6,13 @@ The server enforces Runtime's actual resource limits; no GPU is substituted.
 from __future__ import annotations
 import json
 import math
+import sys
 import threading
 import codecs
 import time
 from .. import Runtime
-from .._compat import CompatibilityError, ENV_PATH, environment, positive, reject
+from .._errors import RuntimeError as _SDKError
+from .._compat import CompatibilityError, ENV_PATH, environment, positive, refused, reject
 from ._dual import Dual, install, local
 from ._object import CONSOLE
 from .app import App
@@ -18,7 +20,9 @@ from .cloud_bucket_mount import CloudBucketMount
 from .exception import ClientClosed, Error, InvalidError, TimeoutError as _ProbeTimeout
 from .file_pattern_matcher import FilePatternMatcher
 from .image import Image
+from .output import enable_output
 from .proxy import Proxy
+from .stream_type import StreamType, checked as _stream
 from .secret import Secret
 from .snapshot import SandboxSnapshot
 from .volume import Volume
@@ -28,7 +32,43 @@ from ._tunnel import Tunnel, from_preview as _tunnel_from_preview
 UPSTREAM_VERSION = "1.6.2"
 
 __all__ = ["App", "CloudBucketMount", "ContainerProcess", "Error", "FilePatternMatcher", "Image", "Probe", "Proxy",
-           "Sandbox", "SandboxSnapshot", "Secret", "Tunnel", "Volume"]
+           "Sandbox", "SandboxSnapshot", "Secret", "Tunnel", "Volume", "enable_output"]
+
+# Who a sandbox's processes run as: root, as in a Modal container, where
+# Runtime's own default is uid 1000. Modal code writes to /, installs
+# packages and starts daemons (dockerd) unprefixed.
+ROOT = "root"
+
+# Modal's objects beyond sandboxes, and what to use on Runtime instead: each
+# is refused by name when it is reached, never an AttributeError.
+_FUNCTIONS = ("Runtime runs sandboxes, not Modal Functions: run the code in a modal.Sandbox, or on a schedule "
+              "as a Runtime job (runtime.jobs)")
+_SERVICES = {
+    "Dict": "keep the state in your own store, or in a file on a Runtime volume (runtime.volumes)",
+    "Queue": "keep the queue in your own store, or in a file on a Runtime volume (runtime.volumes)",
+    "NetworkFileSystem": "mount a Runtime volume (runtime.volumes) or a CloudBucketMount",
+    **{name: _FUNCTIONS for name in (
+        "Function", "FunctionCall", "Cls", "Server", "Cron", "Period", "Retries", "SchedulerPlacement", "Cluster",
+        "asgi_app", "wsgi_app", "web_endpoint", "web_server", "fastapi_endpoint", "method", "parameter", "enter",
+        "exit", "batched", "concurrent", "clustered", "sessioned", "current_function_call_id", "current_input_id",
+        "is_local", "interact", "forward")},
+}
+
+
+class _NotASandbox(CompatibilityError, AttributeError):
+    """A CompatibilityError that is also an AttributeError, so hasattr() and
+    tools walking the module still read it as absent. A traceback names it
+    CompatibilityError, as every other refusal is named."""
+
+
+_NotASandbox.__name__ = _NotASandbox.__qualname__ = "CompatibilityError"
+_NotASandbox.__module__ = CompatibilityError.__module__
+
+
+def __getattr__(name):
+    if name in _SERVICES:
+        raise _NotASandbox(f"modal.{name} is not a sandbox: {_SERVICES[name]}")
+    raise AttributeError(f"module 'withruntime.modal' has no attribute {name!r}")
 
 
 class _Reader:
@@ -98,12 +138,27 @@ class _Writer:
         self._closed = True
 
 
+def _shown(data):
+    """Output of a stream exec'd with StreamType.STDOUT, printed as it arrives."""
+    out = getattr(sys.stdout, "buffer", None)
+    if out is not None:
+        sys.stdout.flush()
+        out.write(data)
+        out.flush()
+    else:
+        sys.stdout.write(data.decode(errors="replace"))
+        sys.stdout.flush()
+
+
 class ContainerProcess:
-    def __init__(self, process, text=True, on_exit=None, bufsize=-1, binary_transport=False):
+    def __init__(self, process, text=True, on_exit=None, bufsize=-1, binary_transport=False, modes=None):
         self._process = process
         self._on_exit = on_exit
         self._condition = threading.Condition()
         self._output = {"stdout": b"", "stderr": b""}
+        # Where each stream goes: kept to be read (PIPE, the default),
+        # printed (STDOUT) or dropped (DEVNULL).
+        self._modes = modes or {}
         self._binary_transport = binary_transport
         self._done, self._error, self.returncode = False, None, None
         self.stdout, self.stderr = _Reader(self, "stdout", text, bufsize), _Reader(self, "stderr", text, bufsize)
@@ -117,7 +172,12 @@ class ContainerProcess:
             for event in (self._process.output_bytes() if self._binary_transport else self._process.output()):
                 with self._condition:
                     if event["type"] in self._output:
-                        self._output[event["type"]] += event["data"] if self._binary_transport else event["data"].encode()
+                        data = event["data"] if self._binary_transport else event["data"].encode()
+                        mode = self._modes.get(event["type"])
+                        if mode is StreamType.STDOUT:
+                            _shown(data)
+                        elif mode is not StreamType.DEVNULL:
+                            self._output[event["type"]] += data
                     elif event["type"] == "truncated":
                         raise IOError("Process output was truncated")
                     elif event["type"] == "exit":
@@ -194,7 +254,6 @@ _NoStdin.drain = Dual(_NoStdin.drain, _NoStdin.drain)
 # Each refused create option, and what to use on Runtime instead.
 _REFUSED = {
     "network_file_systems": "Runtime has no network file systems: mount a Volume or a CloudBucketMount",
-    "idle_timeout": "Runtime pauses idle sandboxes by itself; set the native idle_pause_seconds",
     "cloud": "Runtime runs on its own servers; there is no cloud to choose",
     "region": "Runtime places sandboxes itself; the native create takes Runtime's region names",
     "h2_ports": "Runtime previews are HTTPS: list the port in encrypted_ports",
@@ -203,12 +262,10 @@ _REFUSED = {
     "proxy": "Runtime dedicated egress IPs: runtime.ips gives sandboxes a fixed outbound address",
     "include_oidc_identity_token": "Runtime identity tokens are the native SDK's: see withruntime.com/docs/identity-tokens",
     "verbose": "Runtime streams no create logs: read sandbox.stdout and sandbox.stderr",
-    "experimental_options": "Runtime takes no experimental create options",
-    "_experimental_enable_snapshot": "Runtime sandboxes need no flag to be snapshotted: snapshot_filesystem()",
+    "experimental_options": ("Runtime takes no experimental create options; for an exit snapshot, call "
+                             "snapshot_filesystem() before terminate() and start new sandboxes from that Image"),
     "_experimental_outbound_policy": "Set network rules with outbound_domain_allowlist or block_network",
     "inbound_cidr_allowlist": "Runtime previews take a token, not an address list: the native previews.create(port)",
-    "outbound_cidr_allowlist": "Runtime network rules name domains: use outbound_domain_allowlist",
-    "cidr_allowlist": "Runtime network rules name domains: use outbound_domain_allowlist",
     "pty_info": "Runtime takes pty=True with a 24x80 terminal",
     "environment_name": "Modal environment namespaces are not Runtime account namespaces",
 }
@@ -267,6 +324,8 @@ def _plan(args, options):
         raise InvalidError("All entrypoint arguments must be strings")
     timeout = options["timeout"]
     lifetime = None if timeout is None else positive(timeout, "timeout", integral=True)
+    idle = options["idle_timeout"]
+    idle = None if idle is None else positive(idle, "idle_timeout", integral=True)
     fields = {}
     if cpu is not None:
         fields["vcpu"] = positive(cpu, "cpu", integral=True)
@@ -292,35 +351,120 @@ def _plan(args, options):
         labels["modal.probe"] = probe._label()
     if ports:
         labels["modal.ports"] = json.dumps(ports)
-    # Never wider than Modal's: an empty list blocks all egress, which the
-    # native rules would read as the public web; "*" allows everything.
-    allow = options["outbound_domain_allowlist"]
-    if options["block_network"] and allow is not None:
-        raise InvalidError("block_network cannot be combined with outbound_domain_allowlist")
-    if options["block_network"] or allow is not None and not list(allow):
-        network = {"internet": False}
-    elif allow is None or "*" in allow:
-        network = {"internet": True}
-    else:
-        network = {"internet": True, "allow": list(allow)}
+    domains, cidrs = options["outbound_domain_allowlist"], options["outbound_cidr_allowlist"]
+    if options["cidr_allowlist"] is not None:
+        if cidrs is not None:
+            raise InvalidError("Cannot specify both `cidr_allowlist` and `outbound_cidr_allowlist`.")
+        cidrs = options["cidr_allowlist"]
+    if options["block_network"] and (domains is not None or cidrs is not None):
+        raise InvalidError("block_network cannot be combined with outbound_domain_allowlist or outbound_cidr_allowlist")
+    network = {"internet": False} if options["block_network"] else _egress(domains, cidrs)
     write_env = (image is None or not image._snapshot_id or options["env"] is not None
                  or options["secrets"] is not None)
     return {"image": image or Image.debian_slim(), "variables": variables, "lifetime": lifetime, "fields": fields,
+            "idle": idle,
             "disks": disks, "buckets": buckets, "ports": ports, "labels": labels, "network": network,
             "write_env": write_env, "probe": probe, "pty": options["pty"]}
 
 
+def _egress(domains, cidrs):
+    """Modal's outbound allowlists as Runtime network rules. Modal admits a
+    connection a listed domain or a listed CIDR range admits, and a list left
+    out admits nothing once the other is given; Runtime's `allow` is the same
+    union. Modal's `*.example.com` also matches example.com, which Runtime's
+    leaves out, so both are listed. Every domain ("*") with narrower
+    addresses is refused: Runtime cannot admit every name without every
+    address. Before 18 October 2026 CIDR lists were refused outright."""
+    if domains is None and cidrs is None:
+        return {"internet": True}
+    domains, cidrs = list(domains or []), list(cidrs or [])
+    # Every address is both families' whole range; one of them alone stays an
+    # ordinary rule (::/0 by itself opened IPv4 too, wider than Modal).
+    whole = [cidr for cidr in dict.fromkeys(cidrs) if cidr in ("0.0.0.0/0", "::/0")]
+    if len(whole) == 2:
+        return {"internet": True}
+    if "*" in domains and whole:
+        # Every name beside one family's whole range: Runtime has no rule for
+        # every name, so the range alone, narrower than Modal's, never wider.
+        return {"internet": True, "allow": whole}
+    if "*" in domains:
+        raise CompatibilityError('A domain allowlist of "*" with a narrower CIDR allowlist has no Runtime rule: '
+                                 'pass outbound_cidr_allowlist=["0.0.0.0/0", "::/0"] with it for all traffic, '
+                                 "or list the domains")
+    allow = list(dict.fromkeys([*(name for domain in domains for name in (
+        (domain, domain[2:]) if domain.startswith("*.") else (domain,))), *cidrs]))
+    return {"internet": True, "allow": allow} if allow else {"internet": False}
+
+
 def _native_create(plan, source, name):
     disks = [disk._mount(path) for path, disk in plan["disks"].items()]
-    return {"name": name, **source, **_limit(plan["lifetime"]), "on_lease_end": "stop", "labels": plan["labels"],
-            "network": plan["network"], **plan["fields"], **({"volumes": disks} if disks else {})}
+    return {"name": name, **source, **_limit(plan["lifetime"], plan["idle"]), "on_lease_end": "stop",
+            "labels": plan["labels"], "network": plan["network"], **plan["fields"],
+            **({"volumes": disks} if disks else {})}
 
 
-def _limit(lifetime):
+def _limit(lifetime, idle=None):
     """A timeout is the customer's limit, and the sandbox never pauses for
-    idleness before it. None is no time limit (0300): it runs while it works
-    and pauses when idle."""
-    return {} if lifetime is None else {"timeout_seconds": lifetime, "idle_pause_seconds": 0}
+    idleness before it unless idle_timeout asks. None is no time limit
+    (0300): it runs while it works and pauses when idle. Runtime's shortest
+    limit is a minute: a shorter timeout is kept by this client
+    (_deadline), with the minute as the bound if the client goes away. Modal
+    ends an idle sandbox; Runtime pauses it, memory kept and CPU no longer
+    billed, and wakes it at the next command, file call or tunnel request,
+    after ten seconds at the least."""
+    limit = {} if lifetime is None else {"timeout_seconds": max(60, lifetime), "idle_pause_seconds": 0}
+    if idle is not None:
+        limit["idle_pause_seconds"] = max(10, idle)
+    return limit
+
+
+def _deadline(lifetime, stop):
+    """Stops the sandbox at a timeout under Runtime's one-minute floor. The
+    timer never keeps the program running."""
+    if lifetime is not None and lifetime < 60:
+        timer = threading.Timer(lifetime, lambda: _quietly(stop))
+        timer.daemon = True
+        timer.start()
+
+
+def _quietly(call):
+    try:
+        call()
+    except Exception:
+        pass
+
+
+def _memory_snapshot(snapshot, runtime):
+    found = SandboxSnapshot(snapshot["id"], runtime)
+    found._object_id = snapshot["id"]
+    return found
+
+
+def _restore_input(saved, name):
+    """The create of a sandbox from a memory snapshot sandbox._experimental_snapshot() took."""
+    labels = saved.get("labels") or {}
+    if saved.get("mode") == "disk" or "modal.entrypoint" not in labels and "modal.app" not in labels:
+        raise InvalidError(f"Snapshot {saved.get('id')} was not taken with sandbox._experimental_snapshot()")
+    kept = {k: v for k, v in labels.items() if k.startswith("modal.")}
+    if name:
+        kept["modal.name"] = name
+    return {"snapshot": saved["id"], "name": name, "on_lease_end": "stop",
+            "labels": {**kept, "compat.provider": "modal"}}
+
+
+def _restored(runtime, saved, name, create):
+    try:
+        return create(**_restore_input(saved, name))
+    except _SDKError as error:
+        raise _taken(error) from error
+
+
+def _taken(error):
+    """A taken sandbox name as Modal's AlreadyExistsError."""
+    from .exception import AlreadyExistsError
+    if isinstance(error, _SDKError) and error.code == "name_taken":
+        return AlreadyExistsError(str(error))
+    return error
 
 
 def _entrypoint_ms(lifetime):
@@ -353,6 +497,10 @@ DETACHED = "Unable to perform operation on a detached sandbox"
 
 
 class Sandbox:
+    # guide/sandbox-sidecars: a second container beside the sandbox.
+    _experimental_sidecars = refused("Modal", "Sandbox._experimental_sidecars",
+                                     "start a second Runtime sandbox and join both to a private network")
+
     def __init__(self, runtime, sb, entrypoint=None):
         self._runtime, self._sandbox, self._entrypoint = runtime, sb, entrypoint
         self._tunnels, self._terminated, self._detached = None, False, False
@@ -386,11 +534,10 @@ class Sandbox:
                cidr_allowlist=None):
         options = dict(locals())
         options.pop("args")
-        if any((network_file_systems, idle_timeout is not None, cloud is not None, region is not None, h2_ports,
+        if any((network_file_systems, cloud is not None, region is not None, h2_ports,
                 unencrypted_ports, custom_domain is not None, proxy is not None, include_oidc_identity_token, verbose,
-                experimental_options, _experimental_enable_snapshot, _experimental_outbound_policy is not None,
-                inbound_cidr_allowlist is not None, outbound_cidr_allowlist is not None, cidr_allowlist is not None,
-                pty_info is not None, environment_name is not None)):
+                experimental_options, _experimental_outbound_policy is not None,
+                inbound_cidr_allowlist is not None, pty_info is not None, environment_name is not None)):
             raise _refusal(options)
         return _create(args, options)
 
@@ -476,18 +623,26 @@ class Sandbox:
     def logs(self):
         raise CompatibilityError("Read the sandbox's output from sandbox.stdout and sandbox.stderr")
 
-    def exec(self, *args, timeout=None, workdir=None, env=None, secrets=None, text=True, bufsize=-1, pty=False, **options):
+    def exec(self, *args, timeout=None, workdir=None, env=None, secrets=None, text=True, bufsize=-1, pty=False,
+             stdout=StreamType.PIPE, stderr=StreamType.PIPE, **options):
         reject(options, "Modal Sandbox.exec")
         _buffering(text, bufsize)
+        modes = {"stdout": _stream(stdout, "stdout"), "stderr": _stream(stderr, "stderr")}
         sb = self._attached()
         variables = environment(sb.files.read(ENV_PATH))
         for secret in secrets or []:
             variables.update(secret._values)
         variables.update({key: value for key, value in (env or {}).items() if value is not None})
-        process = sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe",
+        process = sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", user=ROOT,
             timeout_ms=None if timeout is None else int(positive(timeout, "timeout") * 1000),
             pty={"rows": 24, "cols": 80} if pty else None, **({"output_encoding": "base64"} if not text else {}))
-        return ContainerProcess(process, text=text, bufsize=bufsize, binary_transport=not text)
+        return ContainerProcess(process, text=text, bufsize=bufsize, binary_transport=not text, modes=modes)
+
+    def _experimental_set_outbound_network_policy(self, *, outbound_cidr_allowlist=None,
+                                                  outbound_domain_allowlist=None):
+        """Replaces the sandbox's outbound rules: what either list admits, or
+        everything when both are left out (modal 1.6.2)."""
+        self._attached().network.set(**_egress(outbound_domain_allowlist, outbound_cidr_allowlist))
 
     def terminate(self, *, wait=False):
         self._attached().stop()
@@ -520,7 +675,7 @@ class Sandbox:
         probe, sb = self._probe(), self._attached()
         while True:
             left = deadline - time.monotonic()
-            result = sb.exec(probe._command(), timeout_ms=max(1, math.ceil(min(left, 10) * 1000)))
+            result = sb.exec(probe._command(), timeout_ms=max(1, math.ceil(min(left, 10) * 1000)), user=ROOT)
             if result.exit_code == 0:
                 return
             if time.monotonic() + probe.interval_ms / 1000 >= deadline:
@@ -556,6 +711,29 @@ class Sandbox:
         self._attached()
         self._check_reload(timeout)
 
+    def _experimental_snapshot(self):
+        """The whole sandbox, memory and running processes included, as
+        Modal's memory snapshot (guide/sandbox-snapshots). It keeps the
+        sandbox's app, tags and entrypoint for the restore."""
+        from .exception import SnapshotCreationError
+        sb = self._attached().refresh()
+        labels = {k: v for k, v in (sb.info.get("labels") or {}).items() if k.startswith("modal.")}
+        try:
+            snapshot = sb.snapshot(labels=labels, mode="memory")
+        except _SDKError as error:
+            raise SnapshotCreationError(str(error)) from error
+        return _memory_snapshot(snapshot, self._runtime)
+
+    @staticmethod
+    def _experimental_from_snapshot(snapshot, client=None, *, name=None):
+        """A new sandbox continuing a memory snapshot: its files, memory and
+        running entrypoint, under the snapshot's app and tags."""
+        runtime = client or Runtime()
+        saved = runtime.snapshots.get(snapshot.object_id)
+        sb = _restored(runtime, saved, name, runtime.sandboxes.create)
+        entrypoint = sb.info.get("labels", {}).get("modal.entrypoint")
+        return Sandbox(runtime, sb, ContainerProcess(sb.process(entrypoint), on_exit=sb.stop) if entrypoint else None)
+
     def snapshot_directory(self, path, *, timeout=55, ttl=30 * 24 * 3600, _experimental_encryption_key=None):
         raise CompatibilityError(SNAPSHOT_DIRECTORY)
 
@@ -589,7 +767,10 @@ def _create(args, options):
     source = plan["image"]._source(runtime)
     for disk in plan["disks"].values():
         disk._load(runtime)
-    sb = runtime.sandboxes.create(**_native_create(plan, source, options["name"]))
+    try:
+        sb = runtime.sandboxes.create(**_native_create(plan, source, options["name"]))
+    except _SDKError as error:
+        raise _taken(error) from error
     try:
         if plan["write_env"]:
             sb.files.write(ENV_PATH, json.dumps(plan["variables"]), mode=0o600)
@@ -599,7 +780,7 @@ def _create(args, options):
             sb.previews.create(port, visibility="public")
         entry = None
         if args:
-            process = sb.spawn(list(args), cwd=options["workdir"], env=plan["variables"], stdin="pipe",
+            process = sb.spawn(list(args), cwd=options["workdir"], env=plan["variables"], stdin="pipe", user=ROOT,
                                timeout_ms=_entrypoint_ms(plan["lifetime"]),
                                **({"pty": {"rows": 24, "cols": 80}} if plan["pty"] else {}))
             sb.update(labels={**sb.info.get("labels", {}), "modal.entrypoint": process.id})
@@ -612,12 +793,24 @@ def _create(args, options):
         raise
     box = Sandbox(runtime, sb, entry)
     box._readiness, box._read_only_disks = plan["probe"], any(disk._read_only for disk in plan["disks"].values())
+    _deadline(plan["lifetime"], box._end)
     return box
 
 
+def _end(self):
+    """Ends the sandbox when its timeout passes, as Modal's does: it
+    terminated, and its entrypoint (if any) was killed with it."""
+    self._sandbox.stop()
+    self._terminated = True
+
+
+Sandbox._end = _end
 install(Sandbox, ("hydrate", "get_dashboard_url", "detach"))
 install(Sandbox, ("create_connect_token", "snapshot_directory", "mount_image", "unmount_image"), refused=True)
 
 from ._async import install as _install_async  # noqa: E402
 _install_async()
 del _install_async
+
+# Modal's package imports these, so `import modal` reaches modal.io_streams.
+from . import container_process, io_streams, stream_type  # noqa: E402,F401

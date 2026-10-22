@@ -1,0 +1,91 @@
+# Source: https://github.com/modal-labs/modal-examples/blob/65241421aa1758c03ed40656afc1119831a0fbae/13_sandboxes/sandbox_agent.py
+# Read 18 October 2026. Copied verbatim; the only change is Modal's import lines,
+# `import modal` to `from withruntime import modal` (and `from modal.x` to `from withruntime.modal.x`).
+
+# ---
+# cmd: ["python", "13_sandboxes/sandbox_agent.py"]
+# pytest: false
+# ---
+
+# # Run Claude Code in a Modal Sandbox
+
+# This example demonstrates how to run Claude Code in a Modal
+# [Sandbox](https://modal.com/docs/guide/sandbox) to analyze a GitHub repository.
+# The Sandbox provides an isolated environment where the agent can safely execute code
+# and examine files.
+
+# You can also run this in a [Modal Notebook](https://modal.com/notebooks/modal-labs/_/nb-30WInxiigR3Wc8kQ3jU7Hr)!
+
+from withruntime import modal
+from withruntime.modal.container_process import ContainerProcess
+
+app = modal.App.lookup("example-sandbox-agent", create_if_missing=True)
+
+# First, we create a custom [Image](https://modal.com/docs/guide/images) that has Claude Code
+# and git installed.
+
+image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("curl", "git")
+    .env({"PATH": "/root/.local/bin:$PATH"})  # add claude to path
+    .run_commands(
+        "curl -fsSL https://claude.ai/install.sh | bash",
+    )
+)
+
+# Then we create our Sandbox.
+
+with modal.enable_output():
+    sandbox = modal.Sandbox.create(app=app, image=image)
+print(f"Sandbox ID: {sandbox.object_id}")
+
+# Next we'll clone the repository that Claude Code will work on.
+# We'll use [the Modal examples repo](https://github.com/modal-labs/modal-examples)
+# that this example is a part of.
+
+# We trigger the clone by [`exec`](https://modal.com/docs/reference/modal.Sandbox#exec)uting
+# `git` as a process inside the Sandbox. We then `.wait` for it to finish.
+# You can read more about the interface for managing
+# `ContainerProcess`es in Sandboxes [here](https://modal.com/docs/reference/modal.container_process).
+
+repo_url = "https://github.com/modal-labs/modal-examples"
+git_ps: ContainerProcess = sandbox.exec(
+    "git", "clone", "--depth", "1", repo_url, "/repo"
+)
+git_ps.wait()
+print(f"Cloned '{repo_url}' into /repo.")
+
+# Finally we'll use `exec` again to run Claude Code to analyze the repository.
+# Here, we pass the `pty` flag to give the process a
+# [pseudo-terminal](https://unix.stackexchange.com/questions/21147/what-are-pseudo-terminals-pty-tty).
+
+claude_cmd = ["claude", "-p", "What is in this repository?"]
+
+print("\nRunning command:", *claude_cmd)
+
+claude_ps = sandbox.exec(
+    *claude_cmd,
+    pty=True,  # Adding a PTY is important, since Claude requires it
+    secrets=[
+        modal.Secret.from_name("anthropic-secret", required_keys=["ANTHROPIC_API_KEY"])
+    ],
+    workdir="/repo",
+)
+claude_ps.wait()
+
+# Once the command finishes, we read the `stdout` and `stderr`.
+
+print("\nAgent stdout:\n")
+print(claude_ps.stdout.read())
+
+stderr = claude_ps.stderr.read()
+if stderr != "":
+    print("Agent stderr:", stderr)
+
+# Nice, you've got Claude Code running in a Modal Sandbox! What's next?
+
+# - Check out [this example](https://modal.com/docs/examples/opencode_server) to see how you might productionize this.
+# - Want to restore quickly after repo setup / builds? Try [Filesystem Snapshots](https://modal.com/docs/guide/sandbox-snapshots#filesystem-snapshots).
+# - More complex prompt routing and metadata? You may need a [Dict](https://modal.com/docs/guide/dicts) or a [Queue](https://modal.com/docs/guide/queues).
+# - Need performant, durable storage? Try out [Modal Volumes](https://modal.com/docs/guide/volumes).
+# - Hook it up to your custom [MCP Server](https://modal.com/docs/examples/mcp_server_stateless) for passing more external context to your agent.

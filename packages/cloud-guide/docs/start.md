@@ -184,11 +184,13 @@ Once the account holds credit, its sandboxes have paid limits.
 **Most sandbox code moves over call for call.** The [switch guide](./migrate)
 maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
 Runtime's, and shows how to work out your monthly saving from measured usage.
-Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after changing one
-import to `withruntime/e2b`, `withruntime/daytona`, `withruntime/vercel` or
-`withruntime/blaxel`; Morph's TypeScript client, to `withruntime/morph`; a
-Worker written for Cloudflare's Sandbox SDK, to `withruntime/cloudflare`, with
-its `containers` block deleted and a `RUNTIME_API_KEY` secret.
+Code written for E2B, Daytona, Vercel Sandbox, Blaxel or Modal Sandboxes runs
+after changing one import to `withruntime/e2b`, `withruntime/daytona`,
+`withruntime/vercel`, `withruntime/blaxel` or `withruntime/modal`; Morph's
+TypeScript client, to `withruntime/morph`; a Worker written for Cloudflare's
+Sandbox SDK, to `withruntime/cloudflare`, with its `containers` block deleted
+and a `RUNTIME_API_KEY` secret; code that calls Fly's Machines API, after
+pointing it at `npx withruntime fly-api` (`withruntime/fly`).
 `npx withruntime compare --from <provider>` prints what you save, and
 credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 
@@ -207,18 +209,18 @@ See [troubleshooting](./troubleshooting) for safe retries and cleanup.
 
 ## What you can do next
 
-| You want to                                                        | Read                                                                                         |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Run commands, stream output, start servers                         | [JavaScript](./javascript), [Python](./python), [Go](./go), [Ruby](./ruby) or [Java](./java) |
-| Drive sandboxes from a terminal or a script                        | [CLI](./cli)                                                                                 |
-| Give an agent Runtime tools                                        | [MCP](./mcp)                                                                                 |
-| Call the API from any language                                     | [API reference](./api)                                                                       |
-| Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment)                                             |
-| Keep data on volumes, or mount your own bucket                     | [Storage and backups](./storage)                                                             |
-| Serve on your own domain, open a TCP port or reach your network    | [Networking](./networking)                                                                   |
-| Watch CPU and memory, get webhooks, export to OpenTelemetry        | [Observability](./observability)                                                             |
-| Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                                                                   |
-| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                                                                    |
-| Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)                                               |
+| You want to                                                        | Read                                                                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Run commands, stream output, start servers                         | [JavaScript SDK](./javascript), [Python SDK](./python), [Go SDK](./go), [Ruby SDK](./ruby) or [Java SDK](./java) |
+| Drive sandboxes from a terminal or a script                        | [CLI](./cli)                                                                                                     |
+| Give an agent Runtime tools                                        | [MCP](./mcp)                                                                                                     |
+| Call the API from any language                                     | [API reference](./api)                                                                                           |
+| Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment)                                                                 |
+| Keep data on volumes, or mount your own bucket                     | [Storage and backups](./storage)                                                                                 |
+| Serve on your own domain, open a TCP port or reach your network    | [Networking](./networking)                                                                                       |
+| Watch CPU and memory, get webhooks, export to OpenTelemetry        | [Observability](./observability)                                                                                 |
+| Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                                                                                       |
+| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                                                                                        |
+| Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)                                                                   |
 
 Keep important results outside the sandbox: a sandbox is not a backup.

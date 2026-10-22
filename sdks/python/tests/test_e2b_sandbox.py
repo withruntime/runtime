@@ -707,10 +707,34 @@ class ForksPortsAndGaps(Base):
         with self.assertRaises(e2b.PublicPreviewNotAllowedException):
             sbx.get_public_host(3000)
 
+    def test_signed_urls_map_to_runtime_links(self):
+        from unittest import mock
+        from e2b_fake import FakeFiles
+        sbx = self.create()
+
+        def link(method):
+            def make(files, path, **options):
+                files._w.record(f"files.{method}", path, options)
+                return {"url": f"https://files.example/{method}{path}", "method": "GET", "path": path}
+            return make
+        with mock.patch.object(FakeFiles, "download_url", link("download_url"), create=True), \
+                mock.patch.object(FakeFiles, "upload_url", link("upload_url"), create=True):
+            self.assertEqual(sbx.download_url("/workspace/a.txt"), "https://files.example/download_url/workspace/a.txt")
+            self.assertEqual(sbx.download_url("/workspace/a.txt", user="root", use_signature_expiration=60),
+                             "https://files.example/download_url/workspace/a.txt")
+            self.assertEqual(sbx.upload_url("/workspace/b.txt"), "https://files.example/upload_url/workspace/b.txt")
+            with self.assertRaises(ValueError) as caught:
+                sbx.upload_url()
+            self.assertIn("path", str(caught.exception))
+        self.assertEqual(self.world.called("files.download_url"),
+                         [("/workspace/a.txt", {"expires_in_seconds": 3600}),
+                          ("/workspace/a.txt", {"expires_in_seconds": 60})])
+        self.assertEqual(self.world.called("files.upload_url"),
+                         [("/workspace/b.txt", {"expires_in_seconds": 3600})])
+
     def test_gaps(self):
         sbx = self.create()
-        for call in (lambda: sbx.git, sbx.update_network, sbx.upload_url,
-                     sbx.download_url, sbx.get_mcp_token, e2b.Template, lambda: e2b.Volume.create("v"),
+        for call in (lambda: sbx.git, sbx.update_network, sbx.get_mcp_token, e2b.Template, lambda: e2b.Volume.create("v"),
                      lambda: e2b.Secret.create("s"), lambda: e2b.wait_for_port(3000)):
             with self.assertRaises(NotSupportedException):
                 call()

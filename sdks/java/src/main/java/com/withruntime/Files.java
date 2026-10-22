@@ -268,6 +268,91 @@ public final class Files {
   }
 
   /**
+   * Options for {@link #downloadUrl(String, DownloadUrlOptions)}: expiresInSeconds (default 3600,
+   * at most 604800), filename (download under that name), wake (true wakes a paused sandbox, false
+   * never does) and archive (a folder as a .tar.gz).
+   */
+  public static final class DownloadUrlOptions extends Params<DownloadUrlOptions> {
+    public DownloadUrlOptions() {}
+
+    public DownloadUrlOptions expiresInSeconds(int seconds) {
+      return set("expiresInSeconds", seconds);
+    }
+
+    public DownloadUrlOptions filename(String filename) {
+      return set("filename", filename);
+    }
+
+    public DownloadUrlOptions wake(boolean wake) {
+      return set("wake", wake);
+    }
+
+    public DownloadUrlOptions archive(boolean archive) {
+      return set("archive", archive);
+    }
+  }
+
+  /**
+   * Options for {@link #uploadUrl(String, UploadUrlOptions)}: expiresInSeconds (default 3600, at
+   * most 604800), maxBytes (default and most 5 GiB) and wake (true wakes a paused sandbox, false
+   * never does).
+   */
+  public static final class UploadUrlOptions extends Params<UploadUrlOptions> {
+    public UploadUrlOptions() {}
+
+    public UploadUrlOptions expiresInSeconds(int seconds) {
+      return set("expiresInSeconds", seconds);
+    }
+
+    public UploadUrlOptions maxBytes(long maxBytes) {
+      return set("maxBytes", maxBytes);
+    }
+
+    public UploadUrlOptions wake(boolean wake) {
+      return set("wake", wake);
+    }
+  }
+
+  private JsonObject link(String path, String method, Params<?> options) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("path", path);
+    body.put("method", method);
+    if (options != null) body.putAll(options.body);
+    return new JsonObject(
+        t().object(new Transport.Call("POST", sandbox.path("/files:link")).body(body)));
+  }
+
+  /**
+   * A link anyone can open with no API key to download a file (Range works). The answer holds
+   * url and expiresAt. It lasts an hour by default, at most 7 days.
+   */
+  public JsonObject downloadUrl(String path) {
+    return downloadUrl(path, null);
+  }
+
+  public JsonObject downloadUrl(String path, DownloadUrlOptions options) {
+    return link(path, "GET", options);
+  }
+
+  /**
+   * A link anyone can PUT a raw body to with no API key: the body becomes the file at path, whole
+   * or not at all. The answer holds url and expiresAt.
+   */
+  public JsonObject uploadUrl(String path) {
+    return uploadUrl(path, null);
+  }
+
+  public JsonObject uploadUrl(String path, UploadUrlOptions options) {
+    return link(path, "PUT", options);
+  }
+
+  /** Ends every link made for this sandbox so far. */
+  public JsonObject revokeLinks() {
+    return new JsonObject(
+        t().object(new Transport.Call("POST", sandbox.path("/files:revoke-links"))));
+  }
+
+  /**
    * Copies a local file or directory in. A directory travels as one gzipped tar to the API's folder
    * routes, and the sandbox's own tar unpacks it as it arrives, making the folder and its parents.
    */

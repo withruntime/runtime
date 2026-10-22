@@ -55,9 +55,9 @@ The sandbox object does the rest:
   own tailnet), `metrics` and `mcp` (servers from the MCP catalog, run in the
   sandbox) for the other products.
 
-A sandbox pauses itself after 60 seconds with nothing happening in it, keeping
+A sandbox pauses itself after 300 seconds with nothing happening in it, keeping
 its memory and processes, and the next call wakes it, so an idle sandbox costs
-no compute; `idlePauseSeconds` sets 10 to 86,400, or 0 for never.
+no compute; `idlePauseSeconds` sets 60 to 86,400 (a shorter time is raised to 60), or 0 for never.
 
 `Sandbox.getOrCreate(name)` returns the sandbox with that name, woken if it is
 paused, or creates it.
@@ -162,6 +162,24 @@ copies memory and processes. `stop` deletes the sandbox, as Morph's does.
 SSH, reboot and a time limit set after start throw `CompatibilityError`
 naming the alternative. `COMPATIBILITY.md` lists every mapping.
 
+## Code written for Modal Sandboxes
+
+`withruntime/modal` runs code written for Modal's Sandboxes (`modal` 0.11.1).
+Change the import and set `RUNTIME_API_KEY`:
+
+```ts no-run
+import { ModalClient } from "withruntime/modal"; // was: from "modal"
+```
+
+Modal's own sandbox examples run unchanged where they use none of what is
+refused below, and a Modal token is never needed
+or sent. Commands run as root, as in a Modal container. A `timeoutMs` ends the
+sandbox; an `idleTimeoutMs` pauses it with its memory kept, and the next call
+wakes it. GPUs, Modal Functions and queues, named secrets, secrets in image
+build steps (a build keeps no secret: use it at run time), volumes made on
+first use, sidecars, connect tokens, directory and exit snapshots throw
+`CompatibilityError` before anything is created, naming what to use instead.
+
 ## Code written for Cloudflare's Sandbox SDK
 
 `withruntime/cloudflare` runs a Worker written for Cloudflare's 0.x
@@ -180,6 +198,22 @@ the code interpreter, sessions, `gitCheckout` and `exposePort` work as
 Cloudflare documents them; backups, tunnels, terminals and outbound
 interception throw `CompatibilityError` naming the alternative.
 `COMPATIBILITY.md` lists every mapping.
+
+## Code written for Fly Machines
+
+`withruntime/fly` answers Fly's Machines API (`api.machines.dev`) with Runtime
+sandboxes, so code in any language moves by changing one address:
+
+```sh no-run
+npx withruntime fly-api   # http://127.0.0.1:4280, as your Runtime login
+```
+
+Point `FLY_API_HOSTNAME` (as in Fly's own examples), fly-go's
+`FLY_FLAPS_BASE_URL` or any client's base URL there; `machinesApi()` is the same
+as a fetch handler for your own server. A Machine's image is built once with
+its `init` and `files`, the image's command is its main process, and its
+restart policy is kept. The Fly token is never sent anywhere. Services, mounts,
+checks and other regions answer 400 naming the alternative.
 
 ## Agent frameworks
 

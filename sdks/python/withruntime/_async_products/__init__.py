@@ -20,6 +20,7 @@ from .apps import AsyncApps, AsyncFunctions
 from .audit import AsyncAudit
 from .browser import AsyncBrowser
 from .builds import AsyncBuilds
+from .ci import AsyncCi
 from .containers import AsyncContainers
 from .desktop import AsyncDesktop
 from .images import AsyncImages
@@ -31,8 +32,10 @@ from .mcp import AsyncMcp, AsyncSandboxMcp
 from .network import AsyncNetwork
 from .network_products import AsyncAccountNetwork, AsyncAddresses, AsyncDomains, AsyncPorts
 from .observability import AsyncEvents, AsyncMetrics, AsyncOtel, AsyncWebhooks
+from .plans import AsyncPlans
 from .previews import AsyncPreviews
 from .referrals import AsyncReferrals
+from .reservations import AsyncReservations
 from .billing import AsyncBilling
 from .secrets import AsyncSecrets
 from .sso import AsyncSso
@@ -48,11 +51,14 @@ CLIENT["jobs"] = AsyncJobs
 CLIENT["apps"] = AsyncApps
 CLIENT["functions"] = AsyncFunctions
 CLIENT["builds"] = AsyncBuilds
+CLIENT["ci"] = AsyncCi
 CLIENT["containers"] = AsyncContainers
 CLIENT["agents"] = AsyncAgents
 CLIENT["referrals"] = AsyncReferrals
+CLIENT["plans"] = AsyncPlans
 CLIENT["billing"] = AsyncBilling
 CLIENT["limits"] = AsyncLimits
+CLIENT["reservations"] = AsyncReservations
 CLIENT["sso"] = AsyncSso
 CLIENT["switching"] = AsyncSwitching
 CLIENT["secrets"] = AsyncSecrets

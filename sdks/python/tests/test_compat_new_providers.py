@@ -228,7 +228,8 @@ class ModalTests(Base):
         self.assertEqual(self.world.sandboxes[box.object_id].files.read(ENV_PATH), b'{"TOKEN": "secret"}')
 
     def test_rejects_gpu_and_security_options_before_effects(self):
-        for options in ({"gpu": "H100"}, {"outbound_cidr_allowlist": ["10.0.0.0/8"]}, {"cpu": .5}):
+        for options in ({"gpu": "H100"}, {"outbound_domain_allowlist": ["*"], "outbound_cidr_allowlist": ["10.0.0.0/8"]},
+                        {"cpu": .5}):
             with self.assertRaises(CompatibilityError):
                 Sandbox.create(client=self.client, **options)
         self.assertEqual(self.world.called("images.build"), [])

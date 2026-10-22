@@ -36,6 +36,10 @@ type ExecOptions struct {
 	// command timed out.
 	Check          bool
 	IdempotencyKey string
+	// TraceFiles sets the result's Files to the files the command (and
+	// anything it started) read and wrote. An older sandbox answers
+	// unsupported_operation: stop and start it, and no command runs.
+	TraceFiles bool
 }
 
 type command struct {
@@ -68,6 +72,9 @@ func commandBody(cmd command, opts *ExecOptions, defaultTimeout time.Duration) m
 	}
 	if timeout > 0 {
 		body["timeoutMs"] = timeout.Milliseconds()
+	}
+	if opts.TraceFiles {
+		body["traceFiles"] = true
 	}
 	return body
 }
@@ -133,6 +140,7 @@ func (s *Sandbox) exec(ctx context.Context, cmd command, opts *ExecOptions) (*Co
 				result.ExitCode = event.ExitCode
 				result.TimedOut = event.TimedOut
 				result.DurationMs = event.DurationMs
+				result.Files = event.Files
 			}
 		}
 		result.Stdout = stdout.String()
@@ -304,6 +312,9 @@ type SpawnOptions struct {
 	// PTY gives the process a terminal of this size.
 	PTY            *PTY
 	IdempotencyKey string
+	// TraceFiles records the files it opens: read them with Files once it
+	// has ended.
+	TraceFiles bool
 }
 
 // PTY is a terminal's size.
@@ -328,7 +339,7 @@ func (s *Sandbox) spawn(ctx context.Context, cmd command, opts *SpawnOptions) (*
 	if opts == nil {
 		opts = &SpawnOptions{}
 	}
-	body := commandBody(cmd, &ExecOptions{Cwd: opts.Cwd, User: opts.User, Env: opts.Env, Timeout: opts.Timeout}, 0)
+	body := commandBody(cmd, &ExecOptions{Cwd: opts.Cwd, User: opts.User, Env: opts.Env, Timeout: opts.Timeout, TraceFiles: opts.TraceFiles}, 0)
 	if opts.PipeStdin {
 		body["stdinMode"] = "pipe"
 	} else if opts.Stdin != nil {
@@ -457,6 +468,16 @@ func (p *Process) Kill(ctx context.Context, signal string) error {
 // Resize changes a PTY process's terminal size.
 func (p *Process) Resize(ctx context.Context, cols, rows int) error {
 	return p.sandbox.c.do(ctx, &call{method: http.MethodPost, path: p.path(":resize"), body: map[string]any{"cols": cols, "rows": rows}}, nil)
+}
+
+// Files is what a process started with TraceFiles read and wrote. It fails
+// with process_running while the process runs.
+func (p *Process) Files(ctx context.Context) (*TracedFiles, error) {
+	var files TracedFiles
+	if err := p.sandbox.c.do(ctx, &call{method: http.MethodGet, path: p.path("/files")}, &files); err != nil {
+		return nil, err
+	}
+	return &files, nil
 }
 
 // Refresh reads the process again.

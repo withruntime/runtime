@@ -2,20 +2,28 @@
  * `hint` says what to do next, and `requestId` is what to quote in a report
  * (runtime.feedback.submit, `runtime feedback`, or support). */
 /** A product switched off on this deployment, or paused on purpose: the API
- * answers these 503s in fixed words (`serverFault` "off" in
- * packages/cloud/src/api/respond.ts) and retrying cannot change them.
- * host_unavailable and busy pass, and are retried. */
+ * answers these with 501 (503 from an older server) in fixed words, and
+ * retrying cannot change them. host_unavailable and busy pass, and are
+ * retried. The API also says so itself (`retryable: false`); this set is for
+ * a server too old to. */
 export const DELIBERATE: ReadonlySet<string> = new Set([
   "unavailable",
   "unsupported",
   "fork_unavailable",
   "previews_unavailable",
+  "file_links_unavailable",
   "network_unavailable",
   "network_rules_unavailable",
   "secrets_unavailable",
   "identity_unavailable",
   "env_unavailable",
   "resize_unavailable",
+  "feature_unavailable",
+  "delete_unavailable",
+  "switch_image_unavailable",
+  "switching_paused",
+  "schema_migration_required",
+  "storage_unavailable",
 ]);
 /** Refusals that guarantee nothing ran: a sandbox running as many commands
  * as it can (`guest_busy`), and the API's own limits, which answer before any
@@ -51,6 +59,10 @@ export class RuntimeError extends Error {
   /** The key the SDK sent. A retry with it never repeats the effect. */
   readonly idempotencyKey?: string;
   readonly retryAfterMs?: number;
+  /** What the API said of this answer: whether the same request, sent again
+   * unchanged, may succeed. Undefined from a server too old to say, or for a
+   * failure the SDK made itself; `retryable` then judges by code and status. */
+  readonly sentRetryable?: boolean;
   constructor(init: {
     message: string;
     code: string;
@@ -60,6 +72,7 @@ export class RuntimeError extends Error {
     details?: Record<string, unknown>;
     idempotencyKey?: string;
     retryAfterMs?: number;
+    sentRetryable?: boolean;
     cause?: unknown;
   }) {
     super(init.message, init.cause === undefined ? undefined : { cause: init.cause });
@@ -71,16 +84,23 @@ export class RuntimeError extends Error {
     if (init.details !== undefined) this.details = init.details;
     if (init.idempotencyKey !== undefined) this.idempotencyKey = init.idempotencyKey;
     if (init.retryAfterMs !== undefined) this.retryAfterMs = init.retryAfterMs;
+    if (init.sentRetryable !== undefined) this.sentRetryable = init.sentRetryable;
   }
   /** Retrying this exact call (the SDK keeps the key) is safe and may work.
    * True for no_capacity and no_credit_running_limit as well, which clear by themselves when
    * a host frees room or a sandbox without credit stops. `sandboxes.create` already
    * waits for those (see `waitForCapacityMs`), so seeing one from a create
-   * means the wait ran out or was switched off. */
+   * means the wait ran out or was switched off. The API's own word
+   * (`sentRetryable`) wins; the rest is for an older server. */
   get retryable(): boolean {
+    if (this.sentRetryable !== undefined) return this.sentRetryable;
     if (DELIBERATE.has(this.code)) return false;
     // A fork asking for more copies than an account without credit runs at once never fits.
     if (PASSING.has(this.code)) return this.details?.field !== "count";
+    // The account at one of its limits (a 429 since 17 October 2026): some
+    // free when its own work ends, some only when something is deleted, so
+    // the same call again is no answer by itself.
+    if (this.code === "quota_exceeded") return false;
     return [0, 429, 502, 503, 504].includes(this.status);
   }
   toString(): string {
@@ -149,6 +169,7 @@ export function errorFor(status: number, body: unknown, idempotencyKey?: string)
       ? { details: error.details as Record<string, unknown> }
       : {}),
     ...(typeof error.retryAfterMs === "number" ? { retryAfterMs: error.retryAfterMs } : {}),
+    ...(typeof error.retryable === "boolean" ? { sentRetryable: error.retryable } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
   };
   if (init.code === "account_blocked") return new AccountBlockedError(init);

@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.23.0",
+  "version": "0.33.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -57,6 +57,7 @@
     },
     "./agents": {
       "types": "./dist/agents/index.d.ts",
+      "browser": "./dist/agents/browser.js",
       "import": "./dist/agents/index.js",
       "default": "./dist/agents/index.js"
     },
@@ -69,6 +70,16 @@
       "types": "./dist/builds/index.d.ts",
       "import": "./dist/builds/index.js",
       "default": "./dist/builds/index.js"
+    },
+    "./ci": {
+      "types": "./dist/ci/index.d.ts",
+      "import": "./dist/ci/index.js",
+      "default": "./dist/ci/index.js"
+    },
+    "./apps": {
+      "types": "./dist/apps/index.d.ts",
+      "import": "./dist/apps/index.js",
+      "default": "./dist/apps/index.js"
     },
     "./e2b": {
       "types": "./dist/e2b/index.d.ts",
@@ -135,6 +146,11 @@
       "import": "./dist/sprites/index.js",
       "default": "./dist/sprites/index.js"
     },
+    "./fly": {
+      "types": "./dist/fly/index.d.ts",
+      "import": "./dist/fly/index.js",
+      "default": "./dist/fly/index.js"
+    },
     "./freestyle": {
       "types": "./dist/freestyle/index.d.ts",
       "import": "./dist/freestyle/index.js",
@@ -180,9 +196,9 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check-types": "tsc --noEmit",
-    "lint": "eslint",
+    "build": "node ../typescript-config/tsc5.mjs -p tsconfig.build.json",
+    "check-types": "tsgo --noEmit",
+    "lint": "oxlint -c ../eslint-config/oxlint.json --ignore-pattern 'dist/**' --ignore-pattern 'tests/fixtures/modal/**'",
     "test": "bun test"
   },
   "devDependencies": {
@@ -202,7 +218,6 @@
     "@types/bun": "^1.4.0",
     "@types/node": "^20",
     "ai": "7.0.87",
-    "eslint": "^9",
     "groq-sdk": "1.6.0",
     "openai": "7.23.0",
     "together-ai": "0.55.0",
@@ -227,6 +242,7 @@
     "./dist/tar.js": "./dist/browser-stub.js",
     "./dist/image-context.js": "./dist/browser-stub.js",
     "./dist/credentials.js": "./dist/browser-stub.js",
+    "./dist/agents-file.js": "./dist/browser-stub.js",
     "undici": false
   },
   "keywords": [
@@ -242,7 +258,8 @@
     "llm"
   ],
   "dependencies": {
-    "undici": "^7.29.1"
+    "undici": "^7.29.1",
+    "yaml": "^2.8.1"
   },
   "peerDependencies": {
     "@ai-sdk/harness": "^1.0.0",

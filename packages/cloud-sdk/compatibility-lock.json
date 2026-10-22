@@ -248,10 +248,10 @@
         {
           "registry": "pypi",
           "name": "prime-sandboxes",
-          "version": "0.4.6",
+          "version": "0.4.7",
           "artifacts": {
-            "prime_sandboxes-0.4.6-py3-none-any.whl": "sha256-e97c6e70c032e0b6d7defdb26d6192a02643ad279af1a4726ebceb35ee89d70c",
-            "prime_sandboxes-0.4.6.tar.gz": "sha256-23204a465500e9c20639e3043e92d703712d8c80b94d6434bfeb82c787102915"
+            "prime_sandboxes-0.4.7-py3-none-any.whl": "sha256-309600da3ee596ce36ed75a7b0956d7883f3e4fc385f026e80c9df887ea1a948",
+            "prime_sandboxes-0.4.7.tar.gz": "sha256-72382facabe083b5f9618bfcc057cf1b0211fe103d66cad06d0310567b416adb"
           }
         }
       ]

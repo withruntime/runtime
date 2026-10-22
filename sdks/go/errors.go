@@ -27,6 +27,11 @@ type Error struct {
 	IdempotencyKey string
 	// RetryAfter is how long the server asked the client to wait, when it did.
 	RetryAfter time.Duration
+	// ServerRetryable is the answer's own `retryable`: whether the same
+	// request sent again unchanged may succeed. Nil when the server did not
+	// say (an older server, or no answer); Retryable then judges by code and
+	// status.
+	ServerRetryable *bool
 	// Err is the underlying cause, for a connection failure.
 	Err error
 }
@@ -53,19 +58,27 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// deliberate are 503s that are a deliberate state, not a passing one: a
-// product switched off here. Retrying cannot change them.
+// deliberate are refusals that are a deliberate state, not a passing one: a
+// product switched off here (501; 503 from an older server). Retrying cannot
+// change them. Read only when the answer carries no `retryable`.
 var deliberate = map[string]bool{
 	"unavailable":               true,
 	"unsupported":               true,
 	"fork_unavailable":          true,
 	"previews_unavailable":      true,
+	"file_links_unavailable":    true,
 	"network_unavailable":       true,
 	"network_rules_unavailable": true,
 	"secrets_unavailable":       true,
 	"identity_unavailable":      true,
 	"env_unavailable":           true,
 	"resize_unavailable":        true,
+	"feature_unavailable":       true,
+	"delete_unavailable":        true,
+	"switch_image_unavailable":  true,
+	"switching_paused":          true,
+	"schema_migration_required": true,
+	"storage_unavailable":       true,
 }
 
 // passing are refusals that clear by themselves: a host frees room, a
@@ -87,13 +100,22 @@ var waitsForRoom = map[string]bool{
 }
 
 // Retryable reports whether retrying this exact call (with the same
-// idempotency key) is safe and may work.
+// idempotency key) is safe and may work: the server's own `retryable` when
+// the answer carried one, else judged by code and status.
 func (e *Error) Retryable() bool {
+	if e.ServerRetryable != nil {
+		return *e.ServerRetryable
+	}
 	if deliberate[e.Code] {
 		return false
 	}
 	if passing[e.Code] {
 		return e.Details["field"] != "count"
+	}
+	// The account at one of its limits (a 429): some free when its own work ends,
+	// some only when something is deleted, so the same call again is no answer by itself.
+	if e.Code == "quota_exceeded" {
+		return false
 	}
 	switch e.Status {
 	case 0, 429, 502, 503, 504:
@@ -174,12 +196,13 @@ func commandError(result *CommandResult) *CommandError {
 func errorFor(status int, body []byte, key string) *Error {
 	var parsed struct {
 		Error struct {
-			Code         string         `json:"code"`
-			Message      string         `json:"message"`
-			Hint         string         `json:"hint"`
-			RequestID    string         `json:"requestId"`
-			Details      map[string]any `json:"details"`
-			RetryAfterMs *float64       `json:"retryAfterMs"`
+			Code         string          `json:"code"`
+			Message      string          `json:"message"`
+			Hint         string          `json:"hint"`
+			RequestID    string          `json:"requestId"`
+			Details      map[string]any  `json:"details"`
+			RetryAfterMs *float64        `json:"retryAfterMs"`
+			Retryable    json.RawMessage `json:"retryable"`
 		} `json:"error"`
 	}
 	err := &Error{Status: status, IdempotencyKey: key}
@@ -189,6 +212,12 @@ func errorFor(status int, body []byte, key string) *Error {
 		err.Hint = parsed.Error.Hint
 		err.RequestID = parsed.Error.RequestID
 		err.Details = parsed.Error.Details
+		// Read only when a boolean: anything else leaves the judgement to
+		// Retryable's own rules, and never spoils the rest of the error.
+		var retryable bool
+		if json.Unmarshal(parsed.Error.Retryable, &retryable) == nil && string(parsed.Error.Retryable) != "null" {
+			err.ServerRetryable = &retryable
+		}
 		if parsed.Error.RetryAfterMs != nil {
 			err.RetryAfter = time.Duration(*parsed.Error.RetryAfterMs * float64(time.Millisecond))
 		}

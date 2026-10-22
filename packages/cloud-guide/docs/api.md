@@ -62,7 +62,7 @@ Every response carries `x-request-id`. Every error has one shape:
 {
   "error": {
     "code": "no_credit_running_limit",
-    "status": 409,
+    "status": 429,
     "message": "An account without credit runs at most 4 sandboxes at once.",
     "hint": "... Stop or pause one you no longer need (runtime sandboxes stop <id>, or pause <id>), or wait for one to end, then retry. ... Adding credit lifts this. Only the account's owner adds credit, at https://withruntime.com/account/billing#add-credit, so tell them what was refused; an agent never adds or spends it on its own. Credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total. ...",
     "details": {
@@ -74,7 +74,8 @@ Every response carries `x-request-id`. Every error has one shape:
         "welcomeMatch": { "withinDays": {{welcome-days}}, "upToUsd": {{welcome-max-usd}} }
       }
     },
-    "requestId": "req_0mud1dtgjogtn2z8t6y"
+    "requestId": "req_0mud1dtgjogtn2z8t6y",
+    "retryable": true
   }
 }
 ```
@@ -82,10 +83,19 @@ Every response carries `x-request-id`. Every error has one shape:
 Follow the `hint`. Quote the `requestId` when you report a problem. A 5xx never
 carries internal detail, only a fixed message and the request id.
 
+**`retryable` says whether to send it again.** Every error has it. `true`
+means the same request, sent again unchanged, may succeed: the answer then
+always carries a `Retry-After` header, the seconds to wait first (and
+`retryAfterMs` in the body when the wait is exact). `false` means something
+must change first, and the same request gets the same answer; such an answer
+never carries `Retry-After`. Each code has one status and one `retryable`,
+listed below and in the OpenAPI document's `x-error-codes`; a code is never
+renamed, so code that reads `code` keeps working.
+
 **A refusal that adding credit lifts has one shape**, whatever the product, so
 an agent can tell its person plainly what to do. It answers with one of
 `no_credit_size_limit`, `no_credit_running_limit`, `no_credit_total_limit`,
-`no_credit_kept_limit`, `no_credit_daily_limit`, `no_credit_domain_limit`, `no_credit_capacity_full`, `no_credit_build_limit`,
+`no_credit_kept_limit`, `no_credit_daily_limit`, `no_credit_key_limit`, `no_credit_domain_limit`, `no_credit_capacity_full`, `no_credit_build_limit`,
 `included_usage_used_up`, `included_usage_unavailable`, `insufficient_funds`,
 `payment_required`, `public_preview_not_allowed` or `connect_not_allowed`:
 
@@ -120,43 +130,58 @@ claim code as secret as the key. `connect_not_allowed` for an organization whose
 Runtime turned off has no `addCredit`, since credit does not change it.
 
 **A 5xx says whose fault it is.** A message that says the fault is ours, not
-your request's, was reported to us automatically, with its `requestId`. Retry with the same key; write to us only if it keeps
-failing.
+your request's, was reported to us automatically, with its `requestId`. A 500
+is a fault a retry does not fix; a 502, 503 or 504 passes, so retry it with
+the same key; write to us only if it keeps failing. A 501 is a product switched
+off on this deployment.
 
-| Status   | Codes you may see                                                                                                                                                                                                                                                                 | Safe next step                                                                                                                                                                                                                       |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 400      | `invalid_request` (with `details.issues`), `invalid_region`, `no_credit_size_limit`, `disk_too_small`, `env_name_reserved`                                                                                                                                                        | Fix the named fields                                                                                                                                                                                                                 |
-| 401      | `unauthorized`                                                                                                                                                                                                                                                                    | Check the key                                                                                                                                                                                                                        |
-| 402      | `included_usage_used_up`, `insufficient_funds`, `spending_limit_reached`                                                                                                                                                                                                          | Add credit (sandboxes then run on it), or read `GET /v1/limits`                                                                                                                                                                      |
-| 402      | `payment_required`, `included_usage_unavailable`                                                                                                                                                                                                                                  | A feature that needs credit or a kept top-up, or no free usage on this account yet; the message says which ([pricing](./pricing#how-many-at-once))                                                                                   |
-| 402      | `account_blocked`                                                                                                                                                                                                                                                                 | A payment is disputed or under review; the message says what clears it                                                                                                                                                               |
-| 402      | `pilot_hours_used`                                                                                                                                                                                                                                                                | This pilot's sandbox hours are used: its sandboxes pause, files kept. The account's owner may write to support to extend the pilot or ask for more hours. Credit does not help                                                       |
-| 402      | `pilot_ended`                                                                                                                                                                                                                                                                     | The pilot this sandbox ran on has ended, so it cannot run again. The account's owner may write to support to extend the pilot. Credit does not help                                                                                  |
-| 403      | `forbidden` (a read-only key asking to change something is one), `permission_denied`, `connect_not_allowed`, `product_in_beta` (a product in a private beta, open only to the accounts on its list), `outside_compartment` (a key in a compartment asking for an account setting) | Do not work around a refusal                                                                                                                                                                                                         |
-| 403      | `sandbox_halted`                                                                                                                                                                                                                                                                  | A sandbox halted by the [abuse checks](./security#network-access): it cannot be woken, started, snapshotted or forked, nor a snapshot of it started, files kept. Your inbox says what was seen; write to support if it was a mistake |
-| 404      | `not_found`, `route_not_found`, `file_not_found`, `image_not_found`, `snapshot_not_found`                                                                                                                                                                                         | Check the id, name or path                                                                                                                                                                                                           |
-| 405      | `method_not_allowed`                                                                                                                                                                                                                                                              | Use the method this page lists for the path                                                                                                                                                                                          |
-| 408      | `request_timeout`                                                                                                                                                                                                                                                                 | Your request body stopped arriving (no bytes for 30 s): send it again with the same key (the SDKs get 503 `body_stalled` and do)                                                                                                     |
-| 409      | `no_capacity`, `host_capacity`, `no_credit_running_limit`, `no_credit_domain_limit`, `quota_exceeded`, `build_in_progress`, `volume_releasing`                                                                                                                                    | Clears when something else ends or finishes: wait, then retry with the same key                                                                                                                                                      |
-| 409      | `not_running`, `sandbox_paused`, `sandbox_stopped`, `sandbox_not_ready`, `is_a_directory`, `name_taken`, `volume_attached`, `compartment_not_empty`                                                                                                                               | Resolve the state, then retry                                                                                                                                                                                                        |
-| 409      | `time_limit_too_short`                                                                                                                                                                                                                                                            | The command's timeout outlasts the sandbox's time limit or its funded time: extend it, add credit, or give the command a shorter timeout                                                                                             |
-| 410      | `name_retired`                                                                                                                                                                                                                                                                    | Use the name the hint gives                                                                                                                                                                                                          |
-| 422      | `idempotency_key_reused`                                                                                                                                                                                                                                                          | Same key, same body; or a new key for new work                                                                                                                                                                                       |
-| 426      | `upgrade_required`                                                                                                                                                                                                                                                                | Move to this API version                                                                                                                                                                                                             |
-| 429      | `rate_limited`, `no_credit_build_limit`                                                                                                                                                                                                                                           | Wait `Retry-After`, then retry with the same key                                                                                                                                                                                     |
-| 503      | `busy`, `host_unavailable`, `api_unavailable`, `guest_busy`, `body_stalled`                                                                                                                                                                                                       | Retry after `Retry-After` with the same key (the SDKs do)                                                                                                                                                                            |
-| 503      | `unavailable`, `fork_unavailable`, `previews_unavailable`, `resize_unavailable`                                                                                                                                                                                                   | Switched off here on purpose; retrying will not help                                                                                                                                                                                 |
-| 503      | `operation_failed`                                                                                                                                                                                                                                                                | The sandbox's last start, wake, pause, stop or delete could not be completed, a fault of ours; files kept, nothing charged. Stop or delete it; retrying will not help                                                                |
-| 500      | `secrets_unconfirmed`                                                                                                                                                                                                                                                             | A create or fork naming secrets whose stored list could not be read back; the sandbox was stopped before anything ran. Create it again with a new key                                                                                |
-| 503      | `wake_refused`                                                                                                                                                                                                                                                                    | A wake or restart refused at once by a fault of ours; nothing queued or charged, files kept. Retry it in a few minutes                                                                                                               |
-| 502, 504 | `interpreter_failed`, `mcp_failed`, `watch_failed`, `recording_failed`, `tunnel_unavailable`                                                                                                                                                                                      | Something in your sandbox failed; the message says what                                                                                                                                                                              |
-| 5xx      | `internal_error`, `guest_failed`, `host_unknown` and any other code                                                                                                                                                                                                               | A fault on our side, reported to us; retry with the same key                                                                                                                                                                         |
+The status follows HTTP's meaning, so a client or a retry library that reads
+only the status does the right thing: 409 is only a state you change first (a
+sandbox to wake, a name already held) or one that clears by itself; 429 is
+your own limit (a rate, what runs at once, a quota, a daily cap); 503 is the
+service briefly away or out of room.
 
-**Temporary refusals are safe to retry.** `no_capacity`, `busy`,
-`host_unavailable`, `rate_limited` and `no_credit_running_limit` clear on their own: retry
-with the same key, a growing delay and a bounded deadline.
+<!-- error-codes:start (bun packages/cloud/src/api/error-codes-write.ts) -->
 
-- The SDKs retry the 429 and 503 codes themselves.
+| Status | Retryable | Codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Safe next step                                                                                                                                                                                                                                                                                                                                                  |
+| ------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | no        | `confirmation_required`, `copies_invalid`, `cursor_ahead`, `disk_shrink`, `env_invalid`, `env_name_reserved`, `env_too_large`, `image_no_command`, `invalid_alert`, `invalid_archive`, `invalid_authority`, `invalid_backup_night`, `invalid_drill`, `invalid_env`, `invalid_host`, `invalid_journal`, `invalid_lease`, `invalid_packages`, `invalid_path`, `invalid_region`, `invalid_request`, `invalid_service`, `port_ambiguous`, `resize_needs_restart`, `scale_invalid`, `size_exceeded`, `switch_keeps_workspace_only`, `terms_required`, `volume_invalid`, `working_dir_invalid`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Fix the request as the message and `details` say                                                                                                                                                                                                                                                                                                                |
+| 401    | no        | `invalid_identity`, `unauthorized`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Check the key                                                                                                                                                                                                                                                                                                                                                   |
+| 402    | no        | `account_blocked`, `budget_exceeded`, `budget_reached`, `included_usage_unavailable`, `included_usage_used_up`, `insufficient_credit`, `insufficient_funds`, `payment_failed`, `payment_required`, `pilot_ended`, `pilot_hours_used`, `retention_unavailable`, `spending_limit_reached`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | It needs credit or money; the message says which, and `details.addCredit` how                                                                                                                                                                                                                                                                                   |
+| 403    | no        | `agent_key_required`, `connect_not_allowed`, `forbidden`, `mode_not_applied`, `network_not_allowed`, `no_person`, `outside_compartment`, `permission_denied`, `plan_required`, `product_in_beta`, `public_preview_not_allowed`, `sandbox_halted`, `secret_not_shared`, `sign_in_unfinished`, `signed_requests_off`, `sso_refused`, `sso_required`, `wrong_source`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | This key or account may not; do not work around it                                                                                                                                                                                                                                                                                                              |
+| 404    | no        | `file_not_found`, `image_not_found`, `not_available`, `not_found`, `path_not_found`, `process_not_found`, `route_not_found`, `sandbox_gone`, `snapshot_not_found`, `target_not_found`, `transfer_not_found`, `volume_not_found`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Check the id, name or path                                                                                                                                                                                                                                                                                                                                      |
+| 405    | no        | `method_not_allowed`, `wrong_method`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Use a method the path accepts                                                                                                                                                                                                                                                                                                                                   |
+| 408    | no        | `download_idle`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Send the request again, faster                                                                                                                                                                                                                                                                                                                                  |
+| 408    | yes       | `request_timeout`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Send it again after `Retry-After`, with the same key                                                                                                                                                                                                                                                                                                            |
+| 409    | no        | `already_exists`, `already_switched`, `already_topped_up`, `archive_unavailable`, `auto_wake_off`, `blobs_missing`, `browser_failed`, `checksum_mismatch`, `chunk_conflict`, `compartment_not_empty`, `conflict`, `desktop_not_running`, `directory_not_empty`, `file_trace_not_requested`, `file_trace_unavailable`, `fork_failed`, `guest_upgrade_required`, `image_in_use`, `image_unchanged`, `image_unnamed`, `insufficient_storage`, `invalid_state`, `is_a_directory`, `journal_full`, `legacy_email_requires_reconciliation`, `limit_reached`, `memory_full`, `name_conflict`, `name_taken`, `no_credit_kept_limit`, `no_credit_key_limit`, `no_memory_scope`, `no_space`, `not_a_directory`, `not_a_regular_file`, `not_a_terminal`, `not_installed`, `not_pausable`, `not_paused`, `not_resumable`, `not_running`, `offset_mismatch`, `operation_conflict`, `operation_outcome_unknown`, `payment_used`, `process_running`, `rebase_copy_failed`, `rebase_copy_timeout`, `repository_disconnected`, `repository_taken`, `resize_disk_cold`, `resize_needs_disk`, `resource_stopped`, `restart_unavailable`, `rollback_unavailable`, `root_unavailable`, `sandbox_in_use`, `sandbox_not_paused`, `sandbox_not_running`, `sandbox_paused`, `sandbox_stopped`, `second_step_already_on`, `second_step_not_started`, `second_step_off`, `second_step_required_by_account`, `secrets_mismatch`, `service_conflict`, `service_resume_unavailable`, `session_ended`, `session_open`, `session_stopping`, `size_unchanged`, `snapshot_metadata_changed`, `snapshot_unsupported`, `stdin_closed`, `switch_needs_disk`, `tailscale_joined`, `time_limit_too_short`, `trigger_paused`, `unmount_failed`, `unsupported_operation`, `upload_incomplete`, `version_conflict`, `volume_attached`, `volume_change_refused`, `webhook_disabled` | Change the state the message names (wake, stop, detach, rename), then send it again. A count you hold at its limit (`no_credit_kept_limit`, `no_credit_key_limit`, `limit_reached`, and `quota_exceeded` on what is kept: volumes, images, snapshots, secrets, kept sandboxes) is one too: delete one, or raise the limit; sending it again alone does not help |
+| 409    | yes       | `backup_not_ready`, `browser_installing`, `desktop_installing`, `file_changed`, `image_building`, `image_not_ready`, `operation_pending`, `resize_during_snapshot`, `resize_not_halted`, `run_in_progress`, `sandbox_not_ready`, `snapshot_capturing`, `snapshot_in_progress`, `snapshot_not_ready`, `switch_not_paused`, `volume_not_ready`, `volume_releasing`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Clears by itself: send it again after `Retry-After`, with the same key                                                                                                                                                                                                                                                                                          |
+| 410    | no        | `deleted`, `host_lost`, `link_expired`, `link_revoked`, `name_retired`, `secret_revoked`, `snapshot_expired`, `snapshot_lost`, `upgrade_required`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Gone for good: make a new one, or use the name the hint gives                                                                                                                                                                                                                                                                                                   |
+| 413    | no        | `body_too_large`, `file_too_large`, `too_large`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Send less, or use the chunked upload                                                                                                                                                                                                                                                                                                                            |
+| 415    | no        | `unsupported_media_type`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Send `Content-Type: application/json`                                                                                                                                                                                                                                                                                                                           |
+| 416    | no        | `range_not_satisfiable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Ask for a range inside the file; the message says its length                                                                                                                                                                                                                                                                                                    |
+| 422    | no        | `archive_failed`, `cwd_not_found`, `disk_too_small`, `idempotency_conflict`, `idempotency_key_reused`, `image_build_failed`, `image_config_invalid`, `image_limit_too_small`, `image_on_another_host`, `image_platform_unsupported`, `image_port_invalid`, `image_registry_unsupported`, `interpreter_failed`, `invalid_volume_attachment`, `keep_env_refused`, `mcp_cleanup_failed`, `mcp_failed`, `no_credit_size_limit`, `passkey_limit`, `passkey_refused`, `recording_failed`, `ref_not_found`, `retention_too_long`, `scale_over_limit`, `second_step_wrong_code`, `subagent_depth`, `tailscale_failed`, `tunnel_overrun`, `tunnel_unavailable`, `unprocessable`, `upload_failed`, `volumes_apart`, `volumes_on_different_hosts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Well formed, but not possible as asked: change what the message names; a program in your sandbox that failed is named in `details`                                                                                                                                                                                                                              |
+| 429    | yes       | `blob_store_full`, `blob_upload_limit`, `build_in_progress`, `context_limit`, `daily_limit`, `guest_busy`, `no_credit_build_limit`, `no_credit_daily_limit`, `no_credit_domain_limit`, `no_credit_running_limit`, `no_credit_total_limit`, `process_limit`, `quota_exceeded`, `rate_limited`, `resource_limit`, `sandbox_busy`, `second_step_locked`, `startup_application_limit`, `startup_cool_down`, `subagent_quota`, `transfer_limit`, `trial_signup_rate`, `watch_limit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `quota_exceeded` for a limit on what runs at once (`details.limit` `sandbox.count`, `sandbox.vcpu`, `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count` or `instance.count`); on what is kept it is a 409. Your own limit: its rate, what runs at once, a quota or a daily cap. Retry after `Retry-After` with the same key, or end something it counts    |
+| 451    | no        | `taken_down`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Taken down after a report; write to support if it was a mistake                                                                                                                                                                                                                                                                                                 |
+| 499    | no        | `cancelled`, `client_closed`, `request_cancelled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | You closed the connection first; nobody read this                                                                                                                                                                                                                                                                                                               |
+| 500    | no        | `env_unreadable`, `guest_quarantined`, `internal_error`, `job_failed`, `operation_failed`, `price_unavailable`, `secrets_unconfirmed`, `snapshot_busy`, `snapshot_unusable`, `watch_failed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Our fault, reported to us. Safe to send again with the same key, but it may fail the same way until we fix it                                                                                                                                                                                                                                                   |
+| 501    | no        | `delete_unavailable`, `env_unavailable`, `feature_unavailable`, `file_links_unavailable`, `fork_unavailable`, `identity_unavailable`, `network_rules_unavailable`, `network_unavailable`, `previews_unavailable`, `resize_unavailable`, `schema_migration_required`, `secrets_unavailable`, `storage_unavailable`, `switch_image_unavailable`, `switching_paused`, `unavailable`, `unsupported`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Switched off on this deployment; sending it again does not help                                                                                                                                                                                                                                                                                                 |
+| 502    | yes       | `billing_unavailable`, `download_incomplete`, `github_unavailable`, `guest_failed`, `image_unavailable`, `keys_unavailable`, `support_unavailable`, `upstream_failed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | A service behind the API answered badly: retry after `Retry-After` with the same key                                                                                                                                                                                                                                                                            |
+| 503    | yes       | `alert_in_flight`, `alert_unavailable`, `api_unavailable`, `base_image_unverified`, `body_stalled`, `builder_outdated`, `busy`, `capacity_unavailable`, `copies_unread`, `desktop_connection_unavailable`, `drill_unalerted`, `drill_unrecorded`, `email_unavailable`, `guest_not_ready`, `heartbeats_unreadable`, `host_busy`, `host_capacity`, `host_memory_pressure`, `host_not_ready`, `host_start_failed`, `host_unavailable`, `host_unknown`, `monitor_unavailable`, `no_capacity`, `no_credit_capacity_full`, `own_share_full`, `planned_release`, `resize_not_started`, `signing_unavailable`, `snapshot_restoring`, `switch_undone`, `wake_refused`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Briefly away or out of room: retry after `Retry-After` with the same key (the SDKs do)                                                                                                                                                                                                                                                                          |
+| 504    | yes       | `host_timeout`, `upstream_timeout`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | A service behind the API did not answer in time: retry after `Retry-After` with the same key                                                                                                                                                                                                                                                                    |
+
+<!-- error-codes:end -->
+
+**Retryable answers are safe to send again.** `no_capacity`, `busy`,
+`host_unavailable`, `rate_limited`, `no_credit_running_limit` and every other
+code marked retryable above clear on their own: retry with the same key after
+`Retry-After`, a growing delay and a bounded deadline.
+
+- The SDKs retry every answer that says `retryable: true` themselves, after
+  its `Retry-After`, up to `maxRetries`, but for `no_capacity`,
+  `quota_exceeded` and `no_credit_running_limit`, which they wait out only
+  where they wait for room (below) and otherwise return at once. A wait over
+  a minute (a daily cap) is not slept on: the error is returned at once, with
+  `retryAfterMs`, for you to schedule.
 - `guest_busy`, `busy` and `rate_limited` mean nothing ran. The SDKs send such
   a call again, with the same key and a delay that grows from `Retry-After`
   to eight times it, until the call's own deadline, or for
@@ -166,15 +191,30 @@ with the same key, a growing delay and a bounded deadline.
 - A `quota_exceeded` names the limit in its message and in `details`:
   `limit` (such as `volume.count`), `max` and how to `raise` it. Every limit
   is listed in [limits](./limits).
+- A create or wake refused `no_capacity` holds a place in its region's line
+  while it is sent again with the same `Idempotency-Key` (the SDKs do), and
+  its message says the place, how many wait ahead and the account's lane: "in
+  line at place 2: the region's room goes to higher lanes first: 1 waiting
+  ahead (pro 1); this account's lane is free", and its `details.line` holds
+  the same as `lane`, `place`, `ahead` (by lane) and `words`. Room that frees
+  goes to the highest lane waiting first; see
+  [waiting in line for room](./limits#waiting-in-line-for-room).
 - An SDK create also waits out `no_credit_running_limit`, `quota_exceeded` and
   `no_capacity`, for up to two minutes by default, then returns the refusal.
-  The error's `retryable` is `true` for `no_credit_running_limit` and `no_capacity`, for a
-  loop of your own.
-- `no_capacity` answers with a `Retry-After` header, the wait before a first
-  retry, for a client that reads only HTTP. The SDKs keep their own growing
-  delay.
+  The error's `retryable` is `true` for `no_credit_running_limit`, `no_capacity`
+  and a `quota_exceeded` on what runs at once (`sandbox.count`, `sandbox.vcpu`,
+  `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count`, `instance.count`),
+  for a loop of your own. A `quota_exceeded` on what you keep (volumes, images,
+  snapshots, secrets, kept sandboxes) is a 409 that says `retryable: false`
+  and has no `Retry-After`: it clears only when you delete something or raise
+  the limit, and no SDK waits for it.
+- `no_capacity` is a 503 with `Retry-After: 1`, and `no_credit_running_limit`
+  and a retryable `quota_exceeded` are 429s with `Retry-After: 5`: the wait
+  before a first retry, for a client that reads only HTTP. The SDKs keep their
+  own growing delay. Until 17 October 2026 all three were 409s, with the same
+  body.
 - `no_credit_running_limit` clears when one of the {{trial-sandboxes}} running sandboxes without credit stops or pauses. A fork asking for more copies than that never fits.
-- `own_share_full` (409, `Retry-After: 300`) is answered only to Runtime's own
+- `own_share_full` (503, `Retry-After: 300`) is answered only to Runtime's own
   organization: its sandboxes may take at most a share of a region, so the
   rest is always left for customers. No customer's request is answered it.
 
@@ -196,21 +236,21 @@ key for 24 hours:
   request afresh, and only an answer that did the work is replayed. A create
   refused `no_capacity` and retried with its key once there is room starts the
   sandbox; the next retry with that key replays it.
-- `no_capacity` is 409 on a create (`POST /v1/sandboxes`, a fork, a restart
-  or a wake) and 503 on a public port or a dedicated address. A client that
-  retries only 5xx must also retry a 409 `no_capacity`, with the same key.
+- `no_capacity` is 503 with `Retry-After` wherever it is answered (a create,
+  a fork, a restart, a wake, a public port or a dedicated address), so a
+  client that retries 5xx retries it, with the same key.
 - A waited pause (`POST /v1/sandboxes/{id}:pause` with `Prefer: wait`)
   succeeds when its server's snapshot space is full: the server holds the
   sandbox's memory and saves it once there is room. Only a sandbox too near
-  the end of its time to save it later answers `no_capacity` (409,
+  the end of its time to save it later answers `no_capacity` (503,
   `Retry-After: 60`): the pause was not taken, and the sandbox is still
   running with its memory and files. Unlike a create, that request did run,
   so pause again with a new `Idempotency-Key`; the same key only answers the
   sandbox as it is now.
 - A new key is new work.
 
-The SDKs send a key on every change and retry transport failures, 429, 502, 503
-and 504 with it. A connection refused before the request left is sent again at
+The SDKs send a key on every change and retry transport failures and every
+answer marked `retryable: true` with it. A connection refused before the request left is sent again at
 once; anything that may have reached a server waits first. Changing the body
 while reusing a key is not a retry.
 
@@ -231,12 +271,15 @@ These limits are protection, not quotas, and a refusal costs nothing.
   200 (`address_rate`). A key that has worked is never refused because of
   someone else's wrong keys.
 - **Per organization:** 192 requests in flight across all its keys, and six
-  more for each sandbox it holds that is not stopped, up to 1,024, so every
-  sandbox can stream four commands and two watches at once; a new sandbox's
-  six come within half a minute. Also 16 watch streams, 16 SSH logins and
-  port forwards and 64 terminals open, each with two more for each such
-  sandbox, up to 292 watch streams, 292 logins and forwards and 340
-  terminals (a pilot's agreed count sets more), and at most 12 terminals in
+  more for each sandbox it holds that is not stopped, up to 1,024; when
+  support has raised its sandbox quota past 138, six more for each running
+  sandbox up to that quota (2,592 for 400 running), so every sandbox can
+  stream four commands and
+  two watches at once; a new sandbox's six come within half a minute. Also
+  16 watch streams, 16 SSH logins and port forwards and 64 terminals open,
+  each with two more for each such sandbox, up to 292 watch streams, 292
+  logins and forwards and 340 terminals, or more as the quota allows (a
+  pilot's agreed count sets more too), and at most 12 terminals in
   one sandbox. When the service as a whole holds as many as it can, a new one
   is refused for a moment with a retry delay. Requests beyond what an
   organization's sandboxes bring share one room: while it is
@@ -245,10 +288,14 @@ These limits are protection, not quotas, and a refusal costs nothing.
   account never crowds out the rest.
 - **Per sandbox:** up to 1,024 commands and background processes running at
   once; the sandbox's memory is usually the closer limit. Past that, a new one
-  is refused with `process_limit` (409), which names the number. A command's
+  is refused with `process_limit` (429), which names the number. A command's
   output stays readable by its own stream however many others end meanwhile.
-  A custom image keeps the limit of the day it was built: one built while the
-  limit was 16 keeps 16 until it is built again.
+  Processes and threads together: up to 16,384 in a sandbox, and up to 15,360
+  for one command and all it starts, so a fork bomb in one leaves room for the
+  command that ends it. Past that, Linux refuses a new one (`fork` or
+  `pthread_create` fails with `EAGAIN`).
+  A custom image keeps the limits of the day it was built: one built while the
+  command limit was 16 keeps 16 until it is built again.
 - **Per address:** 64 connections open to the API at once, and 50 new ones a
   second in bursts of 100. Once a request from the address carries a valid
   key, it may hold its organization's room instead for the next 10 minutes,
@@ -265,7 +312,8 @@ These limits are protection, not quotas, and a refusal costs nothing.
 Over a limit you get 429 with `Retry-After`.
 Streaming responses count as requests in flight until their bodies finish or
 you cancel them. Receiving the headers does not release a request slot. A
-request you abandon, or one answered 503 because it ran past its deadline,
+request you abandon, or one answered 503 because it ran past its deadline
+(110 seconds from the end of its request body),
 is stopped and counts against its key and organization until its work has
 stopped: a read at once, a change once it is recorded, at most about four
 minutes more. A command it started keeps running in the sandbox.
@@ -386,8 +434,11 @@ its time limit ends. One stopped before it ever started has no disk to keep:
 it reads `diskKept: false`, and a restart is refused, so create a new one.
 A raw HTTP client
 says it knows this with `x-runtime-client: http/2026-10-04`; a stop from a
-client that names an older version, or none, keeps the disk free for three
-days and then deletes it. To end a sandbox for good in any state, delete it.
+client that names an older version, or none, keeps the disk as any stop does
+in an account with credit, a card saved or a past purchase (at least 30 days
+from the stop, even if its credit runs out), and in one with none of these
+keeps it free for three days and then deletes it. To end a sandbox for good in any
+state, delete it.
 
 **Its environment.** `env` at create sets variables that every command,
 background process, terminal, SSH session and the image's start command in the
@@ -406,7 +457,7 @@ of them, never the values. Copies made by `:fork` keep them, because they are
 the same machine and its processes already hold them; a sandbox created from a
 snapshot takes only its own `env`. An SSH session gets every variable whose
 value has no double quote, backslash or line break. A deployment that cannot
-store them answers `env_unavailable` (503) and creates nothing.
+store them answers `env_unavailable` (501) and creates nothing.
 
 **Deleting a sandbox.** `DELETE /v1/sandboxes/{id}` works in any state. It
 stops the sandbox if it runs or is paused, deletes its disk and its paused
@@ -433,10 +484,10 @@ nothing changes. Snapshot it first to keep everything. A running sandbox is paus
 persistent one, is switched as it is; a stopped ordinary one kept no disk
 (`switch_needs_disk`, 409). It is charged as a wake. The answer comes once the
 sandbox runs the new image. If anything fails, the switch is undone and the
-answer is `switch_undone` (409): the sandbox is paused or stopped on its old image
+answer is `switch_undone` (503): the sandbox is paused or stopped on its old image
 with its files and memory as they were. The image must be ready, on the
-sandbox's server (`image_on_another_host`, 409), different from the one it runs
-(`image_unchanged`, 409) and fit its disk (`disk_too_small`, 409); copying
+sandbox's server (`image_on_another_host`, 422), different from the one it runs
+(`image_unchanged`, 409) and fit its disk (`disk_too_small`, 422); copying
 `/workspace` may take up to {{switch-copy-time}}.
 
 **On your tailnet.** A paid sandbox can join your own Tailscale network.
@@ -459,11 +510,12 @@ logged or written to the sandbox's disk. [Networking](./networking#your-tailscal
 | `POST /v1/sandboxes/{id}/processes/{processId}:write`  | `{"data"}` or `{"base64"}`, with `offset` and `eof`; offsets make retries safe |
 | `POST /v1/sandboxes/{id}/processes/{processId}:signal` | `{"signal": "SIGTERM"}`                                                        |
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
+| `GET /v1/sandboxes/{id}/processes/{processId}/files`   | What a process started with `traceFiles` read and wrote, once it has ended     |
 
 The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
 fields are `cwd`, `env`, `stdin`, `user`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage end sooner; at
-most 24 hours)
-and `stream`. A timeout is a result with `timedOut: true`, not an error. `env`
+most 24 hours),
+`stream` and `traceFiles` (below). A timeout is a result with `timedOut: true`, not an error. `env`
 is put over the sandbox's own environment; its values are never echoed and are
 stored only as hashes. `user` is `"sandbox"` (the default: the user `runtime`,
 uid 1000) or `"root"`, which runs the command as root through the sandbox's
@@ -471,6 +523,23 @@ passwordless `sudo`, with the same environment, `PATH` and working directory
 and `HOME=/root` (unless `env` sets `HOME`), so no command needs a `sudo`
 prefix. Starting a process takes `user` too, and every process answers which
 it runs as in `user`.
+
+**Files a command read.** With `"traceFiles": true` the answer, or the stream's
+`exit` event, adds `files`: `read`, every file and directory the command and
+anything it started opened (sorted absolute paths, links resolved, a directory
+ending in `/`), `written`, every file it wrote, and `truncated`, which is `true`
+when some paths are missing (past about 380 KB of paths). Key a cache by the
+contents of `read` and a test reruns only when a file it really read changed. A
+background process takes `traceFiles` too and answers its files at `…/files`
+once it ends. Only the command's own opens count, never another process's on
+the same sandbox. Opens through mounts the command itself makes, and lookups of
+files that do not exist, are not seen. Each file costs 5 to 15 microseconds the
+first time it is opened, and next to nothing after. A sandbox started before tracing
+existed answers `409 unsupported_operation`, and nothing runs; stop and start
+it. A sandbox that cannot trace the command answers 409
+`file_trace_unavailable`, and nothing runs. Its `…/files` answers 409
+`process_running` while the process still runs, and 409
+`file_trace_not_requested` for a process started without `traceFiles`.
 
 **Streaming.** With `"stream": true` the answer is NDJSON, one event a line:
 `start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time
@@ -537,28 +606,30 @@ queue closes the socket even when data bytes remain below the credit limit.
 
 ## Files
 
-| Method and path                                                 | What it does                                                                                                                                                             |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /v1/sandboxes/{id}/files/content?path=`                    | The file's raw bytes, any size; `x-content-length` gives the length first (and `x-content-sha256` a small file's digest), so check it: a body that ends short failed     |
-| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body, up to 1 MiB (larger answers 413: use `/uploads`); makes parents; `mode=755` sets its permissions (644 by default)            |
-| `GET /v1/sandboxes/{id}/files/list?path=`                       | Entries; `depth`, `glob`, `hidden`, `limit`                                                                                                                              |
-| `GET /v1/sandboxes/{id}/files/stat?path=`                       | Type, size, mode and times, or `{"exists": false}`                                                                                                                       |
-| `POST /v1/sandboxes/{id}/files:mkdir`                           | `{"path", "parents"}`                                                                                                                                                    |
-| `POST /v1/sandboxes/{id}/files:remove`                          | `{"path", "recursive"}`                                                                                                                                                  |
-| `POST /v1/sandboxes/{id}/files:rename`                          | `{"from", "to", "overwrite"}`                                                                                                                                            |
-| `POST /v1/sandboxes/{id}/files:chmod`                           | `{"path", "mode": "755"}`                                                                                                                                                |
-| `POST`, `GET /v1/sandboxes/{id}/files/watches`                  | Watch a directory: `{"path", "recursive", "events", "include", "exclude", "batchMs", "timeoutMs"}`; list the watches                                                     |
-| `GET /v1/sandboxes/{id}/files/watches/{watchId}/events?cursor=` | Its events after a cursor (`waitMs` up to 8000), or `follow=true` for a stream                                                                                           |
-| `DELETE /v1/sandboxes/{id}/files/watches/{watchId}`             | Stop a watch                                                                                                                                                             |
-| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload: `{"path", "size", "sha256", "mode"}`; `path` must be under `/workspace` (move it with exec after the commit)                                       |
-| `PUT /v1/sandboxes/{id}/uploads/{uploadId}?offset=`             | One chunk of raw bytes; chunks may go in parallel                                                                                                                        |
-| `POST /v1/sandboxes/{id}/uploads/{uploadId}:commit`             | Check the digest and move the file into place atomically                                                                                                                 |
-| `POST /v1/sandboxes/{id}/uploads/{uploadId}:abort`              | Give up                                                                                                                                                                  |
-| `GET /v1/sandboxes/{id}/files/archive?path=`                    | A folder as tar, streamed; `gzip=true`, `user=sandbox` or `root`, and repeated relative `exclude` paths. A failed folder stream ends as an archive no tar reader accepts |
-| `PUT /v1/sandboxes/{id}/files/archive?path=`                    | Unpack a tar (gzipped or not) of up to 1 MiB from the raw body into the folder, making it; merges with what is there                                                     |
-| `POST /v1/sandboxes/{id}/files/archive/uploads`                 | Begin a larger one: `{"path", "gzip", "user"}`; `gzip` and `user` are optional; answers `uploadId`                                                                       |
-| `PUT …/files/archive/uploads/{uploadId}?offset=`                | The next part, up to 1 MiB, in order; a part sent twice is not written twice                                                                                             |
-| `POST …/files/archive/uploads/{uploadId}:commit`                | Answers once tar has unpacked it all (`:abort` stops it; what was unpacked stays)                                                                                        |
+| Method and path                                                 | What it does                                                                                                                                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/sandboxes/{id}/files/content?path=`                    | The file's raw bytes, any size; `x-content-length` gives the length first (and `x-content-sha256` a small file's digest), so check it: a body that ends short failed                                    |
+| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body, up to 1 MiB (larger answers 413: use `/uploads`); makes parents; `mode=755` sets its permissions (644 by default)                                           |
+| `GET /v1/sandboxes/{id}/files/list?path=`                       | Entries; `depth`, `glob`, `hidden`, `limit`                                                                                                                                                             |
+| `GET /v1/sandboxes/{id}/files/stat?path=`                       | Type, size, mode and times, or `{"exists": false}`                                                                                                                                                      |
+| `POST /v1/sandboxes/{id}/files:mkdir`                           | `{"path", "parents"}`                                                                                                                                                                                   |
+| `POST /v1/sandboxes/{id}/files:remove`                          | `{"path", "recursive"}`                                                                                                                                                                                 |
+| `POST /v1/sandboxes/{id}/files:rename`                          | `{"from", "to", "overwrite"}`                                                                                                                                                                           |
+| `POST /v1/sandboxes/{id}/files:chmod`                           | `{"path", "mode": "755"}`                                                                                                                                                                               |
+| `POST`, `GET /v1/sandboxes/{id}/files/watches`                  | Watch a directory: `{"path", "recursive", "events", "include", "exclude", "batchMs", "timeoutMs"}`; list the watches                                                                                    |
+| `GET /v1/sandboxes/{id}/files/watches/{watchId}/events?cursor=` | Its events after a cursor (`waitMs` up to 8000), or `follow=true` for a stream                                                                                                                          |
+| `DELETE /v1/sandboxes/{id}/files/watches/{watchId}`             | Stop a watch                                                                                                                                                                                            |
+| `POST /v1/sandboxes/{id}/uploads`                               | Begin a large upload: `{"path", "size", "sha256", "mode"}`; `path` must be under `/workspace` (move it with exec after the commit)                                                                      |
+| `PUT /v1/sandboxes/{id}/uploads/{uploadId}?offset=`             | One chunk of raw bytes; chunks may go in parallel                                                                                                                                                       |
+| `POST /v1/sandboxes/{id}/uploads/{uploadId}:commit`             | Check the digest and move the file into place atomically                                                                                                                                                |
+| `POST /v1/sandboxes/{id}/uploads/{uploadId}:abort`              | Give up                                                                                                                                                                                                 |
+| `GET /v1/sandboxes/{id}/files/archive?path=`                    | A folder as tar, streamed; `gzip=true`, `user=sandbox` or `root`, and repeated relative `exclude` paths. A failed folder stream ends as an archive no tar reader accepts                                |
+| `PUT /v1/sandboxes/{id}/files/archive?path=`                    | Unpack a tar (gzipped or not) of up to 1 MiB from the raw body into the folder, making it; merges with what is there                                                                                    |
+| `POST /v1/sandboxes/{id}/files/archive/uploads`                 | Begin a larger one: `{"path", "gzip", "user"}`; `gzip` and `user` are optional; answers `uploadId`                                                                                                      |
+| `PUT …/files/archive/uploads/{uploadId}?offset=`                | The next part, up to 1 MiB, in order; a part sent twice is not written twice                                                                                                                            |
+| `POST …/files/archive/uploads/{uploadId}:commit`                | Answers once tar has unpacked it all (`:abort` stops it; what was unpacked stays)                                                                                                                       |
+| `POST /v1/sandboxes/{id}/files:link`                            | A link anyone can open with no key: `{"path", "method": "GET" or "PUT", "expiresInSeconds", "filename", "maxBytes", "wake", "archive"}`; answers `{"url", "expiresAt"}` (see [File links](#file-links)) |
+| `POST /v1/sandboxes/{id}/files:revoke-links`                    | End every link made for the sandbox so far                                                                                                                                                              |
 
 Paths are absolute. File errors name the path: `file_not_found`,
 `is_a_directory`, `not_a_directory`, `permission_denied`.
@@ -595,8 +666,13 @@ A download whose reader takes no bytes for 60 seconds ends with 408
 `download_idle`; ask for it again.
 An upload, chunk or any request whose body sends no bytes for 30 seconds is
 answered 408 `request_timeout`; send it again (a chunk at its same offset).
-The SDKs and the CLI get 503 `body_stalled` instead, which they send again
-by themselves with the same key.
+A body that keeps arriving, however slowly, may take up to about 280 seconds
+to arrive; the request then still has its own 110 seconds to answer. A body
+still arriving after 280 seconds is answered 408 `request_timeout` too, and
+its answer says how many bytes came. Chunks sent at once share the link, so
+over a slow link send fewer at once. The SDKs and the CLI get 503
+`body_stalled` instead of either 408, which they send again by themselves
+with the same key.
 The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandboxes cp`
 use these routes. The SDKs also expose `files.archive` and `files.unarchive`
 for callers that need the archive bytes themselves.
@@ -607,6 +683,55 @@ curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?path=/wor
 curl -sS -X PUT "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?path=/workspace/site" \
   -H "Authorization: Bearer ${RUNTIME_API_KEY}" --data-binary @site.tar.gz
 ```
+
+### File links
+
+A file link is an address for one file of a sandbox that works with no API
+key, for a person's browser or another service: a report, a build, a video, a
+dataset. `POST /v1/sandboxes/{id}/files:link` makes one and answers its `url`,
+`https://files.<preview domain>/<token>/<name>`, and when it ends.
+
+- `method: "GET"` (the default) downloads the file. Range requests work, so a
+  video plays and a download resumes (`ETag` and `If-Range` keep a resume on
+  the same version). A picture, video, sound or plain text shows in the
+  browser; anything else (a PDF, a page, a program) downloads, and with
+  `filename` everything downloads under that name. Nothing a link serves runs
+  as a page, and every answer carries `X-Runtime-Report`, where to report it. `archive: true` links a
+  folder, downloaded as `.tar.gz`. The file must exist when the link is made.
+- `method: "PUT"` makes an upload link: `curl -T report.pdf "$URL"` writes the
+  body to `path`, making its folder, whole or not at all (a reader sees the old
+  file or the new one), and answers 201 with `{"path", "size", "sha256"}`. Up to
+  `maxBytes`, 5 GiB by default and at most; the body must arrive within 5
+  minutes.
+- `expiresInSeconds` is 3600 unless given, 60 to 604800 (7 days).
+- A paused sandbox wakes for a link as for any file call. `wake: false` never
+  wakes it (the link answers 409 `sandbox_paused`); `wake: true` wakes it even
+  when it was made with `autoWake: false`, and needs a key that may wake the
+  sandbox itself (the `create` permission; otherwise 403).
+
+A link needs the key's `read_file` permission to download and `write_file` to
+upload, and acts as that key: revoking the key ends its links, and so does
+`POST /v1/sandboxes/{id}/files:revoke-links` for every link of the sandbox, and
+deleting the sandbox. A link that ended answers 410 (`link_expired`,
+`link_revoked`), a deleted sandbox 404 `sandbox_gone`, a request with the
+other method 405 `wrong_method`, a range past the end of the file 416
+`range_not_satisfiable`, and an upload the sandbox could not write 422
+`upload_failed` (nothing is written), and a sandbox Runtime took down after
+a report 451 `taken_down`; refusals are plain text, or JSON when
+the request accepts `application/json`. Each link made and each
+revocation is in the audit log. The bytes a link serves count as the sandbox's
+served traffic, as a preview's do: the same monthly allowance and price.
+
+```bash no-run
+URL=$(curl -sS -X POST "https://api.withruntime.com/v1/sandboxes/${ID}/files:link" \
+  -H "Authorization: Bearer ${RUNTIME_API_KEY}" -H "Content-Type: application/json" \
+  -d '{"path": "/workspace/report.pdf", "expiresInSeconds": 86400}' | jq -r .url)
+curl -fLo report.pdf "$URL"  # no key
+```
+
+Links are for a sandbox's files. A link to a file on a volume with no sandbox
+running is not available yet: mount the volume in a sandbox and link the file
+there.
 
 ## Sessions
 
@@ -705,8 +830,11 @@ from one boots fresh with no saved processes, at the `vcpu`, `memoryMiB` and
 `diskMiB` the create asks for (each one left out is the snapshot's), with a
 disk at least the saved size. A copy of a memory snapshot continues the saved
 machine, so it is the snapshot's size; naming a different size is
-`400 invalid_request`. Both require a paused source without attached volumes
-and keep the same ownership, retention and storage pricing. The returned snapshot includes its `mode`. Keep the
+`400 invalid_request`. Neither takes a source with attached volumes, and both
+keep the same ownership, retention and storage pricing. A running source is
+paused for the capture and woken after it; a disk snapshot's pause first
+waits for the sandbox to write to its disk what it still holds in memory,
+milliseconds when quiet and up to a few seconds while it writes. The returned snapshot includes its `mode`. Keep the
 source paused until the snapshot's state is `ready` or `failed`; `Prefer: wait`
 can return while capture is still in progress.
 
@@ -721,7 +849,11 @@ See [snapshot storage](./storage#snapshots-survive-their-server).
 ### Keeping copies on several servers
 
 A copy of a snapshot starts on a server that holds the snapshot: the server it
-was taken on, or one Runtime keeps a checked copy of it on. A server starts at
+was taken on, or one Runtime keeps a checked copy of it on. When none of those
+has room, Runtime copies the snapshot to another server in the region and the
+sandbox starts there once the copy is checked, usually within half a minute.
+This works as soon as the snapshot is `ready`, even while its compression is
+pending. A server starts at
 most 4 copies a minute of one account's snapshot while that account's
 sandboxes there are busy on CPU. Past that, the start moves to another server
 holding the snapshot that has room, and is refused with `account_busy_here`
@@ -730,13 +862,13 @@ warm sources on different servers.
 
 `spreadFrom` lists 1 to 16 ids of your own sandboxes or snapshots. The new
 sandbox starts on a server none of them is on, and stays apart if its start is
-moved. With no other server that has room, the create answers 409
+moved. With no other server that has room, the create answers 503
 `no_capacity` (its message names `spreadFrom`), and nothing is made or
 charged. An id that is not a sandbox or snapshot this key may read is
-`400 invalid_request`. A copy of a snapshot can start only on a server that
-holds that snapshot, so `snapshot` with a `spreadFrom` that names every such
-server is `no_capacity` too. Compare `placement` tags to see which of yours share a
-server.
+`400 invalid_request`. A copy of a snapshot whose `spreadFrom` names every
+server holding that snapshot starts on another server, the snapshot copied
+there first, as when those servers are full. Compare `placement` tags to see
+which of yours share a server.
 
 Three warm sources apart, then copies round-robin:
 
@@ -772,6 +904,14 @@ for i in range(12):
 
 Wakes and copies run on the source's server.
 
+A copy of a snapshot that saved memory, and a wake, load all of that memory
+within seconds, so a server counts each one at all of it from its start. Many
+copies or wakes at once on one server take what memory it has; the ones past
+that wait while it makes room, and if none comes in time they answer
+`503 host_memory_pressure` with `Retry-After`. Send each again after it, with
+the same `Idempotency-Key`, backing off if it is refused again, as the SDKs
+do.
+
 Forks:
 
 - A fork's copies keep the source's size and CPU (`cpu` and `cpuFloorMillis`),
@@ -801,6 +941,194 @@ Metrics, events, webhooks and OpenTelemetry export are in
 are signed and retried, and what an export sends.
 
 The OpenAPI document has every field of every route.
+
+<!-- launch: apps -->
+
+### Commands and files in an App's copy (private beta)
+
+Apps are open to organizations in their private beta. Each copy of an App is
+a machine, and the sandbox routes for [commands](#commands-and-processes) and
+[files](#files) reach it by its id: `POST /v1/sandboxes/{copyId}:exec`,
+`…/processes`, and `GET` and `PUT …/files/content`, uploads included. Copy ids
+come from `GET /v1/apps/{id}/copies`. Use one whose `state` is `serving`; the
+copy of the `liveVersion` is the live one.
+
+```bash no-run
+copy=$(curl -sS "https://api.withruntime.com/v1/apps/${APP}/copies" \
+  -H "Authorization: Bearer ${RUNTIME_API_KEY}" | jq -r '[.[] | select(.state == "serving")][0].id')
+curl -sS "https://api.withruntime.com/v1/sandboxes/${copy}:exec" \
+  -H "Authorization: Bearer ${RUNTIME_API_KEY}" \
+  -H "Content-Type: application/json" -d '{"command": "tail -n 50 /srv/app.log"}'
+```
+
+- A copy holds the App's environment, its secrets included. Only a key of an owner or admin may reach into one. Any other key gets
+  `403 forbidden`, even a developer's key that made the App.
+- A copy that is not serving (frozen, starting or draining) answers
+  `409 invalid_state`. A call never wakes it. A request to the App's URL wakes
+  one, and `minCopies: 1` keeps one awake.
+- A file written to a copy lasts only as long as that copy. A deploy replaces
+  every copy with new ones from the version's image.
+- The CLI does the same with `runtime apps exec <app> -- <command>` and
+  `runtime apps cp <file> <app>:/<path>` ([CLI](./cli#apps-private-beta)).
+
+### What an App's requests carry
+
+Every request reaches an App's copies with headers Runtime's router sets
+itself, replacing any a visitor sent under the same names:
+
+| Header                 | Value                                           |
+| ---------------------- | ----------------------------------------------- |
+| `x-runtime-client-ip`  | The visitor's address                           |
+| `x-runtime-ip-country` | The visitor's country, two letters, when known  |
+| `x-runtime-ip-city`    | The visitor's city, percent-encoded, when known |
+| `x-runtime-request-id` | 32 hex characters, new for each request         |
+
+The `x-runtime-` names belong to the router: any other `x-runtime-*` header a
+visitor sends is removed before the request reaches the App, as is every
+`x-vercel-*` header, so an App can trust every `x-runtime-*` header it reads.
+The answer carries the same `x-runtime-request-id`, which finds the request
+in the App's logs.
+
+### App and Function addresses
+
+Every App and Function answers at its own readable address:
+its name, 16 random characters, then your account's handle, one name under
+`runtimehost.com`. The App `shop` of the account Acme is, for example,
+`https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/`. It is the `url` of the App
+(`GET /v1/apps/{id}`) and of each of its deploys. An App made before 20
+October 2026 was given one then. It is kept for life: renaming the App or the account leaves it where it
+is, so no link you shared breaks, and a deleted App's address is never any
+App's again. Your account's handle is made from its name at its first App,
+letters then a number, and is never anyone else's, even after your account
+is closed. An account named from the email it signed up with has the handle
+`acct<number>`, so no part of an email address is ever in an address. An App
+without a name, or whose name holds a word sign-in pages are trusted for or a
+well-known brand's name, is `app-<16 random>-acme1` (`function-…` for a
+Function).
+
+The random part means an address can't be guessed from your App's and
+company's names, but an address is not a secret: anyone you give it to has
+it. Protect an App that must be private with its own sign-in or a firewall.
+Every App also keeps answering at its id's address,
+`https://<id without dashes>.runtimehost.com/`. Your own domains are added beside it (see
+[Networking](./networking)).
+
+### App and Function CDN
+
+Every App and Function has a `cdn` setting, `true` unless you set it: Cloudflare's
+CDN sits in front of its addresses, the `runtimehost.com` one and its custom
+domains. `false` sends visitors straight to Runtime's routers, with nothing
+cached. Set it when you create the App (`POST /v1/apps`, `POST /v1/functions`)
+or change it later (`POST /v1/apps/{id}:update`); every read answers it. It is
+part of the price of Apps and Functions, with no separate fee. In the SDKs it is
+`cdn` (`CDN` in Go, `cdn:` in Ruby, `cdn(...)` in Java), in the CLI
+`--cdn on|off`, and the MCP tools take `cdn` as the routes do.
+
+### App and Function logs
+
+`GET /v1/apps/{id}/logs` (and `GET /v1/functions/{id}/logs`) answers what the
+App's copies printed to standard output and error, as `lines`, oldest first:
+`at` (Unix milliseconds), `stream`, `copy` (the copy's id), `version` and
+`text`. A page is the newest `limit` lines (1 to 500, default 100) of the
+window, with `nextCursor` and `hasMore`; pass `nextCursor` back as `cursor`,
+with the same filters, for the page before it.
+
+- `since`: a time (`2026-10-18T20:00:00Z`) or a duration back from now
+  (`30s`, `15m`, `2h`, `7d`); an hour when left out. Lines are kept 14 days.
+- `version`, `copy` (an id from `GET /v1/apps/{id}/copies`) and `stream`
+  (`stdout` or `stderr`) narrow it.
+- `follow=true` answers NDJSON: the page's lines, then each new one as it is
+  printed. Each event is a `line` or a `gap` (lines lost before they could be
+  read), with a `cursor` to resume after it. One call lasts at most two
+  minutes and ends with a `continue` event; call again with its `cursor`. The
+  SDKs do this themselves and give each line once.
+
+Reading logs needs a key that may read files (`read_file`, so a read-only key
+may). Another account's App, or one the key's agent does not act for, is
+`404 not_found`. A `cursor` that does not continue the read is
+`400 invalid_request`; a read the log store cannot answer just now is
+`503 api_unavailable`, safe to retry; on a deployment without the log store
+the read is `501 unavailable`. The MCP tools are `runtime_apps_logs` and
+`runtime_functions_logs` (the `logs` action of `runtime_apps` and
+`runtime_functions`); there a page's size is `lines` and its cursor `before`,
+since `limit` and `cursor` are the list's. In the SDKs: `apps.logs(id, options)`, with
+`follow: true` (JavaScript) or `follow=True` (Python) to stream;
+`Logs` and `FollowLogs` (Go); `logs` and `follow_logs` (Ruby); `logs` and
+`followLogs` (Java). A follow that loses its connection more than three
+times in a row stops with `app_log_interrupted`, and one that reads an event
+it does not understand with `app_log_invalid`; each error's
+`details.cursor` is where to follow again from.
+<!-- /launch: apps -->
+
+<!-- launch: apps -->
+
+### Apps with a volume
+
+Give an App `volume: {volumeId, path}` on create or update to mount one of
+your volumes (`POST /v1/volumes`) read-write in its copy. `path` is under
+`/data`, `/mnt`, `/state`, `/storage` or `/volumes`, with no `.` or `..`
+segments. A volume has one writer, so the App runs one copy: `minCopies` 1,
+`maxCopies` 1 and `spares` 0, or `400 volume_invalid`. The copy runs on the
+volume's server. A volume that is another App's, or attached to a sandbox,
+is `409 volume_attached`; while the App holds it, the volume is not deleted,
+resized or attached elsewhere. A volume is added or taken off only before
+the App's first deploy (`409 volume_change_refused`).
+
+The volume's files reach the App's environment, so once any version of the
+App has a sealed environment or uses account secrets, every write that
+moves its copy needs a key that may reveal them (`secrets_reveal`): setting
+or moving the volume, and each deploy, rollback and restart. Any other key
+is answered `403 forbidden`. What such an App wrote stays as secret: once
+its copy has used the volume, attaching that volume to a sandbox, or a
+volume restored from one of its backups, needs a key that may reveal that
+App's secrets, even after the App is deleted or has moved to another
+volume (else `403 forbidden`).
+
+Every deploy, rollback and restart of such an App stops, then starts:
+
+- The live copy leaves the route (requests wait), gets SIGTERM, and has
+  `stopGraceSeconds` (0 to 900, 30 by default) to exit before it is stopped
+  and the volume let go.
+- The new copy boots fresh from the version's image, or a build's files with
+  its start command, with the volume mounted. It never resumes saved memory
+  and never runs beside the old one.
+- Its health check decides. A copy that fails, or does not serve within the
+  start time, fails the version (`deploy_health_failed`), and the version
+  that was live is started again the same way. The failed deploy's
+  `lastOutput` holds the server's last lines only for a key that may reveal
+  the App's secrets, since they ran with its environment; any other key
+  reads a sentence saying they are held.
+- If the old copy never stops and lets the volume go within 30 minutes (its
+  server was lost, and the volume has not yet come back on another server
+  from its replica or its backup), the deploy fails with
+  `deploy_stop_failed` and nothing of it starts. The version that was live
+  starts again on the volume as soon as it is free.
+- If the new copy serves but the switch to it is not recorded within 5
+  minutes, the deploy fails with `deploy_switch_failed` and the version that
+  was live starts again on the volume.
+- The deploy record says `downtime`: `stopMs`, `bootMs` and `totalMs`.
+
+### Restart and replaced copies
+
+`POST /v1/apps/{id}:restart` (and `POST /v1/functions/{id}:restart`) starts
+the live version afresh and answers a deploy record of its own, with
+`restartOf` naming that version. It works on any App or Function: one
+without a volume warms the new copies beside the old, as a deploy does.
+Nothing live is `409 restart_unavailable`. A live version that names its
+image by name rather than id resolves the name again, so with a sealed
+environment or account secrets its restart needs a key that may reveal them
+(`403 forbidden`); deploy the image by id to restart it with any key. The MCP tools are
+`runtime_apps_restart` and `runtime_functions_restart`. In the SDKs:
+`apps.restart(id)` and `functions.restart(id)`, in JavaScript and Python;
+in the CLI, `runtime apps restart <app>`.
+
+A live copy that every router has had out of rotation for its App's or
+Function's `healthFailSeconds` (10 to 3600, 60 by default; set on create or
+update, as for an App), or whose process ended, is replaced by a copy of the
+same version. The version's `replacements` list
+each one: `at`, `reason` (`health` or `exited`) and, with a volume,
+`downtimeMs`.
+<!-- /launch: apps -->
 
 ## Account
 

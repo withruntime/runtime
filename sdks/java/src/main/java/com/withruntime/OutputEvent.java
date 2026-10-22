@@ -44,6 +44,11 @@ public final class OutputEvent extends JsonObject {
     return getLong("durationMs");
   }
 
+  /** An exit event's traced files, when the command ran with traceFiles; null otherwise. */
+  public TracedFiles files() {
+    return has("files") ? new TracedFiles(map(get("files"))) : null;
+  }
+
   /** A continue event's cursor: where to resume following. */
   public long cursor() {
     return getLong("cursor", 0);

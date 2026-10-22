@@ -9,31 +9,99 @@ import { switchedOff } from "./jobs.js";
  * read two ways gets no secret that has rules. Needs credit on the account. */
 export type SecretRule = { methods?: string[]; paths: string[] };
 /** Which sandboxes get a secret: those whose labels hold every pair of any one
- * selector in `labels` (including sandboxes created or labelled later), and
- * those named in `sandboxes`. Any other sandbox of the organization sees no
- * placeholder, and its requests never carry the value. Absent on a secret:
- * every sandbox of the organization. */
+ * selector in `labels` (including sandboxes created or labelled later), those
+ * named in `sandboxes`, and every copy of the Apps named in `apps`. Any other
+ * sandbox of the organization sees no placeholder, and its requests never
+ * carry the value. Absent on a secret: every sandbox of the organization. */
 export type SecretScope = {
   /** 1 to 8 selectors of 1 to 8 key/value pairs: `[{ role: "hub" }]`. */
   labels?: Array<Record<string, string>>;
   /** 1 to 100 sandbox ids of the organization. */
   sandboxes?: string[];
+  /** 1 to 100 App or Function ids: every copy of each, of any version,
+   * including copies later deploys, restarts and scaling make. A deploy names
+   * the secrets its copies see (`apps.deploy(id, { secrets: [...] })`). */
+  apps?: string[];
+};
+/** A GitHub App the servers act as. The secret's value is the App's private
+ * key (PEM); the servers make its installation tokens themselves, each for an
+ * hour. The key goes into no request, and each request the rules allow carries
+ * the current token: `Authorization: Bearer` to the API, and git's
+ * `x-access-token` to git over HTTPS. Takes no `header` or `format`. */
+export type SecretGithubApp = {
+  /** The App's id. */
+  id: number;
+  /** The installation's id: where the App is installed. */
+  installation: number;
+  /** The repositories each token reaches, by name. Absent: every repository of
+   * the installation. */
+  repositories?: string[];
+  /** What each token may do, at most what the App holds: `{ contents: "write" }`.
+   * Absent: all the App's permissions. */
+  permissions?: Record<string, "read" | "write" | "admin">;
+  /** The App's API on GitHub Enterprise Server (`https://<host>/api/v3`); one
+   * of `hosts`. Default `https://api.github.com`. */
+  api?: string;
+};
+/** What a git push over HTTPS carrying the secret may update. A push to any
+ * other ref, a tag, or a delete is refused before it leaves the server, in
+ * git's own words (`! [remote rejected]`). */
+export type SecretGit = {
+  /** The branches a push may update: `refs/heads/` then a name, with `*` only
+   * at the end for any name that begins so, and `{label.<key>}` for the
+   * sandbox's own label of that key (a sandbox without it pushes nothing it
+   * names): `["refs/heads/task/{label.task}", "refs/heads/task/{label.task}--*"]`.
+   * Empty: no push at all. */
+  push: string[];
+};
+/** Each sandbox's hour with the secret, the far end's reserve, GraphQL's
+ * mutations and shared copies. */
+export type SecretApiPolicy = {
+  /** The most requests each sandbox makes with the secret in an hour; past it,
+   * 429 with `Retry-After`. */
+  callsPerHour?: number;
+  /** The most writes (any method but GET, HEAD and OPTIONS; a GraphQL
+   * mutation) each sandbox makes in an hour. 0: none. */
+  writesPerHour?: number;
+  /** Calls the far end keeps for others: none is sent while its
+   * `x-ratelimit-remaining` says this many or fewer are left, until its reset. */
+  keep?: number;
+  /** Reads (GET over HTTP/2) answered from the server's copy while the far end
+   * answers 304 to its ETag, shared by every sandbox the secret reaches on that
+   * server; past a sandbox's hour, from the copy unasked. Answers carry
+   * `x-runtime-copy`. */
+  copies?: boolean;
+  /** With `copies`: 1 to 300 seconds a copy is answered without asking the far
+   * end, GraphQL queries included. */
+  fresh?: number;
+  /** A GraphQL query always goes; a mutation only when every one is listed. */
+  graphql?: {
+    /** Default `/graphql`. */
+    path?: string;
+    /** The mutations a request may make; any other is refused with 403. */
+    mutations: string[];
+  };
 };
 /** A secret your sandboxes use without seeing it. Every sandbox of your
- * organization has an environment variable of the secret's name holding
- * `placeholder`; the egress proxy sets `header` on every HTTPS request to
+ * organization has an environment variable of the secret's name (or `env`)
+ * holding `placeholder`; the egress proxy sets `header` on every HTTPS request to
  * `hosts`, or, without `header`, replaces the placeholder in a credential
  * header (Authorization, x-api-key, x-goog-api-key, api-key, xi-api-key,
  * x-subscription-token, private-token). Never in the URL or another header.
  * The value is never returned. */
 export type Secret = {
   name: string;
+  /** The environment variable the placeholder is in, when not `name`. */
+  env?: string;
   hosts: string[];
   header?: string;
   format?: string;
   rules?: SecretRule[];
   /** Absent: every sandbox of the organization. */
   only?: SecretScope;
+  githubApp?: SecretGithubApp;
+  git?: SecretGit;
+  api?: SecretApiPolicy;
   placeholder: string;
   valueBytes: number;
   createdAt: string;
@@ -61,6 +129,22 @@ export type SetSecret = {
    * has stays, so a new value never widens who gets it. `{}`: every sandbox of
    * the organization again. */
   only?: SecretScope;
+  /** The value is a GitHub App's private key (PEM), and the servers make the
+   * App's installation tokens themselves. Takes no `header` or `format`. */
+  githubApp?: SecretGithubApp;
+  /** What a git push over HTTPS carrying the secret may update. Absent: the
+   * secret limits no push. */
+  git?: SecretGit;
+  /** Each sandbox's hour with the secret, the far end's reserve, GraphQL's
+   * mutations and shared copies. */
+  api?: SecretApiPolicy;
+  /** The environment variable sandboxes see it in, when not the secret's
+   * name. Several secrets may share one, each scoped (`only`) to sandboxes no
+   * other of them reaches, such as one `GITHUB_TOKEN` per repository: a write
+   * that would put two in one sandbox is refused (409, conflict). The
+   * secret's own name gives the name back. Absent when replacing a secret:
+   * the variable it has stays. */
+  env?: string;
   /** Also keep a copy for scheduled jobs, which a job puts into its run's
    * environment (`jobs.create({ secrets: [...] })`). Unlike the sandboxes'
    * copy, the jobs copy is yours rather than the account's, versioned, and can
@@ -92,8 +176,10 @@ export type SecretUse = { name: string; sandboxes: Secret | null; jobs: JobSecre
  * names what took effect. Calling again with the same arguments is safe. */
 export class SecretPartlyStoredError extends RuntimeError {}
 
+/** Secrets for jobs switched off here (501; 503 from an older server). */
 const unavailable = (error: unknown) =>
-  error instanceof RuntimeError && (error.code === "unavailable" || error.status === 503);
+  error instanceof RuntimeError &&
+  (error.code === "unavailable" || error.status === 501 || error.status === 503);
 
 export function secrets(t: Transport) {
   const off = switchedOff("Secrets for jobs");
@@ -161,7 +247,14 @@ export function secrets(t: Transport) {
       ];
       for (const replay of replays) {
         const answer = await replay().catch((again: unknown) => {
-          if (again instanceof RuntimeError && again.status === 409) return undefined;
+          // Not this request's earlier send: a conflict, or its key held by
+          // another request (idempotency_conflict, 422; 409 from an older
+          // server).
+          if (
+            again instanceof RuntimeError &&
+            (again.status === 409 || again.code === "idempotency_conflict")
+          )
+            return undefined;
           throw again;
         });
         if (answer) return answer;

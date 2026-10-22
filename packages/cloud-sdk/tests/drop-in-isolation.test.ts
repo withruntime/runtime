@@ -28,6 +28,7 @@ const adapters = [
   "runloop",
   "codesandbox",
   "sprites",
+  "fly",
   "freestyle",
   "morph",
   "modal",

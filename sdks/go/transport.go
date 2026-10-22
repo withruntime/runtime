@@ -40,6 +40,10 @@ type call struct {
 	noRetry bool
 	// room is how long to wait out full slots without credit, a full quota or a full region.
 	room time.Duration
+	// roomed: the call is a create, wake, restart or fork, whose refusals for
+	// room or a limit are the room wait's (room 0 tells them at once), not
+	// the general retry's.
+	roomed bool
 	// timeout replaces the client's for this call.
 	timeout time.Duration
 }
@@ -128,6 +132,12 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 	ctx, cancel := context.WithTimeout(ctx, timeout+cl.room)
 	roomUntil := time.Now().Add(cl.room)
 	roomAttempt := 0
+	// An answer that ran nothing is sent again until the call's deadline.
+	idleUntil := time.Now().Add(nothingRanFor)
+	if deadline, ok := ctx.Deadline(); ok {
+		idleUntil = deadline
+	}
+	idleAttempt := 0
 	target := c.baseURL + cl.path
 	if len(cl.query) > 0 {
 		target += "?" + cl.query.Encode()
@@ -230,7 +240,9 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 		failure := errorFor(status, body, key)
 		// A full house: wait for a slot or for room, then send the same call
 		// again. A request that can never fit is not waited for.
-		if !cl.noRetry && cl.room > 0 && waitsForRoom[failure.Code] && failure.Details["field"] != "count" {
+		// A quota on what is kept says it never clears by waiting.
+		keptLimit := failure.ServerRetryable != nil && !*failure.ServerRetryable
+		if !cl.noRetry && cl.room > 0 && waitsForRoom[failure.Code] && failure.Details["field"] != "count" && !keptLimit {
 			left := time.Until(roomUntil)
 			if left <= 0 {
 				cancel()
@@ -248,18 +260,44 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			attempt--
 			continue
 		}
-		retryable := (status == 429 || status == 502 || status == 503 || status == 504) && !deliberate[failure.Code]
-		if cl.noRetry || !retryable || attempt >= c.maxRetries {
+		named := failure.RetryAfter
+		if named <= 0 {
+			named = retryAfterHeader(response)
+		}
+		// A wait the server names past maxNamedWait (a daily cap) is not
+		// slept on: the refusal is returned at once, still retryable and
+		// carrying its RetryAfter, for the caller to schedule.
+		if named > maxNamedWait {
+			failure.RetryAfter = named
 			cancel()
 			return nil, nil, failure
 		}
-		wait := failure.RetryAfter
-		if wait <= 0 {
-			if seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64); err == nil && seconds > 0 {
-				wait = time.Duration(seconds * float64(time.Second))
-			} else {
-				wait = backoff(attempt)
+		// Nothing ran: safe to send again for any call, past maxRetries,
+		// with growing waits, until the call's deadline; then this refusal
+		// stands. A late answer's failure came after the work began, so only
+		// a guest's own refusal (guest_busy, before anything is journaled)
+		// still says nothing ran.
+		if (status == 429 || status == 503) && nothingRan[failure.Code] && !saysNotRetryable(failure) && (!late || failure.Code == "guest_busy") {
+			base := named
+			if base <= 0 {
+				base = 250 * time.Millisecond
 			}
+			pause := time.Duration(float64(min(30*time.Second, base*time.Duration(1<<min(idleAttempt, 3)))) * (0.9 + mathrand.Float64()*0.2))
+			idleAttempt++
+			if pause >= time.Until(idleUntil) || sleep(ctx, pause) != nil {
+				cancel()
+				return nil, nil, failure
+			}
+			attempt--
+			continue
+		}
+		if cl.noRetry || !retriesAgain(failure, cl.roomed) || attempt >= c.maxRetries {
+			cancel()
+			return nil, nil, failure
+		}
+		wait := named
+		if wait <= 0 {
+			wait = backoff(attempt)
 		}
 		wait = time.Duration(float64(min(30*time.Second, wait)) * (0.9 + mathrand.Float64()*0.2))
 		if sleep(ctx, wait) != nil {
@@ -267,6 +305,52 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			return nil, nil, failure
 		}
 	}
+}
+
+// maxNamedWait is the longest wait a server names (Retry-After or
+// retryAfterMs) that the client sleeps on before sending again; a longer one
+// is returned at once for the caller to schedule.
+const maxNamedWait = 60 * time.Second
+
+// nothingRanFor is how long an answer that ran nothing is sent again for a
+// call without a deadline of its own.
+const nothingRanFor = 300 * time.Second
+
+// nothingRan are refusals given before anything ran: sent again for any call,
+// with growing waits, until the call's deadline, past maxRetries.
+var nothingRan = map[string]bool{"guest_busy": true, "busy": true, "rate_limited": true}
+
+// retriesAgain: the general retry. The server's own `retryable` when the
+// answer carried one; else, for an older server, a 429, 502, 503 or 504 that
+// is not a product switched off.
+func retriesAgain(failure *Error, roomed bool) bool {
+	// A refusal for room or the account's own limit is the room wait's on a
+	// create, wake, restart or fork; any other call retries what the answer
+	// says.
+	if roomed && waitsForRoom[failure.Code] {
+		return false
+	}
+	if failure.ServerRetryable != nil {
+		return *failure.ServerRetryable
+	}
+	switch failure.Status {
+	case 429, 502, 503, 504:
+		return !deliberate[failure.Code]
+	}
+	return false
+}
+
+// saysNotRetryable: the answer said retryable false, which no path resends.
+func saysNotRetryable(failure *Error) bool {
+	return failure.ServerRetryable != nil && !*failure.ServerRetryable
+}
+
+// retryAfterHeader is the answer's Retry-After in seconds, or 0.
+func retryAfterHeader(response *http.Response) time.Duration {
+	if seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64); err == nil && seconds > 0 {
+		return time.Duration(seconds * float64(time.Second))
+	}
+	return 0
 }
 
 // lateFailure is the status a late answer's body failed with, or 200 when it

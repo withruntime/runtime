@@ -1,0 +1,4 @@
+# Off Runtime, no test runs: checks never run on a laptop
+# (scripts/runtime-only.ts).
+[test]
+preload = ["../../scripts/runtime-only-preload.ts"]

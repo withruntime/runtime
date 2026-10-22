@@ -5,10 +5,16 @@ import { RuntimeError } from "./errors.js";
 import { logStream } from "./terminal.js";
 import {
   apps,
+  functions,
   type AppDeploy,
+  type AppLogLine,
+  type AppDowntime,
   type AppSettings,
+  type AppVersion,
+  type AppVolume,
   type CreateApp,
   type DeployApp,
+  type StatefulSettings,
   type UpdateApp,
 } from "./products/apps.js";
 import {
@@ -27,10 +33,12 @@ import {
   type UpdateContainer,
 } from "./products/containers.js";
 
-/* `runtime apps`, `runtime builds` and `runtime containers`, kept out of
-   cli.ts as cli-extras.ts is. All three are in a private beta: a key outside
-   it is refused product_in_beta, said in the server's words and hint
-   (cli-words.ts), never as a stack. */
+/* `runtime apps`, `runtime functions`, `runtime builds` and `runtime
+   containers`, kept out of cli.ts as cli-extras.ts is. Each is in a private
+   beta: a key outside it is refused product_in_beta, said in the server's
+   words and hint (cli-words.ts), never as a stack. A Function is an App that
+   sleeps (the API's copiesPreset, packages/cloud/src/api/products/apps.ts):
+   one command serves both kinds, and a Function has no --min-copies. */
 
 type Out = { json: boolean; write: (text: string) => void; error: (text: string) => void };
 type Args = ReturnType<CliKit["parse"]>;
@@ -43,13 +51,26 @@ export const APP_HELP = `runtime apps <command>
 
   create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-1000>
          [--min-copies 0] [--concurrency 100] [--spares 2] [--port 8080]
-         [--health-path /healthz] [--label key=value]...
-                                              Make an App, waiting for its first deploy; prints its id
+         [--health-path /healthz] [--health-fail 60] [--stop-grace 30] [--cdn on|off]
+         [--volume <volumeId>:<path>] [--label key=value]...
+                                              Make an App, waiting for its first deploy; prints its id.
+                                              --health-fail: seconds a live copy may fail its health
+                                              check before it is replaced. --stop-grace: seconds a
+                                              stopped copy has after SIGTERM. --volume mounts one
+                                              volume of yours at a path under /data, /mnt, /state,
+                                              /storage or /volumes, in the App's one copy: it needs
+                                              --max-copies 1 (--min-copies is then 1, --spares 0), and
+                                              each deploy stops the old copy before the new one boots
   ls [--all]                                  Your Apps: state, live version, copies; --all, deleted too
   get <app>                                   One App, in full (an id or its name)
   update <app> [--name <name>] [--vcpu n] [--memory n] [--min-copies n] [--max-copies n]
-         [--concurrency n] [--spares n] [--port n] [--health-path /path] [--label key=value]...
-                                              Change its settings
+         [--concurrency n] [--spares n] [--port n] [--health-path /path] [--health-fail n]
+         [--stop-grace n] [--volume <volumeId>:<path> | none] [--cdn on|off]
+         [--label key=value]...
+                                              Change its settings; --volume none takes the volume
+                                              away, only before its first deploy;
+                                              --cdn off sends visitors straight to Runtime's routers,
+                                              with nothing cached (on: Cloudflare's CDN in front)
   rm <app>                                    Delete it and stop its copies
   deploy <app> (--image <image> | --build <buildId>) [--env KEY=VALUE]... [--keep-env]
          [--port 8080] [--health-path /healthz] [--no-wait]
@@ -63,12 +84,77 @@ export const APP_HELP = `runtime apps <command>
                                               that one (--wait: until it ends)
   versions <app>                              Its versions; the live and previous ones keep saved copies
   copies <app>                                Its copies now: version, region, state
+  logs <app> [--follow] [--since 1h] [--version n] [--copy <copyId>] [--stream stdout|stderr]
+         [--limit 100] [--raw]                What its copies printed: the newest lines since --since
+                                              (a time, or 30s, 15m, 2h, 7d; kept 14 days), or with
+                                              --follow every line as it comes, until Ctrl-C. On a
+                                              terminal control characters show as \\uXXXX unless --raw
+  exec <app> [--copy <id>] [--root] [--cwd <dir>] [--env K=V]... [--timeout <ms>] [--trace-files <file.json>] -- <command>
+                                              Run a command in its live copy
+  cp <file> <app>:/<path> [--copy <id>]       Copy a file onto its live copy
+  cp <app>:/<path> <file> [--copy <id>]       Copy a file off it
+  exec and cp go to a serving copy of the live version unless --copy names
+  one. A copy holds the App's secrets, so only an owner's or admin's key
+  reaches into one. A file written to a copy lasts as long as that copy; a
+  deploy replaces its copies.
   rollback <app> [--no-wait]                  Put the previous version live again
+  restart <app> [--no-wait]                   Start the live version afresh, as a deploy of its own;
+                                              with a volume, the old copy stops first and the
+                                              downtime is said
 
 Examples
   runtime apps create web --vcpu 1 --memory 512 --max-copies 3
   runtime apps deploy web --image web:latest --env NODE_ENV=production
+  runtime apps logs web --follow
   runtime apps rollback web
+  runtime apps create db --vcpu 1 --memory 1024 --max-copies 1 --volume <volumeId>:/data
+`;
+
+export const FUNCTION_HELP = `runtime functions <command>
+
+  A Function serves your HTTP handler from an image or a build, at its own
+  address. Copies start when calls come, up to --max-copies, and sleep when
+  they stop: an idle Function has no copy awake.
+  In a private beta: outside it, each command says how to ask to join.
+
+  create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-1000>
+         [--concurrency 100] [--spares 2] [--port 8080]
+         [--health-path /healthz] [--health-fail 60] [--label key=value]...
+                                              Make a Function, waiting for its first deploy; prints its id.
+                                              --health-fail: seconds a live copy may fail its health
+                                              check before it is replaced
+  ls [--all]                                  Your Functions: state, live version, copies; --all, deleted too
+  get <function>                              One Function, in full (an id or its name)
+  update <function> [--name <name>] [--vcpu n] [--memory n] [--max-copies n]
+         [--concurrency n] [--spares n] [--port n] [--health-path /path] [--health-fail n]
+         [--label key=value]...
+                                              Change its settings
+  rm <function>                               Delete it and stop its copies
+  deploy <function> (--image <image> | --build <buildId>) [--env KEY=VALUE]... [--keep-env]
+         [--port 8080] [--health-path /healthz] [--no-wait]
+                                              A new version. Waits until it is live, or says why it
+                                              failed; --no-wait prints the deploy's id at once.
+                                              --image: an image of yours (id, name, name:tag);
+                                              --build: a build that succeeded (runtime builds).
+                                              --env KEY alone sends KEY's value from your environment.
+                                              --keep-env keeps the last deploy's environment, sealed
+  deploys <function> [<deployId>] [--wait]    Each version's deploy: state and address; with an id,
+                                              that one (--wait: until it ends)
+  versions <function>                         Its versions; the live and previous ones keep saved copies
+  copies <function>                           Its copies now: version, region, state
+  logs <function> [--follow] [--since 1h] [--version n] [--copy <copyId>] [--stream stdout|stderr]
+         [--limit 100] [--raw]                What its copies printed: the newest lines since --since
+                                              (a time, or 30s, 15m, 2h, 7d; kept 14 days), or with
+                                              --follow every line as it comes, until Ctrl-C. On a
+                                              terminal control characters show as \\uXXXX unless --raw
+  rollback <function> [--no-wait]             Put the previous version live again
+  restart <function> [--no-wait]              Start the live version afresh, as a deploy of its own
+
+Examples
+  runtime functions create resize --vcpu 1 --memory 512 --max-copies 10
+  runtime functions deploy resize --image resize:latest
+  runtime functions logs resize --follow
+  runtime functions rollback resize
 `;
 
 export const BUILD_HELP = `runtime builds <command>
@@ -139,34 +225,100 @@ Examples
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const when = (ms: number | null | undefined) => (ms == null ? "-" : new Date(ms).toISOString());
 const ENDED: readonly BuildState[] = ["succeeded", "failed", "cancelled", "superseded"];
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+/** A stop-then-start's downtime, in a person's words. */
+const downtime = (d: AppDowntime | null | undefined) =>
+  d ? `down ${seconds(d.totalMs)} (stop ${seconds(d.stopMs)}, boot ${seconds(d.bootMs)})` : "-";
 
-/** An App's id from its id or its name: a name is looked up among the Apps
- * not deleted, and must be one App's alone. */
-async function appIdOf(api: ReturnType<typeof apps>, target: string, kit: CliKit) {
+/** What differs between the two kinds one command serves: the API's
+ * factory, the words, and whether --min-copies exists (an App's only). */
+type Kind = {
+  api: (t: Runtime["transport"]) => ReturnType<typeof apps>;
+  /** The command's own name: `runtime <command>`. */
+  command: "apps" | "functions";
+  one: "App" | "Function";
+  many: "Apps" | "Functions";
+  help: string;
+  minCopies: boolean;
+  /** A create's name and settings a reader can copy. */
+  example: string;
+};
+const APP: Kind = {
+  api: apps,
+  command: "apps",
+  one: "App",
+  many: "Apps",
+  help: APP_HELP,
+  minCopies: true,
+  example: "web --vcpu 1 --memory 512 --max-copies 2",
+};
+const FUNCTION: Kind = {
+  // The same calls under /v1/functions; the API answers minCopies 0.
+  api: functions as unknown as Kind["api"],
+  command: "functions",
+  one: "Function",
+  many: "Functions",
+  help: FUNCTION_HELP,
+  minCopies: false,
+  example: "resize --vcpu 1 --memory 512 --max-copies 10",
+};
+
+/** An App's or Function's id from its id or its name: a name is looked up
+ * among those not deleted, and must be one's alone. */
+async function appIdOf(api: ReturnType<typeof apps>, target: string, kit: CliKit, kind: Kind) {
   if (UUID.test(target)) return target;
   const found = (await api.list({ name: target, state: ["waiting", "live", "failed"] })).data;
   if (found.length === 1) return found[0]!.id;
   throw kit.usage(
     found.length
-      ? `${found.length} Apps are named ${target}; give one's id (${me} apps ls).`
-      : `No App is named ${target}. Your Apps: ${me} apps ls`,
+      ? `${found.length} ${kind.many} are named ${target}; give one's id (${me} ${kind.command} ls).`
+      : `No ${kind.one} is named ${target}. Your ${kind.many}: ${me} ${kind.command} ls`,
   );
 }
 
-/** The flags an App's settings are given with, as the API names them. */
-function settings(args: Args, kit: CliKit): Partial<AppSettings> {
+/** `--cdn on` or `--cdn off`. */
+function onOff(value: string, kit: CliKit): boolean {
+  if (value === "on") return true;
+  if (value === "off") return false;
+  throw kit.usage(`--cdn takes on or off, not ${value}.`);
+}
+
+/** --volume <volumeId>:<path>, or none (an update's: no volume). */
+function volume(args: Args, kit: CliKit): { volume?: AppVolume | null } {
+  const given = kit.flag(args, "volume");
+  if (given === undefined) return {};
+  if (given === "none") return { volume: null };
+  const at = given.indexOf(":");
+  const volumeId = given.slice(0, at);
+  const path = given.slice(at + 1);
+  if (at < 0 || !UUID.test(volumeId) || !path.startsWith("/"))
+    throw kit.usage(
+      `--volume takes a volume's id and where it mounts: --volume <volumeId>:/data (${me} volumes ls)`,
+    );
+  return { volume: { volumeId, path } };
+}
+
+/** The flags an App's settings are given with, as the API names them. A
+ * Function's leave out --min-copies, --stop-grace and --volume, which its
+ * parse does not take. */
+function settings(args: Args, kit: CliKit, kind: Kind): Partial<AppSettings & StatefulSettings> {
   const { integer, flag } = kit;
-  const number = (name: string, field: keyof AppSettings) =>
+  const number = (name: string, field: keyof (AppSettings & StatefulSettings)) =>
     integer(args, name) === undefined ? {} : { [field]: integer(args, name)! };
   return {
     ...number("vcpu", "vcpu"),
     ...number("memory", "memoryMiB"),
-    ...number("min-copies", "minCopies"),
+    ...(kind.minCopies ? number("min-copies", "minCopies") : {}),
     ...number("max-copies", "maxCopies"),
     ...number("concurrency", "concurrency"),
     ...number("spares", "spares"),
     ...number("port", "port"),
     ...(flag(args, "health-path") === undefined ? {} : { healthPath: flag(args, "health-path")! }),
+    ...(flag(args, "cdn") === undefined ? {} : { cdn: onOff(flag(args, "cdn")!, kit) }),
+    ...number("health-fail", "healthFailSeconds"),
+    ...(kind.minCopies
+      ? { ...number("stop-grace", "stopGraceSeconds"), ...volume(args, kit) }
+      : {}),
   };
 }
 const SETTINGS = [
@@ -178,8 +330,27 @@ const SETTINGS = [
   "spares",
   "port",
   "health-path",
+  "cdn",
+  "health-fail",
+  "stop-grace",
+  "volume",
   "label",
 ];
+const settingsOf = (kind: Kind) =>
+  kind.minCopies
+    ? SETTINGS
+    : SETTINGS.filter((name) => !["min-copies", "stop-grace", "volume"].includes(name));
+
+/** A version's copies replaced while live: how many, and why. */
+function replaced(list: AppVersion["replacements"] | undefined) {
+  if (!list?.length) return "-";
+  const health = list.filter((r) => r.reason === "health").length;
+  const why = [
+    health ? `${health} health` : "",
+    list.length - health ? `${list.length - health} exited` : "",
+  ];
+  return `${list.length} (${why.filter(Boolean).join(", ")})`;
+}
 
 /** A deploy that ended badly, said with its own words, hint and last output. */
 function deployFailure(deploy: AppDeploy): RuntimeError | undefined {
@@ -196,7 +367,28 @@ function deployFailure(deploy: AppDeploy): RuntimeError | undefined {
   });
 }
 
-export async function appsCommand(
+export function appsCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  out: Out,
+  client: () => Promise<Runtime>,
+  kit: CliKit,
+): Promise<number> {
+  return copiesCommand(APP, argv, env, out, client, kit);
+}
+
+export function functionsCommand(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  out: Out,
+  client: () => Promise<Runtime>,
+  kit: CliKit,
+): Promise<number> {
+  return copiesCommand(FUNCTION, argv, env, out, client, kit);
+}
+
+async function copiesCommand(
+  kind: Kind,
   argv: string[],
   env: NodeJS.ProcessEnv,
   out: Out,
@@ -208,18 +400,21 @@ export async function appsCommand(
   const print = (human: string, value: unknown) =>
     out.write(out.json ? JSON.stringify(value) : human);
   if (!verb || verb === "help" || verb === "--help") {
-    print(named(APP_HELP), { usage: named(APP_HELP) });
+    print(named(kind.help), { usage: named(kind.help) });
     return 0;
   }
-  const api = apps((await client()).transport);
+  const api = kind.api((await client()).transport);
+  const { command, one, many } = kind;
   const idOf = (target: string | undefined) =>
-    appIdOf(api, need(target, "an App's id or name"), kit);
+    appIdOf(api, need(target, `${one === "App" ? "an" : "a"} ${one}'s id or name`), kit, kind);
   switch (verb) {
     case "create": {
-      const args = parse(rest, [], SETTINGS);
+      const args = parse(rest, [], settingsOf(kind));
       if (args.positional.length > 1)
-        throw usage(`Give one name: ${me} apps create web --vcpu 1 --memory 512 --max-copies 2`);
-      const given = settings(args, kit);
+        throw usage(`Give one name: ${me} ${command} create ${kind.example}`);
+      const given = settings(args, kit, kind);
+      if (given.volume === null)
+        throw usage(`--volume none is for update: leave --volume out to make an App without one.`);
       for (const [option, field] of [
         ["vcpu", "vcpu"],
         ["memory", "memoryMiB"],
@@ -227,7 +422,11 @@ export async function appsCommand(
       ] as const)
         if (given[field] === undefined)
           throw usage(
-            `Give --${option}: ${me} apps create ${args.positional[0] ?? "web"} --vcpu 1 --memory 512 --max-copies 2`,
+            `Give --${option}: ${me} ${command} create ${
+              args.positional[0]
+                ? `${args.positional[0]} ${kind.example.replace(/^\S+ /, "")}`
+                : kind.example
+            }`,
           );
       const input: CreateApp = {
         ...(given as CreateApp),
@@ -237,7 +436,7 @@ export async function appsCommand(
       const app = await api.create(input);
       if (!out.json)
         out.error(
-          `Created ${app.name ?? app.id}, waiting for its first version. Deploy one: ${me} apps deploy ${app.name ?? app.id} --image <image>`,
+          `Created ${app.name ?? app.id}, waiting for its first version. Deploy one: ${me} ${command} deploy ${app.name ?? app.id} --image <image>`,
         );
       print(app.id, app);
       return 0;
@@ -256,18 +455,21 @@ export async function appsCommand(
       print(
         all.length
           ? table([
-              ["ID", "NAME", "STATE", "LIVE", "COPIES", "SIZE", "CREATED"],
+              ["ID", "NAME", "ADDRESS", "STATE", "LIVE", "COPIES", "SIZE", "CREATED"],
               ...all.map((a) => [
                 a.id,
                 a.name ?? "-",
-                a.state,
+                a.url ?? "-",
+                // A copy waiting for room: its place in its region's line.
+                a.line ? `${a.state} (in line, place ${a.line.place})` : a.state,
                 a.liveVersion === null ? "-" : `v${a.liveVersion}`,
-                `${a.minCopies}-${a.maxCopies}`,
+                // A Function's copies all sleep when idle: up to its maximum.
+                kind.minCopies ? `${a.minCopies}-${a.maxCopies}` : `0-${a.maxCopies}`,
                 `${a.vcpu} vCPU, ${a.memoryMiB} MiB`,
                 when(a.createdAt),
               ]),
             ])
-          : `No Apps. Make one: ${me} apps create web --vcpu 1 --memory 512 --max-copies 2`,
+          : `No ${many}. Make one: ${me} ${command} create ${kind.example}`,
         all,
       );
       return 0;
@@ -278,16 +480,16 @@ export async function appsCommand(
       return 0;
     }
     case "update": {
-      const args = parse(rest, [], [...SETTINGS, "name"]);
+      const args = parse(rest, [], [...settingsOf(kind), "name"]);
       const id = await idOf(args.positional[0]);
       const change: UpdateApp = {
-        ...settings(args, kit),
+        ...settings(args, kit, kind),
         ...(flag(args, "name") === undefined ? {} : { name: flag(args, "name")! }),
         ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
       };
       if (!Object.keys(change).length)
         throw usage(
-          `Give a setting to change, such as ${me} apps update ${args.positional[0]} --max-copies 4`,
+          `Give a setting to change, such as ${me} ${command} update ${args.positional[0]} --max-copies 4`,
         );
       const app = await api.update(id, change);
       print(`${app.name ?? app.id} updated.`, app);
@@ -329,8 +531,8 @@ export async function appsCommand(
       if (failed && !out.json) throw failed;
       print(
         deploy.state === "live"
-          ? `Version ${deploy.version} is live at ${deploy.url}`
-          : `Version ${deploy.version}: ${deploy.state}. Follow it: ${me} apps deploys ${args.positional[0]} ${deploy.id} --wait`,
+          ? `Version ${deploy.version} is live at ${deploy.url}${deploy.downtime ? `, ${downtime(deploy.downtime)}` : ""}`
+          : `Version ${deploy.version}: ${deploy.state}. Follow it: ${me} ${command} deploys ${args.positional[0]} ${deploy.id} --wait`,
         deploy,
       );
       return failed ? 1 : 0;
@@ -355,16 +557,21 @@ export async function appsCommand(
       print(
         deploys.length
           ? table([
-              ["VERSION", "DEPLOY", "STATE", "FROM", "ADDRESS"],
+              ["VERSION", "DEPLOY", "STATE", "FROM", "DOWNTIME", "ADDRESS"],
               ...deploys.map((d, i) => [
                 `v${d.version}${versions[i]!.live ? " (live)" : versions[i]!.previous ? " (previous)" : ""}`,
                 d.id,
                 d.state,
-                versions[i]!.build ? `build ${versions[i]!.build}` : "image",
+                d.restartOf != null
+                  ? `restart of v${d.restartOf}`
+                  : versions[i]!.build
+                    ? `build ${versions[i]!.build}`
+                    : "image",
+                downtime(d.downtime),
                 d.url,
               ]),
             ])
-          : `No deploys yet. Deploy one: ${me} apps deploy ${args.positional[0]} --image <image>`,
+          : `No deploys yet. Deploy one: ${me} ${command} deploy ${args.positional[0]} --image <image>`,
         deploys,
       );
       return 0;
@@ -375,14 +582,16 @@ export async function appsCommand(
       print(
         versions.length
           ? table([
-              ["VERSION", "LIVE", "PREVIOUS", "SAVED", "DEPLOY", "BUILD"],
+              ["VERSION", "LIVE", "PREVIOUS", "SAVED", "BOOT", "DEPLOY", "BUILD", "REPLACED"],
               ...versions.map((v) => [
-                `v${v.version}`,
+                `v${v.version}${v.restartOf == null ? "" : ` (restart of v${v.restartOf})`}`,
                 v.live ? "yes" : "-",
                 v.previous ? "yes" : "-",
                 v.saved ? "yes" : "-",
+                v.boot ?? "-",
                 v.deploy,
                 v.build ?? "-",
+                replaced(v.replacements),
               ]),
             ])
           : "No versions yet.",
@@ -399,9 +608,82 @@ export async function appsCommand(
               ["COPY", "VERSION", "REGION", "STATE", "SINCE"],
               ...copies.map((c) => [c.id, `v${c.version}`, c.region, c.state, when(c.since)]),
             ])
-          : "No copies awake. A request starts one.",
+          : `No copies awake. ${one === "App" ? "A request" : "A call"} starts one.`,
         copies,
       );
+      return 0;
+    }
+    case "exec": {
+      const args = parse(rest, ["root"], ["cwd", "env", "timeout", "copy", "trace-files"]);
+      const command = args.rest ?? args.positional.slice(1);
+      if (!command.length)
+        throw usage(`Give the command after --: ${me} apps exec <app> -- ls -la`);
+      const copy = await api.copy(await idOf(args.positional[0]), {
+        ...(flag(args, "copy") ? { copy: flag(args, "copy")! } : {}),
+      });
+      return kit.execute(copy, command, args, out, env);
+    }
+    case "cp": {
+      const args = parse(rest, [], ["copy"]);
+      const [from, to] = args.positional;
+      await kit.copyFile(
+        need(from, "a source"),
+        need(to, "a destination"),
+        async (app) =>
+          api.copy(await idOf(app), {
+            ...(flag(args, "copy") ? { copy: flag(args, "copy")! } : {}),
+          }),
+        "<app>",
+      );
+      print(`Copied ${from} to ${to}.`, { from, to });
+      return 0;
+    }
+    case "logs": {
+      const args = parse(
+        rest,
+        ["f", "follow", "raw"],
+        ["since", "version", "copy", "stream", "limit"],
+      );
+      const id = await idOf(args.positional[0]);
+      const named = flag(args, "stream");
+      const stream = (["stdout", "stderr"] as const).find((s) => s === named);
+      if (named !== undefined && stream === undefined)
+        throw usage(
+          `--stream is stdout or stderr: ${me} ${command} logs ${args.positional[0]} --stream stderr`,
+        );
+      const version = kit.integer(args, "version");
+      const limit = kit.integer(args, "limit");
+      const query = {
+        ...(flag(args, "since") === undefined ? {} : { since: flag(args, "since")! }),
+        ...(version === undefined ? {} : { version }),
+        ...(flag(args, "copy") === undefined ? {} : { copy: flag(args, "copy")! }),
+        ...(stream === undefined ? {} : { stream }),
+        ...(limit === undefined ? {} : { limit }),
+      };
+      const raw = has(args, "raw");
+      const [stdout, stderr] = [logStream(process.stdout, raw), logStream(process.stderr, raw)];
+      const write = (line: AppLogLine) =>
+        (line.stream === "stderr" ? stderr : stdout)(
+          line.text.endsWith("\n") ? line.text : `${line.text}\n`,
+        );
+      if (!has(args, "f") && !has(args, "follow")) {
+        const page = await api.logs(id, query);
+        if (out.json) out.write(JSON.stringify(page));
+        else if (page.lines.length) page.lines.forEach(write);
+        else
+          out.error(
+            `[no lines ${query.since ? `since ${query.since}` : "in the last hour"}; try --since 1d, or --follow]`,
+          );
+        if (!out.json && page.hasMore)
+          out.error(`[older lines are kept: --since further back, or --limit up to 500]`);
+        return 0;
+      }
+      // Until Ctrl-C: the SDK reconnects across the server's two-minute calls.
+      for await (const event of api.logs(id, { ...query, follow: true }, { timeoutMs: 0 })) {
+        if (out.json) out.write(JSON.stringify(event));
+        else if (event.type === "line") write(event);
+        else out.error("[some lines were dropped before they were read; going on]");
+      }
       return 0;
     }
     case "rollback": {
@@ -421,8 +703,25 @@ export async function appsCommand(
       );
       return failed ? 1 : 0;
     }
+    case "restart": {
+      const args = parse(rest, ["no-wait"], []);
+      const id = await idOf(args.positional[0]);
+      const deploy = await api.restart(id, {
+        wait: !has(args, "no-wait"),
+        timeoutMs: 15 * 60_000,
+      });
+      const failed = deployFailure(deploy);
+      if (failed && !out.json) throw failed;
+      print(
+        deploy.state === "live"
+          ? `Version ${deploy.version} restarted, live at ${deploy.url}${deploy.downtime ? `, ${downtime(deploy.downtime)}` : ""}`
+          : `Restarting version ${deploy.version}: ${deploy.state}. Follow it: ${me} ${command} deploys ${args.positional[0]} ${deploy.id} --wait`,
+        deploy,
+      );
+      return failed ? 1 : 0;
+    }
   }
-  throw kit.unknown("apps command", verb, [
+  throw kit.unknown(`${command} command`, verb, [
     "create",
     "ls",
     "get",
@@ -432,7 +731,11 @@ export async function appsCommand(
     "deploys",
     "versions",
     "copies",
+    "exec",
+    "cp",
+    "logs",
     "rollback",
+    "restart",
   ]);
 }
 

@@ -22,6 +22,9 @@ import { join } from "node:path";
    resolve as they would for a customer who installed them. */
 
 const here = join(import.meta.dir, "..");
+// TypeScript 5 by name, as the published build runs it (package.json "build"):
+// `bun x tsc` may run the root's TypeScript 7 instead.
+const TSC5 = join(here, "..", "typescript-config", "tsc5.mjs");
 const manifest = JSON.parse(readFileSync(join(here, "package.json"), "utf8")) as {
   exports: Record<string, unknown>;
   engines: { node: string };
@@ -44,6 +47,7 @@ const expected: Record<string, string> = {
   "withruntime/runloop": "Runloop",
   "withruntime/codesandbox": "CodeSandbox",
   "withruntime/sprites": "SpritesClient",
+  "withruntime/fly": "machinesApi",
   "withruntime/freestyle": "Freestyle",
   "withruntime/morph": "MorphCloudClient",
   "withruntime/modal": "ModalClient",
@@ -59,7 +63,9 @@ const expected: Record<string, string> = {
   "withruntime/networks": "networks",
   "withruntime/agents": "agents",
   "withruntime/containers": "containers",
+  "withruntime/apps": "apps",
   "withruntime/builds": "builds",
+  "withruntime/ci": "ci",
 };
 
 test("engines asks for the Node that require(esm) needs", () => {
@@ -85,8 +91,8 @@ test(
     const consumer = mkdtempSync(join(tmpdir(), "withruntime-cjs-"));
     try {
       const tsc = spawnSync(
-        "bun",
-        ["x", "tsc", "-p", "tsconfig.build.json", "--outDir", join(built, "dist")],
+        "node",
+        [TSC5, "-p", "tsconfig.build.json", "--outDir", join(built, "dist")],
         { cwd: here, encoding: "utf8" },
       );
       expect(tsc.stderr + tsc.stdout).toBe("");
@@ -123,10 +129,9 @@ test(
           .replaceAll('"@compat/', '"withruntime/'),
       );
       const declarations = spawnSync(
-        "bun",
+        "node",
         [
-          "x",
-          "tsc",
+          TSC5,
           "--noEmit",
           "--strict",
           "--skipLibCheck",

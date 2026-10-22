@@ -19,7 +19,7 @@ interchangeable. Remaining implementation work is tracked in the repository's
 | --------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | E2B             | `e2b==2.56.0`, `e2b-code-interpreter==2.11.0` | `from withruntime.e2b import Sandbox, AsyncSandbox`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox`                                       |
 | Runloop         | `runloop-api-client==2.0.0`                   | `from withruntime.runloop import Runloop, AsyncRunloop`; `from withruntime.runloop.sdk import RunloopSDK, AsyncRunloopSDK`                                      |
-| Prime Intellect | `prime-sandboxes==0.4.6`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
+| Prime Intellect | `prime-sandboxes==0.4.7`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
 | Fly Sprites     | `sprites-py==0.7.2`                           | `from withruntime.sprites import SpritesClient, AsyncSpritesClient, SpriteConfig`; filesystem, client, sprite, types, exec and exceptions submodules also exist |
 | Modal CPU       | `modal==1.6.2`                                | `from withruntime import modal`; `from withruntime.modal import Sandbox, Image, Secret, App`                                                                    |
 | Morph Cloud     | `morphcloud==0.1.115`                         | `from withruntime.morph import MorphCloudClient`; `from withruntime.morph.api import Instance, Snapshot, ApiError` and the other `morphcloud.api` names         |
@@ -38,7 +38,7 @@ for those SDKs.
 | Runloop REST style | Devbox create/retrieve/list/await, execute sync/async, file transfers, shutdown/suspend/resume/keepalive; execution retrieve/wait/kill and channel iterators; disk snapshot status/update/delete/list                                                                                                                                                                                                                                                                                                                                               | Runtime image and snapshot IDs are required. Upstream resource IDs do not identify Runtime resources. Non-sandbox vendor services are outside this interface.                                                                                                                                                                                                                                                                                                                                                                            |
 | Prime Intellect    | Sync/async create/get/list/delete, status batches, bulk delete, foreground execution, binary files/read windows, background start/status/results/batches/wait (a job that cannot start fails its launch; one that died without an exit code is an APIError), filesystem checkpoints as disk-only snapshots (checkpoint, get, batches, wait, list, delete one or all, create from `checkpoint_id`), network rules, logs, concrete response models and mapped API errors; async `open_process` byte streams, stdin, signals, canceled waits and close | GPU, impersonation, advanced configs/secrets, SSH sessions on a public host, Prime's raw API routes, its image registry and LAN networks are refused with Runtime's alternative (LAN: `runtime.networks.private`, which cannot limit members, tags or ports). Nondefault stability probes and custom background worker limits are refused. A checkpoint pauses a running sandbox for its capture and stands alone (no parent, depth 1). Response models preserve tested fields/defaults/aliases, not every Pydantic validation/coercion. |
 | Fly Sprites        | Sync/async create/get/list/destroy/delete, CPU/RAM/disk config, metadata and replacement labels, prefix/cursor pagination, command argv and the vendor's command options, buffered binary output, live byte sinks, TTY, attach to native byte-mode sessions, session list; filesystem/path operations including `copy_to` and `replace`; URL auth (public or sprite) as a port 8080 preview; checkpoints as disk snapshots; domain network policy; upgrade; the vendor's dataclasses and exceptions                                                 | Live sinks/TTY/attach require the native byte-output capability. Buffered commands use owned guest files and work without it. A checkpoint is a Runtime disk snapshot (files, not running processes). Refused by name: provider runtime selection, `private_access`, services, network presets (`include`) and an allow rule inside a denied wildcard, checkpoint history filters, in-place restore, control multiplexing, the vendor's HTTP client and Fly token exchange.                                                              |
-| Modal CPU          | Sync/`.aio` create/from_id/from_name/list/tags, exec/wait/poll/terminate, binary/text process streams, line iteration, stdin, filesystem read/write/copy/stat/list/remove/mkdir/watch; registry image recipes, pip/apt lists, env/workdir, inline secrets and app metadata; disk-only filesystem snapshots returning reusable `Image` objects                                                                                                                                                                                                       | Binary processes require the native byte-output capability. Access/file-target/indefinite filesystem watch requires the expanded native watch capability. Snapshot TTL supports whole days from 1 to 365; other TTLs are refused. Atomic name uniqueness, GPU, volumes, tunnels, remote named secrets and all image options are not mapped. `App.lookup` is Runtime app metadata, not a Modal service lookup.                                                                                                                            |
+| Modal CPU          | Sync/`.aio` create/from_id/from_name/list/tags, idle timeout, exec/wait/poll/terminate as root, binary/text process streams and stream types, line iteration, stdin, filesystem read/write/copy/stat/list/remove/mkdir/watch; registry image recipes, pip/apt lists, env/workdir, inline secrets, app metadata and `publish`; domain and CIDR allowlists and their replacement; disk-only filesystem snapshots returning reusable `Image` objects; memory snapshots                                                                                 | Binary processes require the native byte-output capability. Access/file-target/indefinite filesystem watch requires the expanded native watch capability. Snapshot TTL supports whole days from 1 to 365; other TTLs are refused. GPU, volumes made on first use, sidecars, connect tokens, remote named secrets and directory snapshots are refused, each naming the alternative. `App.lookup` is Runtime app metadata, not a Modal service lookup.                                                                                     |
 | Morph Cloud        | Snapshot create/get/list/list_paginated/delete, metadata, retention, wait, and cached `setup`/`exec`/`upload`/`download`/`build` chains by Morph's own chain hash; instance start/boot/get/list/list_paginated/stop/cleanup, pause/resume, memory snapshots, `branch`, HTTP services as previews, streamed `exec`, metadata, wake-on, a later time-limit end, file upload/download, context managers; every `a`-prefixed twin                                                                                                                       | Refused, naming Runtime's way: SSH clients and keys, `as_container`, `reboot`, devboxes, volumes, the package index and `user` (API keys, secrets, SSH keys). `set_ttl` only moves a time limit later; a snapshot's TTL is whole days. Commands run as `runtime` with sudo, not root.                                                                                                                                                                                                                                                    |
 
 E2B's expanded tests cover sync/async file and command request deadlines, file
@@ -147,6 +147,20 @@ detach changes must be released
 before the corresponding adapters can use them against hosted Runtime. Local
 contract results do not assert that an existing host has those capabilities.
 
+## Prime Intellect, 19 October 2026
+
+prime-sandboxes 0.4.6 → 0.4.7: the wheel and sdist matched the lock (0.4.6)
+and PyPI (0.4.7); the wheel's source is byte for byte its sdist's; nothing was
+installed or run. Requirements are unchanged. `CreateSandboxRequest` gains
+`arch`, `"amd64"` or `"arm64"` (None is amd64; a checkpoint restore omits it).
+Runtime runs amd64 only: the drop-in takes the field, refuses `"arm64"` before
+any sandbox is made, naming amd64, answers a restore that sets `arch` with
+Prime's `APIError`, and creates an `"amd64"` request exactly as one without
+it; before, the field was a `TypeError`. `create_lan_network` takes `rules`
+and stays refused, naming `runtime.networks.private`. Image builds gain
+`linux/arm64` in Prime's image registry, which is refused whole; the rest is
+LAN join internals. `tests/test_prime_0_4_7.py` fails without the change.
+
 ## Prime Intellect, 18 October 2026
 
 prime-sandboxes 0.4.5 → 0.4.6: the wheel and sdist matched the lock (0.4.5)
@@ -159,6 +173,45 @@ and refuses a create with a network before any sandbox is made, with the LAN
 refusal naming `runtime.networks.private`; before, the unknown field was a
 `TypeError`. The rest is an HTTP/2 pool for Prime's own command transport, not
 part of the drop-in. `tests/test_prime_0_4_6.py` fails without the change.
+
+## Modal's own examples, live, 18 October 2026
+
+Modal's documented sandbox code (the code blocks of modal.com/docs/guide
+`sandboxes`, `sandbox-spawn`, `sandbox-networking`, `sandbox-files` and
+`sandbox-snapshots`, and modal-examples `13_sandboxes` at 65241421) is copied
+verbatim into `tests/fixtures/modal`, with only the import changed, and run
+against real Runtime sandboxes by
+`packages/cloud-sdk/scripts/compatibility-modal-examples-live.ts`. Examples
+that run as deployed Modal Functions, need a GPU or an LLM key, or copy the
+reader's own config files are listed there and not run. What failed, and
+what changed:
+
+- `modal.enable_output()`, `modal.stream_type`, `modal.container_process`
+  and `modal.io_streams` were missing; they exist, and `enable_output` prints
+  image build logs. `exec(stdout=StreamType.STDOUT/DEVNULL)` prints or drops.
+- `modal.Dict`, `Queue`, `Function`, `Server` and the rest were plain
+  `AttributeError`s; each raises `CompatibilityError` naming the alternative
+  (and still reads as absent to `hasattr`). `sandbox._experimental_sidecars`
+  refuses the same way.
+- Commands ran as the sandbox user (writes to `/`, Docker); the entrypoint,
+  `exec` and readiness probes now run as root.
+- `timeout` under 60 s was refused; the client ends the sandbox on time,
+  with Runtime's minute as the bound. `idle_timeout` was refused; it is
+  Runtime's idle pause.
+- A taken name raised Runtime's `ConflictError`; it is `AlreadyExistsError`.
+- `list_files` read a field listings never send (`mtimeMs`); it reads
+  `modifiedAt`.
+- `outbound_cidr_allowlist` and `cidr_allowlist` were refused; they are
+  allow rules, a union with the domain allowlist, and
+  `_experimental_set_outbound_network_policy` replaces them.
+- `_experimental_enable_snapshot` was refused; `_experimental_snapshot()` and
+  `Sandbox._experimental_from_snapshot()` take and restore a memory snapshot
+  with its running entrypoint.
+- `Image.publish(name)` was refused; it builds the recipe under that Runtime
+  image name (`name:tag`, `latest` by default), which `Image.from_name` finds.
+
+`tests/test_modal_examples.py` fails on the old drop-in.
+`compat-inventory.json` records 288 present, 197 refused and 0 missing of 485.
 
 ## Modal Python, 16 October 2026
 

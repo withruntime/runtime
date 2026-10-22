@@ -136,6 +136,40 @@ class JobsTest(unittest.TestCase):
             "/v1/jobs", f"/v1/jobs/{JOB_ID}/runs", f"/v1/job-runs/{RUN_ID}", f"/v1/job-runs/{RUN_ID}/logs",
             f"/v1/jobs/{JOB_ID}:pause", f"/v1/jobs/{JOB_ID}:resume", f"/v1/jobs/{JOB_ID}:cancel"])
 
+    def test_runs_reads_newest_first_on_asking(self):
+        with self.client() as runtime:
+            self.assertEqual(runtime.jobs.runs(JOB_ID, limit=1, order="newest").data[0]["id"], RUN_ID)
+            runtime.jobs.runs(JOB_ID)
+        self.assertEqual([s[1] for s in Stub.seen], [f"/v1/jobs/{JOB_ID}/runs?limit=1&order=newest",
+                                                     f"/v1/jobs/{JOB_ID}/runs"])
+
+    def test_create_takes_an_image_and_an_alert_and_update_changes_a_job_in_place(self):
+        alert = {"afterFailures": 3, "webhook": {"url": "https://example.com/hook", "secretId": SECRET_ID}}
+        with self.client() as runtime:
+            runtime.jobs.create("hub", cron="* * * * *", command=["bash", "-lc", "loop"], image="hub:latest",
+                                alert=alert)
+            runtime.jobs.update(JOB_ID, image="hub@7", command=["bash", "-lc", "new"], compute={"memoryMiB": 1024},
+                                alert={"email": True}, idempotency_key="change-1")
+            runtime.jobs.update(JOB_ID, image=None, alert=None, max_total_cost_micros=None)
+            with self.assertRaises(InvalidRequestError):
+                runtime.jobs.update(JOB_ID)
+            with self.assertRaises(InvalidRequestError):
+                runtime.jobs.update(JOB_ID, command=None)
+        created, changed, cleared = Stub.seen
+        self.assertEqual((created[2]["image"], created[2]["alert"]), ("hub:latest", alert))
+        self.assertEqual(changed[:2], ("POST", f"/v1/jobs/{JOB_ID}:update"))
+        self.assertEqual(changed[2], {"image": "hub@7", "command": {"argv": ["bash", "-lc", "new"]},
+                                      "compute": {"memoryMiB": 1024}, "alert": {"email": True}})
+        self.assertEqual(changed[3], "change-1")
+        self.assertEqual(cleared[2], {"image": None, "alert": None, "maxTotalCostMicros": None})
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url) as runtime:
+                return await runtime.jobs.update(JOB_ID, timeout_seconds=60)
+        Stub.seen = []
+        asyncio.run(go())
+        self.assertEqual(Stub.seen[0][2], {"timeoutSeconds": 60})
+
     def test_mistakes_are_refused_before_sending(self):
         with self.client() as runtime:
             for kwargs, pattern in [

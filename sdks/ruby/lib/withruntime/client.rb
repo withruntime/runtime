@@ -23,9 +23,9 @@ module WithRuntime
   RENAME_RETIRES = nil
 
   class Client
-    attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :limits, :emails, :referrals,
+    attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :reservations, :limits, :emails, :referrals, :plans,
                 :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp, :agents,
-                :apps, :functions, :builds, :containers
+                :apps, :functions, :builds, :ci, :containers
 
     # +api_key+: default RUNTIME_API_KEY, then this machine's saved connection.
     # +base_url+: default RUNTIME_API_URL, then https://api.withruntime.com.
@@ -56,9 +56,11 @@ module WithRuntime
       @images = Images.new(@transport)
       @volumes = Volumes.new(@transport)
       @secrets = Secrets.new(@transport)
+      @reservations = Reservations.new(@transport)
       @limits = Limits.new(@transport)
       @emails = Emails.new(@transport)
       @referrals = Referrals.new(@transport)
+      @plans = Plans.new(@transport)
       @switching = Switching.new(@transport)
       @events = Events.new(@transport)
       @webhooks = Webhooks.new(@transport)
@@ -77,6 +79,7 @@ module WithRuntime
       @apps = Apps.new(@transport, "/v1/apps")
       @functions = Apps.new(@transport, "/v1/functions")
       @builds = Builds.new(@transport)
+      @ci = CI.new(@transport)
       @containers = Containers.new(@transport)
     end
 

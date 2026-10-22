@@ -8,12 +8,14 @@ import { sandboxNetwork } from "./network.js";
 import { domains, ips, networks, ports } from "./network-products.js";
 import { sandboxPreviews } from "./previews.js";
 import { referrals } from "./referrals.js";
+import { plans } from "./plans.js";
 import { billing } from "./billing.js";
 import { audit } from "./audit.js";
 import { sso } from "./sso.js";
 import { switching } from "./switching.js";
 import { limits } from "./limits.js";
 import { keys } from "./api-keys.js";
+import { reservations } from "./reservations.js";
 import { volumes } from "./volumes.js";
 import { jobs } from "./jobs.js";
 import { sandboxMounts } from "./mounts.js";
@@ -23,7 +25,13 @@ import { mcp, sandboxMcp } from "./mcp.js";
 import { events, otel, sandboxMetrics, webhooks } from "./observability.js";
 import { agents } from "./agents.js";
 import { builds } from "./builds.js";
+import { ci } from "./ci.js";
 import { containers } from "./containers.js";
+// The hub loads this file, so it loads apps.ts and resources.ts too: request
+// builders over Transport whose top level holds only types, functions and
+// imports of files the hub loads, so importing them runs nothing in the hub
+// (agents/hub-sdk-products.test.ts parses every product file the hub loads).
+import { apps } from "./apps.js";
 
 /* HOW A LANE ADDS A PRODUCT TO THE SDK
  *
@@ -45,9 +53,11 @@ export const clientExtensions = {
   volumes,
   jobs,
   referrals,
+  plans,
   billing,
   limits,
   keys,
+  reservations,
   switching,
   secrets,
   webhooks,
@@ -63,7 +73,12 @@ export const clientExtensions = {
   agents,
   // Builds (beta): the API answers product_in_beta outside its list.
   builds,
+  // CI/CD (beta): the API answers product_in_beta outside its list.
+  ci,
   containers,
+  // A private beta (PRODUCT_BETAS): an account outside it is refused with
+  // product_in_beta until Apps launches.
+  apps,
 } satisfies Record<string, (t: Transport) => unknown>;
 
 export const sandboxExtensions = {

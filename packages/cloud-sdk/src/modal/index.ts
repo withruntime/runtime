@@ -292,6 +292,36 @@ const STATIC_IPS = "Runtime static egress IPs: runtime.ips";
 refuse("Modal", "Proxy", Proxy, { proxyId: STATIC_IPS }, { sync: true });
 refuse("Modal", "ProxyService", ProxyService, { fromName: STATIC_IPS });
 
+// Modal's other products, outside its sandboxes: each call refuses, naming
+// what to use, where it was undefined before (function-call.ts, 18 October 2026).
+const FUNCTIONS =
+  "Runtime runs sandboxes, not Modal Functions: run the code in a sandbox (modal.sandboxes.create), or on a schedule as a Runtime job (runtime.jobs)";
+const QUEUES =
+  "keep the queue in your own store, or in a file on a Runtime volume (runtime.volumes)";
+export class FunctionService {
+  declare readonly fromName: RefusedAsync;
+  declare readonly fromId: RefusedAsync;
+}
+export class FunctionCallService {
+  declare readonly fromId: RefusedAsync;
+}
+export class ClsService {
+  declare readonly fromName: RefusedAsync;
+}
+export class QueueService {
+  declare readonly fromName: RefusedAsync;
+  declare readonly ephemeral: RefusedAsync;
+  declare readonly delete: RefusedAsync;
+}
+refuse("Modal", "FunctionService", FunctionService, { fromName: FUNCTIONS, fromId: FUNCTIONS });
+refuse("Modal", "FunctionCallService", FunctionCallService, { fromId: FUNCTIONS });
+refuse("Modal", "ClsService", ClsService, { fromName: FUNCTIONS });
+refuse("Modal", "QueueService", QueueService, {
+  fromName: QUEUES,
+  ephemeral: QUEUES,
+  delete: QUEUES,
+});
+
 export class ExperimentalOutboundPolicy {
   declare readonly withHeaderReplacement: Refused;
 }
@@ -339,6 +369,8 @@ refuse("Modal", "Probe", Probe, { toProto: "pass it as readinessProbe" }, { sync
 
 // Images ------------------------------------------------------------------------
 
+const BUILD_SECRETS =
+  "a Runtime image build keeps no secret: use it at run time, with sandboxes.create(app, image, { secrets }), or runtime.secrets.set({ value, hosts }) so the sandbox never sees it";
 export class Image {
   private built?: string;
   constructor(
@@ -358,16 +390,28 @@ export class Image {
     if (!this.built) throw new Error("Image is not built; await image.build(app) first.");
     return this.built;
   }
+  /** A layer of Dockerfile commands. Its `secrets` refuse: a Runtime build
+   * keeps its build arguments in the image's build plan, history and cache
+   * key, and has no channel that never keeps a value, so a secret is used at
+   * run time instead (security review, 18 October 2026). */
   dockerfileCommands(
     commands: string[],
-    params: { env?: Record<string, string>; forceBuild?: boolean } = {},
+    params: {
+      env?: Record<string, string>;
+      secrets?: Secret[];
+      gpu?: string;
+      forceBuild?: boolean;
+    } = {},
   ) {
-    only("Modal image", params, ["env", "forceBuild"]);
+    only("Modal image", params, ["env", "secrets", "gpu", "forceBuild"]);
+    if (params.gpu) throw new CompatibilityError("Modal", "GPU image builds");
     if (!this.tag)
       throw new CompatibilityError(
         "Modal",
         "extending a prebuilt Runtime image through Dockerfile layers",
       );
+    if (params.secrets?.length)
+      throw refusal("Modal", "Image.dockerfileCommands secrets", BUILD_SECRETS);
     return new Image(
       this.runtime,
       this.tag,
@@ -511,6 +555,10 @@ export class ModalClient {
   readonly sandboxSnapshots: SandboxSnapshotService;
   readonly proxies = new ProxyService();
   readonly environments = new EnvironmentService();
+  readonly functions = new FunctionService();
+  readonly functionCalls = new FunctionCallService();
+  readonly cls = new ClsService();
+  readonly queues = new QueueService();
   #closed = false;
   constructor(options: ModalClientParams = {}) {
     if (
@@ -592,6 +640,11 @@ refuse("Modal", "ModalClient", ModalClient, {
 
 // Sandboxes ---------------------------------------------------------------------
 
+/** Who a sandbox's processes run as: root, as in a Modal container (and a
+ * registry image's default user), where Runtime's own default is uid 1000.
+ * Modal code writes to /, installs packages and starts daemons unprefixed. */
+const ROOT = "root" as const;
+
 export type SandboxCreateParams = {
   name?: string;
   cpu?: number;
@@ -600,6 +653,7 @@ export type SandboxCreateParams = {
   memoryLimitMiB?: number;
   runtime?: "gvisor" | "vm";
   timeoutMs?: number;
+  idleTimeoutMs?: number;
   workdir?: string;
   command?: string[];
   env?: Record<string, string>;
@@ -616,6 +670,7 @@ export type SandboxCreateParams = {
   cloudBucketMounts?: Record<string, CloudBucketMount>;
   readinessProbe?: Probe;
   experimentalEnableSnapshot?: boolean;
+  experimentalOptions?: Record<string, boolean | string>;
 };
 export type SandboxExecParams = {
   mode?: "text" | "binary";
@@ -627,22 +682,40 @@ export type SandboxExecParams = {
   pty?: boolean;
   secrets?: Secret[];
 };
-/** Modal's outbound allowlists as Runtime network rules, never wider than
- * Modal's: a missing list or a wildcard entry allows everything, an empty
- * list blocks all egress. Runtime's rules are one list a connection matches
- * any entry of, so a domain list and a CIDR list that both narrow are
- * refused rather than joined into a wider rule. */
+/** Modal's outbound allowlists as Runtime network rules. Modal allows a
+ * connection a listed domain or a listed CIDR range admits, and a list left
+ * out admits nothing once the other is given (modal-client
+ * buildOutboundNetworkAccess; its guide: "except traffic allowed by
+ * outbound_domain_allowlist"). Runtime's `allow` is the same union, one list
+ * a connection matches any entry of. Modal's `*.example.com` also matches
+ * example.com, where Runtime's leaves the apex out, so both are listed.
+ * Every domain ("*") with narrower addresses is refused: Runtime cannot
+ * admit every name without every address. Before 18 October 2026 an empty
+ * CIDR list blocked the listed domains too, and two narrowing lists were
+ * refused (Modal's sandbox-network-policy.ts gives both). */
 function egress(domains?: string[], cidrs?: string[]): { internet: boolean; allow?: string[] } {
-  if (domains?.length === 0 || cidrs?.length === 0) return { internet: false };
-  const anyDomain = !domains || domains.includes("*");
-  const anyCidr = !cidrs || cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0");
-  if (anyDomain && anyCidr) return { internet: true };
-  if (!anyDomain && !anyCidr)
+  if (domains === undefined && cidrs === undefined) return { internet: true };
+  // Every address is both families' whole range. One of them alone stays an
+  // ordinary rule: ::/0 by itself opened IPv4 as well, wider than Modal.
+  const whole = [...new Set(cidrs ?? [])].filter((c) => c === "0.0.0.0/0" || c === "::/0");
+  if (whole.length === 2) return { internet: true };
+  if ((domains ?? []).includes("*")) {
+    // Every name beside one family's whole range: Runtime has no rule for
+    // every name, so the range alone (Modal's own examples pass "*" with
+    // 0.0.0.0/0). Narrower than Modal's by the other family, never wider.
+    if (whole.length) return { internet: true, allow: whole };
     throw new CompatibilityError(
       "Modal",
-      "a domain allowlist and a CIDR allowlist at once; pass one list of domains and CIDR ranges to sandbox.native.network.set({ internet: true, allow })",
+      'a domain allowlist of "*" with a narrower CIDR allowlist; pass ["0.0.0.0/0", "::/0"] with it for all traffic, or list the domains',
     );
-  return { internet: true, allow: anyDomain ? cidrs! : domains };
+  }
+  const allow = [
+    ...new Set([
+      ...(domains ?? []).flatMap((d) => (d.startsWith("*.") ? [d, d.slice(2)] : [d])),
+      ...(cidrs ?? []),
+    ]),
+  ];
+  return allow.length ? { internet: true, allow } : { internet: false };
 }
 const ENVIRONMENTS = "named Modal environments";
 const CREATE_OPTIONS = [
@@ -653,6 +726,7 @@ const CREATE_OPTIONS = [
   "memoryLimitMiB",
   "runtime",
   "timeoutMs",
+  "idleTimeoutMs",
   "workdir",
   "command",
   "env",
@@ -669,6 +743,7 @@ const CREATE_OPTIONS = [
   "cloudBucketMounts",
   "readinessProbe",
   "experimentalEnableSnapshot",
+  "experimentalOptions",
 ] as const;
 export class SandboxService {
   constructor(
@@ -701,6 +776,23 @@ export class SandboxService {
       throw new TypeError("blockNetwork cannot be combined with allowlists");
     if (params.runtime !== undefined && params.runtime !== "vm")
       throw new InvalidError(`Unknown sandbox runtime ${String(params.runtime)}`);
+    for (const [option, value] of Object.entries(params.experimentalOptions ?? {}))
+      throw option === "enable_exit_snapshot" && value
+        ? refusal(
+            "Modal",
+            "experimentalOptions.enable_exit_snapshot",
+            "call sandbox.snapshotFilesystem() before terminate(), then start new sandboxes from that Image",
+          )
+        : new CompatibilityError("Modal", `experimental option ${option}`);
+    if (params.timeoutMs !== undefined && !(params.timeoutMs > 0))
+      throw new InvalidError(`timeoutMs must be positive, got ${params.timeoutMs}`);
+    if (
+      params.idleTimeoutMs !== undefined &&
+      (!(params.idleTimeoutMs > 0) || params.idleTimeoutMs % 1000 !== 0)
+    )
+      throw new InvalidError(
+        `idleTimeoutMs must be a positive multiple of 1000ms, got ${params.idleTimeoutMs}`,
+      );
     const network = params.blockNetwork
       ? { internet: false }
       : egress(params.outboundDomainAllowlist, params.outboundCidrAllowlist);
@@ -738,11 +830,22 @@ export class SandboxService {
       region: placement,
       ...(volumes.length ? { volumes } : {}),
       // A timeout is the customer's limit, and the sandbox never pauses
-      // for idleness before it. None is no time limit (0300): it runs while
-      // it works and pauses when idle.
+      // for idleness before it unless idleTimeoutMs asks. None is no time
+      // limit (0300): it runs while it works and pauses when idle. Runtime's
+      // shortest limit is a minute: a shorter one is kept by this client
+      // (below), with the minute as the bound if the client goes away.
       ...(params.timeoutMs === undefined
         ? {}
-        : { timeoutSeconds: Math.ceil(params.timeoutMs / 1000), idlePauseSeconds: 0 }),
+        : {
+            timeoutSeconds: Math.max(60, Math.ceil(params.timeoutMs / 1000)),
+            idlePauseSeconds: 0,
+          }),
+      // Modal ends an idle sandbox; Runtime pauses it, memory kept and CPU
+      // no longer billed, and wakes it at the next command, file call or
+      // tunnel request. Runtime's shortest idle pause is ten seconds.
+      ...(params.idleTimeoutMs === undefined
+        ? {}
+        : { idlePauseSeconds: Math.max(10, params.idleTimeoutMs / 1000) }),
       onLeaseEnd: "stop",
       network,
     };
@@ -759,7 +862,7 @@ export class SandboxService {
         async (s) => {
           for (const mount of mounts) await s.mounts.add(mount);
           primary = await s.spawn(params.command ?? ["sleep", "infinity"], {
-            ...(await execOptions(s, { cwd: params.workdir })),
+            ...(await execOptions(s, { cwd: params.workdir, user: ROOT })),
             stdin: "pipe",
             pty: params.pty ? {} : undefined,
           });
@@ -771,6 +874,8 @@ export class SandboxService {
     );
     const sandbox = new Sandbox(s, new ContainerProcess(primary!, "text"), this.client);
     sandbox.monitorEntrypoint();
+    if (params.timeoutMs !== undefined && params.timeoutMs < 60_000)
+      sandbox.terminateAfter(params.timeoutMs);
     return sandbox;
   }
   async experimentalCreate(app: App, image: Image, params: SandboxCreateParams = {}) {
@@ -975,17 +1080,33 @@ export class ContainerProcess<R extends string | Uint8Array = string> {
     this.stdout = new ModalReadStream<R>(native, "stdout", mode, params.stdout === "ignore");
     this.stderr = new ModalReadStream<R>(native, "stderr", mode, params.stderr === "ignore");
   }
+  /** The exit code, once seen: a poll after the sandbox ended still has it. */
+  #exitCode?: number;
   async wait() {
     const r = await this.native.wait();
     if (r.timedOut) throw new SandboxTimeoutError("Process timed out");
-    return r.exitCode ?? -1;
+    this.#exitCode = r.exitCode ?? -1;
+    return this.#exitCode;
   }
   closeStdin() {
     return this.native.write("", { eof: true });
   }
+  /** null while it runs, then its exit code. A process whose sandbox ended
+   * before its exit was seen was killed with it: 137, as Modal reports. */
   async _poll() {
-    const p = await this.native.refresh();
-    return p.state === "running" ? null : p.exitCode;
+    if (this.#exitCode !== undefined) return this.#exitCode;
+    try {
+      const p = await this.native.refresh();
+      if (p.state === "running") return null;
+      return (this.#exitCode = p.exitCode ?? -1);
+    } catch (error) {
+      if (
+        error instanceof RuntimeError &&
+        (error.code === "sandbox_stopped" || error.status === 404)
+      )
+        return (this.#exitCode = 137);
+      throw error;
+    }
   }
 }
 
@@ -1104,6 +1225,13 @@ export class Sandbox {
   get sandboxId() {
     return this.native.id;
   }
+  /** Ends the sandbox after `ms`, for a Modal timeout under Runtime's
+   * shortest time limit (a minute, which stays the bound if this client
+   * goes away). The timer never keeps the program running. */
+  terminateAfter(ms: number) {
+    const timer = setTimeout(() => void this.terminate().catch(() => undefined), ms);
+    (timer as { unref?: () => void }).unref?.();
+  }
   private attached() {
     this.client?.open();
     if (this.detached) throw new ClientClosedError("Sandbox is detached");
@@ -1133,6 +1261,7 @@ export class Sandbox {
     ]);
     const p = await this.native.spawn(command, {
       ...(await execOptions(this.native, {
+        user: ROOT,
         cwd: params.workdir,
         timeoutMs: params.timeoutMs === 0 ? 86_400_000 : params.timeoutMs,
         env: Object.assign(
@@ -1205,7 +1334,7 @@ export class Sandbox {
     while (true) {
       const left = Math.ceil(until - performance.now());
       if (left <= 0) throw new TimeoutError("Timeout expired");
-      const result = await this.native.exec(argv, { timeoutMs: left });
+      const result = await this.native.exec(argv, { timeoutMs: left, user: ROOT });
       if (result.exitCode === 0) return;
       await new Promise((resolve) => setTimeout(resolve, Math.min(probe.intervalMs, left)));
     }

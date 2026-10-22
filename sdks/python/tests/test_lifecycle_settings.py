@@ -26,6 +26,7 @@ class Stub(BaseHTTPRequestHandler):
     extra: dict = {}
     state = "running"
     expires_in = 60
+    gone = False
 
     def log_message(self, *args):
         pass
@@ -40,6 +41,14 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Stub.seen.append(("GET", self.path, None))
+        if Stub.gone:
+            data = json.dumps({"error": "Sandbox not found.", "code": "not_found", "retryable": False}).encode()
+            self.send_response(404)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         self._answer(info(**Stub.extra))
 
     def do_POST(self):
@@ -73,6 +82,7 @@ class LifecycleSettingsTest(unittest.TestCase):
         Stub.extra = {}
         Stub.state = "running"
         Stub.expires_in = 60
+        Stub.gone = False
 
     def posts(self, suffix):
         return [body for method, path, body in Stub.seen if method == "POST" and path.endswith(suffix)]
@@ -179,6 +189,37 @@ class LifecycleSettingsTest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertIsNone(sbx._keep_alive)
         self.assertEqual(self.posts(":extend"), [])
+
+    def test_a_deleted_sandbox_ends_keep_alive_after_one_refusal(self):
+        # 19 Oct 2026: a company deleted its sandboxes with sandboxes.delete(id)
+        # while each one's keep_alive() ran on, and every loop read its gone
+        # sandbox once a minute for as long as the process lived (442 404s an
+        # hour on 40 sandboxes).
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            sbx = runtime.sandboxes.get(ID)
+            Stub.gone = True
+            Stub.seen = []
+            sbx.keep_alive(every_seconds=10)
+            deadline = time.monotonic() + 30
+            while sbx._keep_alive is not None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertIsNone(sbx._keep_alive)
+        self.assertEqual([method for method, _, _ in Stub.seen], ["GET"])
+
+    def test_async_keep_alive_ends_when_the_sandbox_is_gone(self):
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                sbx = await runtime.sandboxes.get(ID)
+                Stub.gone = True
+                Stub.seen = []
+                sbx.keep_alive(every_seconds=10)
+                deadline = time.monotonic() + 30
+                while sbx._keep_alive is not None and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                self.assertIsNone(sbx._keep_alive)
+
+        asyncio.run(go())
+        self.assertEqual([method for method, _, _ in Stub.seen], ["GET"])
 
     def test_a_keep_alive_whose_loop_ends_before_it_returns_is_not_left_marked(self):
         # The loop's thread can find the sandbox stopped and finish before

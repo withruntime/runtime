@@ -7,17 +7,21 @@ import json
 import time
 import unittest
 
-from withruntime import AsyncRuntime, ConflictError, Runtime
+from withruntime import AsyncRuntime, RateLimitError, Runtime, ServiceUnavailableError
 from withruntime import _async_client as _async_module
 from withruntime import _sync_client as _sync_module
 
 RUNNING = json.dumps({"id": "sbx", "kind": "sandbox", "state": "running", "status": "active"}).encode()
 
 
-def refusal(code, status=409, details=None):
+def refusal(code, status=None, details=None, retryable=None):
+    # Room is a 503 and the account's own limits are 429s (17 October 2026).
+    status = status or {"no_capacity": 503, "quota_exceeded": 429, "no_credit_running_limit": 429}.get(code, 409)
     error = {"code": code, "status": status, "message": "full", "retryAfterMs": 5}
     if details is not None:
         error["details"] = details
+    if retryable is not None:
+        error["retryable"] = retryable
     return status, json.dumps({"error": error}).encode()
 
 
@@ -127,7 +131,7 @@ class CapacityWait(unittest.TestCase):
 
     def test_when_the_wait_runs_out_the_original_refusal_is_raised(self):
         for wire, outcome, took in create([refusal("no_credit_running_limit")] * 1000, {"wait_for_capacity": 0.2}):
-            self.assertIsInstance(outcome, ConflictError)
+            self.assertIsInstance(outcome, RateLimitError)
             self.assertEqual(outcome.code, "no_credit_running_limit")
             self.assertGreater(len(wire.keys), 2)
             self.assertGreaterEqual(took, 0.19)
@@ -180,9 +184,49 @@ class CapacityWait(unittest.TestCase):
         runtime._t._http = wire
         from withruntime._sync_client import Sandbox
         sandbox = Sandbox(runtime._t, {"id": "sbx", "state": "running"})
-        with self.assertRaises(ConflictError):
+        with self.assertRaises(RateLimitError):
             sandbox.fork()
         self.assertEqual(len(wire.keys), 1)
+
+
+    def test_a_call_without_a_room_wait_retries_what_the_answer_says(self):
+        # A volume create has no room wait: the answer's own `retryable`
+        # decides, as for any call. A quota on what is kept says false and is
+        # told at once; room, or a limit on what runs at once, says true and
+        # is sent again after its Retry-After.
+        def post(refusals):
+            runs = []
+            for is_async in (False, True):
+                wire = Wire(refusals, is_async)
+                options = {"api_key": "rk", "base_url": "https://api.example.test", "max_retries": 3}
+                runtime = AsyncRuntime(**options) if is_async else Runtime(**options)
+                runtime._t._http = wire
+                try:
+                    if is_async:
+                        outcome = asyncio.run(runtime._t.json("POST", "/v1/volumes", body={"name": "v"}))
+                    else:
+                        outcome = runtime._t.json("POST", "/v1/volumes", body={"name": "v"})
+                except Exception as error:  # noqa: BLE001 - the outcome under test
+                    outcome = error
+                runs.append((wire, outcome))
+            return runs
+
+        for code, status in (("quota_exceeded", 409), ("no_credit_kept_limit", 409), ("rate_limited", 429)):
+            for wire, outcome in post([refusal(code, status, retryable=False)] * 4):
+                self.assertEqual((getattr(outcome, "code", None), getattr(outcome, "status", None)), (code, status))
+                self.assertEqual(len(wire.keys), 1, code)
+        for code, status in (("no_capacity", 503), ("quota_exceeded", 429), ("no_credit_running_limit", 429)):
+            for wire, outcome in post([refusal(code, status, retryable=True)]):
+                self.assertEqual(len(wire.keys), 2, code)
+                self.assertEqual(outcome, json.loads(RUNNING))
+        # A host that is only passing is still sent again.
+        for wire, outcome in post([refusal("host_unavailable", 503)]):
+            self.assertEqual(len(wire.keys), 2)
+            self.assertEqual(outcome, json.loads(RUNNING))
+
+    def test_a_refusal_for_a_limit_is_not_retryable_by_itself_but_room_is(self):
+        self.assertFalse(RateLimitError("x", code="quota_exceeded", status=429).retryable)
+        self.assertTrue(ServiceUnavailableError("x", code="no_capacity", status=503).retryable)
 
 
 if __name__ == "__main__":

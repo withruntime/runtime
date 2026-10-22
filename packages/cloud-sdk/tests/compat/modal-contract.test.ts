@@ -303,7 +303,6 @@ describe("Modal sandbox create", () => {
     const image = modal.images.fromRegistry("python:3.13");
     for (const params of [
       { runtime: "gvisor" as const },
-      { idleTimeoutMs: 1000 },
       { unencryptedPorts: [22] },
       { h2Ports: [443] },
       { customDomain: "x.example.com" },
@@ -345,30 +344,64 @@ describe("Modal sandbox create", () => {
     };
     expect(await network({})).toEqual({ internet: true });
     expect(await network({ blockNetwork: true })).toEqual({ internet: false });
-    // An empty list blocks all egress; the native rules read an empty allow
-    // list as the public web.
+    // An empty list admits nothing; the native rules read an empty allow
+    // list as the public web, so nothing listed is no internet.
     expect(await network({ outboundDomainAllowlist: [] })).toEqual({ internet: false });
     expect(await network({ outboundCidrAllowlist: [] })).toEqual({ internet: false });
-    expect(
-      await network({ outboundDomainAllowlist: ["pypi.org"], outboundCidrAllowlist: [] }),
-    ).toEqual({ internet: false });
-    expect(await network({ outboundDomainAllowlist: ["pypi.org", "*.pythonhosted.org"] })).toEqual({
-      internet: true,
-      allow: ["pypi.org", "*.pythonhosted.org"],
+    expect(await network({ outboundDomainAllowlist: [], outboundCidrAllowlist: [] })).toEqual({
+      internet: false,
     });
+    // Modal admits what either list admits (modal-client's own
+    // sandbox-network-policy.ts: only modal.com, by name, with no addresses).
     expect(
-      await network({ outboundCidrAllowlist: ["10.0.0.0/8"], outboundDomainAllowlist: ["*"] }),
-    ).toEqual({ internet: true, allow: ["10.0.0.0/8"] });
-    expect(await network({ outboundCidrAllowlist: ["0.0.0.0/0"] })).toEqual({ internet: true });
-    const { runtime, created } = fakeRuntime();
-    const modal = modalOf(runtime);
-    await expect(
-      modal.sandboxes.create(app, modal.images.fromRegistry("python:3.13"), {
+      await network({ outboundDomainAllowlist: ["modal.com"], outboundCidrAllowlist: [] }),
+    ).toEqual({ internet: true, allow: ["modal.com"] });
+    expect(
+      await network({
         outboundDomainAllowlist: ["pypi.org"],
         outboundCidrAllowlist: ["10.0.0.0/8"],
       }),
-    ).rejects.toBeInstanceOf(CompatibilityError);
-    expect(created).toEqual([]);
+    ).toEqual({ internet: true, allow: ["pypi.org", "10.0.0.0/8"] });
+    // Modal's *.example.com matches example.com too; Runtime's does not.
+    expect(await network({ outboundDomainAllowlist: ["pypi.org", "*.pythonhosted.org"] })).toEqual({
+      internet: true,
+      allow: ["pypi.org", "*.pythonhosted.org", "pythonhosted.org"],
+    });
+    // Only both families' whole ranges are every address: ::/0 alone opened
+    // IPv4 too, and 0.0.0.0/0 alone IPv6 (security review, 18 October 2026).
+    expect(await network({ outboundCidrAllowlist: ["::/0"] })).toEqual({
+      internet: true,
+      allow: ["::/0"],
+    });
+    expect(await network({ outboundCidrAllowlist: ["0.0.0.0/0", "0.0.0.0/0"] })).toEqual({
+      internet: true,
+      allow: ["0.0.0.0/0"],
+    });
+    expect(await network({ outboundCidrAllowlist: ["0.0.0.0/0", "::/0"] })).toEqual({
+      internet: true,
+    });
+    // Modal's examples pass "*" with 0.0.0.0/0: that range alone, never more.
+    expect(
+      await network({ outboundDomainAllowlist: ["*"], outboundCidrAllowlist: ["0.0.0.0/0"] }),
+    ).toEqual({ internet: true, allow: ["0.0.0.0/0"] });
+    expect(
+      await network({
+        outboundDomainAllowlist: ["*"],
+        outboundCidrAllowlist: ["0.0.0.0/0", "::/0"],
+      }),
+    ).toEqual({ internet: true });
+    // Every name but not every address has no Runtime rule.
+    for (const params of [
+      { outboundDomainAllowlist: ["*"] },
+      { outboundCidrAllowlist: ["10.0.0.0/8"], outboundDomainAllowlist: ["*"] },
+    ]) {
+      const { runtime, created } = fakeRuntime();
+      const modal = modalOf(runtime);
+      await expect(
+        modal.sandboxes.create(app, modal.images.fromRegistry("python:3.13"), params),
+      ).rejects.toBeInstanceOf(CompatibilityError);
+      expect(created).toEqual([]);
+    }
   });
   test("a taken name is AlreadyExistsError", async () => {
     const { runtime } = fakeRuntime();
@@ -434,7 +467,7 @@ describe("Modal sandbox", () => {
     const none = await started({ "modal.entrypoint": "proc-1" });
     await expect(none.sandbox.waitUntilReady()).rejects.toBeInstanceOf(InvalidError);
   });
-  test("updateNetworkPolicy replaces the rules and never widens them", async () => {
+  test("updateNetworkPolicy replaces the rules with what either list admits", async () => {
     const { fake, sandbox } = await started({ "modal.entrypoint": "proc-1" });
     await expect(
       sandbox.updateNetworkPolicy({ outboundDomainAllowlist: ["pypi.org"] }),
@@ -444,15 +477,20 @@ describe("Modal sandbox", () => {
       outboundCidrAllowlist: ["0.0.0.0/0"],
       outboundDomainAllowlist: ["pypi.org"],
     });
+    await sandbox.updateNetworkPolicy({
+      outboundCidrAllowlist: ["10.0.0.0/8"],
+      outboundDomainAllowlist: ["pypi.org"],
+    });
     await expect(
       sandbox.updateNetworkPolicy({
         outboundCidrAllowlist: ["10.0.0.0/8"],
-        outboundDomainAllowlist: ["pypi.org"],
+        outboundDomainAllowlist: ["*"],
       }),
     ).rejects.toBeInstanceOf(CompatibilityError);
     expect(fake.calls.filter((c) => c.startsWith("network"))).toEqual([
       `network ${JSON.stringify({ internet: false })}`,
-      `network ${JSON.stringify({ internet: true, allow: ["pypi.org"] })}`,
+      `network ${JSON.stringify({ internet: true, allow: ["pypi.org", "0.0.0.0/0"] })}`,
+      `network ${JSON.stringify({ internet: true, allow: ["pypi.org", "10.0.0.0/8"] })}`,
     ]);
   });
   test("tunnels are HTTPS previews; there is no unencrypted socket", async () => {

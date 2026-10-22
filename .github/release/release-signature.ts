@@ -14,7 +14,9 @@
  * again before every host. Anything it cannot read is a refusal.
  *
  * The record is the message of an annotated tag, signed/<target> for a
- * release and signed/unhold for a lifted hold:
+ * release, signed/unhold for a lifted hold, and signed/prebuild-<n> for a
+ * pull request head whose engines are built ahead of its merge
+ * (action=prebuild, target=engines, hosts=all, check=runtime/prebuild):
  *
  *   runtime-release v3
  *   action=release
@@ -26,6 +28,15 @@
  *   nonce=<32 hex, fresh for each press>
  *   at=2026-10-13T17:00:00.000Z        (it expires 10 minutes later)
  *   sig=<Ed25519 signature of the lines above, base64>
+ *
+ * A host order (Marc's `reinstall`, `rejoin` or `monitor` in #agents,
+ * agents/release.ts) is the same record for the target reinstall, which the
+ * follower's server runs (follow-targets/reinstall.ts): action reinstall,
+ * rejoin or monitor, hosts one host, sha main's commit whose scripts it runs,
+ * and check what it is to do: plain/<OVH service> (OVH's installer),
+ * encrypted/<OVH service> (OVH's rescue system and encrypted-install.sh),
+ * monitor/<OVH service> (OVH's monitoring back on), or rejoin (every
+ * controller) or rejoin/<controller> (that one alone).
  */
 import {
   createHash,
@@ -43,9 +54,41 @@ export const SIGNED_MAX_AGE_MS = 10 * 60_000;
 export const SIGNED_FUTURE_MS = 60_000;
 /** The target a lifted hold names: deploy/hold holds every follower. */
 export const HOLD_TARGET = "hosts";
+/** What a prebuild record names (engines-archive.ts, signed by
+ * release-signer.py for the head of an open pull request into main that the
+ * hub's App vouched for with runtime/prebuild, after every gate of the hub's
+ * own passed it): its target, hosts and check. */
+export const PREBUILD = { target: "engines", hosts: "all", check: "runtime/prebuild" } as const;
+/** How many heads wait at most: the hub writes the newest into one of this
+ * many tags (signed/prebuild-1 to -3), and the prebuilder keeps the newest
+ * this many it took. */
+export const PREBUILD_SLOTS = 3;
+export const prebuildSlot = (n: number) => `prebuild-${n}`;
+
+/** The target every host order is signed for: the follower that runs them. */
+export const ORDER_TARGET = "reinstall";
+export const ORDER_ACTIONS = ["reinstall", "rejoin", "monitor"] as const;
+export type OrderAction = (typeof ORDER_ACTIONS)[number];
+/** An OVH service name, as reverse DNS gives it (src/ovh-reinstall.ts SERVICE). */
+const OVH_SERVICE = "ns[0-9]+\\.ip-[0-9]+-[0-9]+-[0-9]+\\.(us|eu|net)";
+/** What each order's check field may say. */
+export const ORDER_CHECK: Record<OrderAction, RegExp> = {
+  reinstall: new RegExp(`^(plain|encrypted)/${OVH_SERVICE}$`),
+  monitor: new RegExp(`^monitor/${OVH_SERVICE}$`),
+  rejoin: /^rejoin(\/vin-\d+)?$/,
+};
+/** For the follower of host orders alone: any one host, which it checks. */
+export const ANY_HOST: unique symbol = Symbol("any host");
+
+export const isOrderAction = (action: string): action is OrderAction =>
+  (ORDER_ACTIONS as readonly string[]).includes(action);
 
 export type Signed = {
-  action: "release" | "unhold";
+  /** prebuild: build these engines ahead of merge (engines-archive.ts),
+   * never a release: a follower takes only its own action. ship: Marc's
+   * ship it of a pull request's head, which CI/CD's gate reads
+   * (agents/ship-it.ts shipRefusal), never a follower. */
+  action: "release" | "unhold" | "prebuild" | "ship" | OrderAction;
   target: string;
   sha: string;
   tree: string;
@@ -71,8 +114,12 @@ export function sign(s: Signed, key: KeyObject): string {
     throw new Error("a signed record names a target, a full sha and its tree");
   if (!/^(all|vin-\d+(,vin-\d+)*)$/.test(s.hosts) || !/^[0-9a-f]{32}$/.test(s.nonce))
     throw new Error("a signed record names its hosts and a fresh nonce");
-  if (!/^[a-z0-9/_-]+$/.test(s.check) || Number.isNaN(Date.parse(s.at)))
-    throw new Error("a signed record names its check and time");
+  if (isOrderAction(s.action)) {
+    if (s.target !== ORDER_TARGET || !/^vin-\d+$/.test(s.hosts))
+      throw new Error("a host order is for the reinstall target and one host");
+    if (!ORDER_CHECK[s.action].test(s.check)) throw new Error(`not what a ${s.action} order says`);
+  } else if (!/^[a-z0-9/_-]+$/.test(s.check)) throw new Error("a signed record names its check");
+  if (Number.isNaN(Date.parse(s.at))) throw new Error("a signed record names its time");
   return `${body(s)}\nsig=${edSign(null, Buffer.from(body(s)), key).toString("base64")}\n`;
 }
 
@@ -89,7 +136,15 @@ export type Verdict = { ok: true; signed: Signed } | { ok: false; why: string };
 export function verify(
   text: string | undefined,
   key: KeyObject | undefined,
-  want: { action: Signed["action"]; target: string; sha?: string; hosts: string },
+  want: {
+    /** Several: any of them, as the follower of host orders takes each. */
+    action: Signed["action"] | readonly Signed["action"][];
+    target: string;
+    sha?: string;
+    /** The host set signed, or ANY_HOST: one host order's, which the
+     * reader then checks itself. Never undefined. */
+    hosts: string | typeof ANY_HOST;
+  },
   now: Date,
   options: { accepted?: string; used?: readonly string[]; maxAgeMs?: number } = {},
 ): Verdict {
@@ -109,17 +164,21 @@ export function verify(
     const signed = fields as Signed;
     if (!sig || !edVerify(null, Buffer.from(body(signed)), key, Buffer.from(sig, "base64")))
       return { ok: false, why: "forged: its signature is not the hub's" };
-    if (signed.action !== want.action || signed.target !== want.target)
+    const actions: readonly string[] =
+      typeof want.action === "string" ? [want.action] : want.action;
+    if (!actions.includes(signed.action) || signed.target !== want.target)
       return {
         ok: false,
-        why: `signed for ${signed.action} of ${signed.target}, not ${want.action} of ${want.target}`,
+        why: `signed for ${signed.action} of ${signed.target}, not ${actions.join(" or ")} of ${want.target}`,
       };
+    if (isOrderAction(signed.action) && !ORDER_CHECK[signed.action].test(signed.check))
+      return { ok: false, why: `not what a ${signed.action} order says: ${signed.check}` };
     if (want.sha !== undefined && signed.sha !== want.sha)
       return {
         ok: false,
         why: `signed for ${signed.sha.slice(0, 9)}, not ${want.sha.slice(0, 9)}`,
       };
-    if (signed.hosts !== want.hosts)
+    if (want.hosts !== ANY_HOST && signed.hosts !== want.hosts)
       return { ok: false, why: `signed for hosts ${signed.hosts}, not ${want.hosts}` };
     if (!/^[0-9a-f]{32}$/.test(signed.nonce)) return { ok: false, why: "no nonce" };
     const at = Date.parse(signed.at);

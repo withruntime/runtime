@@ -139,8 +139,33 @@ try {
 
 ### From Machines
 
-If you create a Machine for each job through the Machines API, create a Runtime
-sandbox instead and stop it when the job ends.
+Code that calls the Machines API keeps its calls: only the address changes.
+Run Runtime's answer to the Machines API next to your code:
+
+```sh no-run
+npx withruntime fly-api   # answers on http://127.0.0.1:4280 as your Runtime login
+```
+
+and point your client at it, with the rest of your code as it is:
+
+```sh no-run
+export FLY_API_HOSTNAME=http://127.0.0.1:4280     # Fly's curl examples
+export FLY_FLAPS_BASE_URL=http://127.0.0.1:4280   # fly-go, Fly's Go client
+```
+
+On 18 October 2026 we ran the 22 curl examples on Fly's
+[Machines API pages](https://fly.io/docs/machines/api/machines-resource/)
+exactly as written, and fly-go 0.11.6 unchanged, against Runtime this way. A
+Node service can answer the calls itself: `machinesApi()` from
+`withruntime/fly` is a fetch handler. Your Fly token is never sent anywhere.
+
+Each Machine is a Runtime sandbox started from its image, built once; `init`,
+`env`, `files`, `metadata`, leases and the restart policy work, and the image's
+command is its main process. Suspend keeps the main process running; stop keeps
+the disk, where Fly resets a stopped Machine's root disk, and start runs the
+main process again. `services`, `mounts`, `checks` and regions other than `iad`
+are refused, naming Runtime's alternative. The full map is in
+[migration](./migrate).
 
 ## When Fly.io may fit better
 

@@ -22,6 +22,10 @@
 // do next and the RequestID to quote to support; errors.Is matches them
 // against ErrNotFound, ErrRateLimited and the other sentinels.
 //
+// Agents are set up from a runtime.yml in your repo by the CLI, which makes
+// the account's agents match the file: npx withruntime agents deploy. This
+// package has no deploy of its own.
+//
 // Money is integer microdollars (1,000,000 is one US dollar). The guide is at
 // https://withruntime.com/docs/go.
 package withruntime

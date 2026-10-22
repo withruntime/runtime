@@ -14,7 +14,7 @@ from typing import Any, AsyncIterator, Optional
 from urllib.parse import quote
 
 from .._errors import ConnectionError, RuntimeError
-from .apps import _UNSET, _fields
+from .apps import _UNSET, _cursor, _failure, _fields
 
 # A build is done once it is one of these.
 BUILD_ENDED = frozenset({"succeeded", "failed", "cancelled", "superseded"})
@@ -31,17 +31,8 @@ async def _sleep(seconds: float) -> None:
     await sleep(seconds)
 
 
-def _failure(code: str, hint: str, cursor: Optional[str]) -> RuntimeError:
-    return RuntimeError(hint, code=code, hint=hint, details={"cursor": cursor})
-
-
 def _invalid(cursor: Optional[str], hint: str = "Retry the log from the last received cursor.") -> RuntimeError:
     return _failure("build_log_invalid", hint, cursor)
-
-
-def _cursor(value: Any) -> bool:
-    return isinstance(value, str) and 0 < len(value) <= 4096 and \
-        not any(ord(c) < 0x20 or ord(c) == 0x7F for c in value)
 
 
 def _failing_step(value: Any) -> bool:

@@ -152,6 +152,7 @@ proxy.
 | `sandbox.files.changed`      | Files changed under a watch that sends to webhooks                                                           |
 | `sandbox.out_of_memory`      | The sandbox ran out of memory and Linux ended a command's program; `outOfMemory` says how many and its size  |
 | `sandbox.secret_not_applied` | A request carried a secret's placeholder that was not replaced; `secretNotApplied` says which secret and why |
+| `sandbox.network.limited`    | The sandbox met an outbound connection limit; `networkLimited` says which and its figure                     |
 | `snapshot.ready`             | A snapshot finished and can be started from                                                                  |
 | `snapshot.failed`            | A snapshot could not be taken                                                                                |
 | `snapshot.deleted`           | A snapshot was deleted or expired                                                                            |
@@ -166,6 +167,8 @@ proxy.
 | `upstream_proxy.removed`     | Your upstream proxy was removed                                                                              |
 | `credit.low`                 | Credit lasts under 5 days at this month's pace; `credit` has what is left and what 5 days need               |
 | `credit.empty`               | No credit is left; `credit` has `availableMicros` and `agentOnly`                                            |
+| `job.run.failed`             | A [job](./jobs#alerts)'s run ended failed, timed out or unknown, with no retry left                          |
+| `job.recovered`              | A job's run succeeded after runs that failed                                                                 |
 
 Each event carries the resource as it was:
 
@@ -189,6 +192,34 @@ Each event carries the resource as it was:
       "funding": "paid",
       "pausable": true
     }
+  }
+}
+```
+
+`job.run.failed` and `job.recovered` carry the job and the run, never its
+output: a run's output can hold the secrets in its environment. A run that
+will be retried sends none until its last attempt ends. `job.run.failed` is
+sent for every run that ends failing; `failingRuns` says how many in a row. A
+job's own [alert](./jobs#alerts) sends the same body to its own URL, with
+`logTail`, the run's last 20 lines of output (at most 2,000 bytes):
+
+```json
+{
+  "type": "job.run.failed",
+  "data": {
+    "job": { "id": "5d1c…", "name": "nightly", "failingRuns": 3, "afterFailures": 3 },
+    "run": {
+      "id": "9a7e…",
+      "attempt": 1,
+      "trigger": "schedule",
+      "state": "failed",
+      "reason": "timeout",
+      "exitCode": -9,
+      "scheduledFor": "2026-10-18T09:00:00.000Z",
+      "startedAt": "2026-10-18T09:00:04.210Z",
+      "endedAt": "2026-10-18T09:30:04.215Z"
+    },
+    "logTail": ["fetching page 412", "still waiting on api.example.com"]
   }
 }
 ```
@@ -282,6 +313,31 @@ dropped (a flood, or the watch fell behind): list the folder again for either.
 when the sandbox restarted). While a sandbox that pauses itself does nothing,
 its watch is not read, so the watch never keeps it awake; a change arrives
 within seconds of the sandbox next doing work, or when it wakes.
+
+`sandbox.network.limited` is sent when a sandbox meets one of its
+[outbound connection limits](./sandbox-environment#the-network): at most once
+an hour for each limit, with the host's next usage reading, within about a
+minute. `limit` is `connections` (open at once: a new one was refused),
+`new-connections` (a second) or `destinations` (new hosts and ports a minute),
+where a connection waited its turn. `most` is the figure it was held to,
+`count` how many times by the report, and `at` when it was first met that
+hour. `GET /v1/sandboxes/{id}/network` shows every limit in `limits`.
+
+```json
+{
+  "type": "sandbox.network.limited",
+  "data": {
+    "sandbox": { "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f", "state": "running" },
+    "networkLimited": {
+      "limit": "connections",
+      "most": 64,
+      "count": 1,
+      "at": "2026-10-15T18:00:00.000Z",
+      "message": "The sandbox reached its limit of 64 open connections at once, so a new one was refused. Close or reuse connections it no longer needs. GET /v1/sandboxes/7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f/network shows its limits."
+    }
+  }
+}
+```
 
 ```json
 {

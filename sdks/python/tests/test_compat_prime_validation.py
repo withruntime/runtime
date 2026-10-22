@@ -160,7 +160,7 @@ class Validation(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_user_signatures_and_rpc_validation_match_review(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.6')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.7')
         from prime_sandboxes import SandboxClient as OfficialSync, AsyncSandboxClient as OfficialAsync
         from prime_sandboxes.rpc_command_session import build_command_session_start_request
         for runtime, official in ((SandboxClient, OfficialSync), (AsyncSandboxClient, OfficialAsync)):
@@ -259,7 +259,7 @@ class Validation(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('RUNTIME_COMPAT_OFFICIAL') == '1', 'Pinned official SDK opt-in')
     def test_pinned_official_nested_request_response_and_validation_match(self):
-        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.6')
+        self.assertEqual(importlib.metadata.version('prime-sandboxes'), '0.4.7')
         from prime_sandboxes import models as official
         for provider in (models, official):
             request = provider.CreateSandboxRequest(name='box', docker_image='python:3.13',
@@ -279,5 +279,10 @@ class Validation(unittest.TestCase):
                            {}, {'checkpoint_id': 'x' * 65}):
                 with self.subTest(fields=fields), self.assertRaises(ValueError):
                     provider.CreateSandboxRequest(name='box', **fields)
+            # 0.4.7: arch is amd64, arm64 or None (the server's amd64).
+            for arch in (None, 'amd64', 'arm64'):
+                self.assertEqual(provider.CreateSandboxRequest(name='box', docker_image='python:3.13', arch=arch).arch, arch)
+            with self.assertRaises(ValueError):
+                provider.CreateSandboxRequest(name='box', docker_image='python:3.13', arch='x86')
         self.assertEqual(models.SandboxListResponse(sandboxes=[sandbox_data()], total=1, page=1, perPage=50, hasNext=False).model_dump(by_alias=True),
                          official.SandboxListResponse(sandboxes=[sandbox_data()], total=1, page=1, perPage=50, hasNext=False).model_dump(by_alias=True))

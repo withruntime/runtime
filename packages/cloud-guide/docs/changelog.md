@@ -8,8 +8,665 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 21 October 2026
+
+- **Previews are never indexed.** Every answer on a preview address, private
+  or public, carries `X-Robots-Tag: noindex, nofollow`, and each preview
+  address serves Runtime's own `robots.txt`, so no preview shows up in search.
+  A custom domain serves your site's own headers and `robots.txt`; use one for
+  a site that should be found. See
+  [search engines](./networking#search-engines).
+
+- **First in line by plan when room is short.** When a region is short of
+  room, the room that frees goes first to the highest lane waiting for it:
+  Enterprise, then Scale, Pro Max, Pro and Free, from the account's plan,
+  and Runtime's own work after every customer's. Until an account chooses a
+  plan, paying accounts go before trials. A create or wake refused
+  `no_capacity` keeps its place while it is sent again with the same
+  `Idempotency-Key`, as the SDKs do, and the refusal says its place, how
+  many wait ahead and its lane, also in `details.line`. Nothing already
+  running is stopped for a higher lane. See
+  [waiting in line for room](./limits#waiting-in-line-for-room).
+
+<!-- launch: apps -->
+
+- **Apps wait in line for room by plan too.** An App that needs a copy no
+  server has room for waits in its region's line by its account's lane, as
+  creates and wakes do. See
+  [waiting in line for room](./limits#waiting-in-line-for-room).
+
+<!-- /launch: apps -->
+
+<!-- launch: ci -->
+
+- **CI/CD's checks get machines by plan (private beta).** When machines are
+  short, a higher lane's checks are taken and given machines first, and a
+  waiting job says where it stands, such as
+  `short of room: waiting for room, 1 ahead (pro 1); this lane is free`.
+  See [price and limits](./ci#price-and-limits).
+
+<!-- /launch: ci -->
+
+<!-- launch: ci -->
+
+- **CI/CD reviews each change with AI, beside its tests (private beta).** A
+  `review` step asks a Runtime Agent on your own Claude accounts to read the
+  diff, the description and what was asked for, from the same moment the
+  tests start, and pass or block the change with each finding's file, line
+  and fix. The model has no tools and none of your secrets. Each review takes
+  the account with the most usage left and moves to the next when one runs
+  out; a check waits only when every account is out, and never fails for it.
+  The verdict is on the job in the API, the SDKs, `runtime ci logs` and the
+  console. See [Review](./ci#review). Agent session keys starting
+  `ci-review:` are now CI/CD's own: starting a session with one is refused
+  with `invalid_request`.
+- **A push to the production branch checks first, on as many machines as
+  it has jobs.** Its check takes machines before any pull request's: while
+  it is short, the others ask for none and give back each machine they have
+  nothing left to run on, so it starts within seconds of room freeing. It
+  is no longer held to 8 machines, and a pull request's check no longer to
+  8 by default: each holds as many as it has jobs ready, up to the
+  account's 256 at once. A gate waiting for room waits until it comes,
+  never failing. See [Read checks, jobs and logs](./ci#read-checks-jobs-and-logs).
+- **CI/CD keeps only the snapshots a check can still use.** When a push to
+  the production branch changes the setup, the machine size or a `cache`
+  file, the warm snapshots of the old key are deleted an hour later, not
+  kept their 7 days, and a check's copy of its machine is deleted when the
+  check ends, however it ended, not a day later. They leave your snapshot
+  list and your storage bill then. See [A warm start](./ci#a-warm-start).
+- **A CI/CD check runs only what the change reaches, and never fails for
+  want of machines.** A split step's `affected` command now runs before the
+  plan, on the check's first machine: a step it reaches none of has no job
+  (before, each of its parts passed with nothing to run), its parts are
+  dealt from the files it reaches, and a change that reaches nothing shows
+  one passing job, `nothing reached`. Parts left to Runtime are no more than the machines a check runs
+  at once. A check with no machine to run on waits for one, never failing
+  for it, until machines come or it is cancelled. See
+  [Split test files](./ci#split-test-files).
+- **A CI/CD check runs only what the change reaches, keeps each result by
+  its content, and never fails for want of machines.** Runtime reads what
+  each test file reads from your repository (its imports, the files its code
+  names, the scripts it runs) and keys its result by exactly those files'
+  contents: a test file a change can't make fail keeps the pass it had on
+  the production branch, or in another pull request of the repository by
+  someone with write access, and runs on no machine. A part or step with nothing left to run
+  passes at once, on no machine. Parts left to Runtime are no more than the
+  machines a check runs at once. A check with no machine to run on waits for
+  one, never failing for it, until machines come or it is cancelled. A
+  split's `affected` command is no longer read: remove it. See
+  [Passed before](./ci#passed-before).
+- **No flaky test hides in CI/CD (private beta).** Every run of every test
+  is kept by commit and content key. A test that passed and failed on the
+  same inputs on your production branch is quarantined at once: it still
+  runs and reports, and blocks nothing. It is handed to an owner from
+  `CODEOWNERS` or its last change, with 48 hours to fix or delete it, and
+  ends only once it passes 100 times in parallel forks. A pull request's
+  new or changed tests run 20 times before it can pass. See the flakes in
+  the console, `runtime ci flakes`, `GET /v1/ci/flakes` and every SDK.
+  `quarantine: { clean_runs: N }` is no longer accepted: until you remove
+  it from your config, every check fails with an error that names it. See
+  [Flaky tests](./ci#flaky-tests).
+
+- **Every file `cache` matches keys CI/CD's warm machine (private beta).** A check's warm
+  snapshot was keyed by only the first 32 files its `cache` patterns
+  matched, so a change to any file past those kept the old snapshot, with
+  what it had installed. Now every matching file is in the key. A repository
+  matching more than 32 sets up a new warm machine once, on its next push to
+  the production branch. See [A warm start](./ci#a-warm-start).
+
+- **CI/CD tells GitHub one check run per check.** A check shows as one run,
+  `runtime`, in progress and then its conclusion, linked to the check in the
+  console; a failed one names each failed job, its log's last line and a link
+  to it. GitHub hears a check only when its state changes: at most two calls
+  of your installation's hourly GitHub budget a check, where a check of 42
+  jobs made 170. Every read of GitHub is conditional, so one that has not
+  changed costs nothing of the budget. When the budget runs low, telling
+  GitHub waits first and a verdict never waits on it. Each job, its state,
+  why it waits and its log are in the console and the API. Runs per job
+  (`runtime / <step>`, `runtime / test (1/2)`) are no longer made: a branch
+  rule that requires one waits for it forever, so require `runtime`
+  instead. See [What GitHub shows](./ci#what-github-shows).
+- **A pull request's next push starts on its own machines.** A check's
+  machines are its pull request's own, left paused by its last push with
+  their build caches (all woken on its first ask, in a second or two), then
+  the warm pool's, then the rest in one batch fork, or all at once from the
+  warm snapshot. With `keep:` in `runtime.yml` (1 to 16; off unless set), a
+  pull request keeps that many machines paused for its next push, billed as paused
+  sandboxes at {{paused-storage-rate}} per decimal GB per 30-day month, and
+  deleted when it merges or closes, or a day after its last push. Only the
+  same pull request's next push runs on them, and only a writer's own
+  branch's pull request keeps any: never a fork's, a push to the production
+  branch, nor a gate. Past the account's 2 machine starts a second or 256 at
+  once, a check waits in line with the reason on its jobs; it no longer
+  falls back to a full setup. Each check's `machines` says where they came
+  from and how soon, in the API, the SDKs, `runtime ci get` and the console.
+  See [A pull request's machines](./ci#a-pull-requests-machines).
+
+<!-- /launch: ci -->
+
+- **A slow upload is given the time to arrive.** A request's 110 seconds to
+  answer now start once its body has arrived, so a chunk of a large upload
+  over a slow or busy link is no longer cut while its bytes are still coming
+  in, and answered `503 api_unavailable` as if the API were at fault. A body
+  may take up to about 280 seconds to arrive. One still arriving after that
+  is answered `408 request_timeout` with the bytes received so far; the SDKs
+  and the CLI get `503 body_stalled` and send it again by themselves. Many
+  uploads at once over one slow link share it: send fewer at once. See
+  [files](./api#files).
+- **30 days to top up.** When credit runs out in an account that has bought
+  credit or saved a card, its stopped and paused sandboxes' disks are kept 30
+  days, not seven, with a notice first and a warning the day before, and
+  adding credit in that time keeps them. Other stored items, and every item
+  in an account that has done neither, keep their seven days. See
+  [when your balance runs out](./pricing#when-your-balance-runs-out).
+- **Many copies of a large snapshot at once can be asked to retry.** A copy
+  of a snapshot that saved memory, and a wake, load all of that memory within
+  seconds, and a server now counts each one at all of it from its start, not
+  a quarter. A burst of copies or wakes bigger than one server's memory no
+  longer overfills it: the ones past its room wait while it makes room, and
+  if none comes in time answer `503 host_memory_pressure` with
+  `Retry-After`. Send them again after it, with the same `Idempotency-Key`,
+  as the SDKs do. See [errors](./api#responses-and-errors).
+
+<!-- launch: apps -->
+
+- **Apps and Functions deployed from an image go live again.** On 19
+  October every deploy from an image failed while warming, with "warming the
+  image stopped 3 times without an answer". Such a version stays failed:
+  deploy it again. The App's owner, the agent or API key that created it,
+  now needs `write_file` on sandboxes beside `create`, `list`, `get`, `stop`
+  and `exec`; without one of them the deploy fails at once with
+  `deploy_build_failed` and "Runtime's machine that saves this version was
+  refused", in place of three silent retries. See
+  [Deploys, health checks and rollback](./apps#deploys-health-checks-and-rollback).
+
+<!-- /launch: apps -->
+
+- **A scheduled job keeps data between runs on a volume.** A job's
+  `compute.volumes` attaches up to four of your volumes to every run, each at
+  a path, as a sandbox create does: read-write, one run at a time, so each run
+  reads what the last one wrote, or a read-only `snapshot` copy. In the CLI,
+  `runtime jobs create ... --volume <id>:/data`, and for a job you already
+  have, `runtime jobs update <job> --volume <id>:/data` or `--no-volumes`; in
+  the SDKs' next release. A run that waits for its volume says so with
+  `blockedReason` `volume`. See
+  [Keep data between runs](./jobs#keep-data-between-runs).
+- **A full region answers 503, and an account at its limit 429.** No room
+  for a sandbox, a fork, a restart, a wake, a build or a volume,
+  `no_capacity`, is now `503 Service Unavailable` with `Retry-After: 1`.
+  The account at a limit on what runs at once, `quota_exceeded` or
+  `no_credit_running_limit`, is now `429 Too Many Requests` with
+  `Retry-After: 5`. All three were `409 Conflict`, which a client that
+  retries only 5xx and 429 gave up on. Such a client now retries them with
+  no change. The body is the same, so code that reads `error.code` keeps
+  working. In the SDKs' next release the error's
+  class follows the status: `no_capacity` is a
+  `ServiceUnavailableError`, and the two limits are a `RateLimitError`, not a
+  `ConflictError`. The SDKs still wait them out on create, wake and restart,
+  and return them at once elsewhere, as before. See
+  [errors](./api#responses-and-errors).
+- **Every error says whether to retry it, and its status means what HTTP
+  says.** Each error now has `retryable`, `true` or `false`; a retryable one
+  always carries a `Retry-After` header, and no other does. Each code has one
+  status, listed with every code in [Responses and errors](./api#responses-and-errors)
+  and in the OpenAPI document's `x-error-codes`. Codes are unchanged, so code
+  that reads `code` keeps working; a check on the status may need a look:
+  - 409 is now only a state you change first, or one that clears by itself
+    (`snapshot_not_ready`, `image_not_ready`, `volume_releasing`, ... are
+    retryable).
+  - Your own limits that clear by themselves are 429, always with
+    `Retry-After`: `quota_exceeded` on what runs at once (`details.limit`
+    such as `sandbox.count` or `sandbox.memory_mib`), the `no_credit_*`
+    limits on what runs, `process_limit`, `transfer_limit`, `guest_busy`,
+    `build_in_progress` and the daily caps.
+  - A count that falls only when you delete something is 409, with
+    `retryable: false` and no `Retry-After`, so no retry library retries
+    it: `no_credit_kept_limit`, `limit_reached` (keys, invitations,
+    compartments) and `quota_exceeded` on what is kept (volumes, snapshots,
+    images, secrets, `sandbox.kept`). Delete one, or raise the limit.
+  - A full region or host is 503 with `Retry-After`: `no_capacity`,
+    `host_capacity`, `own_share_full`.
+  - A product switched off on a deployment is 501, not 503, so no client
+    retries it.
+  - A fault of ours that a retry does not fix is 500 (`operation_failed`,
+    `price_unavailable`, and `watch_failed`: Runtime's own file watcher in a
+    sandbox); a service behind the API is 502 or 504.
+  - A request that cannot be done as asked is 422: `disk_too_small`,
+    `idempotency_conflict`, `no_credit_size_limit`, a program in your sandbox
+    that failed (`interpreter_failed`, `tunnel_unavailable`).
+- **The SDKs read `retryable`** (in the same versions). They retry an answer
+  that says `retryable: true` after its `Retry-After`, and never one that says
+  `false`. A create, wake or restart waits out room and the account's limits
+  for its own wait for room (two minutes by default; `0` returns at once), and
+  a fork returns them at once. An answer whose wait is over a minute (a daily
+  cap) is returned at once, with `retryAfterMs`. The Go, Ruby and Java SDKs now
+  also resend a call refused `guest_busy`, `busy` or `rate_limited` until its
+  deadline, as JavaScript and Python do. The CLI's `--json` errors carry
+  `retryable` and `retryAfterMs`.
+- **A pause succeeds when its server's snapshot space is full.** Saving a
+  snapshot now leaves the room each server keeps for pausing the sandboxes it
+  runs. When that room is short, the server makes room while the pause
+  waits, up to about a minute: it compresses saved memory images, moves kept
+  snapshots to other servers, and copies paused sandboxes to storage and
+  shrinks them. If there is still no room, the sandbox is paused all the
+  same: the server holds its memory and saves it once there is room, and a
+  wake meanwhile resumes it at once. Such a pause used to fail. Only a
+  sandbox too near the end of its time to save its memory later is not
+  paused: the pause fails with `no_capacity` (503, retryable) and the sandbox
+  keeps running, its memory intact. A snapshot the server has no room for is
+  refused with `host_capacity` (503); retry it later. See
+  [pause, wake, extend](./javascript#pause-wake-extend).
+- **Accounts without credit hold up to 10 API keys.** A new key past ten is
+  refused with `no_credit_key_limit` (409) and says how to make room: revoke a
+  key you no longer use, or add credit, after which there is no limit. Every
+  key an account already holds keeps working, and keys Runtime makes for the
+  console, its terminals and image builds are not counted. See
+  [free usage](./included-usage#without-credit).
+
+<!-- launch: apps -->
+
+- **Apps with a volume, and restart (private beta).** An App can mount one of
+  your volumes with `volume: {volumeId, path}`. It runs one copy on the
+  volume's server. Each deploy, rollback and restart stops that copy (SIGTERM,
+  then `stopGraceSeconds`) before the next boots fresh with the volume, and
+  the deploy record says the downtime. `POST /v1/apps/{id}:restart` and
+  `POST /v1/functions/{id}:restart` start any App's or Function's live
+  version afresh as a deploy of its own (`runtime_apps_restart` and
+  `runtime_functions_restart` in MCP). A live copy of an App or a Function
+  failing its health check for `healthFailSeconds` (60 by default) is
+  replaced, and its version's history shows it. In the JavaScript SDK
+  0.30.0, the Python SDK 0.29.0, `runtime apps restart` and
+  `runtime functions restart`; outside the beta these calls are refused
+  with `product_in_beta`.
+- **An App with `minCopies: 0` answers its first request from a frozen copy.**
+  When nobody calls it, it keeps one copy frozen, free, rather than none, so
+  the first request waits for that copy to wake, not for a new one to start:
+  milliseconds within 30 minutes of the last request, a few hundred
+  milliseconds after that. Each server keeps up to the App's `spares` frozen
+  copies in memory and parks the rest. The server a copy runs on wakes it, so a
+  wake never waits on Runtime's central scheduler, even when that is down. See
+  [How copies scale](./apps#how-copies-scale).
+
+<!-- /launch: apps -->
+
+## 20 October 2026
+
+- **`runtime.apps` in the TypeScript SDK, for the Apps private beta.**
+  `withruntime`'s next release (`npm i withruntime@latest`) has
+  `runtime.apps`: create an App, deploy an image to it, follow the deploy,
+  roll back, and list its versions and copies. Apps is a private beta for now: an account outside it gets
+  `product_in_beta` (403), with a hint to ask support to join.
+- **Book room for a burst.** Book room for up to 10,000 sandboxes of one size
+  for a window of up to 24 hours, starting now or within 14 days, and be told
+  at once whether you have it. In the window your creates are never refused
+  `no_capacity` or `quota_exceeded` up to what you booked; sandboxes you run
+  bill as usual. A decline says why, the most that fit and the nearest window that
+  takes them all. In the API (`POST /v1/reservations`), the JavaScript,
+  Python, Go, Ruby and Java SDKs (`runtime.reservations`), the CLI
+  (`withruntime reservations book`) and MCP. See
+  [Book room for a burst](./reservations).
+- **Booked room left unused costs a little.** Room a booking holds that none
+  of your sandboxes uses now costs a quarter of the memory rate,
+  {{booked-unused-rate}} per GiB-hour, with no CPU charge; sandboxes you run
+  bill as usual. 300 sandboxes of 2 GiB booked for 2 hours cost at most
+  {{booked-unused-example}} if none run, and nothing if you cancel at least an
+  hour before the start. A booking's answer, the CLI and the console's Booked
+  room card say the most it can cost. See [What it costs](./reservations#what-it-costs).
+- **Standing room for a pool.** Keep room for a pool of sandboxes until you
+  cancel it: name the snapshots it forks from and the room is held on the
+  servers holding them, so a sandbox replaced after each use is never
+  refused for room or limits. `forKey` keeps it for one key's sandboxes, and
+  `inUse` says how much of it runs now. Room none of them uses costs a
+  quarter of the memory rate, {{booked-unused-rate}} per GiB-hour. See
+  [standing room](./reservations#standing-room-for-a-pool).
+- **Audit log entries older than 400 days are now removed.** The audit log
+  has always promised to keep each entry for at least 400 days; until now it
+  kept every entry forever. From this release, entries past 400 days are
+  deleted, oldest first, and none younger is ever touched. See
+  [the audit log](./teams#audit-log).
+- **Node trusts HTTPS from a sandbox's first command.** A sandbox with
+  egress secrets checks its HTTPS with Runtime's own certificate authority,
+  and Node, which keeps its own roots, learns it from `NODE_EXTRA_CA_CERTS`.
+  A sandbox's or a scheduled job's first commands, in its first few seconds,
+  could start without that variable, and Node refused every HTTPS call with
+  `SELF_SIGNED_CERT_IN_CHAIN`. They now have it from the start. See
+  [networking](./networking).
+- **The CLI says when a certificate is not trusted.** Behind a proxy or
+  firewall that inspects TLS with its own authority, every call failed as
+  "No answer from Runtime". It now says the certificate presented is not one
+  your machine trusts, with its code, and to point `NODE_EXTRA_CA_CERTS` at
+  the proxy's certificate.
+- **`runtime images build -f` reads the Dockerfile as `docker build` does.**
+  `runtime images build . -f apps/web/Dockerfile` builds a monorepo's app with
+  the repository as its context: `-f` is read from where you run the command,
+  and a path inside the folder still works. See [images](./images).
+- **Apps and Functions: what Cloudflare's cache serves is outbound traffic
+  (private beta).** Once Cloudflare's cache serves Apps and Functions, the
+  bytes it serves for an App's or a Function's addresses and custom domains,
+  without reaching it, are charged as outbound traffic, the same as a
+  sandbox's: from the account's {{outbound-allowance}} a month free first, then
+  {{outbound-rate}} per decimal GB. They are read from Cloudflare's analytics
+  an hour at a time, charged once per hour, and shown in `GET /v1/usage` under
+  `outbound`. An App or Function made without credit sends for free and uses
+  none of the allowance.
+- **Storing several secrets at once no longer fails.** Writing egress
+  secrets (`PUT` or `DELETE /v1/egress-secrets/{name}`) or the upstream proxy
+  from parallel jobs of one account used to fail with 503 busy for all but
+  one of them. Now the writes wait in line and each one succeeds. See
+  [the API](./api).
+- **A copy of a snapshot starts even when its servers are full.** When the
+  servers holding a snapshot have no room, or `spreadFrom` rules them out, the
+  create now starts on another server, the snapshot copied there straight
+  from a server that holds it, instead of answering `no_capacity`. This works
+  from the moment the snapshot is `ready`, even before its compression ends.
+  See [keeping copies on several servers](./api#keeping-copies-on-several-servers).
+- **A wake waits for room instead of failing.** When a paused sandbox's host
+  is short of room only because of work Runtime runs at the lowest priority
+  there (such as Runtime's own CI), waking it now pauses that work and waits
+  up to 20 seconds for the room, rather than answering `no_capacity` at once.
+  Requests that wake a sandbox by themselves do the same. See
+  [a paused sandbox will not wake](./troubleshooting#a-paused-sandbox-will-not-wake).
+- **Sandbox desktop, browser, MCP servers and mounts in the console.** A
+  sandbox's page now lets you open its desktop and watch it live, record it,
+  start or stop its browser, and see or stop its code contexts, MCP servers,
+  bucket mounts, file watches and tailnet, each stop asked first. Networking
+  gains the switch for your sandboxes to
+  [reach each other by name](./networking#reach-your-other-sandboxes-by-name).
+- **Faster website on phones.** Pages on withruntime.com no longer download
+  two extra font files, 140 KB, to look for a single character such as "10⁹"
+  or "✓": the home page loads about a third lighter on a phone, and the
+  pricing, comparison and blog pages about a fifth lighter. See
+  [pricing](./pricing).
+- **Clearer page titles in search results.** Guides now show titles that
+  say what they cover, such as "Python SDK for agent sandboxes" or "Custom
+  sandbox images from any Dockerfile", so they are easier to find. See
+  [the Python SDK](./python).
+- **CI/CD leaves no run "Waiting" on GitHub after its check ended.** A
+  check restarted midway, or one whose tests were split into a different
+  number of parts, could leave old `runtime / …` runs queued or in progress
+  on the commit for good, though the check itself had passed, failed or been
+  cancelled. Within a few minutes of a check's end, every run of it GitHub still
+  shows open is now ended: a job's run with its job's result, an extra
+  `runtime` run with the check's own, and a run of a job the check no longer
+  has as Cancelled, "Not run: its check ended before this run of the job
+  began." Another check of the same commit keeps its runs as they are.
+- **Pull requests start from a copy of your production branch that is
+  closer to its newest commit.** The ready-made machine each check starts from
+  now moves to a production push's commit while that push's own check runs,
+  not after it ends, so a pull request checked a few minutes later has fewer
+  files to catch up on.
+- **A CI/CD check that can no longer finish now fails, with the reason.**
+  Before, a check whose runner stopped, or whose job hung, could show "in
+  progress" on GitHub for hours. Now it fails within minutes of the point it
+  can no longer finish, saying why: a job sent nothing for longer than its
+  30-minute limit, no
+  machine came for its jobs in 45 minutes, no runner has held it for 30
+  minutes, or it waited an hour to start. Re-run it on GitHub to check the
+  commit again.
+- **Choose what happens when an App release gets worse (private beta).** An
+  App or Function now has `releaseWatch`: when a new version's errors or speed
+  get clearly worse in its first 15 minutes, `alert` (the default) tells the
+  account's owners, `rollback` also goes back to the previous version by
+  itself, and `off` does neither. Each release judged worse posts an
+  `app-release-worse` notice to `GET /v1/notices` for every owner, shown on
+  Usage & billing and emailed to them. Set it on create or update from the
+  API, the MCP tools, or the JavaScript 0.24.0, Python 0.22.0, Go 0.11.0, Ruby
+  0.10.0 and Java 0.10.0 SDKs. Only an account-wide key made on the website
+  turns it off: a key in a compartment, a key made by another key and a
+  sandbox's own session key may choose `alert` or `rollback`, and `off` is
+  refused with `403 forbidden` ([compartments](./security#compartments),
+  [run a swarm](./teams#run-a-swarm)).
+
+<!-- launch: ci -->
+
+- **CI/CD runs your own automation's pushes (private beta).** A repository
+  can now trust GitHub Apps: list each App's login (`my-bot[bot]`) in
+  `trustedApps` with `POST /v1/ci/repositories/{id}:update`. Pushes by those
+  Apps then run as code from someone who can write, and their checks that
+  are waiting now run. Only a full key made by an owner or admin sets the
+  list. A push by any other App still waits,
+  and its `runtime` check on GitHub says which App and how to trust it. See
+  [CI/CD](./ci#trust-your-own-automations-app).
+
+<!-- /launch: ci -->
+
+- **A job tells you when it fails, runs your image, and changes in place.**
+  A job's `alert` posts to your webhook, signed with a jobs secret, or emails
+  you once runs fail in a row, with the run's reason, exit code and last lines
+  of output, and once more when a run succeeds again. Your account's webhooks
+  hear `job.run.failed` and `job.recovered`. `--image` starts each run from an
+  image of yours, and `runtime jobs update` (`PATCH /v1/jobs/{id}`) changes a
+  job's command, image, size, secrets, alert, timeout or retries and keeps its
+  history. In `withruntime` 0.29.0 for JavaScript and the CLI, and 0.28.0 for
+  Python. See [alerts](./jobs#alerts).
+- **Every App has a readable address (private beta).** Every App and
+  Function, those you have and every new one, answers at its name, 16 random characters, then its
+  account's handle: `https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/` for the App
+  `shop` of the account Acme, in `url` on the App and its deploys, in the API,
+  the console and every SDK. It is kept for life: a rename leaves it, and a
+  handle is never another account's, even after an account closes. Every App
+  keeps its id's address too.
+- **A disk snapshot of a sandbox that is writing no longer fails.** A
+  `mode: "disk"` snapshot of a running sandbox used to fail with "could not
+  confirm that its writes reached its disk" whenever a program in it was
+  writing. Its pause now waits for the sandbox to write out what it still
+  held in memory before the snapshot is taken. That takes milliseconds when
+  the sandbox is quiet and can take a few seconds while it writes. Memory
+  snapshots are as fast as before. See [the API guide](./api).
+- **A trust center for your security review.** [withruntime.com/trust](https://withruntime.com/trust)
+  gathers what a security team asks a vendor for on one page: the public
+  documents, where data lives, how sandboxes are kept apart, encryption,
+  sign-in, availability and recovery, every subprocessor, and how to report
+  a vulnerability. A filled-in questionnaire is on request from security@.
+  See [security and compliance](./trust).
+
+<!-- launch: apps -->
+
+- **A paying account's stopped disks are kept.** In an account with credit or
+  a card saved, a stop from an older client, the end of its time limit or a
+  crash no longer deletes the disk after three days: it is kept like any
+  other stop, billed as [paused storage](./pricing#paused-storage), until you
+  delete it. Disks already counting down their free days are kept the same
+  way, and stay free until those days end; storage is billed only from then.
+  An account that adds credit or saves a card while its disk counts down
+  keeps that disk too. An account with neither still has the three free
+  days, one notice, then the deletion.
+- **A paying account's stopped disks are kept.** In an account with credit,
+  a card saved or a past purchase, a stop from an older client, the end of
+  its time limit or a crash no longer deletes the disk after three days: it
+  is kept like any other stop, billed as
+  [paused storage](./pricing#paused-storage), until you delete it. If the
+  account's credit runs out, that disk is still kept at least 30 days from
+  the stop, with the usual notices. Disks already counting down their free
+  days are kept the same way, and stay free until those days end; storage is
+  billed only from then. An account that adds credit or saves a card while
+  its disk counts down keeps that disk too. An account with none of these
+  still has the three free days, one notice, then the deletion.
+- **An App can trust every `x-runtime-*` header it reads (private beta).**
+  The router removes every `x-runtime-*` header a visitor sends, on HTTP/1.1
+  and HTTP/2, before it adds its own: the visitor's address, country, city
+  and the request's id. A visitor can no longer make up a header in that
+  namespace and have it reach an App. See
+  [what an App's requests carry](./api#what-an-apps-requests-carry).
+- **Scraping accounts move to the scraper addresses by themselves.** An
+  account whose sandboxes ask for their own address from many sandboxes, keep
+  reaching a site that blocks by address, or open thousands of connections to
+  one site now sends from the addresses kept for scrapers without anyone
+  marking it, and goes back to the shared ones after a quiet day. Its
+  sandboxes keep their internet throughout. See
+  [Shared addresses](./egress#shared-addresses-and-per-address-limits).
+- **A sandbox whose wake failed on our side recovers by itself.** When the
+  machine holding a paused sandbox could not hand it back, every command used
+  to answer `operation_failed` until you stopped it. Now the sandbox is
+  checked again every five minutes: once the machine lets it go, it is paused
+  again and your next command wakes it, from its disk if its memory could not
+  be kept (`memoryRestored: false`). See
+  [A sandbox stays resuming](./troubleshooting#a-sandbox-stays-resuming-or-its-operation-never-finishes).
+- **An account that never paid is suspended for clear abuse.** Mining, a port
+  scan or a sweep of addresses, or mail sent straight to many mail servers now
+  suspends an account that has never paid, as trying one internal address
+  after another already did; its sandboxes are paused with their files kept.
+  An account that has paid is still never suspended for it: only the one
+  sandbox loses its network and is paused. See
+  [security](./security#network-access).
+- **Secrets for different sandboxes can share one variable.** A secret can
+  now name `env`, the environment variable its sandboxes see it in, when that
+  is not its name: keep one GitHub token per repository, each scoped to that
+  repository's sandboxes, and every sandbox and App copy sees its own as
+  `GITHUB_TOKEN`. Set it with
+  `runtime secrets set GITHUB_TOKEN_WEB --host api.github.com --only-label repo=web --env GITHUB_TOKEN`,
+  `env` in every SDK and the API, or the Variable field on the console's
+  Secrets page. A store or scope change that would give one sandbox two
+  secrets of the same variable is refused. Before, a secret's
+  name was always its variable, so each token needed a name of its own. See
+  [Secrets sandboxes never see](./security#secrets-sandboxes-never-see).
+
+<!-- /launch: apps -->
+
 ## 19 October 2026
 
+<!-- launch: ci -->
+
+- **CI/CD's checks, jobs and logs to read (private beta).** Every check of a
+  connected repository, newest first, with its jobs by state
+  (`GET /v1/ci/checks`); a check with its jobs in plan order
+  (`/v1/ci/checks/{id}`); a job with the tail of its log and the sandboxes it
+  ran in, where a failure's may be kept paused to look into
+  (`/v1/ci/jobs/{id}`); and a repository's test files with their quarantine
+  (`/v1/ci/tests`). In every SDK as `ci`, in the CLI as `runtime ci`, as the
+  `runtime_ci` MCP tools, and in the console under CI/CD.
+
+<!-- /launch: ci -->
+
+- **Fly Machines API on Runtime.** Code written for Fly's Machines API now
+  runs on Runtime by changing one address: run `npx withruntime fly-api` and
+  point `FLY_API_HOSTNAME` (or fly-go's `FLY_FLAPS_BASE_URL`) at it. Each
+  Machine is a sandbox; `init`, `env`, `files`, metadata, leases and the
+  restart policy work, and what isn't supported is refused with Runtime's
+  alternative. Node services can serve it themselves with `machinesApi()` from
+  `withruntime/fly`. See [switching from Fly Machines](./fly-alternative#from-machines).
+- **Every router serves the same routes, and a copy stops only once none
+  sends it visitors.** An App's or a balancer's change counts served only once
+  every Runtime router serves it, so a deploy's old copies stop only after no
+  router can still send them a visit. A router that has never had its route
+  table yet answers `router_not_ready` (503, `Retry-After: 1`) instead of
+  `no_route`. See [Networking](./networking#what-a-visitor-can-get).
+- **Functions in the CLI and the console (private beta).** `runtime functions`
+  creates, deploys, lists, reads, updates, rolls back and deletes Functions,
+  and lists their releases, versions and copies, as `runtime apps` does for
+  Apps. In the console, Functions has a list of its own beside Apps, and each
+  Function a page with its calls, errors, releases, copies and logs, with
+  deploy and rollback. Outside the beta these are refused with
+  `product_in_beta`. See the [CLI](./cli).
+- **Snapshots kept while you have credit have no end date.** A snapshot taken
+  without `retentionDays` used to be deleted a year after it was taken, even
+  with credit on the account. Now it is kept for as long as you have credit,
+  as the 4 October entry said. See [pricing](./pricing).
+- **The Vercel-compatible snapshot's `expiresAt`.** For a snapshot kept while
+  you have credit it now reports a year from now, moving on with each read,
+  instead of a year after the snapshot was made, a date that would pass while
+  the snapshot was still kept. In the JavaScript SDK's next release.
+- **The data processing addendum, privacy policy and subprocessors page say
+  more, and say what is true today.** A new subprocessor is listed at least 30
+  days before it starts, and you may object within those 30 days; email
+  legal@withruntime.com to be told when the list changes. A breach affecting
+  your data is reported to your account's owners within 72 hours, with what
+  happened, who and what it touches and what we are doing. Closing an
+  organization destroys its key first, then deletes its data, and the
+  addendum gives every step's time limit, including each server's own nightly
+  backup, gone within 44 days. Once we hold a SOC 2 report, it is shared under
+  a confidentiality agreement as our answer to audit requests. The addendum
+  lists the security measures we run now. Anthropic, which runs the AI model
+  that answers support, and Slack, which carries our team's alerts and support
+  drafts, are now on the subprocessors page. See
+  [security and compliance](./trust).
+- **Keep-alive ends when its sandbox is deleted.** In every SDK, a sandbox's
+  keep-alive (`keepAlive`, `keep_alive`, `KeepAlive`) now ends at the first
+  answer that the sandbox is gone, as when it was deleted by id from another
+  handle or another process. Before, it went on reading the deleted sandbox
+  once a minute for as long as the program ran.
+
+- **Storage is limited in GiB, not only counted.** An account keeps up to
+  500 GiB in all with credit (50 GiB without): snapshots, images, volumes,
+  volume backups and paused or stopped sandboxes, measured as they are
+  billed; snapshots up to 250 GiB of it (20 GiB without). Past a limit nothing
+  is deleted or stopped: a new snapshot, image, backup or volume is refused
+  with `quota_exceeded`, naming the limit, until there is room. An account
+  that already stored more than a limit when it began has what it stored then
+  as that limit. Both are on the Limits page and in `GET /v1/limits`. See
+  [limits](./limits#storage).
+- **Requests in flight grow to your sandbox quota.** An account's requests
+  in flight grew by six for each sandbox it holds only up to 1,024 (138
+  sandboxes). Now an account whose sandbox quota support raised past 138
+  keeps growing, six for each running sandbox up to that quota: 2,592 for
+  400 running, so each can stream four commands and two watches at once.
+  Watch streams, SSH logins, port forwards and terminals grow with it. See
+  [limits](./api#limits).
+- **A command may run 15,360 processes and threads.** One command and
+  everything it starts may hold up to 15,360 processes and threads together,
+  of a sandbox's 16,384; it was 1,024. Test runs that start many processes,
+  Java and parallel builds on a sandbox with several vCPUs no longer fail to
+  start a thread. A sandbox gets it the next time it starts; a custom image,
+  once it is built again. See [limits](./api#limits).
+- **Started copies are kept for images in use.** A server keeps an image's
+  started copies (the ones a sandbox starts from in about half a second)
+  while sandboxes are created from that image there. Once none has been for
+  2 days, the copies go. The first sandbox after that gap boots the image (a
+  few seconds), and the ones after it start from copies again. Before, every
+  image version kept its copies on every server it reached, used or not. See
+  [Images](./images).
+
+- **See which files a command read.** Run a command with `traceFiles: true`
+  and its answer lists every file and folder it, and anything it started,
+  opened, and every file it wrote; other programs on the sandbox never show
+  up. Key a test cache by those files and rerun only the tests whose files
+  changed. Background processes, every SDK and `runtime sandboxes exec
+--trace-files` have it too. See
+  [commands and processes](./api#commands-and-processes).
+- **A paying account's stopped sandboxes keep their disk 30 days.** When a
+  sandbox stops to clean up (a stop from an older client, the end of its time
+  limit, or a crash), an account that has paid, holds credit or saved a card
+  for automatic top-ups now keeps its disk free for 30 days after the stop, not
+  three. Disks already waiting in such an account move to 30 days from their
+  stop, never less than a day from now, and you get the deletion notice again
+  before the new date. Other accounts keep three days. See
+  [paused storage](./pricing#paused-storage).
+- **Turn an App's CDN off (private beta).** Cloudflare's CDN sits in front of
+  every App's and Function's addresses by default, with no separate fee. Set
+  `cdn` to `false` when you create or update one (`--cdn off` in the CLI, `cdn`
+  in the API, MCP tools and every SDK) to send visitors straight to Runtime's
+  routers, with nothing cached.
+- **Read and follow an App's logs (private beta).** What an App's or a
+  Function's copies print to standard output and error is kept 14 days and
+  read back with `GET /v1/apps/{id}/logs` (`/v1/functions/{id}/logs`), the
+  `runtime_apps_logs` and `runtime_functions_logs` MCP tools,
+  `runtime apps logs <app>` in the CLI, and `logs` in every SDK. Narrow it by
+  `since` (a time, or `30s`, `15m`, `2h`, `7d`; an hour by default),
+  `version`, `copy` and `stream`; page back with `cursor`. With `follow` it
+  streams each line as it is printed, and the SDKs and the CLI reconnect by
+  themselves and give each line once. A key that may read files reads the
+  logs of the Apps it can see, a worker's or a compartment's key its own
+  Apps' alone. Outside the beta these calls are refused with
+  `product_in_beta`.
+- **Sandboxes with egress secrets start under heavy load.** Creating a
+  sandbox that names its egress secrets (`secrets`) checks its list again
+  rather than failing at once with `secrets_unconfirmed` when the service is
+  busy, and one account
+  sending far more requests than its limit is slowed alone while other
+  accounts' calls go through. See [Keys and secrets](./security#keys-and-secrets).
+- **Request timeouts on sign-up and webhook routes.** A request to a route you
+  call before you have a key (the [MCP sign-up](./mcp), GitHub's webhooks and
+  install link, and an agent's reports) whose body has not all arrived after
+  5 seconds is now answered `408 request_timeout` straight away: send it
+  again. Before, it waited 15 seconds or more and was answered
+  `503 api_unavailable` as if Runtime had failed. See [errors](./api#responses-and-errors).
+
+- **The Prime Sandboxes drop-in follows 0.4.7.** Code written for
+  `prime-sandboxes` 0.4.7 runs on `withruntime.prime`. Its new `arch` option
+  on create works with `"amd64"`, and `"arm64"` gets a plain error before any
+  sandbox is made, as Runtime sandboxes are x86-64. `create_lan_network` now
+  takes `rules` and, as before, names Runtime's private network instead. See
+  [Migrate](./migrate).
 - **Workers start from their coordinator's snapshots.** A key made by a key
   can now create a sandbox from a snapshot that its maker, or any key above
   it, took and labelled `share: made-keys`. It can only start from it: it never lists,
@@ -76,6 +733,17 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   `secrets.narrow` (withruntime 0.22.0 for JavaScript, 0.21.0 for Python); in the console, leave the value empty
   when you edit a secret to take hosts or rules away. The audit log records each one.
   See [Secrets sandboxes never see](./security#secrets-sandboxes-never-see).
+- **Links to one file in a sandbox, with no API key.** `files:link` (API),
+  `sandbox.files.downloadUrl` and `uploadUrl` (JavaScript, with `download_url`
+  and `upload_url` in Python, and the same in Ruby, Go and Java) and
+  `runtime sandboxes link` make a secret, expiring URL for one file. A GET downloads it
+  (Range works, so videos play and downloads resume); a PUT writes it
+  atomically, up to 5 GiB. A link lasts 1 hour by default and at most 7 days;
+  `revokeLinks` ends every link of a sandbox, and revoking the key that made
+  one, or deleting the sandbox, ends it too. E2B's `downloadUrl` and
+  `uploadUrl` now work the same way. JavaScript 0.25.0, Python 0.23.0, Go 0.12.0,
+  Ruby 0.10.0 and Java 0.10.0. See [files in the API guide](./api#file-links).
+
 - **Apps, Functions and Builds in the Go, Ruby and Java SDKs (private beta).**
   Go 0.7.0 (`client.Apps`, `client.Functions`, `client.Builds`), Ruby 0.6.0
   (`client.apps`, `client.functions`, `client.builds`) and Java 0.6.0
@@ -88,6 +756,23 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 18 October 2026
 
+- **GitHub App tokens, push limits and API budgets for secrets.** A secret
+  can now hold a GitHub App's private key (`githubApp`): our servers make its
+  installation tokens and add them to your sandboxes' GitHub requests and git
+  pushes, and the key itself goes into no request. `git.push` names the
+  branches a push may update, such as `refs/heads/task/{label.task}`: each
+  label's branch belongs to the first sandbox made with it, even once it is
+  deleted, and that label can't change after the sandbox is made. Any
+  other push is refused with git's own `[remote rejected]`, as is any API call
+  that would move, merge or write to another branch. `api` caps each
+  sandbox's calls and writes an hour, lists the GraphQL mutations allowed,
+  and lets sandboxes share cached reads. A rule's path segment that is `*`
+  alone now names any one segment. See
+  [GitHub: an App's tokens, branch limits and API budgets](./security#github-an-app-s-tokens-branch-limits-and-api-budgets).
+- **SDKs take a secret's GitHub App, push limits and API budgets.**
+  `withruntime` 0.25.0 for JavaScript and 0.23.0 for Python, the Go SDK 0.12.0, and
+  the Java and Ruby SDKs 0.11.0 set and return `githubApp`, `git` and `api`. See
+  [GitHub: an App's tokens, branch limits and API budgets](./security#github-an-app-s-tokens-branch-limits-and-api-budgets).
 - **Clear refusals instead of 500 errors on sandbox create.** A create
   that asks for ports beyond 80 and 443 (`network.connect`) from an account
   without a kept top-up is refused with 403 `connect_not_allowed`, saying
@@ -150,6 +835,17 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   could not add it at that moment, the sandbox now gets a
   `sandbox.secret_not_applied` event with reason `withheld`, saying the fault
   is ours and what to do. See [events](./observability#events).
+
+<!-- launch: apps -->
+
+- **Run a command or copy a file in an App (private beta).** `runtime apps
+exec <app> -- <command>` runs a command in an App's live copy, and
+  `runtime apps cp <file> <app>:/<path>` copies a file onto it or off it. Only an owner's or admin's key may reach into a copy,
+  since it holds the App's secrets. See
+  [Apps in the CLI](./cli#apps-private-beta).
+
+<!-- /launch: apps -->
+
 - **A worker's key runs its own Apps.** A key made by another key, or a key in
   a compartment, can now create, list, deploy, roll back and delete the Apps
   and Functions its own agent made, as it does sandboxes, over the API and
@@ -165,19 +861,6 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   `id`, and listed no `image` or `build`, for every key; it now takes them.
   The `runtime_apps` tool also answers a worker's or compartment's key in the
   Apps beta, which it refused before.
-- **A pause succeeds when its server's snapshot space is full.** Saving a
-  snapshot now leaves the room each server keeps for pausing the sandboxes it
-  runs. When that room is short, the server makes room while the pause
-  waits, up to about a minute: it compresses saved memory images, moves kept
-  snapshots to other servers, and copies paused sandboxes to storage and
-  shrinks them. If there is still no room, the sandbox is paused all the
-  same: the server holds its memory and saves it once there is room, and a
-  wake meanwhile resumes it at once. Such a pause used to fail. Only a
-  sandbox too near the end of its time to save its memory later is not
-  paused: the pause fails with `no_capacity` (409, retryable) and the sandbox
-  keeps running, its memory intact. A snapshot the server has no room for is
-  refused with `host_capacity` (409); retry it later. See
-  [pause, wake, extend](./javascript#pause-wake-extend).
 - **Snapshots and forks in bursts no longer wait running.** A snapshot or a
   fork of a running sandbox now stops it at once, so the snapshot, or the
   fork's copies, hold the memory of the moment you asked, and then waits for
@@ -192,6 +875,11 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   a sixth argument in Java) and `secrets.scope(name, only)` (`Scope` in Go),
   which changes who gets an existing secret without its value. Python is
   0.17.0, Go 0.6.0, Ruby 0.5.0 and Java 0.5.0. See
+- **Give a secret to one App's copies.** `runtime secrets scope NAME --only-app <app id>`
+  gives a secret to every copy of an App, including copies later deploys,
+  restarts and scaling make; a deploy names the secrets its copies see with
+  `secrets: ["NAME"]`, and a copy holds only the placeholder. An App copy's
+  identity token now says which App it is (`app_id`). See
   [secrets sandboxes never see](./security#secrets-sandboxes-never-see).
 - **A sandbox out of memory still answers.** When a sandbox's programs fill
   its memory, Linux now ends one of them for memory, as the guide says,
@@ -240,6 +928,17 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   as TypeScript already did, instead of a CPU sandbox. Prime's new
   `lan_network_id` on create is refused before a sandbox is made, naming
   Runtime's private network. See [Migrate](./migrate).
+- **Idle sandboxes now pause after 5 minutes.** A new sandbox, browser or
+  sleeping container pauses after 5 minutes with nothing happening in it by
+  default, where it was 1 minute before. Rates are unchanged, but an idle
+  sandbox that sets no idle time now runs, and is billed for its memory, up
+  to 4 more minutes before it pauses; set `idlePauseSeconds` to 60 to keep
+  the old default. The shortest idle pause is now 60 seconds, not 10: a time
+  of 10 to 59 seconds you set on a new sandbox, or change to, is raised to 60,
+  so that sandbox runs, and is billed, until 60 seconds idle. The answer shows
+  the 60 it got; 0 still turns pausing off. Sandboxes made before today keep
+  the setting they have, under 60 too. See
+  [pause when idle](./javascript#pause-when-idle).
 
 ## 17 October 2026
 
@@ -421,6 +1120,17 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
 
 ## 15 October 2026
 
+- **Hundreds of outbound connections, and a clear answer at every limit.**
+  A sandbox of an account that keeps a top-up now holds 512 outbound
+  connections open at once for each vCPU, up to 4,096, where every sandbox held 64. In a test, 500 HTTPS connections opened at once from a 1 vCPU sandbox
+  all connected, where 436 of them were reset before. New connections a
+  second (20, after a first 128 at once) and new hosts a minute (120) stay
+  as they were for every sandbox; past them a connection waits its turn
+  instead of being reset. Past any limit a connection gets `503` with the
+  limit in `X-Runtime-Egress`, and the account event `sandbox.network.limited`
+  says which limit, at most once an hour. `GET /v1/sandboxes/{id}/network`
+  shows a sandbox's limits. Accounts without a kept top-up keep 64. See
+  [the sandbox environment](./sandbox-environment).
 - **Keep sandboxes on separate servers.** A create takes `spreadFrom`, up to
   16 ids of your sandboxes or snapshots, and starts on a server none of them
   is on. Every sandbox and snapshot now shows `placement`, an opaque tag that
@@ -580,6 +1290,14 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   `USER`. So `USER node`, `WORKDIR /app`, `COPY . .`, `RUN npm ci` builds, where
   it failed on an `/app` only root could write. See
   [Build from a Dockerfile](./images#build-from-a-dockerfile).
+- **Paid accounts get 1 TiB of sandbox disk.** An account with credit now has
+  1 TiB of disk across its sandboxes, up from 400 GiB. One sandbox is still
+  at most 400 GiB. See [Limits](./limits).
+- **An account without credit keeps 5 sandboxes.** Running, paused or
+  stopped, down from 10; each is still up to 10 GiB of disk. A sandbox you
+  already keep is never cut off: waking or deleting one is never refused, and
+  an account keeping more than 5 makes new ones once it is under. Adding
+  credit lifts the limit.
 - **Morph Cloud code runs on Runtime after one import.** Change
   `from "morphcloud"` to `from "withruntime/morph"` (`withruntime` 0.16.0):
   snapshots and their cached `setup` steps, instances, `branch`, pause and
@@ -605,13 +1323,6 @@ ANTHROPIC_API_KEY`) and it gets only that egress secret: no placeholder for
   that do not say where a click came from, only the warning's own Continue
   button now takes a visitor past it. A link sent by someone else shows the
   warning first. See [Networking](./networking).
-- **More outbound connections, and a clear answer at the limit.** A paid
-  sandbox now holds 512 outbound connections at once, or 128 per vCPU up to
-  1,024, and opens 100 new ones a second or more. Past its limit, a new
-  connection gets `503` with `X-Runtime-Egress: too many open connections`
-  and `Retry-After: 1` instead of a reset, and a connection silent for a
-  minute is closed first to make room. See
-  [the sandbox environment](./sandbox-environment).
 - **Image rebuilds get the newest base image.** A build `FROM python:3.12-slim`
   or `:latest` now starts from the image the tag names today, as
   `docker buildx build` does, instead of an earlier pull kept from a past

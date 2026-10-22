@@ -243,6 +243,23 @@ describe.each(["node", "bun"])("behind a proxy, on %s", (name) => {
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
+  test("a certificate this machine does not trust is said as that, never as no answer", async () => {
+    // As behind a proxy that inspects TLS with its own authority, where Node
+    // was not told of it (18 October 2026): the API's certificate untrusted.
+    const result = await sdk(runtime(), `https://${HOST}:${api.port}`, {
+      HTTPS_PROXY: `http://127.0.0.1:${proxyPort}`,
+      NODE_EXTRA_CA_CERTS: "",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("connection_error");
+    expect(result.message).toMatch(
+      new RegExp(
+        `^Runtime at https://${HOST}:${api.port} through the proxy http://127\\.0\\.0\\.1:${proxyPort} \\(HTTPS_PROXY\\) could not be reached: the TLS certificate presented is not one this machine trusts \\([A-Z_]+\\)\\.$`,
+      ),
+    );
+    expect(result.hint).toContain("NODE_EXTRA_CA_CERTS");
+  });
+
   test("a proxy that refuses the tunnel for want of credentials says so", async () => {
     tunnels.length = 0;
     refuse = true;

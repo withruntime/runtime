@@ -12,6 +12,8 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "incremental": true
+    "incremental": true,
+    "types": ["bun", "node"],
+    "noFallthroughCasesInSwitch": true
   }
 }

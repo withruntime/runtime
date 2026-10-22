@@ -100,6 +100,15 @@ A scheduled job's run also says which job it is:
 | `job_made_by_kind` | `agent` or `person`                                          |
 | `job_vouched_by`   | The owner or admin who vouched for it, while it is unchanged |
 
+A copy of an App also says which App it is, since the copy's own id changes
+at every deploy, restart and scale-up:
+
+| Claim         | What it is                    |
+| ------------- | ----------------------------- |
+| `app_id`      | The App's id                  |
+| `app_name`    | Its name, if it has one       |
+| `app_version` | The id of the version it runs |
+
 An owner or admin vouches for a job on its page in the console, signed in. No
 API key can. Only runs that start after the vouch carry the name. Any change
 to the job's command, schedule or size clears the vouch, even if the job is

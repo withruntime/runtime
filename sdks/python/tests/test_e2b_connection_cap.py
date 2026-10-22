@@ -177,8 +177,10 @@ class AdapterClientIsWide(unittest.TestCase):
             return results, time.monotonic() - started
         results, seconds = asyncio.run(main())
         self.assertTrue(all(r.exit_code == 0 for r in results))
+        # All 100 open at once is the proof of width; the time only bounds what
+        # is added around one 1 s hold, with room for a busy check machine.
         self.assertEqual(wire.peak, 100)
-        self.assertLess(seconds, 1.8)
+        self.assertLess(seconds, 3)
 
     def test_a_hundred_commands_at_once_sync(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -192,8 +194,10 @@ class AdapterClientIsWide(unittest.TestCase):
             results = list(pool.map(lambda _: sbx.commands.run("sleep 1"), range(100)))
         seconds = time.monotonic() - started
         self.assertTrue(all(r.exit_code == 0 for r in results))
+        # All 100 open at once is the proof of width; the time only bounds what
+        # is added around one 1 s hold, with room for a busy check machine.
         self.assertEqual(wire.peak, 100)
-        self.assertLess(seconds, 1.8)
+        self.assertLess(seconds, 3)
 
     def test_a_queued_call_warns_once(self):
         import warnings

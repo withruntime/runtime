@@ -23,8 +23,13 @@ public final class Page<T> implements Iterable<T> {
 
   /** Reads one {data, nextCursor} page of a list call; cursor is null for the first. */
   static <T> Page<T> read(Transport transport, Transport.Call call, Function<java.util.Map<String, Object>, T> make, Function<String, Transport.Call> again) {
+    return read(transport, call, "data", make, again);
+  }
+
+  /** As above, for a list whose items are under {@code field} (reservations use "items"). */
+  static <T> Page<T> read(Transport transport, Transport.Call call, String field, Function<java.util.Map<String, Object>, T> make, Function<String, Transport.Call> again) {
     JsonObject body = new JsonObject(transport.object(call));
-    return new Page<>(body.getObjects("data", make), body.getString("nextCursor"), cursor -> read(transport, again.apply(cursor), make, again));
+    return new Page<>(body.getObjects(field, make), body.getString("nextCursor"), cursor -> read(transport, again.apply(cursor), field, make, again));
   }
 
   /** This page's items. */

@@ -37,8 +37,8 @@ for run in runtime.jobs.runs(job["id"]):
 ```
 
 Agents use the `runtime_jobs` MCP tool, with `action` `create`, `list`,
-`get`, `runs`, `run`, `logs`, `pause`, `resume`, `trigger`, `reschedule` or
-`cancel`.
+`get`, `runs`, `run`, `logs`, `pause`, `resume`, `trigger`, `reschedule`,
+`update` or `cancel`.
 
 Every job is also on the [Jobs page](https://withruntime.com/account/jobs) of
 your account: its schedule, size, last and next run, each run's exit code,
@@ -48,9 +48,9 @@ resume or cancel it.
 ## What a run is
 
 Every run starts a new sandbox, runs the command in it and stops it. Nothing
-carries over from one run to the next, so a job that needs data reads it from
-somewhere that lasts, such as your own bucket or database, and writes its
-results back there.
+on the sandbox's own disk carries over from one run to the next, so a job that
+keeps data between runs [attaches a volume](#keep-data-between-runs), or reads
+and writes somewhere else that lasts, such as your own bucket or database.
 
 - **The command runs as given, without a shell.** Pass an argv list. For pipes,
   `&&` or variables, run it through bash: `-- bash -lc 'cd /workspace && make'`.
@@ -73,6 +73,81 @@ results back there.
 - **Output is kept.** A run keeps its last {{job-log-kept}} of standard output
   and standard error together; `logsTruncated` says when earlier output was
   dropped.
+- **It starts from the standard image, or yours.** `--image` (`image` in the
+  SDKs and API) takes an [image](./images) of your account, by id, name (its
+  `latest` tag), `name:tag` or `name@version`, so a job's code and tools are
+  in the image rather than packed into its command. The name is resolved to the
+  image's id when the job is made, as an App deploy takes it: moving a tag later
+  changes no job, and `runtime jobs update <id> --image <ref>` moves it on. The
+  image must be ready, in the job's region and fit its disk; one that is not is
+  refused when the job is made, never at its runs.
+
+## Keep data between runs
+
+A job attaches up to four existing [volumes](./storage#attaching-a-volume) to
+every run's sandbox, each at a path, as a sandbox create does. Read-write, the
+default, is one sandbox at a time, so each run in turn gets the volume and
+reads what the run before it wrote. `snapshot` is a read-only copy of the
+volume as the run starts, and any number of sandboxes and runs can hold one at
+once.
+
+```bash no-run
+vol=$(runtime volumes create --size-mib 10240 --name state)   # the volume id
+runtime jobs create count --cron "0 * * * *" --volume "${vol}":/data \
+  -- bash -lc 'date >> /data/runs && wc -l < /data/runs'
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const volume = await runtime.volumes.create({ sizeMiB: 10_240, name: "state" });
+await runtime.jobs.create({
+  name: "count",
+  schedule: { cron: "0 * * * *" },
+  command: ["bash", "-lc", "date >> /data/runs && wc -l < /data/runs"],
+  compute: { region: volume.region, volumes: [{ volumeId: volume.id, path: "/data" }] },
+});
+```
+
+```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+volume = runtime.volumes.create(10_240, name="state")
+runtime.jobs.create("count", cron="0 * * * *",
+                    command=["bash", "-lc", "date >> /data/runs && wc -l < /data/runs"],
+                    compute={"region": volume["region"],
+                             "volumes": [{"volumeId": volume["id"], "path": "/data"}]})
+```
+
+- **A run starts on its volume's server,** in the volume's region: give the job
+  that region (`compute.region`; the CLI takes it from the volume). A job in
+  another region is refused when you create it.
+- **What a run wrote is on the volume when the next run starts.** A run's
+  sandbox writes its volumes out as it stops, even at its timeout, and,
+  keeping no disk of its own, lets them go then. The next run waits the few
+  seconds that takes.
+- **A volume held read-write by another sandbox holds the job.** Any other
+  sandbox, running, paused or stopped, keeps its volume until it is deleted
+  ([a stop keeps the disk](./storage#what-is-kept-where)), so delete it to
+  free the volume. The job waits with `blockedReason` `volume` and starts
+  within 30 seconds of the volume coming free. A `snapshot` attachment is
+  never held.
+- **The key that makes the job** may attach the volume: it needs `write_file`
+  on it for read-write, `read_file` for a snapshot, as a sandbox create does.
+- **A job you already have takes volumes in place:**
+  `runtime jobs update <id> --volume "${vol}":/data` (or `compute.volumes` in
+  an update) replaces its whole list, and `--no-volumes` removes them. The
+  next run attaches them; its history stays.
+- **A volume is paid for as always,** by the GiB-hour while it exists, and is
+  backed up every day ([backups](./storage#volume-backups)). Each run is paid
+  for as any run.
+
+A run never starts in an existing sandbox, running, paused or stopped: every
+run is a fresh one. To keep a sandbox's whole disk, use a
+[persistent sandbox](./javascript#keep-a-sandbox-running) and run the command in it yourself; to keep
+data for a job, put it on a volume.
 
 ## Schedules
 
@@ -110,6 +185,34 @@ Change schedule needs no cron: pick every hour, day, weekday, week or month, or
 once, and a time zone, and the page says the schedule in words before you
 confirm; Custom takes a cron.
 
+**Change a job.** `runtime jobs update <id>` (`jobs.update(id, changes)` in
+the SDKs, `PATCH /v1/jobs/{id}` in the API) changes a job in place: its
+command (after `--`), image (`--image`, or `--standard-image` to go back),
+size, secrets, alert, timeout, retries or cost cap. Its id, its runs and its
+schedule stay; the schedule moves with `reschedule`, and the name does not
+change. What you leave out stays as it is: `compute` and `retry` change only
+the fields you give, and `secrets` replaces the whole list. A run already
+bought or going finishes with the command it started with; the next run is
+the new job. A cancelled or finished job is refused with `invalid_state`.
+
+```bash no-run
+runtime jobs update "${job}" --image hub:latest --timeout 600 -- bash -lc 'bun run loop.ts'
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+await runtime.jobs.update("job-id", { image: "hub@8", compute: { memoryMiB: 2048 } });
+```
+
+```python check
+from withruntime import Runtime
+
+runtime = Runtime()
+runtime.jobs.update("job-id", image="hub@8", compute={"memoryMiB": 2048})
+```
+
 ## Failures and retries
 
 A run that exits with a code other than 0 has failed. By default a job tries
@@ -127,8 +230,80 @@ runs as usual.
 If a run cannot start, the job's `blockedReason` says why and it tries again
 every {{job-blocked-retry}}: `credits` (the account has no credit: scheduled jobs run only on an account
 that holds credit, so add credit), `cost_cap` (a limit you
-set, or the key's daily limit, was reached), `capacity` (no room right now) or
-`permission` (the key that made the job was revoked or narrowed).
+set, or the key's daily limit, was reached), `capacity` (no room right now),
+`volume` (a volume it attaches was deleted, is not ready, or is attached
+read-write to another sandbox) or `permission` (the key that made the job was
+revoked or narrowed, or may not use a volume it attaches).
+
+## Alerts
+
+A job can tell you when its runs fail, so nothing has to poll its runs. Once
+`afterFailures` runs in a row (1 unless you say) end `failed`, timed out or
+`unknown`, one alert goes out; while they keep failing, no more; once a run
+succeeds again, one more says it recovered. A run that will be retried counts
+when its last attempt ends, and a run you cancel does not count.
+
+```bash no-run
+printf %s "$HOOK_SECRET" | runtime secrets set HOOK_SECRET --jobs
+runtime jobs create loop --cron "*/5 * * * *" --image hub:latest \
+  --alert-webhook https://example.com/runtime-alerts --alert-secret HOOK_SECRET --alert-after 3 \
+  -- bash -lc 'bun run loop.ts'
+runtime jobs update "${job}" --alert-email     # mail me instead
+runtime jobs update "${job}" --no-alert        # tell no one
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const hook = await runtime.secrets.set("HOOK_SECRET", { value: "…", jobs: true });
+await runtime.jobs.create({
+  name: "loop",
+  schedule: { cron: "*/5 * * * *" },
+  command: ["bash", "-lc", "bun run loop.ts"],
+  alert: {
+    afterFailures: 3,
+    webhook: { url: "https://example.com/runtime-alerts", secretId: hook.jobs.id },
+  },
+});
+```
+
+- **A webhook** (`alert.webhook`: `url`, an https address on the public
+  internet named by a host name or an IPv4 address, and `secretId`, a secret
+  stored with `--jobs`) gets a POST with the same body an [account webhook](./observability#webhooks)
+  gets for the same run: `type` `job.run.failed` or `job.recovered`, and
+  `data.job`, `data.run` (its state, `reason` such as `timeout`, exit code and
+  times) and `data.logTail`, the run's last 20 lines of output. With a
+  `secretId` it is signed with that secret's value as account webhooks are
+  signed with theirs, in `Runtime-Signature`, so `verifyWebhook(body, header,
+value)` checks it; without one it is sent unsigned. `Runtime-Webhook-Id` is
+  the alert's id, the same on every attempt. A send that does not get a 2xx is
+  tried again for about three days, as webhooks are. The key that sets the
+  alert, and the job's key, must be allowed to reveal the secret as well as
+  use it (`secrets_reveal`). A run's output is the job's to choose, so a key
+  that may only use a secret in a run, where its sandbox sees a stand-in,
+  never gets that output signed with its real value. A secret deleted, or one
+  the job's key may no longer use and reveal, stops the alert rather than
+  sending it unsigned.
+- **An email** (`alert.email: true`) goes to the job's person: who made it, or
+  the person whose key made it, only while they are an active member of the
+  account. It names the job, the run, its reason and exit code, and links to
+  the run; it never carries the run's output, which the job's page shows to
+  whoever may read it. Once they are removed or suspended, the job's alerts are no longer
+  mailed to them.
+- **Your account's webhooks** hear every run that ends failing as
+  `job.run.failed` and each recovery as `job.recovered`, whether the job has an
+  alert or not ([events](./observability#events)), without the run's output.
+
+Only the job's own key, or another key of the same agent, changes a job, and a
+new command, image, size or secret list then runs with the key that wrote it:
+that key must be allowed every secret the job binds, an alert's `secretId`,
+and the job's image. A rule that stops the key's agent from starting
+sandboxes from an image also stops a job from being set to it, and each run
+of a job that already uses it.
+
+A job shows `failingRuns`, the runs in a row that ended failing,
+`alertingSince`, and `lastAlert`, its last alert and how its delivery went.
 
 ## What it costs
 
@@ -218,16 +393,18 @@ If another of your keys could reach a secret before now, rotate it.
 | `runtime jobs create <name> ... --` | `jobs.create`                | Schedule a job; prints its id                 |
 | `runtime jobs ls`                   | `jobs.list`                  | Your jobs, oldest first                       |
 | `runtime jobs get <id>`             | `jobs.get`                   | One job, in full                              |
-| `runtime jobs runs <id>`            | `jobs.runs`                  | Its runs: attempt, state, exit code           |
+| `runtime jobs runs <id> [--all]`    | `jobs.runs(id, {order})`     | Its newest 100 runs; `--all`: every one       |
 | `runtime jobs logs <id> [-f]`       | `jobs.logs(runId, {cursor})` | A run's output; a job id means its latest run |
 | `runtime jobs pause`, `resume <id>` | `jobs.pause`, `jobs.resume`  | Stop or restart scheduling                    |
 | `runtime jobs trigger <id>`         | `jobs.trigger`               | Run it now, once                              |
 | `runtime jobs reschedule <id> ...`  | `jobs.reschedule`            | Give it a new schedule                        |
+| `runtime jobs update <id> ...`      | `jobs.update`                | Change what it runs, or its alert, in place   |
 | `runtime jobs cancel <id>`          | `jobs.cancel`                | End it and stop a run in progress             |
 
 The HTTP routes are `POST /v1/jobs`, `GET /v1/jobs`, `GET /v1/jobs/{id}`,
-`GET /v1/jobs/{id}/runs`, `POST /v1/jobs/{id}:pause`, `:resume`, `:trigger`,
-`:reschedule` (body `{"schedule": ...}`) and `:cancel`,
+`GET /v1/jobs/{id}/runs` (oldest first; `?order=newest` for newest first), `POST /v1/jobs/{id}:pause`, `:resume`, `:trigger`,
+`:reschedule` (body `{"schedule": ...}`), `:cancel`, `PATCH /v1/jobs/{id}`
+(also `POST /v1/jobs/{id}:update`; a body of the fields that change),
 `GET /v1/job-runs/{id}` and `GET /v1/job-runs/{id}/logs`. Every write takes an
 `Idempotency-Key`; the SDKs and the CLI send one for you, so a retry after a
 lost reply never makes a second job.

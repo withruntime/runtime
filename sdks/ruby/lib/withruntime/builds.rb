@@ -18,7 +18,6 @@ module WithRuntime
     # Reconnections in a row with no new line before a follow gives up.
     RECONNECTS = 3
     SEEN = 10_000
-    SAFE_INTEGER = (2**53) - 1
 
     attr_reader :repositories
 
@@ -69,13 +68,7 @@ module WithRuntime
 
     def path(id) = "/v1/builds/#{seg(id)}"
 
-    def failure(code, hint, cursor) = Error.new(hint, code: code, hint: hint, details: { "cursor" => cursor })
-
     def invalid(cursor) = failure("build_log_invalid", "Retry the log from the last received cursor.", cursor)
-
-    def valid_cursor?(value)
-      value.is_a?(String) && !value.empty? && value.length <= 4096 && !value.match?(/[\x00-\x1f\x7f]/)
-    end
 
     def valid_failure?(value)
       return true if value.nil?
@@ -85,8 +78,6 @@ module WithRuntime
       value["name"].is_a?(String) && (value["exitCode"].nil? || safe_integer?(value["exitCode"])) &&
         lines.is_a?(Array) && lines.size <= 20 && lines.all?(String)
     end
-
-    def safe_integer?(value) = value.is_a?(Integer) && value.abs <= SAFE_INTEGER
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 

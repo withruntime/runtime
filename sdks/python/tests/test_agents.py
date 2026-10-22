@@ -23,6 +23,9 @@ AGENT = {"id": AGENT_ID, "name": "dev", "version": 1, "definition": {"command": 
 TRIGGER = {"id": TRIGGER_ID, "agentId": AGENT_ID, "kind": "github",
            "config": {"repository": "acme/web", "installation": 42}, "pausedAt": None, "pausedWhy": None,
            "createdAt": "2026-10-18T00:00:00Z"}
+MEMORY = {"scope": "", "path": "notes/tea.md", "bytes": 21, "updatedAt": "2026-10-18T00:00:00Z",
+          "updatedBy": "key_1"}
+USAGE = {"bytes": 42, "files": 2, "limitBytes": 1073741824, "limitFiles": 100000}
 GUIDE = Path(__file__).resolve().parents[3] / "packages" / "cloud-guide" / "agent-templates.json"
 
 
@@ -54,7 +57,7 @@ REFUSALS = {
     "taken": (409, "name_taken", ConflictError),
     "paused": (409, "trigger_paused", ConflictError),
     "uninstalled": (409, "not_installed", ConflictError),
-    "budget": (409, "budget_reached", ConflictError),
+    "budget": (402, "budget_reached", RuntimeAPIError),
     "open": (409, "session_open", ConflictError),
     "quota": (429, "quota_exceeded", RateLimitError),
     "invalid": (400, "invalid_request", InvalidRequestError),
@@ -71,6 +74,8 @@ class Stub(BaseHTTPRequestHandler):
     states: list = []
     # When set, what a read of one session answers.
     record = None
+    # The server of the test now running.
+    live = None
 
     def log_message(self, *args):
         pass
@@ -84,15 +89,30 @@ class Stub(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def handle_any(self):
+        if self.server is not Stub.live:
+            return
         length = int(self.headers.get("content-length") or 0)
         body = json.loads(self.rfile.read(length)) if length else None
         url = urlsplit(self.path)
-        path, query = url.path, parse_qs(url.query)
+        path, query = url.path, parse_qs(url.query, keep_blank_values=True)
         Stub.seen.append((self.command, path, query, body, self.headers.get("idempotency-key")))
         if Stub.mode in REFUSALS:
             status, code, _ = REFUSALS[Stub.mode]
             return self.answer({"error": {"code": code, "message": f"refused: {code}", "hint": "h"}}, status)
         method = self.command
+        if path == "/v1/agents/dev/memory":
+            if "q" in query:
+                return self.answer({"data": [{**MEMORY, "snippet": "**tea**", "rank": 0.5}], "nextCursor": None})
+            if "cursor" in query:
+                return self.answer({"data": [{**MEMORY, "scope": "customer:42"}], "nextCursor": None, "usage": USAGE})
+            return self.answer({"data": [MEMORY], "nextCursor": "page-2", "usage": USAGE})
+        if path == "/v1/agents/dev/memory/content":
+            if method == "PUT":
+                return self.answer({"scope": query["scope"][0], "path": query["path"][0], "bytes": 9,
+                                    "created": True, "updatedAt": "2026-10-18T00:00:00Z"})
+            if method == "DELETE":
+                return self.answer({"deleted": True})
+            return self.answer({**MEMORY, "content": "tea, no sugar"})
         if path == "/v1/agents" and method == "GET":
             if "cursor" in query:
                 return self.answer({"data": [{**AGENT, "id": "second", "warnings": ["subscription_for_customers"]}],
@@ -133,23 +153,23 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer(AGENT, 201 if method == "POST" else 200)
         self.answer({"error": {"code": "not_found", "message": "no"}}, 404)
 
-    do_GET = do_POST = do_PATCH = do_DELETE = handle_any
+    do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = handle_any
 
 
 class AgentsTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.shutdown()
-
+    # Each test has a stub of its own: a request a test gave up on (a wait past
+    # its deadline) that a busy machine handles late reaches its own test's
+    # stub, which drops it, never the next test's record.
     def setUp(self):
+        self.server = Stub.live = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         Stub.seen, Stub.mode, Stub.pages, Stub.states = [], "ok", [{"data": [], "ended": True}], []
         Stub.record = None
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
 
     def client(self):
         return Runtime(api_key="rk_test", base_url=self.url, max_retries=2)
@@ -315,6 +335,39 @@ class AgentsTest(unittest.TestCase):
             ("POST", f"{base}/resume"), ("DELETE", base)])
         self.assertEqual(Stub.seen[0][3], {"kind": "github", "config": {"repository": "acme/web", "installation": 42}})
         self.assertEqual(Stub.seen[2][3], {"why": "release freeze"})
+
+    def test_every_memory_verb_calls_its_route_with_the_scope_in_the_query(self):
+        with self.client() as runtime:
+            page = runtime.agents.memory.list("dev", prefix="notes/", limit=1)
+            self.assertEqual(page.usage, USAGE)
+            self.assertEqual([f["scope"] for f in page], ["", "customer:42"])
+            hits = runtime.agents.memory.search("dev", "tea", scope="")
+            self.assertEqual(hits[0]["snippet"], "**tea**")
+            self.assertEqual(runtime.agents.memory.read("dev", "notes/tea.md")["content"], "tea, no sugar")
+            written = runtime.agents.memory.write("dev", "tone.md", "Formal.", scope="customer:42")
+            self.assertEqual((written["scope"], written["created"]), ("customer:42", True))
+            self.assertTrue(runtime.agents.memory.delete("dev", "notes/tea.md"))
+        base = "/v1/agents/dev/memory"
+        self.assertEqual(self.routes(), [
+            ("GET", base), ("GET", base), ("GET", base), ("GET", f"{base}/content"), ("PUT", f"{base}/content"),
+            ("DELETE", f"{base}/content")])
+        self.assertEqual([s[2] for s in Stub.seen], [
+            {"prefix": ["notes/"], "limit": ["1"]},
+            {"prefix": ["notes/"], "cursor": ["page-2"], "limit": ["1"]},
+            {"scope": [""], "q": ["tea"]},
+            {"scope": [""], "path": ["notes/tea.md"]},
+            {"scope": ["customer:42"], "path": ["tone.md"]},
+            {"scope": [""], "path": ["notes/tea.md"]}])
+        self.assertEqual(Stub.seen[4][3], {"content": "Formal."})
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=2) as runtime:
+                page = await runtime.agents.memory.list("dev")
+                files = await page.to_list()
+                deleted = await runtime.agents.memory.delete("dev", "x.md", scope="customer:42")
+                return page.usage, files, deleted
+        usage, files, deleted = asyncio.run(go())
+        self.assertEqual((usage, len(files), deleted), (USAGE, 2, True))
 
     def test_refusals_are_the_sdks_own_errors(self):
         for mode, (status, code, kind) in REFUSALS.items():

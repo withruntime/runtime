@@ -5,6 +5,8 @@ require "openssl"
 module WithRuntime
   # The pieces every product shares.
   class Product
+    SAFE_INTEGER = (2**53) - 1
+
     def initialize(transport)
       @t = transport
     end
@@ -12,6 +14,16 @@ module WithRuntime
     private
 
     def seg(value) = Transport.segment(value)
+
+    # A followed log's refusal, with the cursor it resumes from in its details.
+    def failure(code, hint, cursor) = Error.new(hint, code: code, hint: hint, details: { "cursor" => cursor })
+
+    # A log cursor is opaque: a short string with no control characters.
+    def valid_cursor?(value)
+      value.is_a?(String) && !value.empty? && value.length <= 4096 && !value.match?(/[\x00-\x1f\x7f]/)
+    end
+
+    def safe_integer?(value) = value.is_a?(Integer) && value.abs <= SAFE_INTEGER
 
     # A change's body from keyword arguments: nil is left out, +:remove+ sends
     # null, which clears the field.
@@ -96,13 +108,28 @@ module WithRuntime
   class Secrets < Product
     # Stores or replaces a secret for +hosts+ ("api.openai.com", "*.github.com").
     # With +header:+, that header is set on every request to them, +format:+'s
-    # {value} replaced. With +only:+ (<tt>{ labels: [{ role: "hub" }], sandboxes: [id] }</tt>),
-    # only those sandboxes get it instead of every sandbox of the organization: those whose
-    # labels hold every pair of any one selector, and those named by id. Left out when replacing
-    # a secret, the scope it has stays, so a new value never widens who gets it; +{}+ is every
-    # sandbox again.
-    def set(name, value:, hosts:, header: nil, format: nil, only: nil)
-      body = { "value" => value, "hosts" => hosts, "header" => header, "format" => format, "only" => only }.compact
+    # {value} replaced.
+    #
+    # +rules:+ limits the value to the requests a rule allows, such as
+    # [{ "methods" => ["GET"], "paths" => ["/repos/acme/*"] }]. +only:+ gives it to
+    # those sandboxes alone ({ "labels" => [{ "role" => "hub" }], "sandboxes" => [ids],
+    # "apps" => [App ids] }; left out when replacing, the scope it has stays; {} is every
+    # sandbox again). +github_app:+ ({ "id" =>, "installation" =>,
+    # "repositories" =>, "permissions" =>, "api" => }) makes +value+ a GitHub App's
+    # private key (PEM); the servers make its installation tokens themselves, and the
+    # secret takes no +header:+ or +format:+. +git:+ ({ "push" => [branch patterns] };
+    # an empty list is no push at all) limits what a git push may update. +api:+
+    # ({ "callsPerHour" =>, "writesPerHour" =>, "keep" =>, "copies" =>, "fresh" =>,
+    # "graphql" => { "path" =>, "mutations" => [] } }) sets each sandbox's hour with the
+    # secret, the far end's reserve, GraphQL's mutations and shared copies. The answer
+    # and +list+ return them as +githubApp+, +git+ and +api+. +env:+ is the environment
+    # variable sandboxes see it in, when not the secret's name. Secrets scoped to different
+    # sandboxes may share one, such as one GITHUB_TOKEN per repository; a write that would
+    # put two in one sandbox is refused (409). Absent when replacing: the variable it has stays.
+    def set(name, value:, hosts:, header: nil, format: nil, rules: nil, only: nil, github_app: nil, git: nil,
+            api: nil, env: nil)
+      body = { "value" => value, "hosts" => hosts, "header" => header, "format" => format, "rules" => rules,
+               "only" => only, "githubApp" => github_app, "git" => git, "api" => api, "env" => env }.compact
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}", body: body))
     end
 
@@ -152,6 +179,52 @@ module WithRuntime
     def set(category, enabled)
       body = { "category" => category, "enabled" => enabled }
       @t.json("POST", "/v1/account/emails:update", body: body)["settings"].map { |row| Record.new(row) }
+    end
+  end
+
+  # +runtime.plans+: monthly plans whose fee is prepaid usage. The fee comes back as plan usage, spent first
+  # each month at the same measured prices, plus a bonus for committing; plan usage left at the period's end
+  # ends with it. Money is integer microdollars in strings.
+  #
+  # Every change answers +checkout_url+ (where a person starts a first plan or a trial in the browser, nil
+  # once the change was made) and +current+ (the plan as it is now). Each takes an +idempotency_key+; one is
+  # made per call when left out.
+  class Plans < Product
+    # +current+ (the plan you hold, or nil: plan_id, name, status, interval, period_start, period_end,
+    # trial_ends_at, cancel_at_period_end, next_plan_id, started_at, add_ons, auto_upgrade, plan_usage) and
+    # +plans+ (every plan you may choose: id, name, card, fee_micros, yearly_fee_micros, bonus_micros,
+    # trial_days, first_period_double, support, collection, contract, position, included, limits, features,
+    # add_ons).
+    def list = Record.new(@t.json("GET", "/v1/plans"))
+
+    # Start a plan, or move to another. With no plan, answers +checkout_url+. A dearer plan starts at once,
+    # prorated; a cheaper one at +period_end+ (+next_plan_id+). +interval: "year"+ pays ten months for
+    # twelve; monthly unless asked.
+    def choose(plan, interval: nil, idempotency_key: nil)
+      body = { "plan" => plan }
+      body["interval"] = interval unless interval.nil?
+      Record.new(@t.json("POST", "/v1/plans/choose", body: body, key: idempotency_key))
+    end
+
+    # End the plan at +period_end+.
+    def cancel(idempotency_key: nil) = Record.new(@t.json("POST", "/v1/plans/cancel", body: {}, key: idempotency_key))
+
+    # Keep a plan you cancelled, before +period_end+.
+    def resume(idempotency_key: nil) = Record.new(@t.json("POST", "/v1/plans/resume", body: {}, key: idempotency_key))
+
+    # Add an add-on by id: charged now for the rest of the period, prorated, then with the plan.
+    def add_on(id, idempotency_key: nil)
+      Record.new(@t.json("POST", "/v1/plans/add-ons", body: { "addOn" => id }, key: idempotency_key))
+    end
+
+    # Remove an add-on: its charge stops now, and it holds to +period_end+.
+    def remove_add_on(id, idempotency_key: nil)
+      Record.new(@t.json("DELETE", "/v1/plans/add-ons/#{seg(id)}", key: idempotency_key))
+    end
+
+    # Move up a plan by itself when a limit refuses (true), or not. Owners, and keys an owner made.
+    def auto_upgrade(on, idempotency_key: nil)
+      Record.new(@t.json("PUT", "/v1/plans/auto-upgrade", body: { "on" => on }, key: idempotency_key))
     end
   end
 

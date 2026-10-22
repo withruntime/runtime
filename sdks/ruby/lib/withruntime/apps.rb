@@ -151,20 +151,28 @@ module WithRuntime
   #   deploy = runtime.apps.deploy(app.id, image: "web:latest", env: { "MODE" => "prod" }, wait: true)
   #   puts deploy.url
   #
-  # An App or Function: id, name, labels, state (waiting, live, failed,
+  # An App or Function: id, name, url (its address for life, its name then
+  # its account's: https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/; a rename leaves it,
+  # and its id's address answers too), labels, state (waiting, live, failed,
   # deleting, deleted), min_copies, max_copies, concurrency, spares, vcpu,
-  # memory_mib, port, health_path, live_version, previous_version, error
-  # ({code, message} or nil), created_at, updated_at, deleted_at, and
-  # release_watch (rollback, alert or off) where the API sends it.
+  # memory_mib, port, health_path, cdn, live_version, previous_version, error
+  # ({code, message} or nil), line (while a copy waits for room: lane,
+  # place, ahead by lane and words; nil otherwise), created_at, updated_at,
+  # deleted_at, and release_watch (alert, the default; rollback; or off). A Function
+  # also has sleep_after_ms (250 to 5000).
   #
   # A deploy: id, version, url and state (building, warming, switching, live,
   # failed, superseded); a failed or superseded one has error with code
-  # (deploy_build_failed, deploy_health_failed, deploy_superseded), message,
-  # hint and last_output. A version: version, live, previous, saved, deploy
-  # (its deploy's id) and build (nil for an image). A copy: id, version,
+  # (deploy_build_failed, deploy_health_failed, deploy_stop_failed,
+  # deploy_switch_failed, deploy_superseded), message, hint and last_output. A version: version,
+  # live, previous, saved, deploy (its deploy's id) and build (nil for an
+  # image). A copy: id, version,
   # region, state (starting, serving, draining, frozen, parked) and since.
   class Apps < ResourceProduct
     DEPLOY_ENDED = %w[live failed superseded].freeze
+    # Reconnections in a row with no new line before a log follow gives up.
+    LOG_RECONNECTS = 3
+    LOG_SEEN = 10_000
 
     # +path+: /v1/apps or /v1/functions.
     def initialize(transport, path = "/v1/apps")
@@ -173,9 +181,15 @@ module WithRuntime
 
     # Creates one waiting for its first version: +max_copies:+ (1 to 1000),
     # +vcpu:+ (1 to 16) and +memory_mib:+ (128 to 65536) are required;
-    # +concurrency:+, +spares:+, +port:+ (8080), +health_path:+, +name:+,
-    # +labels:+, and for an App +min_copies:+ (0). A Function leaves
-    # +min_copies+ out, zero included.
+    # +concurrency:+, +spares:+, +port:+ (8080), +health_path:+, +cdn:+ (true: Cloudflare's CDN in
+    # front of its addresses; false sends visitors straight to Runtime's routers,
+    # nothing cached), +name:+, +labels:+, +release_watch:+ ("alert" by default: tell the
+    # owners when a new version gets clearly worse in its first 15 minutes; "rollback" also
+    # goes back to the previous version; "off" does neither), and for an App
+    # +min_copies:+ (0). A Function leaves +min_copies+ out, zero included.
+    # A Function also takes +sleep_after_ms:+ (250 to 5000, default 1000): at
+    # most how long a copy stays awake after its last request ends; awake time
+    # with no request in flight is not billed. An App is refused it.
     def create(idempotency_key: nil, **fields) = super
 
     # Follows resource state, not a deploy: an older live version can survive
@@ -220,7 +234,114 @@ module WithRuntime
 
     def copies(id) = @t.json("GET", "#{@base}/#{seg(id)}/copies").map { |copy| Record.new(copy) }
 
+    # What its copies printed: lines (at, Unix milliseconds; stream, stdout
+    # or stderr; copy, a copy's id or nil; version or nil; text), oldest
+    # first, the newest +limit:+ (1 to 500; 100) in the window, with
+    # next_cursor and has_more. +since:+ is an RFC 3339 time or a duration
+    # back from now ("30s", "15m", "2h", "7d"; "1h" by default; 14 days at
+    # most). +version:+, +copy:+ and +stream:+ narrow it. Pass next_cursor as
+    # +cursor:+, with the same filters, for the page of older lines.
+    def logs(id, since: nil, version: nil, copy: nil, stream: nil, limit: nil, cursor: nil)
+      Record.new(@t.json("GET", "#{@base}/#{seg(id)}/logs", query: log_query(since, version, copy, stream, limit, cursor)))
+    end
+
+    # Each event to the block as its copies print (or an Enumerator without
+    # one), until the caller breaks out: a line (type "line", cursor, and a
+    # line's fields as for +logs+) or a gap where the store dropped lines
+    # (type "gap"); the stream goes on after it. A first follow sends the
+    # newest +limit:+ lines since +since:+, then new ones; +cursor:+ resumes
+    # after that line. Each follow the API ends after about two minutes is
+    # resumed from its cursor; a lost connection reconnects from the last
+    # line, up to three times in a row, then app_log_interrupted, whose details
+    # cursor resumes. An error event raises its own code and hint.
+    def follow_logs(id, since: nil, version: nil, copy: nil, stream: nil, limit: nil, cursor: nil, &block)
+      unless block
+        return enum_for(:follow_logs, id, since: since, version: version, copy: copy, stream: stream, limit: limit,
+                                          cursor: cursor)
+      end
+
+      follow_lines(id, log_query(since, version, copy, stream, limit, nil), cursor, &block)
+      nil
+    end
+
     private
+
+    def log_query(since, version, copy, stream, limit, cursor)
+      { "since" => since, "version" => version, "copy" => copy, "stream" => stream, "limit" => limit, "cursor" => cursor }
+    end
+
+    def log_invalid(cursor) = failure("app_log_invalid", "Retry the log from the last received cursor.", cursor)
+
+    def valid_log_line?(event)
+      event["text"].is_a?(String) && %w[stdout stderr].include?(event["stream"]) && valid_cursor?(event["cursor"]) &&
+        safe_integer?(event["at"]) && !event["at"].negative? && (event["copy"].nil? || event["copy"].is_a?(String)) &&
+        (event["version"].nil? || safe_integer?(event["version"]))
+    end
+
+    # Cursors are opaque positions: they cannot be ordered or counted on, so
+    # lines already given are known by their cursor.
+    def follow_lines(id, filters, cursor)
+      if cursor && !valid_cursor?(cursor)
+        raise failure("invalid_log_options", "Use the opaque cursor of a line or a continue event to resume.", cursor)
+      end
+
+      seen = cursor ? { cursor => true } : {}
+      failures = 0
+      loop do
+        continued = false
+        begin
+          # The API ends each follow after about two minutes, with a continue event.
+          @t.events("GET", "#{@base}/#{seg(id)}/logs", query: { "follow" => true }.merge(filters, { "cursor" => cursor }),
+                                                       timeout: 180) do |event|
+            raise log_invalid(cursor) unless event.is_a?(Hash)
+
+            case event["type"]
+            when "line"
+              raise log_invalid(cursor) unless valid_log_line?(event)
+              next if seen.key?(event["cursor"])
+
+              seen[event["cursor"]] = true
+              seen.delete(seen.first[0]) if seen.size > LOG_SEEN
+              cursor = event["cursor"]
+              failures = 0
+              yield Record.new(event)
+            when "gap"
+              raise log_invalid(cursor) unless valid_cursor?(event["cursor"])
+
+              cursor = event["cursor"]
+              yield Record.new(event)
+            when "continue"
+              raise log_invalid(cursor) unless event["cursor"].nil? || valid_cursor?(event["cursor"])
+
+              cursor = event["cursor"] || cursor
+              continued = true
+              break
+            when "error"
+              unless event["code"].is_a?(String) && !event["code"].empty? && event["hint"].is_a?(String) && !event["hint"].empty?
+                raise log_invalid(cursor)
+              end
+
+              raise failure(event["code"], event["hint"], cursor)
+            else
+              raise log_invalid(cursor)
+            end
+          end
+        rescue ConnectionError
+          nil # A lost connection, not a refusal: the transport retries retryable answers. Reconnect from the last line.
+        rescue Error => e
+          raise e unless e.code == "unexpected_answer" && e.status.zero?
+
+          raise failure("app_log_invalid", "The log contained invalid JSON; retry from details.cursor.", cursor)
+        end
+        failures += 1 unless continued
+        if failures > LOG_RECONNECTS
+          raise failure("app_log_interrupted", "Reconnect with follow_logs(id, cursor: details[\"cursor\"]).", cursor)
+        end
+
+        # A service that is down, or continuations one after another, never busy-loop.
+        sleep(0.05 * [1, failures].max)
+      end
+    end
 
     def read_deploy(id, deploy_id, wait_for, timeout_seconds, timeout)
       Record.new(@t.json("GET", "#{@base}/#{seg(id)}/deploys/#{seg(deploy_id)}",

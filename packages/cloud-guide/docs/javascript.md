@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.23.0. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.33.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -485,12 +485,12 @@ shrinks them. If there is still no room, the sandbox is paused all the same
 and billed as paused: the server holds its memory and saves it once there is
 room, and a wake meanwhile resumes it at once. Only a sandbox whose time is
 nearly up, too near its end to save its memory later, is not paused then:
-`pause()` fails with `no_capacity` (409, `retryable` true, `Retry-After: 60`)
+`pause()` fails with `no_capacity` (503, `retryable` true, `Retry-After: 60`)
 and the sandbox keeps running with its memory and files; pause again with a
 new call, which is a new request. A `pause()` that returns first, with the
 sandbox still `pausing`, has not failed: `GET /v1/sandboxes/{id}?waitFor=paused`
 (`sbx.refresh()` in a loop) shows `paused`, or `running` if it was not taken.
-A snapshot the server has no room for is refused with `host_capacity` (409);
+A snapshot the server has no room for is refused with `host_capacity` (503);
 retry it later.
 
 ### Wake on request
@@ -636,22 +636,23 @@ try {
 }
 ```
 
-| Class                     | When                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| `AuthenticationError`     | 401: the key is missing, wrong or revoked                                          |
-| `PermissionDeniedError`   | 403: the key or account may not do this                                            |
-| `NotFoundError`           | 404: no such resource in this account                                              |
-| `ConflictError`           | 409: the resource is in the wrong state, or an account without credit at its limit |
-| `InvalidRequestError`     | 400 and 422: `details` names every wrong field                                     |
-| `RateLimitError`          | 429: slow down; `retryAfterMs` says how long                                       |
-| `ServiceUnavailableError` | 503: capacity or a dependency; safe to retry                                       |
-| `AccountBlockedError`     | 402 `account_blocked`: a payment is disputed or in review (from 0.7.0)             |
-| `ConnectionError`         | No answer at all                                                                   |
-| `CommandError`            | `check: true` and the command did not exit 0                                       |
+| Class                     | When                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `AuthenticationError`     | 401: the key is missing, wrong or revoked                                         |
+| `PermissionDeniedError`   | 403: the key or account may not do this                                           |
+| `NotFoundError`           | 404: no such resource in this account                                             |
+| `ConflictError`           | 409: the wrong state, or a count you hold at its limit; change it first           |
+| `InvalidRequestError`     | 400 and 422: `details` names every wrong field                                    |
+| `RateLimitError`          | 429: your own limit that clears (rate, work at once, a daily cap); `retryAfterMs` |
+| `ServiceUnavailableError` | 5xx: capacity or a dependency; `retryable` says whether to send it again          |
+| `AccountBlockedError`     | 402 `account_blocked`: a payment is disputed or in review (from 0.7.0)            |
+| `ConnectionError`         | No answer at all                                                                  |
+| `CommandError`            | `check: true` and the command did not exit 0                                      |
 
 Every write carries an idempotency key, made for you. Timeouts, dropped
-connections, 429 and 503 are retried with the same key and a growing delay, so a
-retried create never makes two sandboxes and a retried command never runs twice.
+connections and every answer that says `retryable: true` are retried with the same key, after its
+`Retry-After`, so a retried create never makes two sandboxes and a retried command never runs twice.
+A wait over 60 seconds is not slept on: the error is returned at once, with `retryAfterMs`.
 An attempt whose answer has not started after 125 seconds is
 sent again the same way: the API starts every answer within 120 seconds, so the
 server it was sent to is gone, as when the controller fails over mid-call.
@@ -727,7 +728,7 @@ anything gets `PermissionDeniedError`. See [security](./security).
 
 Store an API key once with `runtime.secrets`, naming the hosts it may go to.
 Every sandbox of the account then has an environment variable of that name
-holding a placeholder, and the host's proxy swaps in the real value on HTTPS
+(or `env`) holding a placeholder, and the host's proxy swaps in the real value on HTTPS
 requests to those hosts. The value is sealed and never returned:
 
 ```ts check
@@ -750,6 +751,11 @@ rule allows by method and path carry it: a path is exact or ends in `/*`.
 Replacing a secret keeps its placeholder, so running sandboxes use the new
 value. See [security](./security#secrets-sandboxes-never-see) for the limits
 and what is never rewritten.
+
+With `env: "GITHUB_TOKEN"`, sandboxes see the placeholder in that variable instead of
+the secret's name, so secrets scoped (`only`) to different sandboxes can
+share one, such as a `GITHUB_TOKEN` for each repository; a store that would
+give one sandbox two of them is refused.
 
 ```ts check
 import { Sandbox } from "withruntime";
@@ -877,7 +883,9 @@ filesystem; each sandbox created from it boots fresh without the saved
 processes, at the `vcpu`, `memoryMiB` and `diskMiB` you pass (a disk at least
 the saved size). A copy of a memory snapshot is always the snapshot's size.
 Both modes pause a running source until capture finishes, then wake
-it, and leave an already paused source paused.
+it, and leave an already paused source paused. A disk snapshot's pause first
+waits for the sandbox to write out what it holds in memory: a few seconds at
+most while it writes.
 
 Where deferred compression has been qualified and enabled, a memory
 snapshot can be `ready` with `compressionPending: true` and start
@@ -910,9 +918,9 @@ it and start more copies later; it is then billed as snapshot storage.
   notice (`GET /v1/notices`) names the sandbox and the fork, says nothing was
   charged for the fork's snapshot, and says how to wake it.
 
-A snapshot is kept as long as you have credit, up to a year from when it was
-taken (7 days without credit), or for `retentionDays`, 1 to 365; delete it sooner
-with `runtime.snapshots.delete`.
+A snapshot is kept as long as you have credit, with no end date (7 days without
+credit), or for `retentionDays`, 1 to 365; delete it sooner with
+`runtime.snapshots.delete`.
 
 ## Code interpreter
 
@@ -1350,6 +1358,7 @@ import { Daytona } from "withruntime/daytona"; // was: from "@daytona/sdk"
 import { Sandbox as VercelSandbox } from "withruntime/vercel"; // was: from "@vercel/sandbox"
 import { SandboxInstance } from "withruntime/blaxel"; // was: from "@blaxel/core"
 import { MorphCloudClient } from "withruntime/morph"; // was: from "morphcloud"
+import { ModalClient } from "withruntime/modal"; // was: from "modal"
 ```
 
 Sandboxes get the old provider's defaults, and a call Runtime cannot honour
@@ -1362,6 +1371,10 @@ A Worker written for Cloudflare's Sandbox SDK (0.x) runs after changing its
 import to `withruntime/cloudflare`, deleting the `containers` block from its
 Wrangler config and adding a `RUNTIME_API_KEY` secret; see
 [change the import](./cloudflare-sandbox-alternative#change-the-import).
+
+Code that calls Fly's Machines API runs after changing only its address, to
+`npx withruntime fly-api`; a Node service can answer the same calls itself
+with `machinesApi()` from `withruntime/fly`. See [migration](./migrate).
 
 ## Configuration
 

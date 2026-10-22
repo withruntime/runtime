@@ -28,6 +28,9 @@ from ._errors import NOTHING_RAN, RateLimitError, ServiceUnavailableError
 #: How long an answer that ran nothing (NOTHING_RAN) is retried, in seconds,
 #: for a call that has no deadline of its own.
 _NOTHING_RAN_SECONDS = 300.0
+#: The longest wait the server may name that a call sleeps on before trying
+#: again; past it (a daily cap's hour) the error is raised at once.
+_LONGEST_SLEEP_SECONDS = 60.0
 from ._http import AsyncHTTP as HTTP
 from ._http import NoAnswerStarted, Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
@@ -83,24 +86,54 @@ def _check_key(key: str) -> str:
     return key
 
 
+class TracedFiles:
+    """The files a traced command opened (``trace_files=True``): ``read`` is
+    every file and directory it (and anything it started) opened, sorted
+    absolute paths with links resolved, directories ending in "/"; ``written``
+    every file it wrote. ``truncated`` means some paths are missing, so do not
+    treat the lists as complete."""
+
+    __slots__ = ("read", "written", "truncated")
+
+    def __init__(self, read: list[str], written: list[str], truncated: bool = False) -> None:
+        self.read, self.written, self.truncated = read, written, truncated
+
+    def __repr__(self) -> str:
+        return f"TracedFiles(read={self.read!r}, written={self.written!r}, truncated={self.truncated!r})"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TracedFiles) and self.to_dict() == other.to_dict()
+
+    @staticmethod
+    def from_json(data: Optional[dict[str, Any]]) -> Optional["TracedFiles"]:
+        if not data:
+            return None
+        return TracedFiles(read=list(data.get("read") or []), written=list(data.get("written") or []),
+                           truncated=bool(data.get("truncated")))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"read": self.read, "written": self.written, "truncated": self.truncated}
+
+
 class CommandResult:
     """What a command did: its exit code (None when it did not exit by itself),
     its output, and whether it ran out of time. ``out_of_memory`` is set when
     the sandbox's out-of-memory killer ended it (the program, or anything it
     started): a dict with code ``out_of_memory``, processesKilled, memoryMiB,
-    message and hint, as the API gives it; None otherwise."""
+    message and hint, as the API gives it; None otherwise. ``files`` is a
+    TracedFiles when the command ran with ``trace_files=True``; None otherwise."""
 
     __slots__ = ("exit_code", "stdout", "stderr", "timed_out", "stdout_truncated", "stderr_truncated",
-                 "duration_ms", "process_id", "replayed", "out_of_memory")
+                 "duration_ms", "process_id", "replayed", "out_of_memory", "files")
 
     def __init__(self, exit_code: Optional[int], stdout: str, stderr: str, timed_out: bool = False,
                  stdout_truncated: bool = False, stderr_truncated: bool = False, duration_ms: Optional[int] = None,
                  process_id: Optional[str] = None, replayed: bool = False,
-                 out_of_memory: Optional[dict[str, Any]] = None) -> None:
+                 out_of_memory: Optional[dict[str, Any]] = None, files: Optional[TracedFiles] = None) -> None:
         self.exit_code, self.stdout, self.stderr, self.timed_out = exit_code, stdout, stderr, timed_out
         self.stdout_truncated, self.stderr_truncated = stdout_truncated, stderr_truncated
         self.duration_ms, self.process_id, self.replayed = duration_ms, process_id, replayed
-        self.out_of_memory = out_of_memory
+        self.out_of_memory, self.files = out_of_memory, files
 
     def __repr__(self) -> str:
         return (f"CommandResult(exit_code={self.exit_code!r}, stdout={self.stdout!r}, stderr={self.stderr!r}, "
@@ -116,13 +149,14 @@ class CommandResult:
             timed_out=bool(data.get("timedOut")), stdout_truncated=bool(data.get("stdoutTruncated")),
             stderr_truncated=bool(data.get("stderrTruncated")), duration_ms=data.get("durationMs"),
             process_id=data.get("processId"), replayed=bool(data.get("replayed")),
-            out_of_memory=data.get("outOfMemory"))
+            out_of_memory=data.get("outOfMemory"), files=TracedFiles.from_json(data.get("files")))
 
     def to_dict(self) -> dict[str, Any]:
         return {"exitCode": self.exit_code, "stdout": self.stdout, "stderr": self.stderr, "timedOut": self.timed_out,
                 "stdoutTruncated": self.stdout_truncated, "stderrTruncated": self.stderr_truncated,
                 "durationMs": self.duration_ms, "processId": self.process_id,
-                **({"outOfMemory": self.out_of_memory} if self.out_of_memory else {})}
+                **({"outOfMemory": self.out_of_memory} if self.out_of_memory else {}),
+                **({"files": self.files.to_dict()} if self.files else {})}
 
 
 
@@ -238,7 +272,7 @@ class _Transport:
     async def send(self, method: str, path: str, *, query: Optional[dict[str, Any]] = None, body: Any = None,
                    raw: Optional[bytes] = None, idempotency_key: Optional[str] = None, wait: Optional[int] = None,
                    accept: str = "application/json", timeout: Optional[float] = None, retry: bool = True,
-                   wait_for_capacity: float = 0, deadline: Optional[float] = None,
+                   wait_for_capacity: Optional[float] = None, deadline: Optional[float] = None,
                    on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
                    read_body: bool = False, unlimited_body: bool = False,
                    hold: Optional[_Hold] = None) -> Any:
@@ -259,7 +293,9 @@ class _Transport:
         if scope.deadline is not None:
             deadline = scope.deadline if deadline is None else min(deadline, scope.deadline)
         per_call = scope.timeout(timeout if timeout is not None else self._timeout)
-        room_until = time.monotonic() + wait_for_capacity
+        # None: a call with no room wait; 0: a create, wake or restart told
+        # at once.
+        room_until = time.monotonic() + (wait_for_capacity or 0.0)
         room_attempt = 0
         # An answer that ran nothing is sent again until the call's deadline.
         idle_until = deadline if deadline is not None else time.monotonic() + _NOTHING_RAN_SECONDS
@@ -331,8 +367,10 @@ class _Transport:
             # A full house: wait for a slot or for room, then send the same call
             # again. A request that can never fit (a fork of more copies than
             # the trial runs) is not waited for.
-            if (retry and wait_for_capacity > 0 and error.code in WAITS_FOR_ROOM
-                    and (error.details or {}).get("field") != "count"):
+            if (retry and (wait_for_capacity or 0.0) > 0 and error.code in WAITS_FOR_ROOM
+                    and (error.details or {}).get("field") != "count"
+                    # A quota on what is kept says it never clears by waiting.
+                    and error.sent_retryable is not False):
                 left = room_until - time.monotonic()
                 if left <= 0:
                     raise error
@@ -348,22 +386,30 @@ class _Transport:
             # A late answer's failure came after the work began, so only a
             # guest's own refusal (guest_busy, before anything is journaled)
             # still says nothing ran.
-            if status in (429, 503) and error.code in NOTHING_RAN and (not late or error.code == "guest_busy"):
-                header = response.headers.get("retry-after")
+            named = _named_wait(error, response.headers.get("retry-after"))
+            if (status in (429, 503) and error.code in NOTHING_RAN and error.sent_retryable is not False
+                    and (not late or error.code == "guest_busy")):
+                if _too_long(error, named):
+                    raise error
                 base = (error.retry_after_ms / 1000 if error.retry_after_ms is not None
-                        else float(header) if header and header.isdigit() and int(header) > 0 else 0.25)
+                        else named if named else 0.25)
                 pause = min(30.0, base * 2 ** min(idle_attempt, 3)) * random.uniform(0.9, 1.1)
                 idle_attempt += 1
                 if pause >= idle_until - time.monotonic():
                     raise error
                 await retry_pause(pause)
                 continue
-            if (not retry or status not in (429, 502, 503, 504) or error.code in _DELIBERATE
-                    or attempt >= self._max_retries):
+            # The answer says whether the same call may work again; an older
+            # server that does not say is retried on 429, 502, 503 and 504.
+            # A refusal for room or the account's own limit is the room
+            # wait's on a create, wake or restart (0 fails at once); any other
+            # call retries what the answer says.
+            again = not (wait_for_capacity is not None and error.code in WAITS_FOR_ROOM) and (
+                error.sent_retryable if error.sent_retryable is not None
+                else status in (429, 502, 503, 504) and error.code not in _DELIBERATE)
+            if not retry or not again or attempt >= self._max_retries or _too_long(error, named):
                 raise error
-            header = response.headers.get("retry-after")
-            delay = (error.retry_after_ms / 1000 if error.retry_after_ms is not None
-                     else float(header) if header and header.isdigit() else _backoff(attempt))
+            delay = named if named is not None else _backoff(attempt)
             await retry_pause(min(30.0, delay) * random.uniform(0.9, 1.1))
             attempt += 1
 
@@ -555,6 +601,29 @@ def _never_sent(error: BaseException) -> bool:
     return False
 
 
+def _named_wait(error: RuntimeError, header: Optional[str]) -> Optional[float]:
+    """The seconds the answer asks to wait: its retryAfterMs, else its
+    Retry-After header (seconds), else None."""
+    if error.retry_after_ms is not None:
+        return error.retry_after_ms / 1000
+    try:
+        seconds = float(header) if header else None
+    except ValueError:
+        return None
+    return seconds if seconds is not None and math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _too_long(error: RuntimeError, named: Optional[float]) -> bool:
+    """A wait the server names past _LONGEST_SLEEP_SECONDS (a daily cap) is not
+    slept on: the error is raised at once, still retryable, its retry_after_ms
+    saying when, so the caller can schedule the call again."""
+    if named is None or named <= _LONGEST_SLEEP_SECONDS:
+        return False
+    if error.retry_after_ms is None:
+        error.retry_after_ms = int(math.ceil(named * 1000))
+    return True
+
+
 def _backoff(attempt: int) -> float:
     return min(8.0, 0.25 * 2 ** attempt) * random.uniform(0.5, 1.5)
 
@@ -598,7 +667,7 @@ class AsyncPage:
 
 def _command(command: Union[str, list[str], tuple[str, ...]], cwd: Optional[str], env: Optional[dict[str, str]],
              stdin: Optional[Union[str, bytes]], timeout_ms: Optional[int],
-             user: Optional[Literal["sandbox", "root"]] = None) -> dict[str, Any]:
+             user: Optional[Literal["sandbox", "root"]] = None, trace_files: bool = False) -> dict[str, Any]:
     body: dict[str, Any] = {"command": command} if isinstance(command, str) else {"argv": list(command)}
     if cwd is not None:
         body["cwd"] = cwd
@@ -612,6 +681,8 @@ def _command(command: Union[str, list[str], tuple[str, ...]], cwd: Optional[str]
         body["stdinBase64"] = base64.b64encode(stdin).decode()
     if timeout_ms is not None:
         body["timeoutMs"] = timeout_ms
+    if trace_files:
+        body["traceFiles"] = True
     return body
 
 
@@ -667,6 +738,8 @@ def _cut_off(error: BaseException) -> bool:
     if isinstance(error, ConnectionError):
         return True
     if isinstance(error, (RateLimitError, ServiceUnavailableError)):
+        if error.sent_retryable is not None:
+            return error.sent_retryable
         return error.status in (429, 502, 503, 504) and error.code not in _DELIBERATE
     return isinstance(error, (OSError, TimeoutError, ValueError)) and not isinstance(error, RuntimeError)
 
@@ -877,6 +950,11 @@ class AsyncProcess:
         self.info = await self._t.json("GET", self._path())
         return self.info
 
+    async def files(self) -> TracedFiles:
+        """The files a process spawned with ``trace_files=True`` read and wrote.
+        Raises a 409 ``process_running`` error while it runs."""
+        return TracedFiles.from_json(await self._t.json("GET", self._path("/files"))) or TracedFiles([], [])
+
 
 class AsyncTerminal:
     """An interactive terminal over a WebSocket: write() types, recv() reads."""
@@ -1026,6 +1104,30 @@ class AsyncFiles:
 
     async def rename(self, source: str, target: str, overwrite: bool = False) -> None:
         await self._t.json("POST", self._path("/files:rename"), body={"from": source, "to": target, "overwrite": overwrite})
+
+    async def download_url(self, path: str, *, expires_in_seconds: Optional[int] = None,
+                           filename: Optional[str] = None, wake: Optional[bool] = None,
+                           archive: Optional[bool] = None) -> dict[str, Any]:
+        """A signed URL anyone can open without a key to download ``path``
+        (Range supported). ``archive=True`` downloads a folder as .tar.gz.
+        Expires in 1 hour by default, at most 7 days."""
+        body = {"path": path, "method": "GET", "expiresInSeconds": expires_in_seconds,
+                "filename": filename, "wake": wake, "archive": archive}
+        return await self._t.json("POST", self._path("/files:link"),
+                                  body={k: v for k, v in body.items() if v is not None})
+
+    async def upload_url(self, path: str, *, expires_in_seconds: Optional[int] = None,
+                         max_bytes: Optional[int] = None, wake: Optional[bool] = None) -> dict[str, Any]:
+        """A signed URL anyone can PUT a raw body to without a key, writing
+        ``path`` atomically. Expires in 1 hour by default, at most 7 days."""
+        body = {"path": path, "method": "PUT", "expiresInSeconds": expires_in_seconds,
+                "maxBytes": max_bytes, "wake": wake}
+        return await self._t.json("POST", self._path("/files:link"),
+                                  body={k: v for k, v in body.items() if v is not None})
+
+    async def revoke_links(self) -> dict[str, Any]:
+        """End every download and upload link made for this sandbox."""
+        return await self._t.json("POST", self._path("/files:revoke-links"))
 
     async def archive(self, path: str, *, gzip: bool = True, user: str = "sandbox",
                       exclude: Optional[list[str]] = None) -> bytes:
@@ -1263,7 +1365,8 @@ class AsyncMachine:
         if waits_for_room:
             seconds = (getattr(self._t, "wait_for_capacity", 0.0) if wait_for_capacity is None
                        else max(0.0, float(wait_for_capacity)))
-            if seconds > 0:
+            # 0 is passed too, so the transport tells the refusal at once.
+            if seconds > 0 or hasattr(self._t, "wait_for_capacity"):
                 room = {"wait_for_capacity": seconds, "on_capacity_wait": on_capacity_wait}
         self.info = await self._t.json("POST", self._path(f":{verb}"), body=body or {}, wait=60 if wait else None,
                                        idempotency_key=idempotency_key, **room)
@@ -1293,20 +1396,25 @@ class AsyncMachine:
         return self
 
     async def resize(self: _M, *, restart: bool = True, vcpu: Optional[int] = None, memory_mib: Optional[int] = None,
-                     idempotency_key: Optional[str] = None) -> _M:
+                     disk_mib: Optional[int] = None, idempotency_key: Optional[str] = None) -> _M:
         """Gives it more or fewer vCPUs or more or less memory by a restart:
         its id, whole disk, volumes, environment, name and previews stay, and
         its programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped
         if it is persistent, and comes back running at the new size on the
         same server; a paused or stopped one is started. Memory bills on the
-        new size from then. Refused, with nothing changed, when the server has
-        no room (``no_capacity``), above your quota or the 2 vCPU and 4 GiB without credit, or while a snapshot or fork of it is being taken. ``restart``
-        is optional and True is the only value the API takes."""
+        new size from then. ``disk_mib`` only grows: a larger disk alone on a
+        running sandbox grows live, every program left running, and
+        ``restart=False`` asks for that or a refusal (``resize_needs_restart``:
+        paused, stopped, a custom image, or a server that cannot), never a
+        restart. Refused, with nothing changed, when the server has
+        no room (``no_capacity``), above your quota or the 2 vCPU and 4 GiB without credit, or while a snapshot or fork of it is being taken."""
         body: dict[str, Any] = {"restart": restart}
         if vcpu is not None:
             body["vcpu"] = vcpu
         if memory_mib is not None:
             body["memoryMiB"] = memory_mib
+        if disk_mib is not None:
+            body["diskMiB"] = disk_mib
         self.info = await self._t.json("POST", self._path(":resize"), body=body, wait=120,
                                        idempotency_key=idempotency_key)
         return self
@@ -1355,7 +1463,8 @@ class AsyncMachine:
         ``labels``, ``env`` (a value sets a variable, None removes it; commands
         started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
-        from now; 0 never, otherwise 10 to 86400; a new sandbox has 60),
+        from now; 0 never, otherwise 60 to 86400, a shorter time raised to 60;
+        a new sandbox has 300),
         ``persistent`` (keep it running until stopped, while credit lasts,
         never idle-paused; its disk is billed and kept as any sandbox's; paid
         only),
@@ -1374,7 +1483,7 @@ class AsyncMachine:
         the API allows. A sandbox with no time limit (``endsAt`` None) needs
         none, and is only watched. Running time is billed as it is used. A
         paused sandbox is left paused (a request wakes it unless auto_wake is
-        off); a stopped one ends it."""
+        off); a stopped or deleted one ends it."""
         self.stop_keep_alive()
         state: dict[str, Any] = {"on": True}
         margin = min(3600, max(60, int(margin_seconds)))
@@ -1391,8 +1500,12 @@ class AsyncMachine:
                         need = math.ceil(margin - _seconds_until(self.info.get("endsAt") or self.info.get("expiresAt")))
                         if need >= 1:
                             await self.extend(min(3600, need))
-                except RuntimeError:
-                    pass  # The next check tries again.
+                except RuntimeError as error:
+                    # Gone (deleted elsewhere, or by its own time limit): nothing
+                    # to keep alive, and asking again would only be refused.
+                    if error.status == 404:
+                        break
+                    # Anything else: the next check tries again.
                 if state["on"]:
                     await sleep(every)
             state["on"] = False
@@ -1584,16 +1697,18 @@ class AsyncSandbox(AsyncMachine):
                    env: Optional[dict[str, str]] = None, stdin: Optional[Union[str, bytes]] = None,
                    timeout_ms: Optional[int] = None, on_stdout: Optional[Callable[[str], Any]] = None,
                    on_stderr: Optional[Callable[[str], Any]] = None, check: bool = False,
-                   idempotency_key: Optional[str] = None) -> CommandResult:
+                   idempotency_key: Optional[str] = None, trace_files: bool = False) -> CommandResult:
         """Runs a command: a string under ``bash -c``, a list without a shell.
         With on_stdout/on_stderr the output streams. The timeout is 60 s by
         default, 24 h when the output streams. A timeout is a result
         (timed_out=True, the output so far), never an error; ``check=True``
         raises CommandError on a non-zero exit. ``user="root"`` runs it as root
-        through the sandbox's sudo (the default is "sandbox")."""
+        through the sandbox's sudo (the default is "sandbox"). ``trace_files=True``
+        sets ``result.files`` to the files it read and wrote (TracedFiles); an
+        older sandbox says to stop and start it, and no command runs."""
         streaming = on_stdout is not None or on_stderr is not None or (timeout_ms or 0) > 60_000
         if not streaming:
-            data = await self._t.json("POST", self._path(":exec"), body=_command(command, cwd, env, stdin, timeout_ms, user),
+            data = await self._t.json("POST", self._path(":exec"), body=_command(command, cwd, env, stdin, timeout_ms, user, trace_files),
                                       idempotency_key=idempotency_key, timeout=(timeout_ms or 60_000) / 1000 + 60)
             result = CommandResult.from_json(data)
         else:
@@ -1606,7 +1721,7 @@ class AsyncSandbox(AsyncMachine):
             dropped = False
             try:
                 async for event in self.exec_stream(command, cwd=cwd, user=user, env=env, stdin=stdin, timeout_ms=timeout_ms,
-                                                    idempotency_key=idempotency_key):
+                                                    idempotency_key=idempotency_key, trace_files=trace_files):
                     if event["type"] == "start":
                         process_id = event["processId"]
                     elif event["type"] in ("stdout", "stderr"):
@@ -1638,7 +1753,8 @@ class AsyncSandbox(AsyncMachine):
             result = CommandResult(exit_code=exit_event.get("exitCode"), stdout=out["stdout"], stderr=out["stderr"],
                                    timed_out=bool(exit_event.get("timedOut")), stdout_truncated=dropped,
                                    stderr_truncated=dropped, duration_ms=exit_event.get("durationMs"),
-                                   process_id=process_id, out_of_memory=exit_event.get("outOfMemory"))
+                                   process_id=process_id, out_of_memory=exit_event.get("outOfMemory"),
+                                         files=TracedFiles.from_json(exit_event.get("files")))
         if check and (result.exit_code != 0 or result.timed_out):
             raise CommandError(result.to_dict())
         return result
@@ -1647,7 +1763,7 @@ class AsyncSandbox(AsyncMachine):
                           user: Optional[Literal["sandbox", "root"]] = None,
                           env: Optional[dict[str, str]] = None, stdin: Optional[Union[str, bytes]] = None,
                           timeout_ms: Optional[int] = None,
-                          idempotency_key: Optional[str] = None) -> AsyncIterator[dict[str, Any]]:
+                          idempotency_key: Optional[str] = None, trace_files: bool = False) -> AsyncIterator[dict[str, Any]]:
         """The command's events as they happen: start, stdout, stderr, exit.
         Resumes by itself when the server ends a long stream or the connection
         drops after the command started, and yields ``truncated`` for output it
@@ -1659,7 +1775,7 @@ class AsyncSandbox(AsyncMachine):
                        "stderrTruncated": "stderr_truncated", "droppedBytes": "dropped_bytes",
                        "resumeAt": "resume_at", "outOfMemory": "out_of_memory"}
             return {**event, **{alias: event[name] for name, alias in aliases.items() if name in event}}
-        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS, user), "stream": True}
+        body = {**_command(command, cwd, env, stdin, timeout_ms if timeout_ms is not None else STREAMED_EXEC_TIMEOUT_MS, user, trace_files), "stream": True}
         events = self._t.events("POST", self._path(":exec"), body=body, idempotency_key=idempotency_key,
                                 timeout=((timeout_ms or STREAMED_EXEC_TIMEOUT_MS) / 1000) + 60)
         read = _OutputCursor()
@@ -1699,10 +1815,12 @@ class AsyncSandbox(AsyncMachine):
                     user: Optional[Literal["sandbox", "root"]] = None,
                     env: Optional[dict[str, str]] = None, stdin: Optional[str] = None,
                     pty: Optional[dict[str, int]] = None, timeout_ms: Optional[int] = None,
-                    output_encoding: Optional[str] = None) -> AsyncProcess:
+                    output_encoding: Optional[str] = None, trace_files: bool = False) -> AsyncProcess:
         """Starts a background process and returns at once. ``stdin="pipe"``
-        keeps input open for write(); ``pty={"cols": 120, "rows": 40}`` gives a terminal."""
-        body = _command(command, cwd, env, None if stdin == "pipe" else stdin, timeout_ms, user)
+        keeps input open for write(); ``pty={"cols": 120, "rows": 40}`` gives a terminal.
+        ``trace_files=True`` records the files it opens: read them with files()
+        once it has ended."""
+        body = _command(command, cwd, env, None if stdin == "pipe" else stdin, timeout_ms, user, trace_files)
         if output_encoding is not None:
             if output_encoding not in ("utf8", "base64"):
                 raise ValueError("output_encoding must be utf8 or base64")
@@ -1757,7 +1875,9 @@ class AsyncSandbox(AsyncMachine):
         body = {"count": count, "name": name, "labels": labels, "keepSnapshot": keep_snapshot,
                 "secrets": None if secrets is None else list(secrets)}
         reply = await self._t.json("POST", self._path(":fork"), body={k: v for k, v in body.items() if v is not None},
-                                   wait=60, idempotency_key=idempotency_key)
+                                   wait=60, idempotency_key=idempotency_key,
+                                   # Its key replays a refusal for room or a limit, so it is told at once.
+                                   wait_for_capacity=0)
         sandboxes = [AsyncSandbox(self._t, info) for info in reply["sandboxes"]]
         return sandboxes if count is not None else sandboxes[0]
 

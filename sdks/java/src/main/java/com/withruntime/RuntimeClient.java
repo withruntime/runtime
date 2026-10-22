@@ -19,10 +19,13 @@ import java.util.Map;
  *
  * <p>Every product is {@code runtime.<product>().<verb>(...)}. Money is integer microdollars
  * (1,000,000 is one US dollar).
+ *
+ * <p>Agents are set up from a runtime.yml in your repo by the CLI, which makes the account's agents
+ * match the file: {@code npx withruntime agents deploy}. This package has no deploy of its own.
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.9.0";
+  public static final String VERSION = "0.17.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -36,11 +39,14 @@ public final class RuntimeClient {
   private final Apps apps;
   private final Apps functions;
   private final Builds builds;
+  private final Ci ci;
   private final Containers containers;
   private final Products.Secrets secrets;
+  private final Reservations reservations;
   private final Products.Limits limits;
   private final Products.Emails emails;
   private final Products.Referrals referrals;
+  private final Products.Plans plans;
   private final Products.Switching switching;
   private final Products.Events events;
   private final Products.Webhooks webhooks;
@@ -76,11 +82,14 @@ public final class RuntimeClient {
     this.apps = new Apps(transport, "apps");
     this.functions = new Apps(transport, "functions");
     this.builds = new Builds(transport);
+    this.ci = new Ci(transport);
     this.containers = new Containers(transport);
     this.secrets = new Products.Secrets(transport);
+    this.reservations = new Reservations(transport);
     this.limits = new Products.Limits(transport);
     this.emails = new Products.Emails(transport);
     this.referrals = new Products.Referrals(transport);
+    this.plans = new Products.Plans(transport);
     this.switching = new Products.Switching(transport);
     this.events = new Products.Events(transport);
     this.webhooks = new Products.Webhooks(transport);
@@ -232,6 +241,14 @@ public final class RuntimeClient {
   }
 
   /**
+   * CI/CD: a connected GitHub repository's pushes and pull requests checked in sandboxes, and
+   * their checks, jobs and test files. In a private beta.
+   */
+  public Ci ci() {
+    return ci;
+  }
+
+  /**
    * One OCI image's process each on its own microVM, at the sandbox rates. In private beta:
    * outside it, PermissionDenied with code product_in_beta.
    */
@@ -242,6 +259,11 @@ public final class RuntimeClient {
   /** Values sandboxes use on the way out without seeing them. */
   public Products.Secrets secrets() {
     return secrets;
+  }
+
+  /** Room booked for a burst of sandboxes for a window. */
+  public Reservations reservations() {
+    return reservations;
   }
 
   /** What this key may do and spend. */
@@ -256,6 +278,11 @@ public final class RuntimeClient {
 
   public Products.Referrals referrals() {
     return referrals;
+  }
+
+  /** Monthly plans whose fee is prepaid usage. */
+  public Products.Plans plans() {
+    return plans;
   }
 
   /** Compare usage with a rival's published rates, and record a switch. */

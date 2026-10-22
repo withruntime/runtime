@@ -21,9 +21,11 @@ from ._dual import Dual, install
 from ._object import CONSOLE, _Object
 from .exception import ImageBuildError, InvalidError, NotFoundError
 from .file_pattern_matcher import NON_PYTHON_FILES, FilePatternMatcher, ignore_fn
+from .output import build_log
 
-GPU_OR_SECRETS = ("Runtime builds images on CPU, without stored secrets: drop gpu, and pass build-time "
-                  "values with env=")
+GPU_OR_SECRETS = ("Runtime builds images on CPU and keeps no secret in a build: drop gpu, and use a secret "
+                  "at run time, with Sandbox.create(secrets=[...]), or runtime.secrets.set(...) so the sandbox "
+                  "never sees it")
 REGISTRY_LOGIN = "store the registry login with runtime.images.registries.set(...), then Image.from_registry(tag)"
 ADD_PYTHON = "Installing a specific Python into arbitrary images is not supported: use a Python base image"
 MICROMAMBA = "mambaorg/micromamba:2.1.1-debian12-slim"
@@ -273,7 +275,7 @@ class Image(_Object):
                 self._object_id = runtime.images.resolve(self._ref)["id"]
                 return
             with tempfile.TemporaryDirectory(prefix="modal-image-") as stage:
-                self._object_id = runtime.images.build(**self._fields(stage))["id"]
+                self._object_id = runtime.images.build(on_log=build_log(), **self._fields(stage))["id"]
         except SDKError as error:
             raise _build_error(error) from error
 
@@ -285,7 +287,7 @@ class Image(_Object):
                 self._object_id = (await runtime.images.resolve(self._ref))["id"]
                 return
             with tempfile.TemporaryDirectory(prefix="modal-image-") as stage:
-                self._object_id = (await runtime.images.build(**self._fields(stage)))["id"]
+                self._object_id = (await runtime.images.build(on_log=build_log(), **self._fields(stage)))["id"]
         except SDKError as error:
             raise _build_error(error) from error
 
@@ -393,8 +395,32 @@ class Image(_Object):
         image._client = client
         return image
 
+    def _publishing(self, name, environment_name, experimental_options):
+        """The Runtime image fields `publish` builds under: `name` and its tag,
+        `latest` when none is given, as Modal's from_name reads it."""
+        if environment_name is not None:
+            raise CompatibilityError("Modal environment namespaces are not Runtime account namespaces")
+        if experimental_options:
+            raise CompatibilityError(f"Runtime images take no experimental options: {', '.join(sorted(experimental_options))}")
+        if self._snapshot_id or self._ref:
+            raise CompatibilityError("Only a recipe this client builds can be published under a name: an image from "
+                                     "a filesystem snapshot starts sandboxes as it is, and one from from_id or "
+                                     "from_name already has its Runtime name")
+        name, _, tag = _line(name, "name").partition(":")
+        return {"name": name, "tags": [tag or "latest"]}
+
     def publish(self, name, *, environment_name=None, experimental_options=None, client=None):
-        raise CompatibilityError("Build with a name instead: runtime.images.build(name=..., dockerfile=...)")
+        """Modal's published image is a Runtime image name: the recipe is built
+        under it (a copy, when the account already built the same recipe), so
+        Image.from_name(name) finds it from any program of the account."""
+        named = self._publishing(name, environment_name, experimental_options)
+        from .. import Runtime
+        runtime = client or self._client or Runtime()
+        try:
+            with tempfile.TemporaryDirectory(prefix="modal-image-") as stage:
+                runtime.images.build(on_log=build_log(), **self._fields(stage), **named)
+        except SDKError as error:
+            raise _build_error(error) from error
 
     # Steps ------------------------------------------------------------------
 
@@ -693,5 +719,16 @@ async def _dashboard_aio(self):
 
 Image.build = Dual(Image.build, _build_aio)
 Image.get_dashboard_url = Dual(Image.__dict__["get_dashboard_url"], _dashboard_aio)
-install(Image, ("publish",), refused=True)
+async def _publish_aio(self, name, *, environment_name=None, experimental_options=None, client=None):
+    named = self._publishing(name, environment_name, experimental_options)
+    from .. import AsyncRuntime
+    runtime = client or self._client or AsyncRuntime()
+    try:
+        with tempfile.TemporaryDirectory(prefix="modal-image-") as stage:
+            await runtime.images.build(on_log=build_log(), **self._fields(stage), **named)
+    except SDKError as error:
+        raise _build_error(error) from error
+
+
+Image.publish = Dual(Image.publish, _publish_aio)
 install(Image, ("from_id",), static=("from_id",))

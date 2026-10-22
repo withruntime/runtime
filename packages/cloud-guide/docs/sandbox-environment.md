@@ -202,14 +202,22 @@ running sandboxes to the paid amount, with what they have used kept.
 Inbound traffic is free; each account's first {{outbound-allowance}} out a month is free, then
 {{outbound-rate}} per GB (10⁹ bytes) ([pricing](./pricing#network-products)).
 
-**Connections.** A paid sandbox holds up to 512 outbound connections open at
-once, or 128 per vCPU when that is more, up to 1,024, and opens up to 100 new
-ones a second (25 per vCPU when that is more). A sandbox without credit holds 64
-per vCPU, up to 256, and opens 20 a second. Past the limit, a new connection gets
-`503 Service Unavailable` with `X-Runtime-Egress: too many open connections (512 of 512)`
-and `Retry-After: 1`, rather than a reset; first, though, a connection silent for
-a minute or more is closed to make room. Reuse connections (HTTP keep-alive
-pools) rather than opening one per request.
+**Connections.** A sandbox of an account that keeps a top-up holds up to 512
+outbound connections open at once for each vCPU, up to 4,096; any other holds 64.
+Every sandbox opens up to 20 new connections a second, after a first 128 at once
+(40 without a kept top-up), and starts reaching up to 120 different hosts and
+ports a minute. So an agent can hold hundreds of connections to the APIs it
+uses, while a scan stays slow. Past a rate, a new connection waits up to 30
+seconds for its turn rather than failing: 500 opened at once to one host all
+connect within about 20 seconds. Past a limit, a new connection gets
+`503 Service Unavailable` with `Retry-After: 1` and the limit in
+`X-Runtime-Egress`, such as `too many open connections (512 of 512)` or
+`too many new connections (20 a second)`, never a reset; first, though, a
+connection silent for a minute or more is closed to make room. Each limit a
+sandbox meets also sends the account event `sandbox.network.limited`, at most
+once an hour per limit ([observability](./observability#events)), and
+`GET /v1/sandboxes/{id}/network` shows a sandbox's limits. Reuse connections
+(HTTP keep-alive pools) rather than opening one per request.
 
 Each sandbox has its own rules, set at create (`network`) or at any time after,
 applied at once, to open connections too:
@@ -292,8 +300,8 @@ Nothing on the internet can connect in to a sandbox. There are these ways in,
 all yours to open:
 
 - A preview: an HTTPS address for one port that you share on purpose, private
-  with a token by default. See [JavaScript](./javascript#share-a-port) or
-  `npx withruntime sandboxes preview`.
+  with a token by default, and never indexed by search engines. See
+  [JavaScript](./javascript#share-a-port) or `npx withruntime sandboxes preview`.
 - A connection from your own computer: `runtime sandboxes ssh` and
   `runtime sandboxes port-forward` reach any port on the sandbox's loopback
   through Runtime's API, with your key, and need nothing set up. See

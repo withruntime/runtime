@@ -36,4 +36,14 @@ def entry(data):
     type_mode = {FileType.FILE: stat.S_IFREG, FileType.DIRECTORY: stat.S_IFDIR, FileType.SYMLINK: stat.S_IFLNK}[kind]
     return FileInfo(name=data["name"], path=data["path"], type=kind, size=data["size"], mode=mode,
         permissions=stat.filemode(type_mode | mode), owner=data["owner"], group=data["group"],
-        modified_time=data["mtimeMs"] / 1000, symlink_target=data.get("symlinkTarget"))
+        modified_time=modified(data), symlink_target=data.get("symlinkTarget"))
+
+
+def modified(data):
+    """Seconds since the epoch. A stat answers mtimeMs; a directory listing's
+    entries answer modifiedAt (ISO 8601), which list_files read as mtimeMs
+    and failed with KeyError on every entry until 18 October 2026."""
+    if "mtimeMs" in data:
+        return data["mtimeMs"] / 1000
+    from datetime import datetime
+    return datetime.fromisoformat(data["modifiedAt"].replace("Z", "+00:00")).timestamp()

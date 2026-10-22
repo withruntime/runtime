@@ -111,6 +111,9 @@ final class Transport {
     String key;
     boolean noRetry;
     Duration room = Duration.ZERO;
+    // A create, wake, restart or fork: its refusals for room or a limit are the room wait's (a zero
+    // room tells them at once), not the general retry's.
+    boolean roomed;
     Duration timeout;
     Cancellation cancellation;
 
@@ -122,6 +125,12 @@ final class Transport {
     Call query(String name, Object value) {
       if (value != null && !(value instanceof String text && text.isEmpty()))
         query.add(new String[] {name, String.valueOf(value)});
+      return this;
+    }
+
+    /** A value sent even when empty: an agent memory's scope "" is its shared memory. */
+    Call queryKept(String name, String value) {
+      if (value != null) query.add(new String[] {name, value});
       return this;
     }
 
@@ -157,6 +166,7 @@ final class Transport {
 
     Call room(Duration value) {
       this.room = value;
+      this.roomed = true;
       return this;
     }
 
@@ -314,6 +324,13 @@ final class Transport {
    */
   static Duration answerStart = Duration.ofSeconds(125);
 
+  /**
+   * The longest wait the server may name that a retry sleeps on. A longer one (a daily cap's hour)
+   * is thrown at once, still retryable with its {@link RuntimeCloudException#retryAfter()}, for the
+   * caller to schedule.
+   */
+  static final Duration LONGEST_WAIT = Duration.ofSeconds(60);
+
   private record Exchange(HttpResponse<InputStream> response, byte[] body) {}
 
   private Exchange exchange(Call call, boolean whole) {
@@ -323,6 +340,7 @@ final class Transport {
     long deadline = System.nanoTime() + limit.toNanos();
     long roomUntil = System.nanoTime() + call.room.toNanos();
     int roomAttempt = 0;
+    int idleAttempt = 0;
     byte[] payload = null;
     String contentType = null;
     if (call.raw != null) {
@@ -449,7 +467,9 @@ final class Transport {
       if (!call.noRetry
           && !call.room.isZero()
           && RuntimeCloudException.WAITS_FOR_ROOM.contains(failure.code())
-          && !"count".equals(failure.details().get("field"))) {
+          && !"count".equals(failure.details().get("field"))
+          // A quota on what is kept says it never clears by waiting.
+          && !Boolean.FALSE.equals(failure.sentRetryable())) {
         long roomLeft = roomUntil - System.nanoTime();
         if (roomLeft <= 0) throw failure;
         Duration wait =
@@ -465,20 +485,42 @@ final class Transport {
         attempt--;
         continue;
       }
-      boolean retryable =
-          (status == 429 || status == 502 || status == 503 || status == 504)
-              && !RuntimeCloudException.DELIBERATE.contains(failure.code());
-      if (call.noRetry || !retryable || attempt >= maxRetries) throw failure;
-      Duration wait = failure.retryAfter();
-      if (wait == null) {
-        String header = response.headers().firstValue("Retry-After").orElse("");
-        try {
-          double seconds = Double.parseDouble(header);
-          wait = seconds > 0 ? Duration.ofMillis((long) (seconds * 1000)) : backoff(attempt);
-        } catch (NumberFormatException none) {
-          wait = backoff(attempt);
-        }
+      // The wait the server named: the body's retryAfterMs, else its Retry-After header. One longer
+      // than LONGEST_WAIT (a daily cap) is not slept on: the refusal is thrown at once, still
+      // retryable and carrying its wait, so the caller can schedule the retry.
+      Duration named = failure.retryAfter() != null ? failure.retryAfter() : retryAfterHeader(response);
+      boolean tooLong = named != null && named.compareTo(LONGEST_WAIT) > 0;
+      // Nothing ran: safe to send again for any call, past maxRetries, with growing waits, until
+      // the call's deadline; then this refusal stands. A late answer's failure came after the work
+      // began, so only a guest's own refusal (guest_busy, before anything is journaled) still says
+      // nothing ran.
+      if ((status == 429 || status == 503)
+          && RuntimeCloudException.NOTHING_RAN.contains(failure.code())
+          && !Boolean.FALSE.equals(failure.sentRetryable())
+          && (!lateAnswer || failure.code().equals("guest_busy"))) {
+        if (tooLong) throw failure.waitNamed(named);
+        double base = named != null ? named.toMillis() : 250;
+        double grown = Math.min(30_000, base * Math.pow(2, Math.min(idleAttempt, 3)));
+        idleAttempt++;
+        Duration wait =
+            Duration.ofMillis((long) (grown * (0.9 + ThreadLocalRandom.current().nextDouble() * 0.2)));
+        pause(wait, deadline, write, key, failure, call.cancellation);
+        attempt--;
+        continue;
       }
+      // The answer says whether the same request may succeed; an older server's answer does not,
+      // and then a passing 429, 502, 503 or 504 is retried.
+      // A refusal for room or the account's own limit is the room wait's on a create, wake, restart
+      // or fork; any other call retries what the answer says.
+      boolean retryable =
+          !(call.roomed && RuntimeCloudException.WAITS_FOR_ROOM.contains(failure.code()))
+              && (failure.sentRetryable() != null
+                  ? failure.sentRetryable()
+                  : (status == 429 || status == 502 || status == 503 || status == 504)
+                      && !RuntimeCloudException.DELIBERATE.contains(failure.code()));
+      if (tooLong) throw failure.waitNamed(named);
+      if (call.noRetry || !retryable || attempt >= maxRetries) throw failure;
+      Duration wait = named != null ? named : backoff(attempt);
       wait = min(Duration.ofSeconds(30), wait);
       wait =
           Duration.ofMillis(
@@ -505,6 +547,17 @@ final class Transport {
     return error.get("status") instanceof Number status && status.doubleValue() >= 400
         ? status.intValue()
         : 500;
+  }
+
+  /** A Retry-After header's wait in seconds, or null when there is none or it is not a number. */
+  private static Duration retryAfterHeader(HttpResponse<InputStream> response) {
+    String header = response.headers().firstValue("Retry-After").orElse("");
+    try {
+      double seconds = Double.parseDouble(header);
+      return seconds > 0 ? Duration.ofMillis((long) (seconds * 1000)) : null;
+    } catch (NumberFormatException none) {
+      return null;
+    }
   }
 
   private static Duration min(Duration a, Duration b) {

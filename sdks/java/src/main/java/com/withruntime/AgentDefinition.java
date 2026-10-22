@@ -74,7 +74,16 @@ public final class AgentDefinition {
     return set("from", snapshot == null ? null : Map.of("snapshot", snapshot));
   }
 
-  /** {@code {image}} or {@code {snapshot}}; empty when unset (the default image). */
+  /**
+   * Start from a GitHub repository connected to CI/CD ({@code owner/name}): each session is a copy
+   * of its warm snapshot, the repository checked out at /workspace/repo at its production
+   * branch's last passing commit, set up, with the harness run there.
+   */
+  public AgentDefinition fromRepo(String repo) {
+    return set("from", repo == null ? null : Map.of("repo", repo));
+  }
+
+  /** {@code {image}}, {@code {snapshot}} or {@code {repo}}; empty when unset (the default image). */
   public JsonObject from() {
     return view().getObject("from");
   }
@@ -201,7 +210,7 @@ public final class AgentDefinition {
 
   /**
    * Dollars the agent's sessions started in a UTC day may cost: more than 0, at most 100000, 100
-   * unless set. Past it, it starts nothing new (a Conflict, budget_reached) until the next day.
+   * unless set. Past it, it starts nothing new (402, budget_reached) until the next day.
    */
   public AgentDefinition maxDayDollars(double dollars) {
     return set("maxDayDollars", dollars);

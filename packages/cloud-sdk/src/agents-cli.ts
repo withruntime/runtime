@@ -1,15 +1,17 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import type { AgentsDeployChange, AgentsDeployResult } from "./agents-deploy.js";
 import { me, named } from "./cli-name.js";
 import type { CliKit } from "./cli.js";
 import type { Runtime } from "./client.js";
 import {
   AGENT_TEMPLATES,
+  agentTemplate,
   AGENT_USES,
   agents,
   type AgentDefinition,
   type AgentEvent,
   type AgentSessionState,
-  type AgentTemplateKey,
   type CreateAgentTrigger,
 } from "./products/agents.js";
 
@@ -27,6 +29,15 @@ export const AGENT_HELP = `runtime agents <command>
   In a private beta: outside it, each command says how to ask to join.
 
   templates                                   The harnesses and uses to start from
+  init [name] [--template <harness>] [--use support|team] [--file runtime.yml]
+                                              Write a starter agents: section into runtime.yml
+  deploy [--file runtime.yml] [--dry-run] [--prune [--prune-memory]]
+                                              Make your agents match runtime.yml: create, update
+                                              (a new version only when it changed) and set
+                                              triggers; one line per change. --prune deletes the
+                                              agents a deploy made that the file no longer names,
+                                              with their triggers; one holding memory files only
+                                              with --prune-memory too, which deletes them for good
   create <name> (--template <harness> | --command "<cmd>") [--use support|team]
          [--instructions <text> | --instructions-file <path>] [--secret NAME]...
          [--env KEY=VALUE]... [--image <image> | --snapshot <id>] [--vcpu n] [--memory n]
@@ -53,6 +64,16 @@ export const AGENT_HELP = `runtime agents <command>
   triggers pause <triggerId> --why <words>    Refuse its events, saying why; nothing else is held
   triggers resume <triggerId>
   triggers rm <triggerId>
+  memory ls <agent> [--scope <key>] [--prefix <path>]
+                                              Its memory files, with their scope (shared or a key)
+  memory search <agent> <words...> [--scope <key>] [--limit n]
+                                              Files whose words match, best first
+  memory cat <agent> <path> [--scope <key>]   A file's text
+  memory put <agent> <path> [<file> | - | --content <text>] [--scope <key>]
+                                              Seed or replace a file (from a file, or - for stdin)
+  memory rm <agent> <path> [--scope <key>]    Delete a file
+                                              Without --scope: the shared memory, which every
+                                              session reads and only a shared agent's write
 
   A subscription is for your own team's agents; an agent that serves your
   customers uses an API key.
@@ -61,6 +82,8 @@ Examples
   printf %s "$ANTHROPIC_API_KEY" | runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com
   runtime agents create helper --template claude-code --use support --instructions "Answer briefly."
   runtime agents start helper "How do I reset my password?" --key customer:42 --follow
+  runtime agents memory put helper faq/refunds.md refunds.md
+  runtime agents init --template claude-code && runtime agents deploy --dry-run
 `;
 
 const when = (iso: string | null | undefined) => iso ?? "-";
@@ -111,7 +134,7 @@ function definitionOf(args: Args, kit: CliKit, env: NodeJS.ProcessEnv, base?: Ag
   const secrets = args.flags.get("secret");
   const definition: Record<string, unknown> = {
     ...(base ?? {}),
-    ...(template ? AGENT_TEMPLATES[template as AgentTemplateKey].definition : {}),
+    ...(template ? agentTemplate(template)!.definition : {}),
     ...(use ? AGENT_USES[use].definition : {}),
   };
   const set = (field: string, value: unknown) => {
@@ -181,6 +204,8 @@ export async function agentsCommand(
     );
     return 0;
   }
+  if (verb === "init") return initFile(rest, out, kit);
+  if (verb === "deploy") return deploy(rest, out, client, kit);
   const transport = (await client()).transport;
   const api = agents(transport);
   const follow = async (sessionId: string, after: number) => {
@@ -395,9 +420,13 @@ export async function agentsCommand(
       );
       return 0;
     }
+    case "memory":
+      return memoryCommand(rest, api, out, kit, print);
     default:
       throw unknown("agents command", verb, [
         "templates",
+        "init",
+        "deploy",
         "create",
         "ls",
         "get",
@@ -409,6 +438,257 @@ export async function agentsCommand(
         "sessions",
         "stop",
         "triggers",
+        "memory",
       ]);
   }
+}
+
+const scopeName = (scope: string) => scope || "(shared)";
+
+/** `runtime agents memory`: an agent's built-in memory, by scope and path.
+ * Without --scope, cat, put and rm mean the shared memory, which every
+ * session reads (a per-key session read-only, what you put there alone);
+ * ls and search mean every scope. */
+async function memoryCommand(
+  argv: string[],
+  api: ReturnType<typeof agents>,
+  out: Out,
+  kit: CliKit,
+  print: (human: string, value: unknown) => void,
+): Promise<number> {
+  const { parse, flag, need, table, usage, unknown } = kit;
+  const [sub, ...rest] = argv;
+  switch (sub) {
+    case "ls":
+    case "list": {
+      const args = parse(rest, [], ["scope", "prefix"]);
+      const agent = need(args.positional[0], "an agent's id or name");
+      const scope = flag(args, "scope");
+      const prefix = flag(args, "prefix");
+      const first = await api.memory.list(agent, {
+        limit: 1000,
+        ...(scope === undefined ? {} : { scope }),
+        ...(prefix === undefined ? {} : { prefix }),
+      });
+      const all = await first.toArray(Infinity);
+      const { usage: used } = first;
+      print(
+        [
+          all.length
+            ? table([
+                ["SCOPE", "PATH", "BYTES", "UPDATED"],
+                ...all.map((f) => [scopeName(f.scope), f.path, String(f.bytes), f.updatedAt]),
+              ])
+            : "No memory files.",
+          `${used.files} files, ${used.bytes} bytes in all (at most ${used.limitFiles} files, ${used.limitBytes} bytes).`,
+        ].join("\n"),
+        { data: all, usage: used },
+      );
+      return 0;
+    }
+    case "search": {
+      const args = parse(rest, [], ["scope", "limit"]);
+      const agent = need(args.positional[0], "an agent's id or name");
+      const words = args.positional.slice(1).join(" ");
+      if (!words)
+        throw usage(`Give the words: ${me} agents memory search ${agent} "refund policy"`);
+      const scope = flag(args, "scope");
+      const limit = kit.integer(args, "limit");
+      const hits = await api.memory.search(agent, words, {
+        ...(scope === undefined ? {} : { scope }),
+        ...(limit === undefined ? {} : { limit }),
+      });
+      print(
+        hits.length
+          ? table([
+              ["SCOPE", "PATH", "SNIPPET"],
+              ...hits.map((h) => [scopeName(h.scope), h.path, h.snippet.replace(/\s+/g, " ")]),
+            ])
+          : "Nothing matches.",
+        hits,
+      );
+      return 0;
+    }
+    case "cat":
+    case "read": {
+      const args = parse(rest, [], ["scope"]);
+      const agent = need(args.positional[0], "an agent's id or name");
+      const file = await api.memory.read(agent, need(args.positional[1], "a file's path"), {
+        scope: flag(args, "scope") ?? "",
+      });
+      print(file.content, file);
+      return 0;
+    }
+    case "put":
+    case "write": {
+      const args = parse(rest, [], ["scope", "content"]);
+      const agent = need(args.positional[0], "an agent's id or name");
+      const path = need(args.positional[1], "a file's path");
+      const source = args.positional[2];
+      const given = flag(args, "content");
+      if (given !== undefined && source !== undefined)
+        throw usage("Give a file or --content, not both.");
+      let content = given;
+      if (content === undefined) {
+        if (source !== undefined && source !== "-") content = readFileSync(source, "utf8");
+        // stdin only when named: a CI step with nothing piped in would
+        // otherwise replace the file with nothing.
+        else if (source === "-") {
+          const chunks: Buffer[] = [];
+          for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+          content = Buffer.concat(chunks).toString("utf8");
+        } else
+          throw usage(
+            `Give the text: a file (${me} agents memory put ${agent} ${path} notes.md), - for stdin, or --content.`,
+          );
+      }
+      const written = await api.memory.write(agent, path, content, {
+        scope: flag(args, "scope") ?? "",
+      });
+      print(
+        `${written.created ? "Wrote" : "Replaced"} ${path} in ${scopeName(written.scope)}: ${written.bytes} bytes.`,
+        written,
+      );
+      return 0;
+    }
+    case "rm":
+    case "delete": {
+      const args = parse(rest, [], ["scope"]);
+      const agent = need(args.positional[0], "an agent's id or name");
+      const path = need(args.positional[1], "a file's path");
+      const scope = flag(args, "scope") ?? "";
+      const deleted = await api.memory.delete(agent, path, { scope });
+      print(
+        deleted
+          ? `${path} deleted from ${scopeName(scope)}.`
+          : `No ${path} in ${scopeName(scope)}.`,
+        { deleted },
+      );
+      return 0;
+    }
+    default:
+      if (!sub) throw usage("agents memory takes ls, search, cat, put or rm.");
+      throw unknown("agents memory command", sub, ["ls", "search", "cat", "put", "rm"]);
+  }
+}
+
+/** `runtime agents init`: a starter agents: section, into a new runtime.yml
+ * or added to one that has none yet. The YAML parser loads only here and in
+ * deploy. */
+async function initFile(argv: string[], out: Out, kit: CliKit): Promise<number> {
+  const { parse, flag, usage } = kit;
+  const { AGENTS_FILE, parseAgentsFile, starterAgents } = await import("./agents-file.js");
+  const args = parse(argv, [], ["template", "use", "file"]);
+  const template = flag(args, "template") ?? "claude-code";
+  if (!(template in AGENT_TEMPLATES))
+    throw usage(`--template takes ${Object.keys(AGENT_TEMPLATES).join(", ")}.`);
+  const use = flag(args, "use");
+  if (use !== undefined && use !== "support" && use !== "team")
+    throw usage("--use takes support or team.");
+  const name = args.positional[0] ?? template;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name))
+    throw usage(
+      "An agent's name is letters, digits, '.', '_' and '-', starting with a letter or digit.",
+    );
+  const file = flag(args, "file") ?? AGENTS_FILE;
+  const folder = dirname(resolve(file));
+  const instructionsFile = ["AGENTS.md", "CLAUDE.md"].find((f) => existsSync(join(folder, f)));
+  const text = starterAgents({
+    name,
+    template,
+    ...(use ? { use } : {}),
+    ...(instructionsFile ? { instructionsFile } : {}),
+  });
+  if (existsSync(file)) {
+    const existing = readFileSync(file, "utf8");
+    const config = parseAgentsFile(existing, file).config;
+    if (typeof config === "object" && config !== null && "agents" in config)
+      throw usage(
+        `${file} already has an agents: section. Add ${name} under it by hand, or run \`${me} agents deploy\`.`,
+      );
+    writeFileSync(file, `${existing}${existing.endsWith("\n") || !existing ? "" : "\n"}\n${text}`);
+  } else writeFileSync(file, text);
+  const t = agentTemplate(template)!;
+  say(
+    out,
+    [
+      `Wrote agent ${name} (${t.title}) to ${file}${instructionsFile ? `, with ${instructionsFile} as its instructions` : ""}.`,
+      "Next:",
+      `  printf %s "$${t.apiKeySecret}" | ${me} secrets set ${t.apiKeySecret} --host ${t.apiKeyHost}`,
+      `  ${me} agents deploy --dry-run`,
+      `  ${me} agents deploy`,
+    ].join("\n"),
+    { file, name, template, text },
+  );
+  return 0;
+}
+
+/** `runtime agents deploy`: the file is read and checked before any key is
+ * needed, then the plan is made against the account and each change made in
+ * turn, printed as it is made with its idempotency key. */
+async function deploy(
+  argv: string[],
+  out: Out,
+  client: () => Promise<Runtime>,
+  kit: CliKit,
+): Promise<number> {
+  const { parse, flag, has } = kit;
+  const { AGENTS_FILE, loadAgentsFile } = await import("./agents-file.js");
+  const { checkAgentsFile, withDeploy } = await import("./agents-deploy.js");
+  const args = parse(argv, ["dry-run", "prune", "prune-memory"], ["file"]);
+  if (has(args, "prune-memory") && !has(args, "prune"))
+    throw kit.usage("--prune-memory goes with --prune.");
+  const dryRun = has(args, "dry-run");
+  const source = loadAgentsFile(flag(args, "file") ?? AGENTS_FILE);
+  const count = checkAgentsFile(source).length;
+  const api = withDeploy(agents((await client()).transport));
+  const shown = (c: AgentsDeployChange) => `${dryRun ? "would " : ""}${c.text}  (key ${c.key})`;
+  if (!out.json)
+    out.write(
+      `${source.file}: ${count} agent${count === 1 ? "" : "s"}${dryRun ? ". Dry run: nothing is changed." : "."}`,
+    );
+  let made = 0;
+  let result: AgentsDeployResult;
+  try {
+    result = await api.deploy(source, {
+      dryRun,
+      prune: has(args, "prune"),
+      pruneMemory: has(args, "prune-memory"),
+      onChange: (change) => {
+        made++;
+        if (out.json) return;
+        out.write(shown(change));
+        if (change.action === "add-trigger" && change.secret)
+          out.write(
+            `  secret ${change.secret}  (shown this once: each of its calls carries it; keep it now)`,
+          );
+      },
+    });
+  } catch (error) {
+    if (made && !out.json)
+      out.error(
+        `Stopped after ${made} change${made === 1 ? "" : "s"}. Run \`${me} agents deploy\` again to make the rest: each change's key makes a rerun safe.`,
+      );
+    throw error;
+  }
+  if (out.json) {
+    out.write(JSON.stringify(result));
+    return 0;
+  }
+  if (dryRun) for (const change of result.changes) out.write(shown(change));
+  if (result.unchanged.length) out.write(`unchanged: ${result.unchanged.join(", ")}`);
+  for (const kept of result.leftAlone) out.write(`left alone: ${kept.agent} (${kept.why})`);
+  const n = result.changes.length;
+  out.write(
+    n === 0
+      ? `Nothing to change: your agents match ${source.file}.`
+      : dryRun
+        ? `${n} change${n === 1 ? "" : "s"} planned. Run \`${me} agents deploy\` to make ${n === 1 ? "it" : "them"}.`
+        : `Done: ${n} change${n === 1 ? "" : "s"}.`,
+  );
+  return 0;
+}
+
+function say(out: Out, human: string, value: unknown) {
+  out.write(out.json ? JSON.stringify(value) : human);
 }

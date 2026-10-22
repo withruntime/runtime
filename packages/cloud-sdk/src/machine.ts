@@ -243,15 +243,19 @@ export abstract class Machine<
    * programs stop (snapshot it first to keep its memory too). A running sandbox is paused, or stopped if it is
    * persistent, and comes back running at the new size on the same server; a
    * paused or stopped one is started. Memory bills on the new size from then.
+   * A larger disk alone on a running sandbox grows live instead, every
+   * program left running; `restart: false` asks for that or a refusal
+   * (`resize_needs_restart`: paused, stopped, a custom image, or a server
+   * that cannot), never a restart.
    * Refused, with nothing changed, when the server has no room
    * (`no_capacity`), above your quota or the 2 vCPU and 4 GiB without credit, or
-   * while a snapshot or fork of it is being taken. `restart` is optional:
-   * true is the only value, and it is sent either way, so an API from before
-   * it was optional accepts the call too. */
+   * while a snapshot or fork of it is being taken. `restart` defaults to
+   * true and is sent either way, so an API from before it was optional
+   * accepts the call too. */
   async resize(
-    /** diskMiB only grows; the filesystem fills it at the restart. */
+    /** diskMiB only grows; the filesystem fills it at once (live) or at the restart. */
     size: { vcpu?: number; memoryMiB?: number; diskMiB?: number },
-    options: RequestOptions & { restart?: true } = {},
+    options: RequestOptions & { restart?: boolean } = {},
   ): Promise<this> {
     const { restart = true, ...rest } = options;
     this.#keep(
@@ -259,7 +263,7 @@ export abstract class Machine<
         method: "POST",
         path: this.#path(":resize"),
         body: { ...size, restart },
-        // A pause or stop and a cold boot.
+        // A pause or stop and a cold boot (a live grow answers at once).
         wait: 120,
         ...requestOnly(rest),
       }),
@@ -272,7 +276,7 @@ export abstract class Machine<
    * than the hour ahead the API allows. A sandbox with no time limit
    * (`endsAt` null) needs none, and is only watched. Running time is billed
    * as it is used. A paused sandbox is left paused (a request wakes it,
-   * unless autoWake is off); a stopped one ends the loop. It does not keep a
+   * unless autoWake is off); a stopped or deleted one ends the loop. It does not keep a
    * Node or Bun process alive by itself. */
   keepAlive(options: KeepAliveOptions = {}): () => void {
     this.#keepAlive?.();
@@ -297,6 +301,9 @@ export abstract class Machine<
           if (need >= 1) await this.extend(Math.min(3600, need));
         }
       } catch (error) {
+        // Gone (deleted elsewhere, or by its own time limit): nothing to keep
+        // alive, and asking again would only be refused.
+        if (error instanceof RuntimeError && error.status === 404) return end();
         options.onError?.(error);
       }
       if (ended) return;

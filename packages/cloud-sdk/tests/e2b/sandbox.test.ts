@@ -1116,11 +1116,34 @@ describe("forks, snapshots and ports", () => {
   });
 });
 
+describe("signed file URLs", () => {
+  test("map to Runtime's file links and answer the URL", async () => {
+    const sbx = await create();
+    expect(await sbx.downloadUrl("a.txt")).toBe("https://files.example.test/dl/workspace/a.txt");
+    expect(await sbx.uploadUrl("/workspace/b.bin", { useSignatureExpiration: 90 })).toBe(
+      "https://files.example.test/up/workspace/b.bin",
+    );
+    await sbx.downloadUrl("/x", { useSignatureExpiration: 5 });
+    await sbx.downloadUrl("/x", { useSignatureExpiration: 10_000_000 });
+    expect(world.called("files.downloadUrl").map((call) => call[1])).toEqual([
+      { expiresInSeconds: 3600 },
+      { expiresInSeconds: 60 },
+      { expiresInSeconds: 604800 },
+    ]);
+    expect(world.called("files.uploadUrl")[0]![1]).toEqual({ expiresInSeconds: 90 });
+  });
+
+  test("an upload URL without a path says a link names one file", async () => {
+    const sbx = await create();
+    expect(await sbx.uploadUrl().catch((e: unknown) => e)).toBeInstanceOf(InvalidArgumentError);
+  });
+});
+
 describe("what Runtime does not have", () => {
   test("throws NotSupportedError naming the alternative", async () => {
     const sbx = await create();
     expect(() => sbx.git).toThrow(/commands.run/);
-    for (const call of [sbx.updateNetwork(), sbx.uploadUrl(), sbx.downloadUrl()])
+    for (const call of [sbx.updateNetwork()])
       expect(await call.catch((e: unknown) => e)).toBeInstanceOf(NotSupportedError);
     expect(() => sbx.getMcpUrl()).toThrow(NotSupportedError);
   });

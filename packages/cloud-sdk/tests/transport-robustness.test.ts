@@ -188,7 +188,7 @@ test("capacity waits do not spend the transport retry allowance", async () => {
               retryAfterMs: 1,
             },
           },
-          { status: 409 },
+          { status: 429 },
         );
       if (calls === 4) throw new TypeError("connection reset");
       return Response.json({ ok: true });
@@ -218,7 +218,7 @@ test("errors from caller callbacks propagate without resending a call", async ()
           ? Response.json({ ok: true })
           : Response.json(
               { error: { code: "no_credit_running_limit", message: "full" } },
-              { status: 409 },
+              { status: 429 },
             );
       }) as unknown as typeof fetch,
       { maxRetries: 1 },
@@ -676,7 +676,73 @@ test("a second refusal in a row waits the backoff, so a down API is not hammered
   }) as unknown as typeof fetch;
   await transport(fetcher).json({ method: "GET", path: "/v1/me" });
   expect(at).toHaveLength(3);
-  expect(at[1]! - at[0]!).toBeLessThan(100);
+  // The first retry waits no backoff: less than backoff(1)'s least, 250 ms. A
+  // bound of 100 ms failed on a loaded checker (604 ms run, 16 October 2026).
+  expect(at[1]! - at[0]!).toBeLessThan(240);
   // backoff(1): 250 to 750 ms.
   expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(240);
+});
+
+test("a call without a room wait retries what the answer says; one whose wait is off is told at once", async () => {
+  // 503 and 429 since 17 October 2026, with Retry-After. A volume create has
+  // no room wait: the answer's own `retryable` decides, as for any call. A
+  // quota on what is kept says false and is told at once; room, or a limit
+  // on what runs at once, says true and is sent again.
+  const answering = (code: string, status: number, retryable: boolean, times: number) => {
+    let calls = 0;
+    const t = transport(
+      (async () => {
+        calls++;
+        return calls <= times
+          ? Response.json(
+              { error: { code, status, message: "full", retryable } },
+              { status, headers: retryable ? { "retry-after": "0" } : {} },
+            )
+          : Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      { maxRetries: 3 },
+    );
+    return { t, calls: () => calls };
+  };
+  for (const [code, status] of [
+    ["quota_exceeded", 409],
+    ["no_credit_kept_limit", 409],
+    ["rate_limited", 429],
+  ] as const) {
+    const { t, calls } = answering(code, status, false, 4);
+    await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).rejects.toMatchObject({
+      code,
+      status,
+    });
+    expect(calls()).toBe(1);
+  }
+  for (const [code, status] of [
+    ["no_capacity", 503],
+    ["quota_exceeded", 429],
+    ["no_credit_running_limit", 429],
+  ] as const) {
+    const { t, calls } = answering(code, status, true, 1);
+    await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).resolves.toEqual({
+      ok: true,
+    });
+    expect(calls()).toBe(2);
+    // A create, wake or restart whose owner turned its room wait off.
+    const off = answering(code, status, true, 1);
+    await expect(
+      off.t.json({ method: "POST", path: "/v1/sandboxes/s:wake", body: {}, waitForCapacityMs: 0 }),
+    ).rejects.toMatchObject({ code, status });
+    expect(off.calls()).toBe(1);
+  }
+  let busy = 2;
+  const t = transport(
+    (async () =>
+      busy-- > 0
+        ? Response.json(
+            { error: { code: "host_unavailable", status: 503, message: "away", retryAfterMs: 1 } },
+            { status: 503 },
+          )
+        : Response.json({ ok: true })) as unknown as typeof fetch,
+    { maxRetries: 3 },
+  );
+  await expect(t.json({ method: "GET", path: "/v1/me" })).resolves.toEqual({ ok: true });
 });

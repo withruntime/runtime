@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { productSwitchedOff } from "../switched-off.js";
 
 /* E2B's error classes, by the same names and with the same parents, so a
    `catch (e) { if (e instanceof CommandExitError) ... }` written for E2B keeps
@@ -213,7 +214,7 @@ export function translate(error: unknown, subject: Subject = "other"): unknown {
     out = new SandboxNotRunningError(message);
   else if (error.code === "sandbox_not_ready" || error.code === "host_unavailable")
     out = new SandboxUnreachableError(message);
-  else if (error.status === 503 && error.code.endsWith("_unavailable"))
+  else if (productSwitchedOff(error))
     // A product switched off on purpose (forks, previews): Runtime's own words
     // say what is off and what to use meanwhile.
     out = new NotSupportedError(error.code.replace(/_unavailable$/, ""), error.hint ?? "", message);

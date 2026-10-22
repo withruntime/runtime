@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Runtime } from "../src/client";
 import { PRODUCT_NAMES } from "../src/product-names";
@@ -8,8 +8,11 @@ import { PRODUCT_NAMES } from "../src/product-names";
  * imported alone as withruntime/<product>, by the same plural word. */
 
 const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8")) as {
-  exports: Record<string, { types: string; import: string; default: string }>;
+  exports: Record<string, { types: string; browser?: string; import: string; default: string }>;
 };
+
+/** What a product imported alone has beyond the client's. */
+const ALONE_ADDS: Record<string, string[]> = { agents: ["deploy"] };
 
 test("every product the client has is a subpath export by its plural word", async () => {
   const runtime = new Runtime({ apiKey: "rk_subpath_test" });
@@ -37,6 +40,11 @@ test("every product the client has is a subpath export by its plural word", asyn
   for (const name of sold) {
     expect(manifest.exports[`./${name}`]).toEqual({
       types: `./dist/${name}/index.d.ts`,
+      // A product with a browser build of its own (agents' chat) names it
+      // for bundlers.
+      ...(existsSync(join(import.meta.dir, `../src/${name}/browser.ts`))
+        ? { browser: `./dist/${name}/browser.js` }
+        : {}),
       import: `./dist/${name}/index.js`,
       default: `./dist/${name}/index.js`,
     });
@@ -45,8 +53,13 @@ test("every product the client has is a subpath export by its plural word", asyn
       (options: { apiKey: string }) => object
     >;
     const alone = module[name]!({ apiKey: "rk_subpath_test" });
+    // Each is the client's own product, and withruntime/agents adds deploy,
+    // which runs a runtime.yml as CI does (agents-deploy.ts withDeploy).
     expect(Object.keys(alone).sort()).toEqual(
-      Object.keys((runtime as unknown as Record<string, object>)[name]!).sort(),
+      [
+        ...Object.keys((runtime as unknown as Record<string, object>)[name]!),
+        ...(ALONE_ADDS[name] ?? []),
+      ].sort(),
     );
   }
 });

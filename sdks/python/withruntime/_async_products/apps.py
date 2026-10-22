@@ -6,6 +6,14 @@
 #     app = await runtime.apps.create(name="web", max_copies=4, vcpu=1, memory_mib=1024)
 #     deploy = await runtime.apps.deploy(app["id"], image="web:latest", wait=True)
 #     print(deploy["url"])
+#     async for event in runtime.apps.logs(app["id"], follow=True, since="15m"):
+#         print(event.get("text", event))
+#
+# An App with a volume keeps one copy on it: each deploy, rollback and restart
+# stops the old copy before the new one boots, and its record says the downtime.
+#
+#     db = await runtime.apps.create(name="db", max_copies=1, vcpu=1, memory_mib=1024,
+#                                    volume={"volume_id": volume_id, "path": "/data"})
 #
 # A deploy's outcome follows its own record, not the app's state: an older live
 # version keeps serving through a failed rollout of a newer one.
@@ -13,21 +21,46 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 from urllib.parse import quote
 
-from .._errors import InvalidRequestError, RuntimeError
+from .._errors import ConnectionError, InvalidRequestError, RuntimeError
 
 # A deploy is done once it is one of these.
 DEPLOY_ENDED = ("live", "failed", "superseded")
 # An app's wait ends at its target or at one of these, with the app's error.
 APP_SETTLED = ("failed", "deleted", "live")
+# Where a log line was printed.
+LOG_STREAMS = ("stdout", "stderr")
 _UNSET: Any = object()
 _SPECIAL = {"memory_mib": "memoryMiB"}
 
 
 def _enc(value: str) -> str:
     return quote(value, safe="")
+
+
+def _cursor(value: Any) -> bool:
+    """An opaque log cursor as the API gives it: short text, no control characters."""
+    return isinstance(value, str) and 0 < len(value) <= 4096 and \
+        not any(ord(c) < 0x20 or ord(c) == 0x7F for c in value)
+
+
+def _failure(code: str, hint: str, cursor: Optional[str]) -> RuntimeError:
+    return RuntimeError(hint, code=code, hint=hint, details={"cursor": cursor})
+
+
+def _log_invalid(cursor: Optional[str], hint: str = "Retry the log from the last received cursor.") -> RuntimeError:
+    return _failure("app_log_invalid", hint, cursor)
+
+
+def _log_line(event: dict[str, Any]) -> bool:
+    stamp, copy, version = event.get("at"), event.get("copy"), event.get("version")
+    return (_cursor(event.get("cursor")) and isinstance(event.get("text"), str)
+            and event.get("stream") in LOG_STREAMS
+            and isinstance(stamp, int) and not isinstance(stamp, bool) and stamp >= 0
+            and (copy is None or isinstance(copy, str))
+            and (version is None or (isinstance(version, int) and not isinstance(version, bool))))
 
 
 def _camel(name: str) -> str:
@@ -41,6 +74,11 @@ def _fields(**values: Any) -> dict[str, Any]:
     """The API's body: camelCase names, a field left as None not sent. The
     defaults belong to the API, so the SDK fills in none."""
     return {_camel(name): value for name, value in values.items() if value is not None}
+
+
+def _volume(value: Any) -> Any:
+    """``{"volume_id": ..., "path": ...}`` as the API names it; None stays None."""
+    return value if value is None or value is _UNSET else {_camel(k): v for k, v in value.items()}
 
 
 async def _sleep(seconds: float) -> None:
@@ -106,6 +144,10 @@ class AsyncApps:
                      labels: Optional[dict[str, str]] = None, min_copies: Optional[int] = None,
                      concurrency: Optional[int] = None, spares: Optional[int] = None,
                      port: Optional[int] = None, health_path: Optional[str] = None,
+                     release_watch: Optional[str] = None, sleep_after_ms: Optional[int] = None,
+                     cdn: Optional[bool] = None,
+                     health_fail_seconds: Optional[int] = None, volume: Optional[dict[str, str]] = None,
+                     stop_grace_seconds: Optional[int] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Create one waiting for its first version. ``max_copies`` (1 to 1000)
         bounds the awake copies, each ``vcpu`` (1 to 16) and ``memory_mib`` (128
@@ -114,14 +156,37 @@ class AsyncApps:
         takes at once, ``spares`` (default 2) the warm copies kept beside them.
         The server answers on ``port`` (default 8080); ``health_path`` (such as
         ``/healthz``) must answer 200, else the port accepting connections is
-        enough."""
+        enough; a live copy failing it ``health_fail_seconds`` (10 to 3600,
+        default 60) is replaced. ``release_watch`` says what happens when a new
+        version's errors or speed get clearly worse in its first 15 minutes:
+        ``alert`` (the default) tells the owners, ``rollback`` also goes back
+        to the previous version, ``off`` does neither. ``sleep_after_ms``
+        (Functions only; 250 to 5000, default 1000) is at most how long a copy
+        stays awake after its last request ends; awake time with no request in
+        flight is not billed. ``cdn`` (default true) puts Cloudflare's CDN in
+        front of its addresses; ``False`` sends visitors straight to Runtime's
+        routers, with nothing cached.
+
+        Apps only: ``volume`` (``{"volume_id": ..., "path": "/data"}``, a path
+        under /data, /mnt, /state, /storage or /volumes) mounts one volume of
+        this account in the App's one copy; it needs ``max_copies=1``, and then
+        ``min_copies`` defaults to 1 and ``spares`` to 0. Each deploy, rollback
+        and restart stops the old copy before the new one boots, giving it
+        ``stop_grace_seconds`` (0 to 900, default 30) after SIGTERM. A bad volume
+        is ``volume_invalid`` (400)."""
+        self._stateful(_UNSET if volume is None else volume, stop_grace_seconds)
         body = _fields(name=name, labels=labels, max_copies=max_copies, vcpu=vcpu, memory_mib=memory_mib,
                        min_copies=self._min_copies(min_copies), concurrency=concurrency, spares=spares,
-                       port=port, health_path=health_path)
+                       port=port, health_path=health_path, release_watch=release_watch,
+                       sleep_after_ms=sleep_after_ms, cdn=cdn, health_fail_seconds=health_fail_seconds,
+                       volume=_volume(volume), stop_grace_seconds=stop_grace_seconds)
         return await self._t.json("POST", self._base, body=body, idempotency_key=idempotency_key)
 
     def _min_copies(self, value: Optional[int]) -> Optional[int]:
         return value
+
+    def _stateful(self, volume: Any, stop_grace_seconds: Optional[int]) -> None:
+        pass
 
     async def get(self, app_id: str, *, wait_for: Optional[str] = None,
                   timeout_seconds: Optional[int] = None) -> dict[str, Any]:
@@ -147,14 +212,26 @@ class AsyncApps:
                      min_copies: Optional[int] = None, max_copies: Optional[int] = None,
                      concurrency: Optional[int] = None, spares: Optional[int] = None, vcpu: Optional[int] = None,
                      memory_mib: Optional[int] = None, port: Optional[int] = None,
-                     health_path: Optional[str] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+                     health_path: Optional[str] = None, release_watch: Optional[str] = None,
+                     sleep_after_ms: Optional[int] = None, cdn: Optional[bool] = None,
+                     health_fail_seconds: Optional[int] = None,
+                     volume: Optional[dict[str, str]] = _UNSET, stop_grace_seconds: Optional[int] = None,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Change its settings in place; a field left out stays. ``name=None``
-        clears the name. The live version keeps serving."""
+        clears the name; ``volume=None`` takes the volume away, only before the
+        App's first deploy (else ``volume_change_refused``, 409). The live
+        version keeps serving. ``sleep_after_ms`` is for Functions only (250 to
+        5000)."""
+        self._stateful(volume, stop_grace_seconds)
         body = _fields(labels=labels, min_copies=self._min_copies(min_copies), max_copies=max_copies,
                        concurrency=concurrency, spares=spares, vcpu=vcpu, memory_mib=memory_mib, port=port,
-                       health_path=health_path)
+                       health_path=health_path, release_watch=release_watch,
+                       sleep_after_ms=sleep_after_ms, cdn=cdn, health_fail_seconds=health_fail_seconds,
+                       stop_grace_seconds=stop_grace_seconds)
         if name is not _UNSET:
             body["name"] = name
+        if volume is not _UNSET:
+            body["volume"] = _volume(volume)
         return await self._t.json("POST", f"{self._base}/{_enc(app_id)}:update", body=body,
                                   idempotency_key=idempotency_key)
 
@@ -228,6 +305,15 @@ class AsyncApps:
         version."""
         return await self._write_deploy(app_id, "rollback", {}, wait, timeout, poll, idempotency_key)
 
+    async def restart(self, app_id: str, *, wait: bool = False, timeout: float = 300, poll: float = 0.25,
+                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Start a fresh copy of the live version, as a deploy of its own
+        (``restartOf`` names the version it restarted); with a volume, the old
+        copy stops first and ``downtime`` (stopMs, bootMs, totalMs) says how
+        long it was down. Follow it as a deploy; ``restart_unavailable`` (409)
+        means nothing is live."""
+        return await self._write_deploy(app_id, "restart", {}, wait, timeout, poll, idempotency_key)
+
     async def get_deploy(self, app_id: str, deploy_id: str, *, wait_for: Optional[str] = None,
                          timeout_seconds: Optional[int] = None) -> dict[str, Any]:
         """One deploy. ``wait_for`` (such as ``live``) holds the answer up to
@@ -243,12 +329,114 @@ class AsyncApps:
         return await self._follow_deploy(app_id, record, waiting)
 
     async def versions(self, app_id: str) -> list[dict[str, Any]]:
-        """Its versions, live and previous marked; only those two keep saved copies."""
+        """Its versions, live and previous marked; only those two keep saved
+        copies. Each says its ``boot`` (saved or cold), ``restartOf``, the
+        ``replacements`` of live copies (health or exited) and ``downtime``."""
         return await self._t.json("GET", f"{self._base}/{_enc(app_id)}/versions")
 
     async def copies(self, app_id: str) -> list[dict[str, Any]]:
         """Its copies: version, region, state and when that state began."""
         return await self._t.json("GET", f"{self._base}/{_enc(app_id)}/copies")
+
+    def logs(self, app_id: str, *, since: Optional[str] = None, version: Optional[int] = None,
+             copy: Optional[str] = None, stream: Optional[str] = None, limit: Optional[int] = None,
+             cursor: Optional[str] = None, follow: bool = False, timeout: float = 0) -> Any:
+        """What its copies printed. ``since`` is an RFC 3339 time or a duration
+        back from now (``30s``, ``15m``, ``2h``, ``7d``; default ``1h``, at most
+        14 days); ``version``, ``copy`` (a copy's id) and ``stream`` (``stdout``
+        or ``stderr``) narrow it. Without ``follow``: ``await`` a page, ``lines``
+        oldest first (``at`` in Unix ms, ``stream``, ``copy``, ``version``,
+        ``text``), the newest ``limit`` (1 to 500, default 100) in the window;
+        ``nextCursor``, sent back as ``cursor`` with the same filters, reads the
+        next older page. With ``follow=True``: ``async for`` each event as it
+        comes, ``line`` or ``gap`` (lines lost before they could be read),
+        resuming after ``cursor``. It reconnects by itself, gives each line once
+        and runs until you stop iterating, or for ``timeout`` seconds (0, the
+        default: no deadline); an error's ``details["cursor"]`` is where to resume."""
+        query = {"since": since, "version": version, "copy": copy, "stream": stream, "limit": limit}
+        if follow:
+            return self._follow_logs(app_id, query, cursor, timeout)
+        return self._logs_page(app_id, query, cursor)
+
+    async def _logs_page(self, app_id: str, query: dict[str, Any], cursor: Optional[str]) -> dict[str, Any]:
+        return await self._t.json("GET", f"{self._base}/{_enc(app_id)}/logs", query={**query, "cursor": cursor})
+
+    async def _follow_logs(self, app_id: str, query: dict[str, Any], cursor: Optional[str],
+                           timeout: float) -> AsyncIterator[dict[str, Any]]:
+        _check_wait(timeout, 0)
+        if cursor is not None and not _cursor(cursor):
+            raise _failure("invalid_log_options", "Use the opaque cursor a log answer gave.", cursor)
+        path = f"{self._base}/{_enc(app_id)}/logs"
+        deadline = time.monotonic() + timeout if timeout > 0 else None
+        # Cursors are opaque positions: a line already given is known only by its cursor.
+        seen: dict[str, None] = {} if cursor is None else {cursor: None}
+        failures = 0
+
+        def ended() -> RuntimeError:
+            return _failure("timeout", "The follow reached its deadline; resume from details.cursor.", cursor)
+
+        while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ended()
+            continued = False
+            try:
+                # The filters go with every reconnection; only the cursor moves.
+                async for event in self._t.events("GET", path, query={**query, "follow": True, "cursor": cursor},
+                                                  deadline=deadline):
+                    if not isinstance(event, dict):
+                        raise _log_invalid(cursor)
+                    at = event.get("cursor")
+                    if at is not None and not _cursor(at):
+                        raise _log_invalid(cursor)
+                    kind = event.get("type")
+                    if kind == "line":
+                        if not _log_line(event):
+                            raise _log_invalid(cursor)
+                        if at in seen:
+                            continue
+                        seen[at] = None
+                        if len(seen) > 10_000:
+                            del seen[next(iter(seen))]
+                        cursor, failures = at, 0
+                        yield event
+                    elif kind == "gap":
+                        if at is None:
+                            raise _log_invalid(cursor)
+                        cursor = at
+                        yield event
+                    elif kind == "continue":
+                        # The server ends each follow after about two minutes;
+                        # its cursor resumes exactly there.
+                        if at is not None:
+                            cursor = at
+                        continued = True
+                        break
+                    elif kind == "error":
+                        code, hint = event.get("code"), event.get("hint")
+                        if not isinstance(code, str) or not code or not isinstance(hint, str) or not hint:
+                            raise _log_invalid(cursor)
+                        raise _failure(code, hint, cursor)
+                    else:
+                        raise _log_invalid(cursor)
+            except ValueError as error:
+                raise _log_invalid(cursor, "The log contained invalid JSON; retry from details.cursor.") from error
+            except ConnectionError:
+                # Lost the connection: reconnect from the last line. HTTP refusals
+                # and protocol errors are the caller's to act on; the transport
+                # already retried the retryable ones.
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ended()
+            except RuntimeError as error:
+                if error.code == "request_timeout" and deadline is not None and time.monotonic() >= deadline:
+                    raise ended() from error
+                raise
+            if not continued:
+                failures += 1
+                if failures > 3:
+                    raise _failure("app_log_interrupted",
+                                   "Reconnect with logs(id, follow=True, cursor=details['cursor']).", cursor)
+            # A service gone or answering continue at once must not spin.
+            await _sleep(0.05 * max(1, failures))
 
     async def _get_deploy(self, app_id: str, deploy_id: str, wait_for: Optional[str],
                           timeout_seconds: Optional[int], options: dict[str, Any]) -> dict[str, Any]:
@@ -267,7 +455,7 @@ class AsyncApps:
 
     async def _write_deploy(self, app_id: str, verb: str, body: dict[str, Any], wait: bool, timeout: float,
                             poll: float, idempotency_key: Optional[str]) -> dict[str, Any]:
-        path = f"{self._base}/{_enc(app_id)}/{verb}"
+        path = f"{self._base}/{_enc(app_id)}" + (f":{verb}" if verb == "restart" else f"/{verb}")
         if not wait:
             return await self._t.json("POST", path, body=body, idempotency_key=idempotency_key)
         waiting = _Wait(timeout, poll, idempotency_key or str(uuid.uuid4()))
@@ -287,3 +475,12 @@ class AsyncFunctions(AsyncApps):
                                       code="invalid_request", details={"field": "minCopies"},
                                       hint="Nothing was sent. Use runtime.apps for copies kept awake.")
         return None
+
+    def _stateful(self, volume: Any, stop_grace_seconds: Optional[int]) -> None:
+        """``volume`` is _UNSET when left out: ``volume=None`` is a change too."""
+        for field, given in (("volume", volume is not _UNSET),
+                             ("stopGraceSeconds", stop_grace_seconds is not None)):
+            if given:
+                raise InvalidRequestError(f"A Function takes no volume: leave {field} out.",
+                                          code="invalid_request", details={"field": field},
+                                          hint="Nothing was sent. Use runtime.apps for a server with a volume.")

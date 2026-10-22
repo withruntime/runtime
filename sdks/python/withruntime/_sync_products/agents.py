@@ -336,6 +336,61 @@ class AgentTriggers:
         self._t.json("DELETE", f"/v1/agents/triggers/{_enc(trigger_id)}")
 
 
+class AgentMemory:
+    """``runtime.agents.memory``: an agent's built-in memory, text files its
+    sessions keep across sessions and search. A ``scope`` is whose: ``""``
+    (the default) for what every session of the agent shares, or a session
+    key such as ``customer:42`` for that key's alone. A path is like a file's
+    (``notes/preferences.md``). Up to 1 MiB a file, 1 GiB and 100,000 files an
+    agent, billed as storage; past them a write is refused with ConflictError
+    ``memory_full``."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    def list(self, agent: str, *, scope: Optional[str] = None, prefix: Optional[str] = None,
+                   cursor: Optional[str] = None, limit: Optional[int] = None) -> Page:
+        """Files of ``agent`` (id or name) by scope and path, each {scope,
+        path, bytes, updatedAt, updatedBy}; every scope unless ``scope`` is
+        given. The page's ``usage`` is the agent's whole memory: {bytes,
+        files, limitBytes, limitFiles}. ``for`` walks every page."""
+        from .._sync_client import Page
+
+        def fetch(at: Optional[str]) -> Page:
+            body = self._t.json("GET", f"/v1/agents/{_enc(agent)}/memory", query={
+                "scope": scope, "prefix": prefix, "cursor": at, "limit": limit})
+            page = Page(body["data"], body.get("nextCursor"), fetch)
+            page.usage = body.get("usage")  # type: ignore[attr-defined]
+            return page
+        return fetch(cursor)
+
+    def search(self, agent: str, q: str, *, scope: Optional[str] = None,
+                     limit: Optional[int] = None) -> list[dict[str, Any]]:
+        """Files whose words or path match ``q`` (words, "a phrase", or,
+        -not), best first, each {scope, path, snippet, rank, bytes,
+        updatedAt}; every scope unless ``scope`` is given."""
+        body = self._t.json("GET", f"/v1/agents/{_enc(agent)}/memory",
+                                  query={"scope": scope, "q": q, "limit": limit})
+        return body["data"]
+
+    def read(self, agent: str, path: str, *, scope: str = "") -> dict[str, Any]:
+        """One file: {scope, path, content, bytes, updatedAt, updatedBy}. None
+        there is NotFoundError."""
+        return self._t.json("GET", f"/v1/agents/{_enc(agent)}/memory/content",
+                                  query={"scope": scope, "path": path})
+
+    def write(self, agent: str, path: str, content: str, *, scope: str = "") -> dict[str, Any]:
+        """Seed or replace a file: {scope, path, bytes, created, updatedAt}."""
+        return self._t.json("PUT", f"/v1/agents/{_enc(agent)}/memory/content",
+                                  query={"scope": scope, "path": path}, body={"content": content})
+
+    def delete(self, agent: str, path: str, *, scope: str = "") -> bool:
+        """Delete a file; whether there was one."""
+        body = self._t.json("DELETE", f"/v1/agents/{_enc(agent)}/memory/content",
+                                  query={"scope": scope, "path": path})
+        return bool(body["deleted"])
+
+
 class Agents:
     """``runtime.agents`` (private beta). Times are ISO 8601 strings."""
 
@@ -343,12 +398,15 @@ class Agents:
         self._t = t
         self.sessions = AgentSessions(t)
         self.triggers = AgentTriggers(t)
+        self.memory = AgentMemory(t)
         self.templates = AgentTemplates()
 
     def create(self, name: str, definition: dict[str, Any], *, labels: Optional[dict[str, str]] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Make an agent, version 1. ``definition`` as the API takes it:
-        ``command`` (required), ``from`` ({image} or {snapshot}), ``vcpu`` and
+        ``command`` (required), ``from`` ({image}, {snapshot}, or {repo}: a
+        repository connected to CI/CD, "owner/name", each session a copy of
+        its warm snapshot, checked out at /workspace/repo), ``vcpu`` and
         ``memoryMiB`` (4 vCPU and 8 GiB unless set; a definition from a
         snapshot takes neither, InvalidRequestError, since a snapshot keeps
         its own size), ``instructions``, ``env``, ``secrets``, ``mcp``,
@@ -358,7 +416,7 @@ class Agents:
         covering its tree; a tree at it stops with reason ``budget``),
         ``maxDayDollars`` (more than 0, at most 100000, 100 unless set: the
         agent's sessions started that UTC day; an agent at it starts nothing
-        new, ConflictError ``budget_reached``, until the next day),
+        new, ``budget_reached`` (402), until the next day),
         ``template``;
         ``templates.definition`` makes one.
         A name in use is refused with ConflictError ``name_taken``; the names
@@ -400,7 +458,7 @@ class Agents:
         words join the open session with that key rather than start a second;
         the handle's ``joined`` says which happened. Too many open sessions are
         refused with RateLimitError ``quota_exceeded``, an agent at its day's
-        budget with ConflictError ``budget_reached``."""
+        budget with ``budget_reached`` (402)."""
         body = self._t.json("POST", f"/v1/agents/{_enc(agent)}/sessions",
                                   body=_fields(input=input, key=key, labels=labels),
                                   idempotency_key=idempotency_key)

@@ -3,6 +3,7 @@ package withruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"net/http"
@@ -44,6 +45,7 @@ func (s *SandboxService) Create(ctx context.Context, opts *CreateOptions) (*Sand
 		wait:   wait,
 		key:    opts.IdempotencyKey,
 		room:   room,
+		roomed: true,
 	}, &info); err != nil {
 		return nil, err
 	}
@@ -322,6 +324,7 @@ func (s *Sandbox) lifecycle(ctx context.Context, verb string, opts *LifecycleOpt
 		wait:   wait,
 		key:    opts.IdempotencyKey,
 		room:   room,
+		roomed: verb == "wake" || verb == "restart",
 	}, &info); err != nil {
 		return err
 	}
@@ -376,7 +379,7 @@ type KeepAliveOptions struct {
 // extends the limit so that Margin remains, never more than the hour ahead
 // the API allows. A sandbox with no time limit (EndsAt nil) needs none, and
 // is only watched. Running time is billed as it is used. A paused sandbox is
-// left paused; a stopped one ends the loop.
+// left paused; a stopped or deleted one ends the loop.
 func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 	if opts == nil {
 		opts = &KeepAliveOptions{}
@@ -402,6 +405,12 @@ func (s *Sandbox) KeepAlive(ctx context.Context, opts *KeepAliveOptions) {
 		for {
 			if err := s.Refresh(loop); err != nil {
 				if loop.Err() != nil {
+					return
+				}
+				// Gone (deleted elsewhere, or by its own time limit): nothing to
+				// keep alive, and asking again would only be refused.
+				var refused *Error
+				if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
 					return
 				}
 				if opts.OnError != nil {
@@ -539,6 +548,8 @@ func (s *Sandbox) Fork(ctx context.Context, opts *ForkOptions) ([]*Sandbox, erro
 		body:   &sent,
 		wait:   60,
 		key:    opts.IdempotencyKey,
+		// Its key replays a refusal for room or a limit, so it is told at once.
+		roomed: true,
 	}, &reply); err != nil {
 		return nil, err
 	}

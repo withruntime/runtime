@@ -59,8 +59,10 @@ module WithRuntime
   #   session.events.each { |event| puts event.text if event.kind == "reply" }
   #
   # A definition is a Hash, by snake_case keyword (+memory_mib:+) or by the
-  # API's own key ("memoryMiB"): +command+ (required), +from+ ({ image: } or
-  # { snapshot: }), +vcpu+ and +memory_mib+ (4 vCPU and 8 GiB unless set; a
+  # API's own key ("memoryMiB"): +command+ (required), +from+ ({ image: },
+  # { snapshot: }, or { repo: "owner/name" }: a repository connected to
+  # CI/CD, each session a copy of its warm snapshot, checked out at
+  # /workspace/repo), +vcpu+ and +memory_mib+ (4 vCPU and 8 GiB unless set; a
   # definition from a snapshot takes neither, InvalidRequestError, since a
   # snapshot keeps its own size), +instructions+, +env+, +secrets+ (names of
   # egress secrets: model keys go here), +mcp+ ([{ name:, url: }]), +volumes+
@@ -69,17 +71,18 @@ module WithRuntime
   # unless set: the session and every session under it, the root's covering
   # its tree; a tree at it stops, reason "budget"), +max_day_dollars+ (more
   # than 0, at most 100000, 100 unless set: the agent's sessions started that
-  # UTC day; an agent at it starts nothing new, ConflictError
-  # +budget_reached+, until the next day) and +template+ ("support" or
+  # UTC day; an agent at it starts nothing new, +budget_reached+
+  # (402), until the next day) and +template+ ("support" or
   # "team").
   class Agents < Product
-    attr_reader :sessions, :triggers, :templates
+    attr_reader :sessions, :triggers, :templates, :memory
 
     def initialize(transport)
       super
       @sessions = AgentSessions.new(transport)
       @triggers = AgentTriggers.new(transport)
       @templates = AgentTemplates.new
+      @memory = AgentMemory.new(transport)
       # Approvals come later, here: agents.approvals.list / answer.
     end
 
@@ -111,7 +114,7 @@ module WithRuntime
     # name for the conversation (a Slack thread, a pull request, one of your
     # customers such as "customer:42"), words with the same key join the open
     # session instead of starting a second; +session.joined+ says so. An agent
-    # at its day's budget is refused +budget_reached+ (ConflictError).
+    # at its day's budget is refused +budget_reached+ (402).
     def start(agent, input, key: nil, labels: nil, idempotency_key: nil)
       body = Fields.body(input: input, key: key, labels: labels)
       answer = @t.json("POST", "/v1/agents/#{seg(agent)}/sessions", body: body, key: idempotency_key)
@@ -308,6 +311,69 @@ module WithRuntime
     def resume(id) = Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/resume", body: {}))
 
     def delete(id) = @t.json("DELETE", "/v1/agents/triggers/#{seg(id)}") && nil
+  end
+
+  # A page of an agent's memory files; +usage+ is the agent's whole memory,
+  # every scope: +bytes+, +files+, +limit_bytes+ and +limit_files+.
+  class AgentMemoryPage < Page
+    attr_reader :usage
+
+    def initialize(data, next_cursor, usage, &fetch)
+      super(data, next_cursor, &fetch)
+      @usage = usage
+    end
+  end
+
+  # +runtime.agents.memory+: an agent's built-in memory, text files its
+  # sessions keep across sessions and search. A +scope+ is whose: "" (the
+  # default) for what every session of the agent shares, or a session key such
+  # as "customer:42" for that key's alone. Up to 1 MiB a file, 1 GiB and
+  # 100,000 files an agent, billed as storage; past them a write is refused
+  # +memory_full+ (ConflictError).
+  #
+  #   runtime.agents.memory.write("helpdesk", "faq/refunds.md", "Refunds within 30 days.")
+  #   runtime.agents.memory.search("helpdesk", "refund").each { |hit| puts "#{hit.path}: #{hit.snippet}" }
+  class AgentMemory < Product
+    # The first page of an agent's files by scope and path, each with +scope+,
+    # +path+, +bytes+, +updated_at+ and +updated_by+; every scope unless
+    # +scope:+ is given. +each+ walks every page.
+    def list(agent, scope: nil, prefix: nil, cursor: nil, limit: nil)
+      memory_page(agent, { "scope" => scope, "prefix" => prefix, "limit" => limit }, cursor)
+    end
+
+    # The files whose words or path match +q+ (words, "a phrase", or, -not),
+    # best first, each with a +snippet+ and +rank+; every scope unless
+    # +scope:+ is given.
+    def search(agent, q, scope: nil, limit: nil)
+      body = @t.json("GET", "/v1/agents/#{seg(agent)}/memory", query: { "scope" => scope, "q" => q, "limit" => limit })
+      body["data"].map { |row| Record.new(row) }
+    end
+
+    # A file with its +content+; none there is NotFoundError.
+    def read(agent, path, scope: "")
+      Record.new(@t.json("GET", file(agent), query: { "scope" => scope, "path" => path }))
+    end
+
+    # Seeds or replaces a file; +created+ says which.
+    def write(agent, path, content, scope: "")
+      Record.new(@t.json("PUT", file(agent), query: { "scope" => scope, "path" => path }, body: { "content" => content }))
+    end
+
+    # Deletes a file; whether there was one.
+    def delete(agent, path, scope: "")
+      @t.json("DELETE", file(agent), query: { "scope" => scope, "path" => path })["deleted"] == true
+    end
+
+    private
+
+    def file(agent) = "/v1/agents/#{seg(agent)}/memory/content"
+
+    def memory_page(agent, query, cursor)
+      body = @t.json("GET", "/v1/agents/#{seg(agent)}/memory", query: query.merge("cursor" => cursor))
+      AgentMemoryPage.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"], Record.new(body["usage"] || {})) do |after|
+        memory_page(agent, query, after)
+      end
+    end
   end
 
   # +runtime.agents.templates+: the five harnesses an agent can run, each

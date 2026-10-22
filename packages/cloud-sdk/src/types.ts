@@ -134,8 +134,9 @@ export type CreateSandbox = {
   onLeaseEnd?: "pause" | "stop" | "delete";
   /** Pause after this many seconds in which nothing happens in it: no
    * request, no command or terminal running, no open connection, no network
-   * traffic and no CPU use. Default 60 unless persistent; 0 never;
-   * otherwise 10 to 86400. A request wakes it again. */
+   * traffic and no CPU use. Default 300 unless persistent; 0 never;
+   * otherwise 60 to 86400 (a shorter time is raised to 60). A request wakes
+   * it again. */
   idlePauseSeconds?: number;
   /** A request to a paused sandbox wakes it. Default true. */
   autoWake?: boolean;
@@ -161,7 +162,7 @@ export type CreateSandbox = {
   snapshot?: string;
   /** One to 16 ids of your own sandboxes or snapshots. The new sandbox starts
    * on a server none of them is on, and stays apart if its start is moved.
-   * With no other server that has room, the create answers 409 `no_capacity`
+   * With no other server that has room, the create answers 503 `no_capacity`
    * and nothing is made or charged. A copy of a snapshot starts only where that
    * snapshot is kept, so a `snapshot` with `spreadFrom` naming its server also
    * answers `no_capacity`. */
@@ -187,6 +188,17 @@ export type OutOfMemory = {
   hint: string;
 };
 
+/** What a command run with `traceFiles` opened and wrote, until it exited. */
+export type TracedFiles = {
+  /** Every file and directory it, or anything it started, opened: sorted
+   * absolute paths, links resolved; a directory (a listing) ends in "/". */
+  read: string[];
+  /** Every file it wrote. */
+  written: string[];
+  /** Some paths are missing: the lists are not the whole story. */
+  truncated: boolean;
+};
+
 export type CommandResult = {
   exitCode: number | null;
   stdout: string;
@@ -198,6 +210,8 @@ export type CommandResult = {
   processId?: string;
   replayed?: boolean;
   outOfMemory?: OutOfMemory;
+  /** With `traceFiles` only. */
+  files?: TracedFiles;
 };
 
 export type ExecOptions = {
@@ -217,6 +231,9 @@ export type ExecOptions = {
   onStderr?: (text: string) => unknown;
   /** Throw CommandError when the exit code is not 0. */
   check?: boolean;
+  /** Answer `files`: what the command read and wrote, for keying a cache by
+   * what a test really read. */
+  traceFiles?: boolean;
   signal?: AbortSignal;
   idempotencyKey?: string;
 };
@@ -252,6 +269,8 @@ export type OutputEvent =
       timedOut: boolean;
       durationMs?: number;
       outOfMemory?: OutOfMemory;
+      /** An exec with `traceFiles`. */
+      files?: TracedFiles;
     }
   | { type: "truncated"; droppedBytes: number; resumeAt: number }
   | { type: "continue"; processId: string; cursor: number }
@@ -276,6 +295,20 @@ export type FileEntry = {
   owner?: string;
   group?: string;
   symlinkTarget?: string;
+};
+
+/** A signed link to one file of a sandbox (POST .../files:link): `url` opens
+ * with no API key, GET to download (Range works) or PUT to upload, until
+ * `expiresAt`. */
+export type FileLink = {
+  url: string;
+  method: "GET" | "PUT";
+  path: string;
+  sandboxId: string;
+  expiresAt: string;
+  filename?: string;
+  maxBytes?: number;
+  archive?: boolean;
 };
 
 /** GET /v1/usage. Money is integer microdollars in strings (1,000,000 = $1),
@@ -435,7 +468,7 @@ export type SandboxSettings = {
   /** A request to a paused sandbox wakes it. */
   autoWake?: boolean;
   /** Pause after this many seconds with no activity, counted from now; 0
-   * never, otherwise 10 to 86400. */
+   * never, otherwise 60 to 86400 (a shorter time is raised to 60). */
   idlePauseSeconds?: number;
   /** Keep it running until you stop it, while credit lasts, and keep its disk
    * after a stop. Paid only. */

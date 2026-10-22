@@ -29,6 +29,19 @@ export type NetworkPolicy = Required<NetworkRules> & {
   connectReason: string;
   forbiddenPorts: number[];
   updatedAt: string | null;
+  /** The outbound limits the sandbox's host holds it to. Open connections
+   * grow with its vCPUs when its organization keeps a top-up; past the rate
+   * or the new destinations a connection waits its turn. Meeting one sends
+   * the event `sandbox.network.limited`. */
+  limits: NetworkLimits;
+};
+export type NetworkLimits = {
+  /** Open connections at once. */
+  connections: number;
+  newConnectionsPerSecond: number;
+  /** New connections it may open at once before the rate holds. */
+  newConnectionBurst: number;
+  destinationsPerMinute: number;
 };
 
 /** `sbx.network`: turn the sandbox's internet off or on, narrow it to a list,

@@ -9,6 +9,11 @@
   "files": [
     "base.json",
     "nextjs.json",
-    "react-library.json"
-  ]
+    "react-library.json",
+    "tsc5.mjs",
+    "tsgo.mjs"
+  ],
+  "bin": {
+    "tsgo": "./tsgo.mjs"
+  }
 }

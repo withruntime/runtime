@@ -33,7 +33,8 @@ public final class AppDeploy extends JsonObject {
     return has("error") ? new Failure(getObject("error").raw()) : null;
   }
 
-  /** A deploy's failure: deploy_build_failed, deploy_health_failed or deploy_superseded. */
+  /** A deploy's failure: deploy_build_failed, deploy_health_failed, deploy_stop_failed,
+   * deploy_switch_failed or deploy_superseded. */
   public static final class Failure extends JsonObject {
     Failure(Map<String, Object> raw) {
       super(raw);

@@ -104,6 +104,14 @@ public final class SandboxProcess {
     sandbox.t.json(new Transport.Call("POST", path(":resize")).body(Map.of("cols", cols, "rows", rows)));
   }
 
+  /**
+   * The files a process spawned with {@link SpawnOptions#traceFiles} read and wrote. Fails with
+   * process_running while it runs.
+   */
+  public TracedFiles files() {
+    return new TracedFiles(sandbox.t.object(new Transport.Call("GET", path("/files"))));
+  }
+
   /** Reads the process again. */
   public ProcessInfo refresh() {
     info = new ProcessInfo(sandbox.t.object(new Transport.Call("GET", path(""))));

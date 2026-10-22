@@ -6,11 +6,15 @@
 
 ``AsyncRuntime`` is the same client for asyncio, method for method.
 Keep keys in the environment (RUNTIME_API_KEY), never in source code.
+
+Agents are set up from a runtime.yml in your repo by the CLI, which makes
+the account's agents match the file: ``npx withruntime agents deploy``.
+This package has no deploy of its own.
 """
 from typing import Any, Optional
 
 from ._async_client import (AsyncFeedback, AsyncFiles, AsyncPage, AsyncProcess, AsyncRuntime, AsyncSandbox,
-                            AsyncSandboxes, AsyncSnapshots, AsyncSupport, AsyncTerminal, CommandResult)
+                            AsyncSandboxes, AsyncSnapshots, AsyncSupport, AsyncTerminal, CommandResult, TracedFiles)
 from ._errors import (AccountBlockedError, AuthenticationError, CommandError, ConflictError, ConnectionError,
                       InvalidRequestError, NotFoundError, PermissionDeniedError, RateLimitError, RuntimeError,
                       SecretPartlyStoredError, ServiceUnavailableError)
@@ -152,7 +156,7 @@ def _identity_token(audience: str, lifetime_seconds: Optional[int], timeout: flo
 __all__ = [
     "Runtime", "AsyncRuntime", "Sandbox", "AsyncSandbox", "Sandboxes", "AsyncSandboxes", "Files", "AsyncFiles",
     "Process", "AsyncProcess", "Terminal", "AsyncTerminal", "Page", "AsyncPage", "Feedback", "AsyncFeedback",
-    "Support", "AsyncSupport", "Snapshots", "AsyncSnapshots", "CommandResult", "RuntimeError", "AuthenticationError", "PermissionDeniedError",
+    "Support", "AsyncSupport", "Snapshots", "AsyncSnapshots", "CommandResult", "TracedFiles", "RuntimeError", "AuthenticationError", "PermissionDeniedError",
     "NotFoundError", "ConflictError", "InvalidRequestError", "RateLimitError", "ServiceUnavailableError", "AccountBlockedError", "SecretPartlyStoredError",
     "ConnectionError", "RuntimeAPIError", "RuntimeConnectionError", "CommandError", "verify_webhook", "WebhookVerificationError", "PortForward", "AsyncPortForward", "VERSION", "__version__",
 ]

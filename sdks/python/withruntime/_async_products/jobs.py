@@ -9,7 +9,7 @@
 # ``unavailable``) at once, and retrying does not change it.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 from urllib.parse import quote
 
 from .._api_defaults import JOB_START_SECONDS, JOB_TIMEOUT_SECONDS
@@ -97,7 +97,8 @@ def job_body(name: str, *, command: Union[list[str], dict[str, Any]], at: Any = 
              cron: Optional[str] = None, timezone: Optional[str] = None,
              timeout_seconds: Optional[int] = None, compute: Optional[dict[str, Any]] = None,
              retry: Optional[dict[str, int]] = None, secrets: Optional[list[dict[str, str]]] = None,
-             max_total_cost_micros: Optional[int] = None) -> dict[str, Any]:
+             max_total_cost_micros: Optional[int] = None, image: Optional[str] = None,
+             alert: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """The API's job body, every default filled in and the size checked before sending."""
     schedule = job_schedule(at=at, cron=cron, timezone=timezone)
     argv = command if isinstance(command, list) else command.get("argv")
@@ -122,6 +123,9 @@ def job_body(name: str, *, command: Union[list[str], dict[str, Any]], at: Any = 
     }
     if "maxCostMicros" in given:
         size["maxCostMicros"] = given["maxCostMicros"]
+    if "volumes" in given:
+        # Each run attaches them: [{"volumeId": ..., "path": "/data", "mode": "rw" or "snapshot"}].
+        size["volumes"] = given["volumes"]
     if size["vcpu"] > JOB_LIMITS["maxVcpu"] or size["memoryMiB"] > JOB_LIMITS["maxMemoryMiB"]:
         raise _invalid(f"A run's sandbox is at most {JOB_LIMITS['maxVcpu']} vCPU and "
                        f"{JOB_LIMITS['maxMemoryMiB'] // 1024} GiB of memory; asked for {size['vcpu']} vCPU "
@@ -145,6 +149,42 @@ def job_body(name: str, *, command: Union[list[str], dict[str, Any]], at: Any = 
         body["secrets"] = secrets
     if max_total_cost_micros is not None:
         body["maxTotalCostMicros"] = max_total_cost_micros
+    if image is not None:
+        body["image"] = image
+    if alert is not None:
+        body["alert"] = alert
+    return body
+
+
+class _Keep:
+    """An argument left out of ``update``: that field stays as it is."""
+
+    def __repr__(self) -> str:
+        return "KEEP"
+
+
+KEEP: Any = _Keep()
+
+
+def job_update_body(*, command: Any = KEEP, image: Any = KEEP, compute: Any = KEEP, secrets: Any = KEEP,
+                    alert: Any = KEEP, timeout_seconds: Any = KEEP, retry: Any = KEEP,
+                    max_total_cost_micros: Any = KEEP) -> dict[str, Any]:
+    """The API's update body: each field given, ``None`` where it may be
+    removed (``image``, ``alert``, ``max_total_cost_micros``)."""
+    body: dict[str, Any] = {}
+    for field, value in (("command", command), ("image", image), ("compute", compute), ("secrets", secrets),
+                         ("alert", alert), ("timeoutSeconds", timeout_seconds), ("retry", retry),
+                         ("maxTotalCostMicros", max_total_cost_micros)):
+        if value is KEEP:
+            continue
+        if value is None and field not in ("image", "alert", "maxTotalCostMicros"):
+            raise _invalid(f"{field} cannot be removed; leave it out to keep it.", field)
+        body[field] = value
+    if isinstance(body.get("command"), list):
+        body["command"] = {"argv": list(body["command"])}
+    if not body:
+        raise _invalid("update takes at least one of command, image, compute, secrets, alert, "
+                       "timeout_seconds, retry or max_total_cost_micros.", "update")
     return body
 
 
@@ -177,7 +217,8 @@ class AsyncJobs:
                      cron: Optional[str] = None, timezone: Optional[str] = None,
                      timeout_seconds: Optional[int] = None, compute: Optional[dict[str, Any]] = None,
                      retry: Optional[dict[str, int]] = None, secrets: Optional[list[dict[str, str]]] = None,
-                     max_total_cost_micros: Optional[int] = None,
+                     max_total_cost_micros: Optional[int] = None, image: Optional[str] = None,
+                     alert: Optional[dict[str, Any]] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Schedule a job: ``at=`` (a datetime, ISO time or Unix ms; a time
         already past runs at once) or ``cron="0 3 * * *"`` with an optional IANA
@@ -185,14 +226,24 @@ class AsyncJobs:
         shell, or ``{"argv": [...], "cwd": "/workspace/dir"}``. ``compute``
         overrides the 2 vCPU, 4 GiB default (``vcpu``, ``memoryMiB``,
         ``diskMiB``, ``cpuMode``, ``cpuFloorMillis``, ``region``,
-        ``durationSeconds``, ``maxCostMicros``); ``timeout_seconds`` defaults to
+        ``durationSeconds``, ``maxCostMicros``, and ``volumes``: up to four
+        ``{"volumeId", "path", "mode"}`` each run attaches, ``"rw"`` one run at a
+        time so the next run reads what the last wrote, or ``"snapshot"``, a
+        read-only copy); ``timeout_seconds`` defaults to
         1800. ``retry={"maxAttempts": 3, "backoffSeconds": 30}`` retries a run
         that exits non-zero, up to 5 attempts. ``secrets=[{"name": "ENV_NAME",
         "secretId": ...}]`` puts jobs copies of secrets (``runtime.secrets.set(...,
-        jobs=True)``) into the run's environment."""
+        jobs=True)``) into the run's environment. ``image`` is an image of the
+        account each run starts from (its id, name, ``name:tag`` or
+        ``name@version``, resolved to its id now); the standard image by default.
+        ``alert={"afterFailures": 3, "webhook": {"url": ..., "secretId": ...}}``
+        (or ``"email": True``) tells a webhook, signed with that jobs secret as
+        the account's webhooks are (one the key may reveal, not only use), or
+        the job's person, once that many runs in a row fail, and once more when
+        one succeeds again."""
         body = job_body(name, command=command, at=at, cron=cron, timezone=timezone,
                         timeout_seconds=timeout_seconds, compute=compute, retry=retry, secrets=secrets,
-                        max_total_cost_micros=max_total_cost_micros)
+                        max_total_cost_micros=max_total_cost_micros, image=image, alert=alert)
         return await self._json("POST", "/v1/jobs", body=body, idempotency_key=idempotency_key)
 
     async def list(self, *, limit: Optional[int] = None) -> AsyncPage:
@@ -207,12 +258,15 @@ class AsyncJobs:
     async def get(self, job_id: str) -> dict[str, Any]:
         return await self._json("GET", f"/v1/jobs/{_enc(job_id)}")
 
-    async def runs(self, job_id: str, *, limit: Optional[int] = None) -> AsyncPage:
-        """A job's runs, oldest first: each attempt of each occurrence."""
+    async def runs(self, job_id: str, *, limit: Optional[int] = None,
+                   order: Optional[Literal["oldest", "newest"]] = None) -> AsyncPage:
+        """A job's runs, oldest first: each attempt of each occurrence.
+        ``order="newest"``: newest first, so the last run is one call."""
         from .._async_client import AsyncPage
 
         async def fetch(cursor: Optional[str]) -> AsyncPage:
-            body = await self._json("GET", f"/v1/jobs/{_enc(job_id)}/runs", query={"limit": limit, "cursor": cursor})
+            body = await self._json("GET", f"/v1/jobs/{_enc(job_id)}/runs",
+                                    query={"limit": limit, "cursor": cursor, "order": order})
             return AsyncPage(body["items"], body.get("nextCursor"), fetch)
         return await fetch(None)
 
@@ -251,6 +305,22 @@ class AsyncJobs:
         finishes as it began, and a paused job stays paused."""
         body = {"schedule": job_schedule(at=at, cron=cron, timezone=timezone)}
         return await self._json("POST", f"/v1/jobs/{_enc(job_id)}:reschedule", body=body,
+                                idempotency_key=idempotency_key)
+
+    async def update(self, job_id: str, *, command: Any = KEEP, image: Any = KEEP, compute: Any = KEEP,
+                     secrets: Any = KEEP, alert: Any = KEEP, timeout_seconds: Any = KEEP, retry: Any = KEEP,
+                     max_total_cost_micros: Any = KEEP,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Change a job in place: what is given changes, the rest stays. Its id,
+        history and schedule stay (``reschedule`` moves the schedule); a run
+        already started finishes as it began, and the next run is the new job.
+        ``compute`` and ``retry`` change the fields given; ``secrets`` and
+        ``compute["volumes"]`` replace the list. ``image=None`` goes back to the standard image, ``alert=None``
+        removes the alert and ``max_total_cost_micros=None`` the cap."""
+        body = job_update_body(command=command, image=image, compute=compute, secrets=secrets, alert=alert,
+                               timeout_seconds=timeout_seconds, retry=retry,
+                               max_total_cost_micros=max_total_cost_micros)
+        return await self._json("POST", f"/v1/jobs/{_enc(job_id)}:update", body=body,
                                 idempotency_key=idempotency_key)
 
     async def cancel(self, job_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:

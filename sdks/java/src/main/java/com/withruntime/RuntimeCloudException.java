@@ -14,19 +14,29 @@ import java.util.Set;
 public class RuntimeCloudException extends RuntimeException {
   private static final long serialVersionUID = 1L;
 
-  /** 503s that are a deliberate state, not a passing one: retrying cannot change them. */
+  /**
+   * Products switched off on this deployment (501; 503 from an older server): retrying cannot
+   * change them. Read only when the answer does not say {@code retryable} itself.
+   */
   static final Set<String> DELIBERATE =
       Set.of(
           "unavailable",
           "unsupported",
           "fork_unavailable",
           "previews_unavailable",
+          "file_links_unavailable",
           "network_unavailable",
           "network_rules_unavailable",
           "secrets_unavailable",
           "identity_unavailable",
           "env_unavailable",
-          "resize_unavailable");
+          "resize_unavailable",
+          "feature_unavailable",
+          "delete_unavailable",
+          "switch_image_unavailable",
+          "switching_paused",
+          "schema_migration_required",
+          "storage_unavailable");
 
   /** Refusals that pass on their own: a host frees room, a sandbox of an account without credit stops. */
   static final Set<String> PASSING =
@@ -43,13 +53,21 @@ public class RuntimeCloudException extends RuntimeException {
           "no_capacity",
           "volume_releasing");
 
+  /**
+   * Refusals that say nothing ran (the guest, the API or the caller's rate was busy): sent again
+   * for any call, past maxRetries, with growing waits, until the call's deadline.
+   */
+  static final Set<String> NOTHING_RAN = Set.of("guest_busy", "busy", "rate_limited");
+
   private final String code;
   private final int status;
   private final String hint;
   private final String requestId;
   private final transient Map<String, Object> details;
   private final String idempotencyKey;
-  private final Duration retryAfter;
+  private Duration retryAfter;
+  /** The answer's own {@code retryable}, or null when it did not say (an older server). */
+  private final Boolean sentRetryable;
 
   public RuntimeCloudException(
       String message,
@@ -61,7 +79,22 @@ public class RuntimeCloudException extends RuntimeException {
       String idempotencyKey,
       Duration retryAfter,
       Throwable cause) {
+    this(message, code, status, hint, requestId, details, idempotencyKey, retryAfter, null, cause);
+  }
+
+  private RuntimeCloudException(
+      String message,
+      String code,
+      int status,
+      String hint,
+      String requestId,
+      Map<String, Object> details,
+      String idempotencyKey,
+      Duration retryAfter,
+      Boolean sentRetryable,
+      Throwable cause) {
     super(message, cause);
+    this.sentRetryable = sentRetryable;
     this.code = code;
     this.status = status;
     this.hint = hint;
@@ -107,11 +140,29 @@ public class RuntimeCloudException extends RuntimeException {
     return retryAfter;
   }
 
-  /** Whether retrying this exact call, with the same idempotency key, is safe and may work. */
+  /**
+   * Whether retrying this exact call, with the same idempotency key, is safe and may work: the
+   * answer's own {@code retryable} when it sent one, else judged from its code and status.
+   */
   public boolean retryable() {
+    if (sentRetryable != null) return sentRetryable;
     if (DELIBERATE.contains(code)) return false;
     if (PASSING.contains(code)) return !"count".equals(details().get("field"));
+    // The account at one of its limits (a 429): some free when its own work ends, some only
+    // when something is deleted, so the same call again is no answer by itself.
+    if ("quota_exceeded".equals(code)) return false;
     return status == 0 || status == 429 || status == 502 || status == 503 || status == 504;
+  }
+
+  /** Takes the Retry-After header's wait when the body named none, for a caller to schedule by. */
+  RuntimeCloudException waitNamed(Duration header) {
+    if (retryAfter == null) retryAfter = header;
+    return this;
+  }
+
+  /** The answer's own {@code retryable}, or null when it did not say (an older server). */
+  Boolean sentRetryable() {
+    return sentRetryable;
   }
 
   @Override
@@ -135,7 +186,8 @@ public class RuntimeCloudException extends RuntimeException {
     Double retryMs = e.getDouble("retryAfterMs");
     Duration retryAfter = retryMs == null ? null : Duration.ofMillis(Math.round(retryMs));
     Map<String, Object> details = error.get("details") instanceof Map<?, ?> ? JsonObject.map(error.get("details")) : null;
-    Init a = new Init(message, code, status, e.getString("hint"), e.getString("requestId"), details, idempotencyKey, retryAfter, null);
+    Boolean retryable = error.get("retryable") instanceof Boolean sent ? sent : null;
+    Init a = new Init(message, code, status, e.getString("hint"), e.getString("requestId"), details, idempotencyKey, retryAfter, retryable, null);
     return switch (status) {
       case 401 -> new Authentication(a);
       case 403 -> new PermissionDenied(a);
@@ -157,10 +209,11 @@ public class RuntimeCloudException extends RuntimeException {
       Map<String, Object> details,
       String idempotencyKey,
       Duration retryAfter,
+      Boolean retryable,
       Throwable cause) {}
 
   RuntimeCloudException(Init a) {
-    this(a.message, a.code, a.status, a.hint, a.requestId, a.details, a.idempotencyKey, a.retryAfter, a.cause);
+    this(a.message, a.code, a.status, a.hint, a.requestId, a.details, a.idempotencyKey, a.retryAfter, a.retryable, a.cause);
   }
 
   /**
@@ -172,7 +225,7 @@ public class RuntimeCloudException extends RuntimeException {
     if (this instanceof Connection)
       return new Connection(getMessage(), code, hint, key, details, this);
     if (this instanceof Command) return this;
-    Init a = new Init(getMessage(), code, status, hint, requestId, details, key, retryAfter, this);
+    Init a = new Init(getMessage(), code, status, hint, requestId, details, key, retryAfter, sentRetryable(), this);
     if (this instanceof Authentication) return new Authentication(a);
     if (this instanceof PermissionDenied) return new PermissionDenied(a);
     if (this instanceof NotFound) return new NotFound(a);
@@ -190,6 +243,7 @@ public class RuntimeCloudException extends RuntimeException {
             "missing_api_key",
             0,
             "Run `npx -y withruntime login` (a browser approval; nothing to copy), set RUNTIME_API_KEY to a key from https://withruntime.com/account/keys, or pass RuntimeClient.builder().apiKey(...).",
+            null,
             null,
             null,
             null,

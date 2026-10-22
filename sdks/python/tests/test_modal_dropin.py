@@ -370,7 +370,8 @@ class Images(World):
             lambda: Image.from_registry("ubuntu", add_python="3.12"),
             lambda: Image.from_registry("ubuntu", platform="arm64"),
             lambda: Image.from_aws_ecr("x"), lambda: Image.from_gcp_artifact_registry("x"),
-            lambda: Image.from_scratch(), lambda: base.publish("x"), lambda: base.run_function(print),
+            lambda: Image.from_scratch(), lambda: base.publish("x", environment_name="dev"),
+            lambda: base.run_function(print),
             lambda: base.pip_install_private_repos("github.com/a/b", git_user="me"),
             lambda: base.run_commands("ls", volumes={"/v": Volume.from_name("v")}),
             lambda: Image.from_dockerfile("Dockerfile", add_python="3.12"),
@@ -387,7 +388,7 @@ class Images(World):
             with self.assertRaises(CompatibilityError):
                 call()
         with self.assertRaises(CompatibilityError):
-            asyncio.run(base.publish.aio("x"))
+            asyncio.run(base.publish.aio("x", environment_name="dev"))
         self.assertEqual(self.requests(), [])
 
 
@@ -533,13 +534,12 @@ class Volumes(World):
 
 class Sandboxes(World):
     def test_create_refusals_before_any_request(self):
-        refused = {"network_file_systems": {"/n": object()}, "idle_timeout": 60, "cloud": "aws", "region": "us-east",
+        refused = {"network_file_systems": {"/n": object()}, "cloud": "aws", "region": "us-east",
                    "h2_ports": [8000], "unencrypted_ports": [22], "custom_domain": "x.example.com", "proxy": object(),
                    "include_oidc_identity_token": True, "verbose": True, "experimental_options": {"a": 1},
-                   "_experimental_enable_snapshot": True, "_experimental_outbound_policy": object(),
-                   "inbound_cidr_allowlist": ["1.2.3.4/32"], "outbound_cidr_allowlist": ["10.0.0.0/8"],
-                   "cidr_allowlist": ["10.0.0.0/8"], "pty_info": object(), "environment_name": "prod",
-                   "runtime": "gvisor"}
+                   "_experimental_outbound_policy": object(),
+                   "inbound_cidr_allowlist": ["1.2.3.4/32"], "outbound_domain_allowlist": ["*"],
+                   "pty_info": object(), "environment_name": "prod", "runtime": "gvisor"}
         for name, value in refused.items():
             with self.assertRaises(CompatibilityError, msg=name):
                 Sandbox.create(client=self.client, **{name: value})
@@ -558,10 +558,22 @@ class Sandboxes(World):
 
     def test_network_rules_are_never_wider_than_modals(self):
         cases = [({}, {"internet": True}), ({"block_network": True}, {"internet": False}),
-                 # An empty list blocks all egress; native rules read an empty allow list as the public web.
+                 # An empty list admits nothing; native rules read an empty allow list as the public web.
                  ({"outbound_domain_allowlist": []}, {"internet": False}),
-                 ({"outbound_domain_allowlist": ["*"]}, {"internet": True}),
-                 ({"outbound_domain_allowlist": ["pypi.org"]}, {"internet": True, "allow": ["pypi.org"]})]
+                 ({"outbound_domain_allowlist": ["*"], "outbound_cidr_allowlist": ["0.0.0.0/0", "::/0"]},
+                  {"internet": True}),
+                 # One family's whole range is that range only: ::/0 alone opened IPv4 too
+                 # (security review, 18 October 2026); "*" beside it adds no rule Runtime has.
+                 ({"outbound_cidr_allowlist": ["::/0"]}, {"internet": True, "allow": ["::/0"]}),
+                 ({"outbound_domain_allowlist": ["*"], "outbound_cidr_allowlist": ["0.0.0.0/0"]},
+                  {"internet": True, "allow": ["0.0.0.0/0"]}),
+                 ({"outbound_domain_allowlist": ["pypi.org"]}, {"internet": True, "allow": ["pypi.org"]}),
+                 # Modal admits what either list admits.
+                 ({"outbound_cidr_allowlist": ["52.0.0.0/8", "10.0.1.0/24"]},
+                  {"internet": True, "allow": ["52.0.0.0/8", "10.0.1.0/24"]}),
+                 ({"outbound_domain_allowlist": ["api.openai.com", "*.github.com"], "outbound_cidr_allowlist": []},
+                  {"internet": True, "allow": ["api.openai.com", "*.github.com", "github.com"]}),
+                 ({"cidr_allowlist": ["10.0.0.0/8"]}, {"internet": True, "allow": ["10.0.0.0/8"]})]
         for options, network in cases:
             Sandbox.create(client=self.client, **options)
             self.assertEqual(self.world.called("sandboxes.create")[-1][0]["network"], network, msg=options)
@@ -683,11 +695,12 @@ class Sandboxes(World):
         before = len(self.world.calls)
         calls = [lambda: box.create_connect_token(), lambda: box.snapshot_directory("/a"),
                  lambda: box.mount_image("/a", Image.debian_slim()), lambda: box.unmount_image("/a"),
-                 lambda: box.create_connect_token.aio(), lambda: box.snapshot_directory.aio("/a"),
-                 lambda: box.exec("ls", stdout="devnull")]
+                 lambda: box.create_connect_token.aio(), lambda: box.snapshot_directory.aio("/a")]
         for call in calls:
             with self.assertRaises(CompatibilityError):
                 call()
+        with self.assertRaises(TypeError):  # a stream is a modal.stream_type.StreamType
+            box.exec("ls", stdout="devnull")
         self.assertEqual(len(self.world.calls), before)
 
 

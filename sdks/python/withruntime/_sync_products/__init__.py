@@ -6,6 +6,7 @@ from .apps import Apps, Functions
 from .audit import Audit
 from .browser import Browser
 from .builds import Builds
+from .ci import Ci
 from .containers import Containers
 from .desktop import Desktop
 from .images import Images
@@ -17,8 +18,10 @@ from .mcp import Mcp, SandboxMcp
 from .network import Network
 from .network_products import AccountNetwork, Addresses, Domains, Ports
 from .observability import Events, Metrics, Otel, Webhooks
+from .plans import Plans
 from .previews import Previews
 from .referrals import Referrals
+from .reservations import Reservations
 from .billing import Billing
 from .secrets import Secrets
 from .sso import Sso
@@ -34,11 +37,14 @@ CLIENT["jobs"] = Jobs
 CLIENT["apps"] = Apps
 CLIENT["functions"] = Functions
 CLIENT["builds"] = Builds
+CLIENT["ci"] = Ci
 CLIENT["containers"] = Containers
 CLIENT["agents"] = Agents
 CLIENT["referrals"] = Referrals
+CLIENT["plans"] = Plans
 CLIENT["billing"] = Billing
 CLIENT["limits"] = Limits
+CLIENT["reservations"] = Reservations
 CLIENT["sso"] = Sso
 CLIENT["switching"] = Switching
 CLIENT["secrets"] = Secrets

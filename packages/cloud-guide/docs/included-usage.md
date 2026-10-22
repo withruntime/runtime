@@ -47,6 +47,13 @@ sandboxes have paid limits and still use the free usage first
   refused.
 - At most **{{no-credit-daily}} sandboxes made a day** (any 24 hours), copies
   made by a fork included, refused with `no_credit_daily_limit` past that.
+- At most **{{no-credit-keys}} live API keys** in the account, whoever made
+  them. A new key past that is refused with `no_credit_key_limit`; revoke one
+  to make room. A revoked or expired key frees its place, every key you
+  already hold keeps working, and the short-lived keys Runtime makes by
+  itself, for the console, its terminals, image builds and the other work it
+  runs for you, are not counted. Once the account adds credit,
+  there is no limit.
 - No [scheduled job](./jobs) runs: it waits until the account holds credit.
 - CPU is shared, never reserved, and its guaranteed floor (`cpuFloorMillis`)
   is at most 250 thousandths of a vCPU; the default is 50. A create that asks
@@ -162,6 +169,7 @@ shows what each product used this month and what is left.
 | `no_credit_total_limit`      | Running sandboxes and builds would pass {{no-credit-total}}; the message says what runs now                                                                                                                                             | Stop or pause one, or wait for a build to end        |
 | `no_credit_kept_limit`       | The account keeps {{no-credit-kept}} sandboxes, running, paused or stopped, and a create would make another                                                                                                                             | Delete one, or add credit                            |
 | `no_credit_daily_limit`      | {{no-credit-daily}} sandboxes made in the last 24 hours                                                                                                                                                                                 | Reuse a sandbox, retry later, or add credit          |
+| `no_credit_key_limit`        | The account holds {{no-credit-keys}} live API keys, and a new key would make another                                                                                                                                                    | Revoke one, or add credit                            |
 | `no_credit_domain_limit`     | Accounts on your company's email domain share eight running sandboxes without credit, all running                                                                                                                                       | Stop or pause one, or add credit                     |
 | `no_credit_size_limit`       | The size asked for is larger than 2 vCPU, 4 GiB and 10 GiB of disk                                                                                                                                                                      | Omit the size fields for the default                 |
 | `no_credit_build_limit`      | {{trial-builds-a-day}} builds started in the last 24 hours                                                                                                                                                                              | Reuse an image, or retry later                       |

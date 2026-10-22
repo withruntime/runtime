@@ -13,10 +13,12 @@ function statusOf(state: RuntimeSnapshot["state"]): Status {
 
 /** Vercel's snapshots always expire. Runtime's has no end date while it is kept
  * for as long as the account has credit; it is then taken at the longest a
- * snapshot is kept, a year from when it was made. */
+ * snapshot can be kept from now, a year, which the server moves on with it.
+ * Until 19 October 2026 this said a year from when it was made, a date that
+ * would have passed while the snapshot was still kept. */
 function expiresAtOf(snapshot: RuntimeSnapshot): number {
   return snapshot.expiresAt === null
-    ? Date.parse(snapshot.createdAt) + 365 * 86_400_000
+    ? Math.max(Date.parse(snapshot.createdAt), Date.now()) + 365 * 86_400_000
     : Date.parse(snapshot.expiresAt);
 }
 

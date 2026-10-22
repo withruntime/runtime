@@ -1,15 +1,11 @@
 /** `withruntime/agents`: Agents alone. A harness in a sandbox of its own per
  * session, on your own model key. In a private beta.
  *
- *   import { agents } from "withruntime/agents";
+ *   import { agents, loadAgentsFile } from "withruntime/agents";
  *   const client = agents(); // RUNTIME_API_KEY, or this machine's saved connection
- */
-import { Runtime, type RuntimeOptions } from "../client.js";
-
-export type * from "../products/agents.js";
-export { AGENT_TEMPLATES, AGENT_USES } from "../products/agents.js";
-
-/** `runtime.agents` of a client made with `options`. */
-export function agents(options?: RuntimeOptions): Runtime["agents"] {
-  return new Runtime(options).agents;
-}
+ *   await client.deploy(loadAgentsFile("runtime.yml"), { dryRun: true }); // what CI runs
+ *
+ * A browser or worker bundle gets browser.ts instead: all of this but the
+ * runtime.yml loader, which reads the file system. */
+export * from "./browser.js";
+export { AGENTS_FILE, loadAgentsFile, parseAgentsFile } from "../agents-file.js";

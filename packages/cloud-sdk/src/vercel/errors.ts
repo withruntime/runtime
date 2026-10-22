@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { productSwitchedOff } from "../switched-off.js";
 
 /* Vercel Sandbox's error classes by the same names, so a
    `catch (e) { if (e instanceof APIError) ... }` written for Vercel keeps
@@ -82,7 +83,7 @@ export function translate(error: unknown, sandboxName?: string): unknown {
   ]
     .filter(Boolean)
     .join("\n");
-  if (error.status === 503 && error.code.endsWith("_unavailable"))
+  if (productSwitchedOff(error))
     return new NotSupportedError(
       error.code.replace(/_unavailable$/, ""),
       error.hint ?? "",

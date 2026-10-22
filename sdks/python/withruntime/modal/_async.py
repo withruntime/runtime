@@ -10,7 +10,9 @@ from .. import AsyncRuntime
 from .._compat import CompatibilityError, ENV_PATH, environment, positive, reject
 from ._dual import Dual, async_only
 from . import (Sandbox, Image, _Writer, _plan, _native_create, _entrypoint_ms, _buffering, _ready_timeout,
-               _tunnel_from_preview)
+               _tunnel_from_preview, _egress, _taken, _shown, ROOT, _memory_snapshot, _restore_input)
+from .._errors import RuntimeError as _SDKError
+from .stream_type import StreamType, checked as _stream
 from .exception import TimeoutError as _ProbeTimeout
 
 
@@ -88,10 +90,11 @@ class _AsyncWriter(_Writer):
 
 
 class AsyncContainerProcess:
-    def __init__(self, process, text=True, on_exit=None, bufsize=-1, binary_transport=False):
+    def __init__(self, process, text=True, on_exit=None, bufsize=-1, binary_transport=False, modes=None):
         self._process, self._on_exit = process, on_exit
         self._condition = asyncio.Condition()
         self._output = {"stdout": b"", "stderr": b""}
+        self._modes = modes or {}
         self._binary_transport = binary_transport
         self._done, self._error, self.returncode = False, None, None
         self.stdout, self.stderr = _AsyncReader(self, "stdout", text, bufsize), _AsyncReader(self, "stderr", text, bufsize)
@@ -104,7 +107,12 @@ class AsyncContainerProcess:
             async for event in (self._process.output_bytes() if self._binary_transport else self._process.output()):
                 async with self._condition:
                     if event["type"] in self._output:
-                        self._output[event["type"]] += event["data"] if self._binary_transport else event["data"].encode()
+                        data = event["data"] if self._binary_transport else event["data"].encode()
+                        mode = self._modes.get(event["type"])
+                        if mode is StreamType.STDOUT:
+                            _shown(data)
+                        elif mode is not StreamType.DEVNULL:
+                            self._output[event["type"]] += data
                     elif event["type"] == "truncated":
                         raise IOError("Process output was truncated")
                     elif event["type"] == "exit":
@@ -165,7 +173,10 @@ async def create(*args, **kwargs):
     source = await plan["image"]._source_aio(runtime)
     for disk in plan["disks"].values():
         await disk._load_aio(runtime)
-    sb = await runtime.sandboxes.create(**_native_create(plan, source, options["name"]))
+    try:
+        sb = await runtime.sandboxes.create(**_native_create(plan, source, options["name"]))
+    except _SDKError as error:
+        raise _taken(error) from error
     try:
         if plan["write_env"]:
             await sb.files.write(ENV_PATH, json.dumps(plan["variables"]), mode=0o600)
@@ -176,7 +187,7 @@ async def create(*args, **kwargs):
         entry = None
         if args:
             process = await sb.spawn(list(args), cwd=options["workdir"], env=plan["variables"], stdin="pipe",
-                                     timeout_ms=_entrypoint_ms(plan["lifetime"]),
+                                     user=ROOT, timeout_ms=_entrypoint_ms(plan["lifetime"]),
                                      **({"pty": {"rows": 24, "cols": 80}} if plan["pty"] else {}))
             await sb.update(labels={**sb.info.get("labels", {}), "modal.entrypoint": process.id})
             entry = AsyncContainerProcess(process, on_exit=sb.stop)
@@ -189,7 +200,19 @@ async def create(*args, **kwargs):
     box = Sandbox(runtime, sb, entry)
     box._async_mode = True
     box._readiness, box._read_only_disks = plan["probe"], any(disk._read_only for disk in plan["disks"].values())
+    if plan["lifetime"] is not None and plan["lifetime"] < 60:
+        # Under Runtime's one-minute floor this client keeps the timeout.
+        box._deadline = asyncio.get_running_loop().call_later(
+            plan["lifetime"], lambda: setattr(box, "_ending", asyncio.ensure_future(_end(box))))
     return box
+
+
+async def _end(box):
+    try:
+        await box._sandbox.stop()
+        box._terminated = True
+    except Exception:
+        pass
 
 
 async def from_id(sandbox_id, client=None):
@@ -214,18 +237,24 @@ def _native_async(box):
     return AsyncSandbox(box._async_runtime._t, dict(box._sandbox.info))
 
 
-async def execute(self, *args, timeout=None, workdir=None, env=None, secrets=None, text=True, bufsize=-1, pty=False, **options):
+async def execute(self, *args, timeout=None, workdir=None, env=None, secrets=None, text=True, bufsize=-1, pty=False,
+                  stdout=StreamType.PIPE, stderr=StreamType.PIPE, **options):
     reject(options, "Modal Sandbox.exec")
     _buffering(text, bufsize)
+    modes = {"stdout": _stream(stdout, "stdout"), "stderr": _stream(stderr, "stderr")}
     sb = _native_async(self)
     variables = environment(await sb.files.read(ENV_PATH))
     for secret in secrets or []:
         variables.update(secret._values)
     variables.update({key: value for key, value in (env or {}).items() if value is not None})
-    process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe",
+    process = await sb.spawn(list(args), cwd=workdir, env=variables, stdin="pipe", user=ROOT,
         timeout_ms=None if timeout is None else int(positive(timeout, "timeout") * 1000),
         pty={"rows": 24, "cols": 80} if pty else None, **({"output_encoding": "base64"} if not text else {}))
-    return AsyncContainerProcess(process, text=text, bufsize=bufsize, binary_transport=not text)
+    return AsyncContainerProcess(process, text=text, bufsize=bufsize, binary_transport=not text, modes=modes)
+
+
+async def set_outbound_network_policy(self, *, outbound_cidr_allowlist=None, outbound_domain_allowlist=None):
+    await _native_async(self).network.set(**_egress(outbound_domain_allowlist, outbound_cidr_allowlist))
 
 
 async def terminate(self, *, wait=False):
@@ -265,7 +294,7 @@ async def wait_until_ready(self, *, timeout=300):
     sb = _native_async(self)
     while True:
         left = deadline - time.monotonic()
-        result = await sb.exec(probe._command(), timeout_ms=max(1, math.ceil(min(left, 10) * 1000)))
+        result = await sb.exec(probe._command(), timeout_ms=max(1, math.ceil(min(left, 10) * 1000)), user=ROOT)
         if result.exit_code == 0:
             return
         if time.monotonic() + probe.interval_ms / 1000 >= deadline:
@@ -340,7 +369,36 @@ async def set_tags(self, tags, *, client=None):
     await sb.update(labels={**labels, "modal.tags": json.dumps(values)})
 
 
+async def experimental_snapshot(self):
+    from .exception import SnapshotCreationError
+    sb = _native_async(self)
+    await sb.refresh()
+    labels = {k: v for k, v in (sb.info.get("labels") or {}).items() if k.startswith("modal.")}
+    try:
+        snapshot = await sb.snapshot(labels=labels, mode="memory")
+    except _SDKError as error:
+        raise SnapshotCreationError(str(error)) from error
+    return _memory_snapshot(snapshot, self._runtime)
+
+
+async def experimental_from_snapshot(snapshot, client=None, *, name=None):
+    runtime = client or AsyncRuntime()
+    saved = await runtime.snapshots.get(snapshot.object_id)
+    try:
+        sb = await runtime.sandboxes.create(**_restore_input(saved, name))
+    except _SDKError as error:
+        raise _taken(error) from error
+    entrypoint = sb.info.get("labels", {}).get("modal.entrypoint")
+    entry = AsyncContainerProcess(await sb.process(entrypoint), on_exit=sb.stop) if entrypoint else None
+    box = Sandbox(runtime, sb, entry)
+    box._async_mode = True
+    return box
+
+
 def install():
+    Sandbox._experimental_from_snapshot = Dual(Sandbox._experimental_from_snapshot, experimental_from_snapshot,
+                                               static=True)
+    Sandbox._experimental_snapshot = Dual(Sandbox._experimental_snapshot, experimental_snapshot)
     Sandbox.create = Dual(Sandbox.create, create, static=True)
     Sandbox.from_id = Dual(Sandbox.from_id, from_id, static=True)
     Sandbox.from_name = Dual(Sandbox.from_name, from_name, static=True)
@@ -349,6 +407,7 @@ def install():
                                ("poll", poll), ("snapshot_filesystem", snapshot_filesystem),
                                ("get_tags", get_tags), ("set_tags", set_tags),
                                ("wait_until_ready", wait_until_ready), ("tunnels", tunnels),
-                               ("reload_volumes", reload_volumes)):
+                               ("reload_volumes", reload_volumes),
+                               ("_experimental_set_outbound_network_policy", set_outbound_network_policy)):
         setattr(Sandbox, name, Dual(getattr(Sandbox, name), asynchronous))
     Sandbox.__aenter__, Sandbox.__aexit__ = enter, exit

@@ -165,7 +165,7 @@ module WithRuntime
     # limit so that +margin+ seconds remain, never more than the hour ahead the
     # API allows. A sandbox with no time limit needs none and is only watched.
     # Running time is billed as it is used. A paused sandbox is left paused; a
-    # stopped one ends the loop.
+    # stopped or deleted one ends the loop.
     def keep_alive(every: 60, margin: ApiDefaults::KEEP_ALIVE_MARGIN_SECONDS, &on_error)
       stop_keep_alive
       every = [10, every].max
@@ -182,6 +182,10 @@ module WithRuntime
               extend_lease([3600, need].min) if need >= 1
             end
           rescue Error => e
+            # Gone (deleted elsewhere, or by its own time limit): nothing to
+            # keep alive, and asking again would only be refused.
+            break if e.status == 404
+
             on_error&.call(e)
           end
           sleep(every)
@@ -222,7 +226,8 @@ module WithRuntime
              idempotency_key: nil)
       body = Fields.body(count: count, name: name, labels: labels, keep_snapshot: keep_snapshot,
                          secrets: secrets&.to_a)
-      reply = @t.json("POST", path(":fork"), body: body, wait: 60, key: idempotency_key)
+      # Its key replays a refusal for room or a limit, so it is told at once.
+      reply = @t.json("POST", path(":fork"), body: body, wait: 60, key: idempotency_key, room: 0)
       copies = reply["sandboxes"].map { |info| Sandbox.new(@t, info) }
       count.nil? ? copies.first : copies
     end
@@ -258,15 +263,17 @@ module WithRuntime
     # sandbox's; put secrets here), +stdin+, +timeout+ (seconds, default 60, up
     # to a day; a timeout is a result, not an error), +on_stdout+ and
     # +on_stderr+ (stream the command; the result keeps everything), and
-    # +check+ (raise CommandError on a non-zero exit or a timeout).
+    # +check+ (raise CommandError on a non-zero exit or a timeout), and
+    # +trace_files+ (the result's +files+ are the files it read and wrote; an
+    # older sandbox says to stop and start it, and no command runs).
     def exec(command, cwd: nil, user: nil, env: nil, stdin: nil, timeout: nil, on_stdout: nil, on_stderr: nil,
-             check: false, idempotency_key: nil)
+             check: false, idempotency_key: nil, trace_files: false)
       streamed = on_stdout || on_stderr || (timeout && timeout > 60)
       result = if streamed
                  collect(exec_stream(command, cwd: cwd, user: user, env: env, stdin: stdin, timeout: timeout,
-                                              idempotency_key: idempotency_key), on_stdout, on_stderr)
+                                              idempotency_key: idempotency_key, trace_files: trace_files), on_stdout, on_stderr)
                else
-                 body = command_body(command, cwd, env, stdin, timeout, user)
+                 body = command_body(command, cwd, env, stdin, timeout, user, trace_files)
                  CommandResult.new(@t.json("POST", path(":exec"), body: body, key: idempotency_key,
                                                                   timeout: timeout && (timeout + 60)))
                end
@@ -278,14 +285,14 @@ module WithRuntime
     # Runs a command and yields its events as they happen: start, stdout,
     # stderr, exit (each a Hash). Resumes by itself when the server ends a long
     # stream, so it never drops output. Without a block, an Enumerator.
-    def exec_stream(command, cwd: nil, user: nil, env: nil, stdin: nil, timeout: nil, idempotency_key: nil, &block)
+    def exec_stream(command, cwd: nil, user: nil, env: nil, stdin: nil, timeout: nil, idempotency_key: nil, trace_files: false, &block)
       unless block
         return enum_for(:exec_stream, command, cwd: cwd, user: user, env: env, stdin: stdin, timeout: timeout,
-                                               idempotency_key: idempotency_key)
+                                               idempotency_key: idempotency_key, trace_files: trace_files)
       end
 
       longest = ApiDefaults::STREAMED_EXEC_TIMEOUT_SECONDS
-      body = command_body(command, cwd, env, stdin, timeout || longest, user).merge("stream" => true)
+      body = command_body(command, cwd, env, stdin, timeout || longest, user, trace_files).merge("stream" => true)
       handed_over = nil
       process_id = nil
       cursor = 0
@@ -373,9 +380,11 @@ module WithRuntime
     # Starts a background process (a server, a watcher, a REPL) and returns at
     # once. It outlives your connection; +process(id)+ gets it back.
     # +pipe_stdin: true+ keeps input open for +write+; +pty: { cols:, rows: }+
-    # gives it a terminal.
-    def spawn(command, cwd: nil, user: nil, env: nil, timeout: nil, stdin: nil, pipe_stdin: false, pty: nil, idempotency_key: nil)
-      body = command_body(command, cwd, env, pipe_stdin ? nil : stdin, timeout, user)
+    # gives it a terminal; +trace_files: true+ records the files it opens, read
+    # them with +files+ once it has ended.
+    def spawn(command, cwd: nil, user: nil, env: nil, timeout: nil, stdin: nil, pipe_stdin: false, pty: nil,
+              idempotency_key: nil, trace_files: false)
+      body = command_body(command, cwd, env, pipe_stdin ? nil : stdin, timeout, user, trace_files)
       body["stdinMode"] = "pipe" if pipe_stdin
       body["pty"] = Fields.body(pty) if pty
       SandboxProcess.new(self, @t.json("POST", path("/processes"), body: body, key: idempotency_key))
@@ -391,20 +400,21 @@ module WithRuntime
 
     private
 
-    def lifecycle(verb, body, wait, key, room: 0)
+    def lifecycle(verb, body, wait, key, room: nil)
       @info = Record.new(@t.json("POST", path(":#{verb}"), body: body, wait: wait ? 60 : 0, key: key, room: room))
       self
     end
 
     def room_for(wait_for_capacity) = wait_for_capacity.nil? ? @t.wait_for_capacity : [0, wait_for_capacity].max
 
-    def command_body(command, cwd, env, stdin, timeout, user)
+    def command_body(command, cwd, env, stdin, timeout, user, trace_files = false)
       body = command.is_a?(Array) ? { "argv" => command.map(&:to_s) } : { "command" => command.to_s }
       body["cwd"] = cwd if cwd
       body["user"] = user.to_s if user
       body["env"] = env.to_h { |key, value| [key.to_s, value.to_s] } if env
       body["stdinBase64"] = [stdin.to_s.b].pack("m0") unless stdin.nil?
       body["timeoutMs"] = (timeout * 1000).round if timeout
+      body["traceFiles"] = true if trace_files
       body
     end
 
@@ -423,7 +433,7 @@ module WithRuntime
           stderr << event["data"]
           on_stderr&.call(event["data"])
         when "truncated" then dropped = true
-        when "exit" then fields.merge!(event.slice("exitCode", "timedOut", "durationMs"))
+        when "exit" then fields.merge!(event.slice("exitCode", "timedOut", "durationMs", "files"))
         end
       end
       # A truncated event does not say which stream lost bytes, so both flags carry it.
@@ -494,6 +504,10 @@ module WithRuntime
 
     # Changes a PTY process's terminal size.
     def resize(cols, rows) = @sandbox.transport.json("POST", path(":resize"), body: { "cols" => cols, "rows" => rows })
+
+    # The files a process spawned with +trace_files: true+ read and wrote. Fails
+    # with process_running while it runs.
+    def files = TracedFiles.new(@sandbox.transport.json("GET", path("/files")))
 
     # Reads the process again.
     def refresh
@@ -629,6 +643,28 @@ module WithRuntime
       t.json("POST", @sandbox.path("/files:rename"), body: body)
       nil
     end
+
+    # A link anyone can open with no API key to download +path+ (a Hash with
+    # "url" and "expiresAt"). Range works. It lasts an hour by default, at most
+    # 7 days (+expires_in_seconds+). +filename+ saves it under that name;
+    # +wake+ true wakes a paused sandbox, false never does; +archive+ links a
+    # folder as a .tar.gz.
+    def download_url(path, expires_in_seconds: nil, filename: nil, wake: nil, archive: nil)
+      body = { "path" => path, "method" => "GET", "expiresInSeconds" => expires_in_seconds,
+               "filename" => filename, "wake" => wake, "archive" => archive }.compact
+      t.json("POST", @sandbox.path("/files:link"), body: body)
+    end
+
+    # A link anyone can PUT a raw body to with no API key: the body becomes the
+    # file at +path+, whole or not at all, up to +max_bytes+ (5 GiB at most).
+    def upload_url(path, expires_in_seconds: nil, max_bytes: nil, wake: nil)
+      body = { "path" => path, "method" => "PUT", "expiresInSeconds" => expires_in_seconds,
+               "maxBytes" => max_bytes, "wake" => wake }.compact
+      t.json("POST", @sandbox.path("/files:link"), body: body)
+    end
+
+    # Ends every link made for this sandbox so far.
+    def revoke_links = t.json("POST", @sandbox.path("/files:revoke-links"))
 
     # Copies a local file or directory in. A directory travels as one gzipped
     # tar to the API's folder routes, unpacked by the sandbox's own tar as it

@@ -136,8 +136,8 @@ type CreateOptions struct {
 	OnLeaseEnd string `json:"onLeaseEnd,omitempty"`
 	// IdlePauseSeconds pauses it after this many seconds in which nothing
 	// happens in it: no request, no command or terminal running, no open
-	// connection, no network traffic and no CPU use (10 to 86400). Left 0, it
-	// pauses after 60 unless Persistent. To never pause it, pass
+	// connection, no network traffic and no CPU use (60 to 86400; a shorter time is
+	// raised to 60). Left 0, it pauses after 300 unless Persistent. To never pause it, pass
 	// Extra: map[string]any{"idlePauseSeconds": 0}. A request wakes it.
 	IdlePauseSeconds int `json:"idlePauseSeconds,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it. Default true.
@@ -199,6 +199,19 @@ type CommandResult struct {
 	DurationMs      *int64 `json:"durationMs"`
 	ProcessID       string `json:"processId,omitempty"`
 	Replayed        bool   `json:"replayed"`
+	// Files is set when the command ran with TraceFiles; nil otherwise.
+	Files *TracedFiles `json:"files,omitempty"`
+}
+
+// TracedFiles are the files a traced command opened. Read is every file and
+// directory it (and anything it started) opened, as sorted absolute paths with
+// links resolved, directories ending in "/"; Written is every file it wrote.
+// Truncated means some paths are missing, so do not treat the lists as
+// complete.
+type TracedFiles struct {
+	Read      []string `json:"read"`
+	Written   []string `json:"written"`
+	Truncated bool     `json:"truncated"`
 }
 
 // OutputEvent is one event of a command's or a process's output: start,
@@ -215,6 +228,8 @@ type OutputEvent struct {
 	State      string `json:"state,omitempty"`
 	TimedOut   bool   `json:"timedOut,omitempty"`
 	DurationMs *int64 `json:"durationMs,omitempty"`
+	// Files is an exit event's, when the command ran with TraceFiles.
+	Files *TracedFiles `json:"files,omitempty"`
 	// DroppedBytes and ResumeAt are a truncated event's: the reader fell more
 	// than the sandbox's output buffer behind.
 	DroppedBytes int64 `json:"droppedBytes,omitempty"`
@@ -280,7 +295,8 @@ type SandboxSettings struct {
 	// AutoWake: a request to a paused sandbox wakes it.
 	AutoWake *bool `json:"autoWake,omitempty"`
 	// IdlePauseSeconds pauses it after this many idle seconds, counted from
-	// now; 0 never, otherwise 10 to 86400.
+	// now; 0 never, otherwise 60 to 86400 (a shorter
+	// time is raised to 60).
 	IdlePauseSeconds *int `json:"idlePauseSeconds,omitempty"`
 	// Persistent keeps it running while credit lasts. Paid only.
 	Persistent *bool `json:"persistent,omitempty"`

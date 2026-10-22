@@ -2,6 +2,21 @@
 
 Runtime gives each agent sandbox its own microVM kernel and costs **{{saving:modal}} less than Modal** for an agent that mostly waits on a model.
 
+**Switch in one line.** Your Modal Sandbox code keeps working: change the
+import and set `RUNTIME_API_KEY`.
+
+```ts no-run
+import { ModalClient } from "withruntime/modal"; // was: from "modal"
+```
+
+```python no-run
+from withruntime import modal  # was: import modal
+```
+
+Modal's own sandbox examples run on it unchanged, except the features
+[listed below](#what-the-drop-in-refuses), which stop with an error naming
+Runtime's alternative.
+
 **The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
 Runtime and {{cost:modal}} on Modal**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:modal:100000}}, **{{=$0 less:modal:100000}} a month saved**.
@@ -108,6 +123,59 @@ Give your coding agent the one instruction in [migration](./migrate). It
 replaces the Modal calls on a branch, tests them on the free usage, and tells
 you what you save each month. Your old code stays on the main branch until you
 merge.
+
+### Change one import
+
+Runtime's SDK runs code written for Modal's Sandboxes, as this page describes
+from version 0.25.0 (Python 0.23.0), for Modal's JavaScript SDK 0.11.1 and
+Python SDK 1.6.2. Change the import and set `RUNTIME_API_KEY`:
+
+```ts no-run
+import { ModalClient } from "withruntime/modal"; // was: from "modal"
+```
+
+```python no-run
+from withruntime import modal  # was: import modal
+```
+
+A Modal token is never needed or sent. Apps group sandboxes by name, images
+build from the same registry tags and Dockerfile steps, and commands run as
+root, as in a Modal container. A `timeout` (`timeoutMs`) ends the sandbox, and
+an `idle_timeout` (`idleTimeoutMs`) pauses it with its memory kept, waking at
+the next command, file call or tunnel request. Outbound domain and CIDR
+allowlists, tunnels, tags, names, file calls and watches, filesystem snapshots,
+and in Python memory snapshots work as Modal documents them. Each of Modal's
+sandbox examples was run against Runtime on 18 October 2026, in both
+languages.
+
+### What the drop-in refuses
+
+These stop with a `CompatibilityError` before anything is created, and the
+message names what to use on Runtime:
+
+- **GPUs.** Runtime runs on CPUs.
+- **Modal Functions, Classes, Dicts, Queues and web endpoints.** Run the code
+  in a sandbox, or on a schedule as a [job](./jobs).
+- **Named secrets** (`Secret.from_name`, `secrets.fromName`). Runtime's
+  [secrets](./security#secrets-sandboxes-never-see) are used without being seen: store one with
+  `runtime.secrets.set`, or pass values with `Secret.from_dict`
+  (`secrets.fromObject`).
+- **Secrets in image build steps.** A Runtime build keeps no secret: use it
+  when the sandbox runs instead.
+- **Volumes made on first use** (`create_if_missing`, ephemeral volumes) and
+  volume sub-paths. A Runtime [volume](./storage#attaching-a-volume) has a fixed size: create it
+  first, then mount all of it.
+- **Sidecars.** Start a second sandbox and join both to a private network.
+- **Connect tokens and custom domains** on a tunnel. Share the port as a
+  private preview instead.
+- **Directory snapshots and exit snapshots.** Take a filesystem snapshot
+  before `terminate()`, then start new sandboxes from it.
+- **Proxies and inbound CIDR allowlists.** Use Runtime's static outbound
+  addresses and network rules.
+
+`COMPATIBILITY.md` in each package lists every mapping.
+
+### Or port the calls
 
 Modal:
 

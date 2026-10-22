@@ -308,7 +308,8 @@ export class Tunnel {
   }
 
   #write(bytes: Uint8Array) {
-    if (!this.#over && this.socket.readyState === 1) this.socket.send(bytes);
+    if (!this.#over && this.socket.readyState === 1)
+      this.socket.send(bytes as Uint8Array<ArrayBuffer>);
   }
 
   private receive(message: Uint8Array) {

@@ -268,6 +268,62 @@ test("`runtime secrets set --only-label/--only-sandbox` scopes a secret, --all-s
   );
 });
 
+test("`runtime secrets set --env` puts a secret in another variable, which ls shows; it needs --host", async () => {
+  const only = { labels: [{ repo: "a" }] };
+  await withStub(
+    () => ({ ...SECRET, name: "GITHUB_TOKEN_A", env: "GITHUB_TOKEN", only, enforced: true }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await secretsCommand(
+          [
+            "set",
+            "GITHUB_TOKEN_A",
+            "--host",
+            "api.github.com",
+            "--only-label",
+            "repo=a",
+            "--env",
+            "GITHUB_TOKEN",
+          ],
+          env,
+          out,
+          async () => "ghp_a",
+        ),
+      ).toBe(0);
+      expect(JSON.parse(seen[0]!.body)).toEqual({
+        value: "ghp_a",
+        hosts: ["api.github.com"],
+        only,
+        env: "GITHUB_TOKEN",
+      });
+      expect(lines.join("\n")).toContain(
+        `Only these sandboxes get it and see GITHUB_TOKEN=${SECRET.placeholder}: repo=a.`,
+      );
+    },
+  );
+  await withStub(
+    () => ({ secrets: [{ ...SECRET, name: "GITHUB_TOKEN_A", env: "GITHUB_TOKEN" }] }),
+    async () => {
+      const { lines, out } = output();
+      expect(await run(["secrets", "ls"], env, out)).toBe(0);
+      expect(lines.join("\n")).toContain("GITHUB_TOKEN_A (as GITHUB_TOKEN)");
+    },
+  );
+  const { out } = output();
+  await expect(
+    secretsCommand(["set", "K", "--jobs", "--env", "OTHER"], env, out, async () => "v"),
+  ).rejects.toThrow("--env names the variable sandboxes see");
+  await expect(
+    secretsCommand(
+      ["set", "K", "--keep-value", "--host", "a.example.com", "--env", "OTHER"],
+      env,
+      out,
+      async () => "v",
+    ),
+  ).rejects.toThrow("--keep-value changes only");
+});
+
 test("`runtime secrets scope` changes who gets a secret without reading a value", async () => {
   await withStub(
     () => ({ ...SECRET, only: { labels: [{ role: "hub" }] }, enforced: true }),
@@ -292,6 +348,56 @@ test("`runtime secrets scope` changes who gets a secret without reading a value"
   );
   const { out } = output();
   await expect(secretsCommand(["scope", "K"], env, out)).rejects.toThrow(/Say who gets it/);
+});
+
+const PEM = "-----BEGIN RSA PRIVATE KEY-----\nMIIBAQAB\n-----END RSA PRIVATE KEY-----";
+
+test("secrets.set sends githubApp, git and api as given, and list returns them", async () => {
+  const githubApp = {
+    id: 12345,
+    installation: 67890,
+    repositories: ["runtime-cloud"],
+    permissions: { contents: "write", checks: "read" } as const,
+    api: "https://github.example.com/api/v3",
+  };
+  const git = { push: ["refs/heads/task/{label.task}", "refs/heads/task/{label.task}--*"] };
+  const api = {
+    callsPerHour: 500,
+    writesPerHour: 0,
+    keep: 100,
+    copies: true,
+    graphql: { path: "/api/graphql", mutations: ["createPullRequest"] },
+  };
+  await withStub(
+    (request) =>
+      request.method === "GET"
+        ? { secrets: [{ ...SECRET, githubApp, git, api }] }
+        : { ...SECRET, githubApp, git, api, enforced: true },
+    async (seen) => {
+      const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+      const saved = await runtime.secrets.set("GITHUB_APP", {
+        value: PEM,
+        hosts: ["api.github.com", "github.com"],
+        githubApp,
+        git,
+        api,
+      });
+      expect(saved.githubApp).toEqual(githubApp);
+      expect(saved.git?.push).toHaveLength(2);
+      expect(saved.api?.graphql?.mutations).toEqual(["createPullRequest"]);
+      expect(JSON.parse(seen[0]!.body)).toEqual({
+        value: PEM,
+        hosts: ["api.github.com", "github.com"],
+        githubApp,
+        git,
+        api,
+      });
+      const [listed] = await runtime.secrets.list();
+      expect(listed?.githubApp?.installation).toBe(67890);
+      expect(listed?.git).toEqual(git);
+      expect(listed?.api?.copies).toBe(true);
+    },
+  );
 });
 
 const COPY = {
@@ -399,4 +505,40 @@ test("`runtime secrets set --keep-value` narrows hosts and rules without reading
   await expect(
     secretsCommand(["set", "K", "--host", "a.io"], env, out, async () => ""),
   ).rejects.toThrow(/add --keep-value/);
+});
+
+test("`runtime secrets scope --only-app` gives a secret to every copy of an App, and ls names the App", async () => {
+  const APP = "0b6f3c1e-2d4a-4e5f-9a7b-8c9d0e1f2a3b";
+  await withStub(
+    () => ({ ...SECRET, only: { apps: [APP] }, enforced: true }),
+    async (seen) => {
+      const { lines, out } = output();
+      expect(
+        await secretsCommand(
+          ["scope", "OPENAI_API_KEY", "--only-app", APP.toUpperCase()],
+          env,
+          out,
+        ),
+      ).toBe(0);
+      expect(seen[0]!.line).toBe("PUT /v1/egress-secrets/OPENAI_API_KEY/sandboxes");
+      expect(JSON.parse(seen[0]!.body)).toEqual({ apps: [APP] });
+      expect(lines.join("\n")).toContain(`OPENAI_API_KEY: only app ${APP}.`);
+      await secretsCommand(
+        ["set", "K", "--host", "a.example.com", "--only-app", APP, "--only-label", "role=hub"],
+        env,
+        out,
+        async () => "v",
+      );
+      expect(JSON.parse(seen[1]!.body).only).toEqual({ labels: [{ role: "hub" }], apps: [APP] });
+    },
+  );
+  const { out } = output();
+  for (const bad of [
+    ["--only-app", "agents-hub"],
+    ["--only-app", APP, "--all-sandboxes"],
+  ])
+    await expect(secretsCommand(["scope", "K", ...bad], env, out)).rejects.toThrow(
+      /--only-app|--all-sandboxes/,
+    );
+  expect(scopeText({ apps: [APP], sandboxes: ["s1"] })).toBe(`s1 | app ${APP}`);
 });

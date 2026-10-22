@@ -107,6 +107,27 @@ function invalidProxy(name: string, shown: string, problem: string): RuntimeErro
 /** Words for a failed connection: the route it took, and what to check.
  * `cause` is the error fetch threw, or the status a proxy answered with (Bun's
  * fetch hands a refused tunnel back as a response). */
+/** The TLS codes Node gives when a certificate chain is not one it trusts:
+ * a proxy or firewall that inspects TLS with its own authority, most often. */
+const UNTRUSTED = new Set([
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+/** The certificate error under a failed call, if that is why it failed: its
+ * code, found anywhere in the cause chain. Pure. */
+export function untrustedCertificate(cause: unknown): string | undefined {
+  for (let c = cause, depth = 0; c && typeof c === "object" && depth < 8; depth++) {
+    const code = (c as { code?: unknown }).code;
+    if (typeof code === "string" && UNTRUSTED.has(code)) return code;
+    c = (c as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 export function describeRoute(
   target: string,
   cause: unknown,
