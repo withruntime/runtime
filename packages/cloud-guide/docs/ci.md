@@ -309,6 +309,63 @@ runtime agents create ci-review --command "python3 ~/.runtime-agent/runtime-agen
   and fails nothing. A session that answers with no verdict, four times,
   fails the job.
 
+### Deploy
+
+A `deploy:` entry runs after a push of its `branch` has passed every job. It
+never runs from a pull request. With `app:` it deploys a Runtime App; with
+`run:` alone it runs that command once. With `targets:` it is a staged deploy:
+your command runs on each target, a canary first, judged, then all the rest at
+once, on a machine of its own with the commit checked out.
+
+```yaml
+deploy:
+  - name: hosts
+    branch: main
+    targets: [eu-1, eu-2, us-1, us-2, us-3]
+    canary: eu-1 # released alone first
+    run: ./release.sh {target} # {target} is the name; DEPLOY_TARGET too
+    gate: { run: "./probe.sh {target}", for: 30, every: 10 } # seconds
+    rollback: ./release.sh {target} --back # the canary, when its gate fails
+    slow: 45 # seconds before a target is called a straggler
+    retries: 2 # tries after the first, for a target that fails
+    limit: 600 # seconds one run of your command may take
+    env: { REGION: us } # names not starting RUNTIME_
+```
+
+- **The canary** runs `run`, then the gate: its command on the canary every
+  `every` seconds for `for` seconds (30 and 5 unless you say; `for: 0` is one
+  probe). A probe that exits non-zero fails the gate at once: `rollback` runs
+  on the canary, no other target is touched, and the deploy fails with the
+  probe's last line. A canary whose `run` fails stops the deploy the same way,
+  with no rollback: a release script is expected to undo its own failure.
+- **The rest** run at once. A target still on its first try `slow` seconds
+  after they began, or one that fails, is a **straggler**: it is named on the
+  check, goes on alone and is tried again up to `retries` times, and the others
+  never wait for it. The stage says `all` and `live` when every other target
+  has released, and says each straggler's end whenever it comes. The deploy
+  fails, naming them, only if a target is on the old release after its last
+  try.
+- **The stopwatch** is one line per stage on the check's run and the job's
+  log, such as the one below. `merged` is when the check began.
+
+  ```
+  deploy hosts: merged → checked 38.2 s → canary 29.8 s → all 41.0 s → live 109.0 s after the merge
+  ```
+
+- **Where it runs:** only for a trusted check of a push to the repository's
+  production branch, once every other job has passed. A pull request, a push
+  to any other branch and a check that is not trusted deploy nothing, and the
+  job says why. Like a gate, the `deploy:` entries are read from the commit
+  before the push, never from the commit itself: a change to them takes
+  effect from the next push, and no pull request can change what a deploy
+  runs.
+- **Not set up:** a command that exits 78 touched nothing and says on its last
+  line what is missing. The deploy is then skipped and says so: it is never
+  reported as live.
+- **Limits:** at most 64 targets; a target's name is letters, digits and
+  `_ . -`. The machine has your `setup`'s tools and the commit's files, and
+  every `RUNTIME_CI_*` a step has. Put nothing secret in the file.
+
 ### A pull request's machines
 
 With `keep:` in `runtime.yml` (1 to 16; none unless it says), a pull
