@@ -84,6 +84,11 @@ class AsyncCiChecks:
         """The check with its ``jobs`` in plan order (no log)."""
         return await self._t.json("GET", f"/v1/ci/checks/{_enc(check_id)}")
 
+    async def cancel(self, check_id: str) -> dict[str, Any]:
+        """Cancel a queued or running check: its jobs end and its machines are
+        let go. A check that has ended is answered as it is."""
+        return await self._t.json("POST", f"/v1/ci/checks/{_enc(check_id)}:cancel")
+
 
 class AsyncCiJobs:
     """``runtime.ci.jobs``: one command of a check, run in sandboxes."""

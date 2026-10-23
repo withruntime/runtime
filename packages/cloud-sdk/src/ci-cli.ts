@@ -44,6 +44,8 @@ export const CI_HELP = `runtime ci <command>
   ls [--repository <repoId>] [--branch <name>] [--commit <sha>] [--pr <number>]
      [--state <state>]... [--limit 20]        Checks, newest first, with their jobs by state
   get <checkId>                               One check and its jobs in plan order
+  cancel <checkId>                            Cancel a queued or running check: its jobs end,
+                                              its machines are let go, GitHub is told
   logs <jobId>                                A job's output, its last 256 KiB, and its sandboxes
   tests <repoId> [--quarantined]              Its test files: time, recent outcomes, quarantine
   flakes [--repository <repoId>] [--all]      Flaky tests: each quarantined (or still gating), its
@@ -266,6 +268,14 @@ export async function ciCommand(
       );
       return 0;
     }
+    case "cancel": {
+      const check = await api.checks.cancel(need(rest[0], "a check's id (runtime ci ls)"));
+      print(
+        `${check.repository} ${check.commit.slice(0, 12)} ${where(check)}: ${check.state}${check.reason ? ` (${check.reason})` : ""}`,
+        check,
+      );
+      return 0;
+    }
     case "logs":
     case "job": {
       const job = await api.jobs.get(need(rest[0], "a job's id (runtime ci get <checkId>)"));
@@ -392,6 +402,7 @@ export async function ciCommand(
     "disconnect",
     "ls",
     "get",
+    "cancel",
     "logs",
     "tests",
     "flakes",

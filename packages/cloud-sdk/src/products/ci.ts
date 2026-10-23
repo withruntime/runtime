@@ -370,6 +370,14 @@ export function ci(t: Transport) {
       /** A check with its jobs in plan order. */
       get: (id: string, options?: RequestOptions) =>
         t.json<CiCheckDetail>({ method: "GET", path: at("/v1/ci/checks", id), ...options }),
+      /** Cancel a queued or running check: its jobs end and its machines
+       * are let go. A check that has ended is answered as it is. */
+      cancel: (id: string, options?: RequestOptions) =>
+        t.json<CiCheckDetail>({
+          method: "POST",
+          path: `${at("/v1/ci/checks", id)}:cancel`,
+          ...options,
+        }),
     },
     jobs: {
       /** A job with the tail of its log and the sandboxes it ran in. */

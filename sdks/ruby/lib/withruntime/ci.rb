@@ -68,6 +68,10 @@ module WithRuntime
 
     # The check with its +jobs+ in plan order (no log).
     def get(id) = Record.new(@t.json("GET", "/v1/ci/checks/#{seg(id)}"))
+
+    # Cancels a queued or running check: its jobs end and its machines are let
+    # go. A check that has ended is answered as it is.
+    def cancel(id) = Record.new(@t.json("POST", "/v1/ci/checks/#{seg(id)}:cancel"))
   end
 
   # +runtime.ci.jobs+: one command of a check, run in sandboxes.

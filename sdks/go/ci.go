@@ -479,6 +479,13 @@ func (s *CICheckService) Get(ctx context.Context, id string) (*CICheckDetail, er
 	return &check, s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/ci/checks/" + url.PathEscape(id)}, &check)
 }
 
+// Cancel ends a queued or running check: its jobs end and its machines are
+// let go. A check that has ended is answered as it is.
+func (s *CICheckService) Cancel(ctx context.Context, id string) (*CICheckDetail, error) {
+	var check CICheckDetail
+	return &check, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/ci/checks/" + url.PathEscape(id) + ":cancel"}, &check)
+}
+
 // Get reads a job with the tail of its output (the last 256 KiB).
 func (s *CIJobService) Get(ctx context.Context, id string) (*CIJobDetail, error) {
 	var job CIJobDetail

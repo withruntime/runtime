@@ -96,6 +96,12 @@ public final class Ci {
     public CiCheckDetail get(String id) {
       return new CiCheckDetail(t.object(new Transport.Call("GET", "/v1/ci/checks/" + Transport.segment(id))));
     }
+
+    /** Cancel a queued or running check: its jobs end and its machines are let go. */
+    public CiCheckDetail cancel(String id) {
+      return new CiCheckDetail(
+          t.object(new Transport.Call("POST", "/v1/ci/checks/" + Transport.segment(id) + ":cancel")));
+    }
   }
 
   /** {@code ci().jobs()}. */

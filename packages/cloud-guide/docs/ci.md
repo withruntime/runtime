@@ -79,7 +79,10 @@ From then on these start a check:
 - a re-run asked for on GitHub.
 
 A newer push to the same branch or pull request supersedes a check still
-going.
+going, and its machines are freed at once: the newer commit carries the
+older one. On the production branch, once newer pushes have kept it without
+a verdict for 20 minutes, the check running then is kept and finishes, so
+merges faster than a check never leave the branch unjudged.
 
 ## Whose code runs
 
@@ -216,8 +219,9 @@ steps:
 A step with `gate: true` is read from the production branch's file as it is
 now, never the pull request's own, nor the branch it targets or a pushed
 branch's: a change that edits or removes it, on its own commits or on a branch
-under them, still meets the production branch's. It runs on a machine of its
-own, made from the image, on which none of the change's code ran: no setup and
+under them, still meets the production branch's. A check's gates run one after
+another on one machine of their own, made from the image, on which none of the
+change's code ran: no setup and
 none of its files, only the history of the head and of the production branch's
 head, which a gate reads as its base (`RUNTIME_CI_BASE`, and
 `refs/runtime-ci/commit`, `refs/runtime-ci/base`). So it runs what the
@@ -234,6 +238,43 @@ record a gate checks. A review that approves, asks for changes or comments
 with words, or one dismissed, checks the head again. A gate runs
 on every commit, is never served an earlier pass, and has no `split`,
 `inputs`, `needs` or `machine`; no step needs one.
+
+### Steps that need no machine
+
+A step that only reads the tree and its history needs none of the check's
+machines, so it never waits in line for one. Two kinds:
+
+```yaml
+steps:
+  - name: new code is Rust
+    machine: none # a built-in check, run by the runner itself on the files it holds
+    inline: { kind: new-files, languages: [ts, py], keep: [sdks], why: "New code is Rust." }
+  - name: scan
+    machine: light # a command, on the check's one light sandbox
+    run: ./scan.sh
+```
+
+- **`machine: none`, with `inline:`**, is one of the runner's own checks. It
+  runs in the runner at once after the plan, on the commit's files and its
+  base's (and the bytes of a file the check reads), and its row passes or
+  fails within seconds. `new-files`: the change adds no source file of some
+  `languages` outside the `keep` folders (a move, a config file and a test
+  beside old files pass). `approval`: a change to the `files`, `trees` (less
+  what `exempt` names) or guarded `lines` it names fails until one of its
+  `approvers` approves exactly the head on GitHub; with `gate: true` it is
+  the base's own. `codeowners`: GitHub's code owners file and an `approval`
+  step (`matches`) name the same files. `undoes`: the change sets no file
+  back to how its base had it before other changes landed, unless its commit
+  messages name them; it reads history, which the runner doesn't hold, so it
+  asks git on the light sandbox. A built-in has no `run`, `split`, `inputs`,
+  `needs` or `env`, is never served an earlier pass, and nothing needs it.
+- **`machine: light`** is a command that reads only the tree and its history,
+  such as a scan of the lines a change adds. Every light step of a check, and
+  the built-ins that ask git, run one after another on one small sandbox made
+  from the image for the check (the commit's files checked out, its history
+  fetched, no setup and no warm machine), never a machine each. A command that
+  needs your dependencies belongs on the forks. It has no `split` or `needs`,
+  and nothing needs it.
 
 ### Review
 
@@ -393,8 +434,8 @@ the push that left them in any case.
   from the repository's own branches, pushed by a writer, keeps machines or
   takes them: never a fork's, nor one a writer approved for someone else
   ([Whose code runs](#whose-code-runs)). A push to the production branch
-  never runs on one, and neither does a gate: each gate has a machine of its
-  own, made from the image. Each machine is claimed for one check before it
+  never runs on one, and neither does a gate: a check's gates share one
+  machine of their own, made from the image. Each machine is claimed for one check before it
   wakes: two checks never run on the same one.
 
 ### Split test files
@@ -427,6 +468,13 @@ Only a push to the production branch seeds a warm snapshot, never a pull
 request, even one from a fork's branch named `main`. A small public
 repository, {{ci-small-repo}}, took {{ci-small-cold}} for its first check and
 {{ci-small-pull-request}} for a pull request this way ({{ci-measured-on}}).
+
+A few copies of the warm snapshot are kept paused, ready for the next checks,
+and a check wakes one (a wake takes about a tenth of a second): its first test
+starts on that one machine at once. It adds more machines only when what it
+has to run is longer than about a minute on one, and those start while its
+first tests already run. A paused copy holds no server's processors or
+memory.
 
 The warm snapshots are in your account's snapshot list, and their storage is
 billed as any snapshot's. CI/CD keeps only what a check can still use: the
@@ -588,12 +636,60 @@ npx withruntime ci flake prove <flakeId>        # its 100 runs at the next commi
 npx withruntime ci flake delete <flakeId> --reason "covered by e2e"
 ```
 
+## Failures main already has
+
+A pull request's check can judge only what the pull request breaks. When your
+production branch is red, every pull request would otherwise fail on the same
+broken tests, including the pull requests that fix them.
+
+Turn it on for a split test step with `over_main: true`:
+
+```yaml
+steps:
+  - name: test
+    run: bun test {files}
+    split: { files: "**/*.test.ts" }
+    over_main: true
+```
+
+Then a part of that step that fails on a pull request is named as main's,
+not the change's, when every test file that failed there failed on your
+production branch's own check too, at the pull request's base or a newer
+commit of the branch. The newest of those checks that ran the file decides.
+When every failed job is main's, the check still fails, titled "Failed only
+where main fails too", and names each such job with the commit main failed it
+at. It is never a pass, so no branch rule, auto-merge or merge queue merges a
+change past main's failures: check it again once main passes. When the pull
+request breaks something of its own, the check names those failures first and
+main's apart. Anything else is the change's, as it always was:
+
+- **Only your production branch turns it on.** `over_main` counts only when
+  the production branch's own file has the very same step saying it. A pull
+  request can't add it, or keep it on a step it changed.
+- **Test files only.** Only a split step that is reused can say it, and it is
+  judged file by file. A step run whole is never main's: its exit names
+  no file, so a new failure beside main's would look the same. Nor are
+  [gates](#gates), [reviews](#review), deploys or steps with `reuse: false`.
+- **One more failing file: it fails.** A test file that passes on the
+  production branch and fails on the pull request is always the change's.
+- **Main's verdict unknown: it fails.** If main's check of the base is still
+  running, never ran the file, or there is none, the pull request fails.
+- **The same failure.** A part that ran past its time limit or could not start
+  fails the check: the files it never finished may be the change's.
+- **Fixes are named.** When a job or test file main fails passes on the pull
+  request, the check's run says the change fixes it.
+
+Your production branch's own checks are never judged this way: main stays red
+until a fix lands, and nothing it gates releases before then.
+
 ## What GitHub shows
 
 One check run per check, named `runtime`, the one a branch rule requires. It
 shows in progress while the check runs and then its conclusion, linked to the
 check in the console, where every job and its log are. A failed check's run
-names each job that failed, its log's last line, and a link to that job.
+names each job that failed, its log's last line, and a link to that job. A
+pull request's run also names the jobs that failed the same way on your
+production branch, apart from its own ([failures main already has](#failures-main-already-has)).
 There is no run per job: a branch rule requires `runtime`, never a job's name.
 
 GitHub hears a check only when its state changes, so a check of 40 jobs is at most
@@ -625,6 +721,7 @@ for (const check of page.data) {
 ```bash no-run
 npx withruntime ci ls --commit $(git rev-parse HEAD)
 npx withruntime ci get <checkId>
+npx withruntime ci cancel <checkId>
 npx withruntime ci logs <jobId>
 npx withruntime ci tests <repoId> --quarantined
 ```
@@ -655,6 +752,14 @@ npx withruntime ci tests <repoId> --quarantined
   back each machine it has nothing left to run on, and its check takes that
   room within seconds. It holds as many machines as it has jobs ready, up
   to the account's 256.
+- **Cancel a check** that is queued or running with
+  `POST /v1/ci/checks/{id}:cancel` (`runtime.ci.checks.cancel(id)`): its
+  running jobs are cancelled and its queued ones skipped, its machines are
+  let go within seconds, and GitHub shows its check run as cancelled. A check
+  that has ended is answered as it is, so a second cancel is no error. Any
+  key that may change the check's repository may cancel its checks: an
+  owner's or admin's full key any of the account's, another key those of
+  repositories its own agent connected.
 - **A job** is `queued`, `running`, `passed`, `failed`, `flaky` (its only
   failures were in quarantined files), `cached` (its content key passed
   before, in `cachedFrom`), `cancelled` or `skipped`. Its `log` is the tail of
@@ -676,6 +781,7 @@ npx withruntime ci tests <repoId> --quarantined
 | `DELETE /v1/ci/repositories/{id}` | Disconnect; its checks still going are cancelled          |
 | `GET /v1/ci/checks`               | Checks, newest first                                      |
 | `GET /v1/ci/checks/{id}`          | A check and its jobs in plan order                        |
+| `POST /v1/ci/checks/{id}:cancel`  | Cancel a queued or running check; its machines let go     |
 | `GET /v1/ci/jobs/{id}`            | A job with its log and its sandboxes                      |
 | `GET /v1/ci/tests`                | A repository's test files and their quarantine            |
 | `GET /v1/ci/flakes`               | Flaky tests, newest first; the open ones unless `state`   |
@@ -683,8 +789,8 @@ npx withruntime ci tests <repoId> --quarantined
 | `POST /v1/ci/flakes/{id}:update`  | `prove`, hand it to an `owner`, or a `deleteReason`       |
 
 The MCP tools are `runtime_ci` with the actions `checks`, `check`, `job`,
-`tests`, `flakes`, `flake`, `flake_update`, `repositories`, `connect` and
-`disconnect`. A key reads only the
+`tests`, `flakes`, `flake`, `flake_update`, `check_cancel`, `repositories`,
+`connect` and `disconnect`. A key reads only the
 checks of repositories its own agent, or one it may see, connected.
 
 ## Price and limits
