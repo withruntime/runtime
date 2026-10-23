@@ -522,12 +522,19 @@ machine is handed its output instead.
   binary, test or proc macro the linker's version. Change any of them and it compiles
   again.
 - **Where it is kept:** on each machine, so a warm snapshot carries it to
-  every check, and in the repository's store: a sandbox of your account named
-  `build-cache-<key>` and labelled `runtime-ci-build-cache`, made by the first
-  check that needs it (2 vCPU, 2 GiB, a 32 GiB disk). It pauses when no check
-  uses it and is billed as any sandbox; delete it to start the cache empty.
-  The least used entries go first when its disk fills. A store belongs to one
-  repository, and nothing in it is shared with another repository or account.
+  every check, and in the repository's store: one sandbox of your account,
+  `build-cache-<key>`, labelled `runtime-ci-build-cache`, made by the first
+  check that needs it (2 vCPU, 2 GiB, a 32 GiB disk). It serves through a
+  preview, so it moves at most a preview's daily bytes and rate; a repository
+  whose checks move more sets `build_cache: { shards: N }` in `runtime.yml`
+  (up to 16), and its store is N such sandboxes, `build-cache-<key>-1` and on,
+  each keeping the entries whose keys fall to it: N times the room, the
+  bytes a day and the speed, and N sandboxes woken for every check. They
+  pause when no check uses them and are billed as any sandbox; delete them
+  to start the cache empty. A changed count finds nothing kept under the old
+  until it is compiled again. The least used entries go first when a disk
+  fills. A store belongs to one repository, and nothing in it is shared with
+  another repository or account.
 - **Who reads what:** a push to the production branch writes the
   repository's entries; a pull request reads them and its own, writes only
   its own, and never sees another pull request's. A pull request from a
