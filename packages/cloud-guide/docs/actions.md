@@ -45,13 +45,13 @@ already running finishes its job.
 
 | `runs-on`       | vCPU | Memory | Disk    |
 | --------------- | ---- | ------ | ------- |
-| `runtime`       | 2    | 4 GiB  | 40 GiB  |
-| `runtime-2cpu`  | 2    | 4 GiB  | 40 GiB  |
-| `runtime-4cpu`  | 4    | 8 GiB  | 80 GiB  |
-| `runtime-8cpu`  | 8    | 16 GiB | 160 GiB |
-| `runtime-16cpu` | 16   | 32 GiB | 160 GiB |
+| `runtime`       | 2    | 8 GiB  | 40 GiB  |
+| `runtime-2cpu`  | 2    | 8 GiB  | 40 GiB  |
+| `runtime-4cpu`  | 4    | 16 GiB | 80 GiB  |
+| `runtime-8cpu`  | 8    | 32 GiB | 160 GiB |
+| `runtime-16cpu` | 16   | 64 GiB | 160 GiB |
 
-Each vCPU is a whole core. A runner also carries GitHub's self-hosted
+Each vCPU is a whole core, with 4 GiB of memory. A runner also carries GitHub's self-hosted
 labels, so `runs-on: [self-hosted, linux, x64, runtime-4cpu]` matches too. A
 `runs-on` that names two sizes, or a label a Runtime runner doesn't carry,
 is left for another runner.

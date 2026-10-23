@@ -189,10 +189,11 @@ with them. A step that must hold whatever a pull request says is a gate
 request's.
 
 ```yaml
-machine: 4cpu # 2cpu, 4cpu, 8cpu or 16cpu; 2 GiB of memory per vCPU
+machine: 4cpu # 2cpu, 4cpu (default), 8cpu or 16cpu; 4 GiB of memory per vCPU
 setup: bun install --frozen-lockfile # run once, kept as the warm machine
 cache: [bun.lock, package.json] # files whose bytes key the warm machine
 keep: 8 # machines a pull request keeps for its next push: 0 (default) to 16
+timeout: 120 # seconds the whole check may take from its start: 10 to 21600 (default 3600)
 steps:
   - name: lint
     run: bun run lint
@@ -201,6 +202,7 @@ steps:
     run: bun test {files}
     split: { files: "**/*.test.ts" } # parts left out: by recorded times
     needs: [lint]
+    timeout: 30 # seconds each run may take, each test file apart (default 1800)
   - name: review rules
     run: ./check-rules.sh
     gate: true # the base's own; a pull request can't rewrite or drop it
@@ -210,7 +212,16 @@ steps:
   failed is skipped. A step may set its own `machine` and `env` (names not
   starting `RUNTIME_`).
 - **Limits:** the file is at most 64 KiB, with at most 64 steps; `run` and
-  `setup` are at most 8 KiB each. A job runs at most 30 minutes.
+  `setup` are at most 8 KiB each.
+- **Timeouts:** each run of a step (each file of a split step apart) is
+  killed past its `timeout:` (30 minutes unless it says), and is never given
+  more than the check has left. The whole check is cut at its own `timeout:`
+  (an hour unless it says), counted from its start, waiting for machines
+  included: every job still waiting or running then fails, and each says what
+  it was doing and for how long, such as `Cut at the check's 120 s timeout
+(timeout: in runtime.yml): still running after 95 s: test/slow.test.ts`. A
+  killed run says its file and time: `t/slow.sh ran 30 s, past its step's
+30 s timeout:, and was killed.` The check's machines end with it.
 - **Errors** fail the check at once, before any machine is made, with one run
   that names the key at fault: `runtime.yml: is over 64 KiB`.
 
@@ -455,6 +466,49 @@ leaves alone keeps the pass it had on the production branch or an earlier
 push, and runs on no machine (see [Passed before](#passed-before)). A part
 with nothing left to run passes at once, on no machine.
 
+## Move from GitHub Actions or CircleCI
+
+`runtime ci import` reads the folder's `.github/workflows/*.yml` and
+`.circleci/config.yml` and prints them as one `runtime.yml`; `--write`
+writes it (and never over one already there unless you add `--force`). It
+needs no key and sends nothing: it reads and writes files only.
+
+```bash no-run
+npx withruntime ci import            # print it
+npx withruntime ci import --write    # write runtime.yml
+npx withruntime ci connect acme/web  # then push it and connect
+```
+
+What it carries over:
+
+| From                                                                                                 | To                                                                                  |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| A job (GitHub) or a workflow's job (CircleCI)                                                        | a step, run on its own machine                                                      |
+| `needs:` / `requires:`                                                                               | `needs:`                                                                            |
+| A `strategy.matrix`, with `include` and `exclude`                                                    | a step for each Linux cell; cells that differ only in a tool's version are one step |
+| `run:` steps, each in a shell of its own                                                             | one script, each in a subshell, with `set -e`                                       |
+| `npm ci`, `pip install -r …`, `go mod download` and other installs of the project's own dependencies | `setup:`, run once and kept in the warm machine                                     |
+| `actions/cache` keys' `hashFiles(…)`, CircleCI's `{{ checksum "…" }}`                                | `cache:`                                                                            |
+| `env:` / `environment:`                                                                              | `env:`; a step's own as `export` lines in its subshell                              |
+| `services:`, CircleCI's extra `docker:` images                                                       | `docker run -d` at the start of the step                                            |
+| `working-directory:`                                                                                 | a `cd`                                                                              |
+| CircleCI `commands:` without parameters, `resource_class`                                            | inlined; `2cpu` to `16cpu`                                                          |
+| `${{ matrix.* }}`, `${{ github.sha }}`, `${{ github.ref_name }}`, `${{ env.* }}`                     | filled in, or `$RUNTIME_CI_COMMIT` and `$RUNTIME_CI_BRANCH`                         |
+
+What it never carries over, each named in a note at the top of the file and
+on the command's output: secrets (`${{ secrets.* }}`: a value that needs one
+is left out, and nothing secret is written into the file), marketplace
+actions and orbs other than checkout, setup and cache (a `# was:` line marks
+where each was), uploads and workspaces, `if:` conditions, macOS and Windows
+jobs, scheduled workflows and approval holds. `actions/checkout` and the
+`setup-*` actions need no step: a machine has the commit checked out, with
+Node, Bun, Python, git and a C compiler; install anything else in `setup`.
+A service started by `docker run` has no health check: wait for it in the
+step, as its health check did.
+
+To keep a workflow as it is instead, run its jobs on Runtime with one line
+changed: `runs-on: runtime` ([GitHub Actions](./actions)).
+
 ## A warm start
 
 A push to the production branch runs `setup` once on a new machine and keeps
@@ -471,10 +525,10 @@ repository, {{ci-small-repo}}, took {{ci-small-cold}} for its first check and
 
 A few copies of the warm snapshot are kept paused, ready for the next checks,
 and a check wakes one (a wake takes about a tenth of a second): its first test
-starts on that one machine at once. It adds more machines only when what it
-has to run is longer than about a minute on one, and those start while its
-first tests already run. A paused copy holds no server's processors or
-memory.
+starts on that one machine at once when one is all it needs. It asks for more
+only when what it has to run is longer than about a minute on one, and then
+takes them all before its tests start. A paused copy holds no server's
+processors or memory.
 
 The warm snapshots are in your account's snapshot list, and their storage is
 billed as any snapshot's. CI/CD keeps only what a check can still use: the
@@ -754,11 +808,14 @@ npx withruntime ci tests <repoId> --quarantined
   at most 256, counted across all of them (a `runtime-ci` run by hand counts
   its own): past that, or when a region has no room, a check waits in line with
   the reason on its jobs. It never fails for want of room, a gate's machine
-  neither. A push to the production branch goes first: while its check is
-  short of machines, every other check of the account asks for none, gives
-  back each machine it has nothing left to run on, and its check takes that
-  room within seconds. It holds as many machines as it has jobs ready, up
-  to the account's 256.
+  neither. A check takes its machines whole: one check of the account takes
+  machines at a time, and the others wait in line holding none, so no two
+  checks each hold part of what they need and wait on each other. A check
+  starts once it has all it asked for, or, when no more came for 20 seconds,
+  on those it has, and then runs on those alone. A push to the production
+  branch goes first, then the checks already running, then a pull request
+  whose merge waits on its check, then the newest. It holds as many machines
+  as it has jobs ready, up to the account's 256.
 - **Cancel a check** that is queued or running with
   `POST /v1/ci/checks/{id}:cancel` (`runtime.ci.checks.cancel(id)`): its
   running jobs are cancelled and its queued ones skipped, its machines are
@@ -805,8 +862,9 @@ checks of repositories its own agent, or one it may see, connected.
 A check with no machine to run on, because a region is full or its
 machines failed to start, waits for one and is asked again, after a pause
 that grows to 2 minutes; its jobs show "Waiting" with why. It never fails
-for it: it runs once machines come, or ends when it is cancelled or a newer
-push replaces it.
+for the platform's want of machines: it runs once machines come, or ends when it is cancelled or a newer
+push replaces it, or when its `timeout:` falls, which fails it saying
+how long it waited.
 
 When machines are short, checks go by their account's lane, as sandboxes
 do ([waiting in line for room](./limits#waiting-in-line-for-room)): a
@@ -818,9 +876,18 @@ any fifteen, and only while the region is short of room for everyone, not
 while the account is at its own share. Inside an account, a push of the
 production branch gets machines before its pull requests.
 
+Every account gets its fair share of the checks running at once, however
+many pull requests another account opens: each account's first check is
+taken before any account's next, and while all are taken, a check of an
+account holding more than its share that is running no job (waiting for
+machines, or between steps) makes way and is taken again in its turn, its
+finished jobs kept. A check of a lower lane makes way so for a higher
+lane's, whatever it holds.
+
 A check machine is billed at **{{ci-vcpu-minute}} per vCPU-minute**, with
 {{ci-gib-per-vcpu}} of memory per vCPU, by the second
-([pricing](./pricing#ci-cd)). Every machine of a check is deleted when the
+([pricing](./pricing#ci-cd)): the default, `4cpu`, is 4 vCPU and 16 GiB at
+{{ci-4vcpu-minute}} a minute. Every machine of a check is deleted when the
 check ends, whatever happened, except those a pull request's check keeps
 paused for its next push ([A pull request's machines](#a-pull-requests-machines)). CI/CD opens to an account once Runtime sets its
 limits ([limits](./limits)).

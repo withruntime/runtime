@@ -27,6 +27,9 @@ type Client struct {
 	waitForCapacity time.Duration
 	slots           chan struct{}
 	userAgent       string
+	// pause waits out a retry's backoff; nil is the real clock (sleep). The
+	// SDK's own tests set a clock that keeps the waits without spending them.
+	pause func(ctx context.Context, d time.Duration) error
 
 	// Sandboxes creates, finds and lists sandboxes.
 	Sandboxes *SandboxService

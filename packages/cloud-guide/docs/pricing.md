@@ -364,8 +364,8 @@ There is no fee per App, per request or per deploy.
 A check machine costs **{{ci-vcpu-minute}} per vCPU-minute**, with
 {{ci-gib-per-vcpu}} of memory per vCPU, billed by the second from when it
 starts to when it's deleted, with no minimum and nothing rounded up. That is
-{{ci-2vcpu-minute}} a minute for a 2-vCPU job. A job of 90 seconds on a 4-vCPU
-machine costs {{=$4 4 * 90 / 60 * ci-vcpu-minute}}. A job that passed before
+{{ci-2vcpu-minute}} a minute for a 2-vCPU, 8 GiB job. A job of 90 seconds on
+the default machine, 4 vCPU and 16 GiB, costs {{=$4 4 * 90 / 60 * ci-vcpu-minute}}. A job that passed before
 isn't run, so it costs nothing. There's no fee per user, per repository or per
 check. A warm snapshot is charged at the [snapshot
 rate](#snapshots-images-and-volumes) while it's kept ([CI/CD](./ci)).

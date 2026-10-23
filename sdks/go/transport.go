@@ -95,6 +95,14 @@ func roomBackoff(attempt int) time.Duration {
 	return time.Duration(float64(base)*(0.75+mathrand.Float64()*0.5)) * time.Millisecond
 }
 
+// wait waits out one of a call's retry pauses on the client's clock.
+func (c *Client) wait(ctx context.Context, d time.Duration) error {
+	if c.pause != nil {
+		return c.pause(ctx, d)
+	}
+	return sleep(ctx, d)
+}
+
 func sleep(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -219,7 +227,7 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			if atOnce {
 				pause = time.Duration(mathrand.Float64() * float64(50*time.Millisecond))
 			}
-			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries || sleep(ctx, pause) != nil {
+			if ctx.Err() != nil || cl.noRetry || attempt >= c.maxRetries || c.wait(ctx, pause) != nil {
 				failure := c.connectionError(ctx, write, key, err)
 				cancel()
 				return nil, nil, failure
@@ -253,7 +261,7 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 				wait = roomBackoff(roomAttempt)
 			}
 			roomAttempt++
-			if sleep(ctx, min(left, wait)) != nil {
+			if c.wait(ctx, min(left, wait)) != nil {
 				cancel()
 				return nil, nil, failure
 			}
@@ -284,7 +292,7 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			}
 			pause := time.Duration(float64(min(30*time.Second, base*time.Duration(1<<min(idleAttempt, 3)))) * (0.9 + mathrand.Float64()*0.2))
 			idleAttempt++
-			if pause >= time.Until(idleUntil) || sleep(ctx, pause) != nil {
+			if pause >= time.Until(idleUntil) || c.wait(ctx, pause) != nil {
 				cancel()
 				return nil, nil, failure
 			}
@@ -300,7 +308,7 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 			wait = backoff(attempt)
 		}
 		wait = time.Duration(float64(min(30*time.Second, wait)) * (0.9 + mathrand.Float64()*0.2))
-		if sleep(ctx, wait) != nil {
+		if c.wait(ctx, wait) != nil {
 			cancel()
 			return nil, nil, failure
 		}
@@ -503,7 +511,7 @@ func (c *Client) fileBytes(ctx context.Context, cl *call) ([]byte, error) {
 		if attempt >= 2 {
 			return nil, problem
 		}
-		if sleep(ctx, backoff(attempt)) != nil {
+		if c.wait(ctx, backoff(attempt)) != nil {
 			return nil, problem
 		}
 	}

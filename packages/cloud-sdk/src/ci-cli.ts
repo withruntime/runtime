@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { type CiSource, importCi } from "./ci-import.js";
 import { me, named } from "./cli-name.js";
 import type { CliKit } from "./cli.js";
 import type { Runtime } from "./client.js";
@@ -29,6 +32,10 @@ export const CI_HELP = `runtime ci <command>
   until a writer re-runs it on GitHub. In a private beta: outside it, each
   command says how to ask to join.
 
+  import [dir] [--write] [--force]            This folder's GitHub Actions workflows and CircleCI
+                                              config as a runtime.yml: printed, or written with
+                                              --write; what isn't carried over is noted at its top.
+                                              Needs no key and sends nothing
   connect <owner/name> [--branch main] [--config runtime.yml] [--installation <id>]
           [--trust <app-slug>[bot]]... [--name <name>]
                                               Connect a repository; prints its id. Takes a full key.
@@ -60,6 +67,7 @@ export const CI_HELP = `runtime ci <command>
   \`runtime sandboxes shell <id>\` to look around where it failed.
 
 Examples
+  runtime ci import --write
   runtime ci connect acme/web --config .runtime/ci.yml
   runtime ci repos trust acme/web acme-bot[bot]
   runtime ci ls --commit $(git rev-parse HEAD)
@@ -93,6 +101,53 @@ const ownerOf = (f: CiFlake) =>
     ? "nobody found"
     : `@${f.owner.login}${f.owner.pullRequest === null ? "" : ` (#${f.owner.pullRequest})`}`;
 
+/** `runtime ci import [dir] [--write] [--force]`: the folder's GitHub Actions
+ * workflows and CircleCI config as a `runtime.yml`, printed or written. */
+async function importCommand(argv: string[], out: Out, kit: CliKit): Promise<number> {
+  const args = kit.parse(argv, ["write", "force"], []);
+  const root = args.positional[0] ?? ".";
+  const files: CiSource[] = [];
+  const workflows = join(root, ".github", "workflows");
+  if (existsSync(workflows))
+    for (const name of readdirSync(workflows).sort())
+      if (/\.ya?ml$/.test(name))
+        files.push({
+          path: `.github/workflows/${name}`,
+          text: readFileSync(join(workflows, name), "utf8"),
+        });
+  const circle = join(root, ".circleci", "config.yml");
+  if (existsSync(circle))
+    files.push({ path: ".circleci/config.yml", text: readFileSync(circle, "utf8") });
+  if (!files.length)
+    throw kit.usage(
+      `${root} has neither .github/workflows/*.yml nor .circleci/config.yml to import.`,
+    );
+  const made = importCi(files);
+  if (!made.yaml) {
+    out.error(made.notes.join("\n"));
+    throw kit.usage("No job of these runs on a push or a pull request: nothing to write.");
+  }
+  if (!kit.has(args, "write")) {
+    out.write(
+      out.json ? JSON.stringify({ ...made, read: files.map((f) => f.path) }) : made.yaml.trimEnd(),
+    );
+    return 0;
+  }
+  const target = join(root, "runtime.yml");
+  if (existsSync(target) && !kit.has(args, "force"))
+    throw kit.usage(`${target} is there already: --force writes over it.`);
+  writeFileSync(target, made.yaml);
+  const notes = made.notes.length
+    ? `, ${made.notes.length} notes on what was not carried over at its top`
+    : "";
+  out.write(
+    out.json
+      ? JSON.stringify({ ...made, read: files.map((f) => f.path), written: target })
+      : `${target}: ${made.steps.length} steps from ${files.length === 1 ? "1 file" : `${files.length} files`}${notes}. Push it, then \`${me} ci connect <owner/name>\`.`,
+  );
+  return 0;
+}
+
 export async function ciCommand(
   argv: string[],
   out: Out,
@@ -107,6 +162,8 @@ export async function ciCommand(
     print(named(CI_HELP), { usage: named(CI_HELP) });
     return 0;
   }
+  // Reads and writes this folder's files only: no key, nothing sent.
+  if (verb === "import") return importCommand(rest, out, kit);
   const api = ci((await client()).transport);
   const whole = (value: string | undefined, what: string) => {
     if (value === undefined) return undefined;

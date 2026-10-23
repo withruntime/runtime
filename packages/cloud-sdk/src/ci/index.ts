@@ -12,3 +12,7 @@ export type * from "../products/ci.js";
 export function ci(options?: RuntimeOptions): Runtime["ci"] {
   return new Runtime(options).ci;
 }
+
+/** GitHub Actions workflows and a CircleCI config as a `runtime.yml`, with
+ * notes on what was not carried over (`runtime ci import`). */
+export { importCi, type CiImport, type CiSource } from "../ci-import.js";
