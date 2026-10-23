@@ -1084,9 +1084,8 @@ The live view is a private preview of the desktop: `streamUrl` carries its
 token, so anyone holding it can watch. Open it in a browser and keep it to
 yourself.
 
-The first start in a sandbox installs the desktop (about 90 seconds and 1 GB
-of its disk, once); Chromium follows in the background, and an `open` before it
-is ready waits for it.
+The desktop and Chromium come ready on every server: the first start in a
+sandbox installs nothing on its disk and takes about a second.
 
 Record the screen to MP4:
 

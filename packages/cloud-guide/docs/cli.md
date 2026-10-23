@@ -373,10 +373,8 @@ A session lets your own web page reach one sandbox's commands, files and
 previews directly, for {{session-default}} unless `--ttl` says otherwise and
 {{session-max}} at most; see [a sandbox from a browser](./javascript#a-sandbox-from-a-browser).
 
-The first `desktop start` in a sandbox installs the desktop, which took about
-90 seconds and 1 GB of the sandbox's disk on 23 September 2026; the browser
-comes from the host at once, with no download, and an `open`
-before it is ready waits for it. The first recording
+The desktop and the browser come ready on every server: the first `desktop
+start` in a sandbox installs nothing on its disk and takes about a second. The first recording
 installs ffmpeg. A recording is an MP4 on the sandbox's own disk: it never
 grows past `--max-mib` or runs past `--max-seconds`, stops before the disk fills, and a sandbox keeps at
 most 8 GiB of them.

@@ -774,7 +774,7 @@ with Sandbox.create() as sbx:
     preview = sbx.previews.create(3000)  # private: the link carries its token
     print(preview["urlWithToken"])
 
-    sbx.desktop.start(width=1280, height=800)  # the first start installs it
+    sbx.desktop.start(width=1280, height=800)  # ready in about a second
     sbx.desktop.open("https://example.com")
     sbx.desktop.click(640, 400)
     with open("screen.png", "wb") as file:
