@@ -539,7 +539,8 @@ own disk and count toward that disk's space.
 connected GitHub repository in sandboxes. `ci().repositories()` has `connect`,
 `list` and `disconnect` (only a full key connects one); `ci().checks().list`
 and `get`, `ci().jobs().get` (with the tail of the job's log) and
-`ci().tests().list` read what ran. Times are milliseconds since the epoch,
+`ci().tests().list` read what ran, and `ci().releases().list` a release's
+steps as they were taken. Times are milliseconds since the epoch,
 lists are `Page`s like the others, and an account outside the beta gets
 `PermissionDenied` with code `product_in_beta`.
 

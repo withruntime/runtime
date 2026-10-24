@@ -57,6 +57,7 @@ test("each method's route, method, query and body", async () => {
   await api.flakes.list({ repositoryId: "r", state: ["quarantined", "gating"] });
   await api.flakes.get("f 1");
   await api.flakes.update("f 1", { owner: "acme/testers", prove: true });
+  await api.releases.list({ repositoryId: "r", commit: "a6049bf5a" });
   expect(calls.map((c) => [c.method, c.path, c.query ?? null, c.body ?? null])).toEqual([
     [
       "POST",
@@ -78,6 +79,7 @@ test("each method's route, method, query and body", async () => {
     ["GET", "/v1/ci/flakes", { repositoryId: "r", state: ["quarantined", "gating"] }, null],
     ["GET", "/v1/ci/flakes/f%201", null, null],
     ["POST", "/v1/ci/flakes/f%201:update", null, { owner: "acme/testers", prove: true }],
+    ["GET", "/v1/ci/releases", { repositoryId: "r", commit: "a6049bf5a" }, null],
   ]);
 });
 

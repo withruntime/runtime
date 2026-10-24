@@ -388,7 +388,8 @@ CI/CD runs a repository's checks as jobs in sandboxes. It is in a private beta:
 an account outside it gets `PermissionDeniedError` with code `product_in_beta`.
 `checks.list` and `tests.list(repository_id)` page like the other lists
 (`limit` 1 to 100). A failed job's `sandbox_ids` may be kept paused, to wake
-and look into.
+and look into. `releases.list(commit: ...)` reads a release's steps as they
+were taken.
 <!-- /launch: ci -->
 
 ## Errors and retries

@@ -1121,7 +1121,7 @@ func main() {
 connected GitHub repository in sandboxes. `CI.Repositories` has `Connect`,
 `List` and `Disconnect` (only a full key connects one); `CI.Checks.List` and
 `Get`, `CI.Jobs.Get` (with the tail of the job's log) and `CI.Tests.List`
-read what ran. Times are milliseconds since the epoch, lists page like the
+read what ran, and `CI.Releases.List` a release's steps as they were taken. Times are milliseconds since the epoch, lists page like the
 others, and an account outside the beta gets `product_in_beta` (403).
 
 ```go check

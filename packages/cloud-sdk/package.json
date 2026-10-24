@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.33.2",
+  "version": "0.33.3",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -258,7 +258,7 @@
     "llm"
   ],
   "dependencies": {
-    "undici": "^7.29.1",
+    "undici": "^7.30.1",
     "yaml": "^2.8.1"
   },
   "peerDependencies": {

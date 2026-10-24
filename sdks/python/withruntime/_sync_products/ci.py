@@ -177,6 +177,30 @@ class CiFlakes:
                                   idempotency_key=idempotency_key)
 
 
+class CiReleases:
+    """``runtime.ci.releases``: the steps each release took, as it took them:
+    a migration's copy test or apply, a deploy ref moved, a server's canary or
+    release, the website's deploy or promote, or a wait and why. Only
+    repositories whose releases CI/CD runs have any."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    def list(self, *, repository_id: Optional[str] = None, commit: Optional[str] = None,
+                   limit: Optional[int] = None, cursor: Optional[str] = None) -> Page:
+        """Steps, newest first: each ``commit``, ``source`` (``mover`` or the
+        deploy target that walked it), ``host`` (or None), ``line`` and ``at``
+        (Unix ms). ``commit`` keeps one release's. ``async for`` walks every
+        page."""
+        from .._sync_client import Page
+        query = {"repositoryId": repository_id, "commit": commit, "limit": limit}
+
+        def fetch(at: Optional[str]) -> Page:
+            body = self._t.json("GET", "/v1/ci/releases", query={**query, "cursor": at})
+            return Page(body["data"], body.get("nextCursor"), fetch)
+        return fetch(cursor)
+
+
 class Ci:
     """``runtime.ci``: CI/CD (private beta)."""
 
@@ -187,3 +211,4 @@ class Ci:
         self.jobs = CiJobs(t)
         self.tests = CiTests(t)
         self.flakes = CiFlakes(t)
+        self.releases = CiReleases(t)

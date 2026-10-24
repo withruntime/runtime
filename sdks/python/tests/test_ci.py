@@ -54,6 +54,10 @@ class Stub(BaseHTTPRequestHandler):
         if path == "/v1/ci/flakes" and self.command == "GET":
             return self.answer({"data": [{"id": "f1", "file": "t/a.test.ts", "state": "quarantined"}],
                                 "nextCursor": None})
+        if path == "/v1/ci/releases" and self.command == "GET":
+            return self.answer({"data": [{"id": 7, "commit": "a6049bf5a", "source": "hostd", "host": "web-4",
+                                          "line": "web-4: 562211980 -> a6049bf5a", "at": 1}],
+                                "nextCursor": None})
         if path == "/v1/ci/flakes/f1":
             return self.answer({"id": "f1", "runs": [], "failures": []})
         if path == "/v1/ci/flakes/f1:update":
@@ -101,6 +105,13 @@ class CiTest(unittest.TestCase):
         self.assertEqual(Stub.seen[0][2], {"repositoryId": [REPO_ID], "state": ["quarantined", "gating"]})
         self.assertEqual(Stub.seen[2][3], {"owner": "acme/testers", "prove": True})
         self.assertEqual(Stub.seen[3][3], {"deleteReason": "it timed a timer"})
+
+    def test_a_releases_steps_are_read_by_its_commit(self):
+        with self.client() as runtime:
+            steps = runtime.ci.releases.list(repository_id=REPO_ID, commit="a6049bf5a")
+        self.assertEqual(steps.data[0]["host"], "web-4")
+        self.assertEqual(Stub.seen[0][:3], ("GET", "/v1/ci/releases",
+                                            {"repositoryId": [REPO_ID], "commit": ["a6049bf5a"]}))
 
     def test_every_verb_calls_its_route_with_the_apis_names(self):
         with self.client() as runtime:

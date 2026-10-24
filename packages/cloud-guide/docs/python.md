@@ -953,7 +953,8 @@ CI/CD runs a repository's checks as jobs in sandboxes. It is in a private beta:
 an account outside it gets `PermissionDeniedError` with code
 `product_in_beta`. `checks.list()` and `tests.list(repository_id)` page like
 the other lists (`limit` 1 to 100). A failed job's `sandboxIds` may be kept
-paused, to wake and look into. `AsyncRuntime` has the same methods, awaited.
+paused, to wake and look into. `releases.list(commit=...)` reads a release's
+steps as they were taken. `AsyncRuntime` has the same methods, awaited.
 <!-- /launch: ci -->
 
 ## Account API calls

@@ -536,12 +536,14 @@ one's boot, downtime and replaced copies. See
 
 ```bash no-run
 runtime ci connect acme/web --config runtime.yml   # needs a full key
-runtime ci ls --commit $(git rev-parse HEAD)        # its checks, newest first
-runtime ci get <checkId>                            # its jobs in plan order
+runtime ci checks --commit $(git rev-parse HEAD)    # its checks, newest first
+runtime ci check <checkId>                          # its jobs in plan order
+runtime ci cancel <checkId>                         # end it: its machines let go
 runtime ci logs <jobId>                             # a job's log and its sandboxes
 runtime ci tests <repoId> --quarantined             # quarantined test files
 runtime ci flakes                                   # open flaky tests and their owners
 runtime ci flake <flakeId>                          # one flake: its proof and runs
+runtime ci releases --commit <sha>                  # a release's steps as taken
 ```
 
 A failed job's sandbox may be kept paused: `runtime sandboxes wake <id>`, then

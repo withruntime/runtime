@@ -4,7 +4,8 @@ package com.withruntime;
  * {@code runtime.ci()}: CI/CD. A connected GitHub repository ({@link #repositories()}) has its
  * pushes and pull requests checked ({@link #checks()}, {@link #jobs()}) in sandboxes the runner
  * drives for the account; {@link #tests()} reads its test files and their quarantine, and
- * {@link #flakes()} its flaky tests, each quarantined and handed to an owner.
+ * {@link #flakes()} its flaky tests, each quarantined and handed to an owner; {@link #releases()}
+ * the steps each release took.
  *
  * <p>In private beta: an account outside the beta is refused with {@link
  * RuntimeCloudException.PermissionDenied}, code product_in_beta (403).
@@ -15,6 +16,7 @@ public final class Ci {
   private final Jobs jobs;
   private final Tests tests;
   private final Flakes flakes;
+  private final Releases releases;
 
   Ci(Transport transport) {
     this.repositories = new Repositories(transport);
@@ -22,6 +24,7 @@ public final class Ci {
     this.jobs = new Jobs(transport);
     this.tests = new Tests(transport);
     this.flakes = new Flakes(transport);
+    this.releases = new Releases(transport);
   }
 
   /** Connected repositories, whose pushes and pull requests are checked. */
@@ -44,6 +47,11 @@ public final class Ci {
   /** Tests that passed and failed on the same inputs. */
   public Flakes flakes() {
     return flakes;
+  }
+
+  /** The steps each release took, as it took them. */
+  public Releases releases() {
+    return releases;
   }
 
   /** {@code ci().repositories()}: connect, list, set undo and disconnect. */
@@ -179,6 +187,24 @@ public final class Ci {
               new Transport.Call("POST", "/v1/ci/flakes/" + Transport.segment(id) + ":update")
                   .body(change.toMap())
                   .key(change.idempotencyKey)));
+    }
+  }
+
+  /** {@code ci().releases()}: the steps releases took, newest first. */
+  public static final class Releases {
+    private final Transport t;
+
+    Releases(Transport transport) {
+      this.t = transport;
+    }
+
+    public Page<CiReleaseStep> list() {
+      return list(null);
+    }
+
+    public Page<CiReleaseStep> list(ListCiReleaseSteps filter) {
+      ListCiReleaseSteps query = filter == null ? new ListCiReleaseSteps() : filter;
+      return Page.read(t, query.call(null), CiReleaseStep::new, query::call);
     }
   }
 }

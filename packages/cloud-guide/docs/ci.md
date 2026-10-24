@@ -70,7 +70,8 @@ running while the key that connected the repository stays full.
 A repository is the account's, not one key's: it connects once per account.
 Any key an owner or admin made lists every connected repository, whichever
 key connected it, and any full key of theirs changes or disconnects one.
-Another key lists only the repositories its own agent connected.
+Another key lists only the repositories its own agent connected. Listing
+a repository is not reading its checks: see "A job" below.
 
 From then on these start a check:
 
@@ -956,8 +957,8 @@ for (const check of page.data) {
 ```
 
 ```bash no-run
-npx withruntime ci ls --commit $(git rev-parse HEAD)
-npx withruntime ci get <checkId>
+npx withruntime ci checks --commit $(git rev-parse HEAD)
+npx withruntime ci check <checkId>
 npx withruntime ci cancel <checkId>
 npx withruntime ci logs <jobId>
 npx withruntime ci tests <repoId> --quarantined
@@ -994,10 +995,11 @@ npx withruntime ci tests <repoId> --quarantined
   `POST /v1/ci/checks/{id}:cancel` (`runtime.ci.checks.cancel(id)`): its
   running jobs are cancelled and its queued ones skipped, its machines are
   let go within seconds, and GitHub shows its check run as cancelled. A check
-  that has ended is answered as it is, so a second cancel is no error. Any
-  key that may change the check's repository may cancel its checks: an
-  owner's or admin's full key any of the account's, another key those of
-  repositories its own agent connected.
+  that has ended is answered as it is, so a second cancel is no error. An
+  account-wide key, or an owner's or admin's full key, cancels any of the
+  account's checks, and any other key those of repositories its own agent
+  connected. A key that cancels a check it does not read (below) is answered
+  with the check's `id` and `state` alone, nothing of its jobs or logs.
 - **A job** is `queued`, `running`, `passed`, `failed`, `flaky` (its only
   failures were in quarantined files), `cached` (its content key passed
   before, in `cachedFrom`), `cancelled` or `skipped`. Its `log` is its output,
@@ -1005,9 +1007,16 @@ npx withruntime ci tests <repoId> --quarantined
   short; when it is long, the log keeps its first error, every line that says
   a test failed (`panicked`, `FAILED`, `error[`) with the lines around it,
   and its end, in the order written, saying how many lines each gap holds.
-  A key an owner or admin made account-wide reads every check and job of
-  the account, whichever key connected the repository; an agent's own key
-  reads its agent's.
+  A key an owner or admin made account-wide, and a read-only (`read:*`)
+  key, reads every check, job, log, test file and flake of the account,
+  whichever key connected the repository; any other key reads those of
+  repositories its own agent connected. A read of one repository the key
+  lists but may not read (an owner's key that is not account-wide, say) is
+  refused with 403 and the repository's name, never answered with an empty page, and a check or job
+  it may not read answers 404 naming the repositories it lists and reads
+  nothing of. To read them all, switch the key to account-wide on the
+  API keys page (an owner or admin, signed in); `GET /v1/keys` shows each
+  key's reach.
 - **A failed job's sandbox may be kept paused.** Its `sandboxIds` are your
   own sandboxes: wake one and look around where it failed with
   `runtime sandboxes wake <id>` and `runtime sandboxes shell <id>`, or the
@@ -1015,6 +1024,34 @@ npx withruntime ci tests <repoId> --quarantined
 - **Test files** keep their recent time, which splits a step's files into
   even parts, and their last 20 outcomes. A file whose failures no longer
   fail a check is quarantined since `quarantinedSince`.
+
+## Follow a release
+
+A repository whose releases CI/CD runs keeps each step of a release as it is
+taken, one line each: a migration's copy test begun, passed or failed (with
+the migration), its apply, each deploy ref moved, each server's canary and
+release, the website's deploy and promote, and every wait with why. The
+console's **CI/CD → Releases** shows each release's steps as they come, newest
+first, and a waiting step in red; the API, the SDKs and the MCP tool read the
+same.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const steps = await runtime.ci.releases.list({ commit: "a6049bf5a", limit: 100 });
+for (const step of steps.data.reverse()) {
+  console.log(new Date(step.at).toISOString(), step.source, step.host ?? "", step.line);
+}
+```
+
+```bash no-run
+npx withruntime ci releases --commit a6049bf5a
+```
+
+A step's `source` is who took it (`mover`, or the deploy target that walked
+it), `host` the server it was on, or null. A step never holds a release up:
+one that cannot be kept is logged and the release goes on.
 
 ## API
 
@@ -1031,11 +1068,13 @@ npx withruntime ci tests <repoId> --quarantined
 | `GET /v1/ci/flakes`               | Flaky tests, newest first; the open ones unless `state`   |
 | `GET /v1/ci/flakes/{id}`          | A flaky test with its runs and the jobs it failed in      |
 | `POST /v1/ci/flakes/{id}:update`  | `prove`, hand it to an `owner`, or a `deleteReason`       |
+| `GET /v1/ci/releases`             | A release's steps as taken, newest first; by `commit`     |
 
 The MCP tools are `runtime_ci` with the actions `checks`, `check`, `job`,
-`tests`, `flakes`, `flake`, `flake_update`, `check_cancel`, `repositories`,
+`tests`, `flakes`, `flake`, `flake_update`, `releases`, `check_cancel`, `repositories`,
 `connect` and `disconnect`. A key reads only the
-checks of repositories its own agent, or one it may see, connected.
+checks of repositories its own agent connected, unless it is account-wide
+or read-only.
 
 ## Price and limits
 

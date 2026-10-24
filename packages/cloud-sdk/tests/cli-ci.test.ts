@@ -210,6 +210,41 @@ test("get shows a check's jobs in plan order; logs prints a job's log and where 
   );
 });
 
+test("checks, check and cancel: the words the CI/CD tool says, sent as ls, get and the check's cancel", async () => {
+  await withStub(
+    ({ method, path }) =>
+      method === "GET" && path === "/v1/ci/checks"
+        ? { data: [check], nextCursor: null }
+        : method === "GET" && path === `/v1/ci/checks/${CHECK}`
+          ? { ...check, jobs: [job] }
+          : method === "POST" && path === `/v1/ci/checks/${CHECK}:cancel`
+            ? { ...check, state: "cancelled", reason: "asked through Runtime's API", jobs: [] }
+            : undefined,
+    async (lines, sent) => {
+      expect(await run(["ci", "checks", "--state", "running"], env, out(lines))).toBe(0);
+      expect([sent[0]!.path, sent[0]!.query.getAll("state")]).toEqual([
+        "/v1/ci/checks",
+        ["running"],
+      ]);
+      expect(lines.join("\n")).toContain("1 passed, 1 failed");
+      lines.length = 0;
+      expect(await run(["ci", "check", CHECK], env, out(lines))).toBe(0);
+      expect(lines.join("\n")).toContain("test (2/2)");
+      lines.length = 0;
+      expect(await run(["ci", "cancel", CHECK], env, out(lines))).toBe(0);
+      expect([sent.at(-1)!.method, sent.at(-1)!.path]).toEqual([
+        "POST",
+        `/v1/ci/checks/${CHECK}:cancel`,
+      ]);
+      expect(lines.join("\n")).toContain("cancelled (asked through Runtime's API)");
+    },
+  );
+  const help: string[] = [];
+  expect(await run(["ci", "help"], env, out(help))).toBe(0);
+  expect(help.join("\n")).toContain("checks [--repository <repoId>]");
+  expect(help.join("\n")).toContain("check <checkId>");
+});
+
 test("logs prints a review's verdict: each finding at its line with its fix, then its notes", async () => {
   const reviewed = {
     ...job,
@@ -432,6 +467,35 @@ const flake = {
   endedCheckId: null,
   updatedAt: 1_760_000_000_000,
 };
+
+test("releases shows a release's steps oldest first, by commit", async () => {
+  const step = (id: number, line: string) => ({
+    id,
+    repositoryId: REPO,
+    commit: "a6049bf5a",
+    source: "hostd",
+    host: id === 2 ? "web-4" : null,
+    line,
+    at: 1_760_000_000_000 + id,
+  });
+  await withStub(
+    ({ method, path }) =>
+      method === "GET" && path === "/v1/ci/releases"
+        ? {
+            data: [step(2, "web-4: 562211980 -> a6049bf5a"), step(1, "ring 1 takes a6049bf5a")],
+            nextCursor: null,
+          }
+        : undefined,
+    async (lines, sent) => {
+      expect(await run(["ci", "releases", "--commit", "a6049bf5a"], env, out(lines))).toBe(0);
+      expect(sent[0]!.query.get("commit")).toBe("a6049bf5a");
+      expect(sent[0]!.query.get("limit")).toBe("50");
+      const text = lines.join("\n");
+      expect(text.indexOf("ring 1 takes")).toBeLessThan(text.indexOf("web-4: 562211980"));
+      expect(text).toContain("web-4");
+    },
+  );
+});
 
 test("flakes lists the open ones with their owners and deadlines; flake shows one and says an owner's say", async () => {
   await withStub(

@@ -240,10 +240,12 @@ export type {
 export type {
   CiFlake,
   CiFlakeDetail,
+  CiReleaseStep,
   CiRepository,
   CiTestResult,
   ConnectCiRepository,
   ListCiFlakes,
+  ListCiReleaseSteps,
   ListCiRepositories,
   UpdateCiFlake,
 } from "./products/ci.js";

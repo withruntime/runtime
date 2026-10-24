@@ -28,9 +28,9 @@ type Out = { json: boolean; write: (text: string) => void; error: (text: string)
 export const CI_HELP = `runtime ci <command>
 
   CI/CD checks each push and pull request of a connected GitHub repository in
-  sandboxes, as the steps its config file names. A fork's pull request waits
-  until a writer re-runs it on GitHub. In a private beta: outside it, each
-  command says how to ask to join.
+  sandboxes, as the steps its config file names. A fork's pull request runs
+  nothing; a writer can open it again from a branch of the repository. In a
+  private beta: outside it, each command says how to ask to join.
 
   import [dir] [--write] [--force]            This folder's GitHub Actions workflows and CircleCI
                                               config as a runtime.yml: printed, or written with
@@ -52,9 +52,9 @@ export const CI_HELP = `runtime ci <command>
                                               lands once its check passes. Off until turned on;
                                               takes an owner's or admin's full key
   disconnect <repoId | owner/name>            Stop checking it; its checks still going are cancelled
-  ls [--repository <repoId>] [--branch <name>] [--commit <sha>] [--pr <number>]
-     [--state <state>]... [--limit 20]        Checks, newest first, with their jobs by state
-  get <checkId>                               One check and its jobs in plan order
+  checks [--repository <repoId>] [--branch <name>] [--commit <sha>] [--pr <number>]
+     [--state <state>]... [--limit 20]        Checks, newest first, with their jobs by state (or ls)
+  check <checkId>                             One check and its jobs in plan order (or get)
   cancel <checkId>                            Cancel a queued or running check: its jobs end,
                                               its machines are let go, GitHub is told
   logs <jobId>                                A job's output, its last 256 KiB, and its sandboxes
@@ -66,16 +66,22 @@ export const CI_HELP = `runtime ci <command>
   flake hand <flakeId> <login | org/team>     Hand it to someone else
   flake delete <flakeId> --reason <why>       Say why its test is deleted; it ends once main
                                               no longer holds the file
+  releases [--repository <repoId>] [--commit <sha>] [--limit 50]
+                                              A release's steps as they were taken, oldest
+                                              first: migrations, deploys, servers, waits
 
   A failed job's sandbox may be kept paused: \`runtime sandboxes wake <id>\`, then
-  \`runtime sandboxes shell <id>\` to look around where it failed.
+  \`runtime sandboxes shell <id>\` to look around where it failed. A key reads the
+  checks of repositories its own agent connected; an account-wide key reads and
+  cancels every check of the account (switch one at withruntime.com/account/keys).
 
 Examples
   runtime ci import --write
   runtime ci connect acme/web --config .runtime/ci.yml
   runtime ci repos trust acme/web acme-bot[bot]
   runtime ci repos undo acme/web on
-  runtime ci ls --commit $(git rev-parse HEAD)
+  runtime ci checks --commit $(git rev-parse HEAD)
+  runtime ci cancel <checkId>
   runtime ci logs <jobId>
 `;
 
@@ -284,7 +290,8 @@ export async function ciCommand(
     case "disconnect":
       return disconnect(need(rest[0], "the repository's id or owner/name"));
     case "ls":
-    case "list": {
+    case "list":
+    case "checks": {
       const args = parse(rest, [], ["repository", "branch", "commit", "pr", "state", "limit"]);
       const commit = flag(args, "commit");
       if (commit !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(commit))
@@ -325,7 +332,8 @@ export async function ciCommand(
       );
       return 0;
     }
-    case "get": {
+    case "get":
+    case "check": {
       const check = await api.checks.get(need(rest[0], "a check's id"));
       const job = (j: CiJob) => [
         j.id,
@@ -349,6 +357,11 @@ export async function ciCommand(
     }
     case "cancel": {
       const check = await api.checks.cancel(need(rest[0], "a check's id (runtime ci ls)"));
+      // A key that may cancel the check but not read it is told its state alone.
+      if (!("commit" in check)) {
+        print(`${check.id}: ${check.state}`, check);
+        return 0;
+      }
       print(
         `${check.repository} ${check.commit.slice(0, 12)} ${where(check)}: ${check.state}${check.reason ? ` (${check.reason})` : ""}`,
         check,
@@ -446,6 +459,35 @@ export async function ciCommand(
       );
       return 0;
     }
+    case "releases": {
+      const args = parse(rest, [], ["repository", "commit", "limit"]);
+      const repositoryId = flag(args, "repository");
+      const commit = flag(args, "commit");
+      const limit = flag(args, "limit");
+      const steps = (
+        await api.releases.list({
+          limit: limit ? whole(limit, "--limit") : 50,
+          ...(repositoryId ? { repositoryId } : {}),
+          ...(commit ? { commit } : {}),
+        })
+      ).data.reverse();
+      print(
+        steps.length
+          ? table([
+              ["AT", "RELEASE", "BY", "SERVER", "STEP"],
+              ...steps.map((s) => [
+                when(s.at),
+                s.commit.slice(0, 9),
+                s.source,
+                s.host ?? "-",
+                s.line,
+              ]),
+            ])
+          : "No release steps.",
+        steps,
+      );
+      return 0;
+    }
     case "tests": {
       const args = parse(rest, ["quarantined"], []);
       const repositoryId = need(args.positional[0], "a repository's id (runtime ci repos)");
@@ -479,6 +521,8 @@ export async function ciCommand(
     "connect",
     "repos",
     "disconnect",
+    "checks",
+    "check",
     "ls",
     "get",
     "cancel",
@@ -486,6 +530,7 @@ export async function ciCommand(
     "tests",
     "flakes",
     "flake",
+    "releases",
   ]);
 }
 

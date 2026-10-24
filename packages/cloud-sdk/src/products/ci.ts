@@ -68,7 +68,7 @@ export type CiCheck = {
   /** The GitHub login that pushed, opened or re-ran it. */
   actor: string | null;
   /** The repository's writers' code. A fork's pull request is not, and runs
-   * nothing until a writer re-runs it on GitHub. */
+   * nothing; a writer can open it again from a branch of the repository. */
   trusted: boolean;
   /** Queued for a writer's approval: nothing of it runs. */
   waiting: boolean;
@@ -176,6 +176,9 @@ export type CiReview = {
 };
 /** A check with its jobs, in plan order. */
 export type CiCheckDetail = CiCheck & { jobs: CiJob[] };
+/** A cancel's answer to a key that may cancel the check but not read it:
+ * its id and state, nothing of its jobs or logs. */
+export type CiCancelled = { id: string; state: CiCheckState };
 /** A job with the tail of its output: at most 256 KiB, the oldest dropped first. */
 export type CiJobDetail = CiJob & { log: string };
 export type ListCiChecks = {
@@ -284,6 +287,31 @@ export type ListCiFlakes = {
  * owner, or why its test is deleted. */
 export type UpdateCiFlake = { prove?: true; owner?: string; deleteReason?: string };
 
+/** One step a release took, as it took it: a migration's copy test or
+ * apply, a deploy ref moved, a server's canary or release, the website's
+ * deploy or promote, or a wait with why. */
+export type CiReleaseStep = {
+  id: number;
+  repositoryId: string;
+  /** The commit this step of the release is of. */
+  commit: string;
+  /** Who took it: `mover` (the release on CI/CD's pass) or the deploy
+   * target that walks it (`hostd`, `controller`, `settings`, `follower`). */
+  source: string;
+  /** The server it was on, when it was on one. */
+  host: string | null;
+  line: string;
+  /** Unix milliseconds. */
+  at: number;
+};
+export type ListCiReleaseSteps = {
+  repositoryId?: string;
+  /** Only this commit's release. */
+  commit?: string;
+  limit?: number;
+  cursor?: string;
+};
+
 type Wire<T> = { data: T[]; nextCursor: string | null };
 
 export function ci(t: Transport) {
@@ -386,9 +414,10 @@ export function ci(t: Transport) {
       get: (id: string, options?: RequestOptions) =>
         t.json<CiCheckDetail>({ method: "GET", path: at("/v1/ci/checks", id), ...options }),
       /** Cancel a queued or running check: its jobs end and its machines
-       * are let go. A check that has ended is answered as it is. */
+       * are let go. A check that has ended is answered as it is; to a key
+       * that may cancel it but not read it, with its id and state alone. */
       cancel: (id: string, options?: RequestOptions) =>
-        t.json<CiCheckDetail>({
+        t.json<CiCheckDetail | CiCancelled>({
           method: "POST",
           path: `${at("/v1/ci/checks", id)}:cancel`,
           ...options,
@@ -407,6 +436,12 @@ export function ci(t: Transport) {
           { ...query, repositoryId },
           options,
         ),
+    },
+    releases: {
+      /** The steps releases took, newest first, of one repository or one
+       * commit: only repositories whose releases CI/CD runs have any. */
+      list: (query: ListCiReleaseSteps = {}, options?: RequestOptions) =>
+        paged<CiReleaseStep, ListCiReleaseSteps>("/v1/ci/releases", query, options),
     },
     flakes: {
       /** Flaky tests, newest first; `state: ["quarantined", "gating"]`

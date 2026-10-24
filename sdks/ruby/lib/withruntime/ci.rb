@@ -10,7 +10,7 @@ module WithRuntime
   #   job = runtime.ci.checks.get(check.id).jobs.first
   #   puts runtime.ci.jobs.get(job.id).log
   class CI < Product
-    attr_reader :repositories, :checks, :jobs, :tests, :flakes
+    attr_reader :repositories, :checks, :jobs, :tests, :flakes, :releases
 
     def initialize(transport)
       super
@@ -19,6 +19,7 @@ module WithRuntime
       @jobs = CIJobs.new(transport)
       @tests = CITests.new(transport)
       @flakes = CIFlakes.new(transport)
+      @releases = CIReleases.new(transport)
     end
   end
 
@@ -131,6 +132,20 @@ module WithRuntime
     def update(id, prove: nil, owner: nil, delete_reason: nil, idempotency_key: nil)
       body = Fields.body(prove: prove, owner: owner, delete_reason: delete_reason)
       Record.new(@t.json("POST", "/v1/ci/flakes/#{seg(id)}:update", body: body, key: idempotency_key))
+    end
+  end
+
+  # +runtime.ci.releases+: the steps each release took, as it took them: a
+  # migration's copy test or apply, a deploy ref moved, a server's canary or
+  # release, the website's deploy or promote, or a wait and why. Only
+  # repositories whose releases CI/CD runs have any.
+  #
+  # A step: id, repository_id, commit, source (mover, or the deploy target
+  # that walked it), host (or nil), line and at.
+  class CIReleases < Product
+    # Steps, newest first; +commit:+ keeps one release's.
+    def list(repository_id: nil, commit: nil, limit: nil, cursor: nil)
+      page("/v1/ci/releases", { "repositoryId" => repository_id, "commit" => commit, "limit" => limit, "cursor" => cursor })
     end
   end
 end

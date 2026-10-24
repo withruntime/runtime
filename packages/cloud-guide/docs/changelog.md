@@ -18,6 +18,24 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 <!-- launch: ci -->
 
+- **See each step of a release as it is taken.** A repository whose releases
+  CI/CD runs keeps every step, one line each: a migration's copy test and
+  apply, each deploy ref moved, each server's canary and release, the
+  website's deploy and promote, and every wait with why. Read them in the
+  console's CI/CD → Releases, or with `GET /v1/ci/releases`, every SDK's
+  `ci.releases.list` and the MCP tool's `releases`. See
+  [follow a release](./ci#follow-a-release).
+- **A key that may not read a repository's checks says so.** An owner's key
+  that is not account-wide lists every connected repository but reads the
+  checks only of those its own agent connected. Asked for another's checks,
+  it answered an empty page, and 404 for each check, as if there were none.
+  It is now refused with 403 naming the repository, its 404s name the
+  repositories it lists and reads nothing of, and each refusal says how to
+  read them all: switch the key to account-wide on the API keys page. An
+  owner's full key that cancels a check it does not read is answered with
+  the check's id and state, not 404. The CLI takes `runtime ci checks` and `runtime ci check <id>` beside `ls` and
+  `get`. See [read checks, jobs and logs](./ci#read-checks-jobs-and-logs).
+
 ## 22 October 2026
 
 - **A failed check's log keeps what matters.** A long failed log keeps its
