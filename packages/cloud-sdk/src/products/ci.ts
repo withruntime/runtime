@@ -30,6 +30,9 @@ export type CiRepository = {
   /** The GitHub Apps (`<app-slug>[bot]`, lowercase, sorted) whose pushes run
    * as the code of someone who can write. */
   trustedApps: string[];
+  /** Whether a red production branch's culprit is undone by a pull request
+   * CI/CD opens: off until `setUndo` turns it on. */
+  undoCulprits: boolean;
   state: "connected" | "disconnected";
 };
 export type ConnectCiRepository = {
@@ -355,6 +358,18 @@ export function ci(t: Transport) {
           options,
         );
       },
+      /** Turn on (or off) the undo of a red production branch's culprit:
+       * when main's check fails, CI/CD finds the first commit that fails it
+       * and opens a pull request reverting it, which lands once its own
+       * check passes. Off until set; only an owner's or admin's full key
+       * sets it. */
+      setUndo: (id: string, on: boolean, options?: RequestOptions) =>
+        t.json<CiRepository>({
+          method: "POST",
+          path: `${at("/v1/ci/repositories", id)}:update`,
+          body: { undoCulprits: on },
+          ...options,
+        }),
       /** Disconnect: its checks still going are cancelled; what ended stays. */
       disconnect: (id: string, options?: RequestOptions) =>
         t.json<CiRepository>({

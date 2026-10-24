@@ -26,12 +26,15 @@ import { access } from "node:fs/promises";
 const turn = () =>
   Promise.all([access("/"), new Promise<void>((resolve) => setImmediate(resolve))]);
 let inflight = 0;
+/** How many counted pieces of work have ended: one that ends restarts the quiet. */
+let ended = 0;
 async function counted<T>(work: () => Promise<T>): Promise<T> {
   inflight++;
   try {
     return await work();
   } finally {
     inflight--;
+    ended++;
   }
 }
 const real = { fetch: globalThis.fetch, digest: crypto.subtle.digest.bind(crypto.subtle) };
@@ -54,20 +57,33 @@ function realClock() {
   jest.useRealTimers();
 }
 
-/** Moves the clock while `running()` says so. */
+/** Moves the clock while `running()` says so. Quiet is three turns in a row
+ * with nothing counted running or ending: counted only at their end, the
+ * turns that passed while a digest ran let the clock jump between its answer
+ * and the next digest the SDK asked for, and a file deadline fired before
+ * its first request under a loaded machine (24 October 2026). */
 async function pump(running: () => boolean) {
   while (running()) {
-    for (let i = 0; i < 3 && running(); i++) await turn();
-    if (running() && inflight === 0 && jest.getTimerCount() > 0) jest.advanceTimersToNextTimer();
+    const seen = ended;
+    let quiet = 0;
+    while (quiet < 3 && running()) {
+      await turn();
+      quiet = inflight === 0 && ended === seen ? quiet + 1 : 3 + 1;
+    }
+    if (quiet === 3 && running() && jest.getTimerCount() > 0) jest.advanceTimersToNextTimer();
   }
 }
 
 export function onFakeClock(): void {
   // Each test's own pump: one left from the test before stops at its next turn.
+  // The counted fetch goes in before each test: tests/preload.ts puts the
+  // real one back after every test, for the next file in the same worker.
   let test = 0;
   beforeAll(fake);
   afterAll(realClock);
   beforeEach(() => {
+    globalThis.fetch = fetchCounted;
+    crypto.subtle.digest = digestCounted;
     const mine = ++test;
     void pump(() => mine === test);
   });

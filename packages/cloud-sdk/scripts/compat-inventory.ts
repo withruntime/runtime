@@ -690,9 +690,10 @@ export function typescriptSurface(entry: string, names: readonly string[] | null
 
 // Python ----------------------------------------------------------------------
 
+/* One package's surface: its globals are root (a path) and wanted (names, or
+   None for every export), and it leaves the answer in result. */
 const PYTHON = String.raw`
-import ast, json, pathlib, sys
-root = pathlib.Path(sys.argv[1]); wanted = json.loads(sys.argv[2])
+import ast
 # An entry that is one module (morphcloud/api.py) counts what that module defines.
 module = root if root.is_file() else None
 classes, functions, aliases, assigned, refused_exports = {}, {}, {}, {}, set()
@@ -787,7 +788,19 @@ for name in wanted:
     if name in refused_exports: result[name] = {"kind": "refused"}
     elif found: result[name] = {"kind": "class", "members": members(found, set())}
     elif name in functions: result[name] = {"kind": "function", **describe(functions[name])}
-print(json.dumps(result))
+`;
+
+/* Every package asked for in one interpreter: one python3 each cost 80 ms of
+   its start, 0.9 s of the inventory test's 2.6 (24 October 2026). */
+const PYTHON_ALL = String.raw`
+import json, pathlib, sys
+one = compile(sys.argv[1], "surface", "exec")
+out = []
+for root, wanted in json.loads(sys.stdin.read()):
+    scope = {"root": pathlib.Path(root), "wanted": wanted}
+    exec(one, scope)
+    out.append(scope["result"])
+print(json.dumps(out))
 `;
 
 type PythonEntry =
@@ -797,11 +810,23 @@ type PythonEntry =
 type PythonMember = { refused: boolean; params: string[]; raised: string[]; checks?: boolean };
 
 export function pythonSurface(dir: string, names: readonly string[] | null) {
-  const raw = execFileSync("python3", ["-I", "-c", PYTHON, dir, JSON.stringify(names)], {
+  return pythonSurfaces([[dir, names]])[0]!;
+}
+
+/** pythonSurface for each [directory, names], read by one python3. */
+export function pythonSurfaces(jobs: readonly (readonly [string, readonly string[] | null])[]) {
+  if (!jobs.length) return [];
+  const raw = execFileSync("python3", ["-I", "-c", PYTHON_ALL, PYTHON], {
+    input: JSON.stringify(jobs),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  const runtime = names !== null;
+  return (JSON.parse(raw) as Record<string, PythonEntry>[]).map((entries, index) =>
+    readPython(entries, jobs[index]![1] !== null),
+  );
+}
+
+function readPython(entries: Record<string, PythonEntry>, runtime: boolean) {
   const out: Surface = new Map();
   const member = (key: string, info: PythonMember, constructor: boolean) => {
     if (!constructor) out.set(key, runtime ? (info.refused ? "refused" : "present") : "upstream");
@@ -816,7 +841,7 @@ export function pythonSurface(dir: string, names: readonly string[] | null) {
             : "present",
       );
   };
-  for (const [name, entry] of Object.entries(JSON.parse(raw) as Record<string, PythonEntry>)) {
+  for (const [name, entry] of Object.entries(entries)) {
     if (entry.kind === "function") {
       member(name, entry, false);
       continue;
@@ -881,13 +906,22 @@ const line = (provider: string, counts: ProviderInventory["counts"]) =>
 /** Recompute the adapter side against the committed upstream lists. */
 export function refresh(saved: Record<string, ProviderInventory>, only?: readonly string[]) {
   const result: Record<string, ProviderInventory> = { ...saved };
-  for (const source of SOURCES) {
-    if (only && !only.includes(source.provider)) continue;
+  const sources = SOURCES.filter((source) => !only || only.includes(source.provider));
+  const keysOf = (source: Source) => {
     const previous = saved[source.provider];
     if (!previous) throw new Error(`${source.provider} is not in ${INVENTORY}; run with the cache`);
-    const keys = Object.keys(previous.items);
-    const { items, counts } = compare(keys, runtimeSurface(source, exportedNames(keys)));
-    result[source.provider] = { upstream: previous.upstream, counts, items };
+    return Object.keys(previous.items);
+  };
+  const python = sources.filter((source) => source.language === "python");
+  const read = pythonSurfaces(
+    python.map((source) => [join(ROOT, source.runtime), exportedNames(keysOf(source))] as const),
+  );
+  for (const source of sources) {
+    const keys = keysOf(source);
+    const at = python.indexOf(source);
+    const surface = at >= 0 ? read[at]! : runtimeSurface(source, exportedNames(keys));
+    const { items, counts } = compare(keys, surface);
+    result[source.provider] = { upstream: saved[source.provider]!.upstream, counts, items };
   }
   return result;
 }

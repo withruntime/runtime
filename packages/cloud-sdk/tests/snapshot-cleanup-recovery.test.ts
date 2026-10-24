@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { Runtime } from "../src/client.js";
 import { RuntimeError } from "../src/errors.js";
 import { translate as vercelError } from "../src/vercel/errors.js";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 const ID = "11111111-2222-4333-8444-555555555555";
 

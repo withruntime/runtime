@@ -2,6 +2,12 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { refresh, readInventory, SOURCES } from "../../scripts/compat-inventory";
 
+/* compat-inventory.json, the counts COMPATIBILITY.md and each provider's
+   page state, against the adapters as TypeScript's checker and Python's ast
+   read them. The checker over the whole SDK is 3 s of one core, three times
+   a test file's budget, so this runs on main's check, after merge
+   (.runtime/e2e-files.sh), until it reads the adapters by syntax alone. */
+
 const saved = readInventory();
 const fresh = refresh(saved);
 

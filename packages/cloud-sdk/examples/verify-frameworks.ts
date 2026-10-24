@@ -18,6 +18,7 @@ import { RuntimeCloudSandboxClient, runtimeFunctionTools } from "../src/openai-a
 import { sandboxTools } from "../src/tools/index";
 import { Runtime, type Sandbox } from "../src/index";
 import { resolveCredential } from "../src/credentials";
+import { INVOICE_EXAMPLE } from "./invoice";
 
 /* Every framework integration against real Runtime sandboxes, with scripted
    models: the frameworks' own agent loops run, and no paid model is called.
@@ -34,7 +35,6 @@ const toolOutputs = (items: RunItem[]) =>
   items
     .filter((item) => item.type === "tool_call_output_item")
     .map((item) => JSON.stringify(item.rawItem));
-export const INVOICE_EXAMPLE = "print(sum([125, 250, 375]))\n";
 
 export async function verifyFrameworks(runtime: Runtime, sandbox: Sandbox, key?: string) {
   const results: Record<string, string> = {};

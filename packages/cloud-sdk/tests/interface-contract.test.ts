@@ -2,6 +2,9 @@ import { expect, spyOn, test } from "bun:test";
 import { run } from "../src/cli";
 import { Runtime } from "../src/client";
 import { RuntimeError } from "../src/errors";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* Where the SDK and CLI disagree with what the API answers, against a stub
    API. Found in the interface sweep of 30 September 2026. */

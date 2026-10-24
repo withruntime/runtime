@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { generateKeyPair, privateDecrypt } from "node:crypto";
+import { privateDecrypt } from "node:crypto";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { connectionOrigins } from "./credentials.js";
@@ -7,6 +7,7 @@ import { RuntimeError } from "./errors.js";
 import { named } from "./cli-name.js";
 import { sandboxIdentityHeaders } from "./identity.js";
 import { describeRoute, envFetch } from "./proxy.js";
+import { sealing } from "./sealing.js";
 
 /* `runtime keys create`: an API key for somewhere with no browser, a CI runner
    above all, asked for from a terminal and approved by an account owner in the
@@ -155,16 +156,19 @@ export async function createKey(
   async function post(path: string, body: unknown, key?: string) {
     const address = `${origins.auth}/api/connect/${path}`;
     let response: Response;
+    // The sandbox's identity first: its own lookup has its own deadline, and
+    // the call's 20 s start when the call does.
+    const identity = await sandboxIdentityHeaders();
     try {
       response = await fetcher(address, {
         method: "POST",
         redirect: "error",
-        signal: AbortSignal.timeout(20_000),
         headers: {
           "content-type": "application/json",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
-          ...(await sandboxIdentityHeaders()),
+          ...identity,
         },
+        signal: AbortSignal.timeout(20_000),
         body: JSON.stringify(body),
       });
     } catch (cause) {
@@ -186,11 +190,7 @@ export async function createKey(
     return result;
   }
 
-  const pair = await promisify(generateKeyPair)("rsa", {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: "spki", format: "pem" },
-    privateKeyEncoding: { type: "pkcs8", format: "pem" },
-  });
+  const pair = await sealing.pair();
   const started = await post("start", {
     purpose: "key",
     agentName: name,

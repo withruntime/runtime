@@ -7,6 +7,9 @@ import type { Snapshot as NativeSnapshot } from "../../src/snapshots.js";
 import { Sandbox, Snapshot } from "../../src/vercel/index.js";
 import { prepare } from "../../scripts/prepare-compatibility.js";
 import type { CompatibilityLock } from "../../scripts/check-upstream.js";
+import { onFakeClock } from "../fixtures/fake-clock";
+
+onFakeClock();
 
 const ID = "11111111-2222-4333-8444-555555555555";
 const NOW = "2026-09-30T00:00:00.123Z";

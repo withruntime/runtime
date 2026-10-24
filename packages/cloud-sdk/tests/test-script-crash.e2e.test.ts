@@ -5,13 +5,15 @@ import { join } from "node:path";
 import { crashed } from "../scripts/test";
 
 /* Bun's real output, not a copy of it: a worker that crashes in a parallel
-   run, the files it aborts, and a run where a test also fails on its own. */
+   run, the files it aborts, and a run where a test also fails on its own.
+   Three runs of bun test with waits, 0.5 s, and Bun's output changes only
+   with Bun: on main's check (.runtime/e2e-files.sh). */
 function bunTest(files: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), "sdk-crash-"));
   try {
     for (const [name, body] of Object.entries(files))
       writeFileSync(join(dir, name), `import { expect, test } from "bun:test";\n${body}\n`);
-    const run = Bun.spawnSync([process.execPath, "test", "--parallel=2"], {
+    const run = Bun.spawnSync([process.execPath, "test", "--parallel=2", "--no-isolate"], {
       cwd: dir,
     });
     return run.stdout.toString() + run.stderr.toString();

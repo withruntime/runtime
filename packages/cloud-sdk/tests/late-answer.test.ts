@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 import { Runtime, ServiceUnavailableError, NotFoundError } from "../src/index";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* An answer later than the API holds its headers (90 s) arrives as a 200
    with `runtime-late-answer: true`, whitespace while the work runs, then its

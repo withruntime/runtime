@@ -59,6 +59,14 @@ public final class CiRepository extends JsonObject {
     return getLong("githubRepositoryId");
   }
 
+  /**
+   * Whether a red production branch's culprit is undone by a pull request CI/CD opens: off until
+   * {@code setUndo} turns it on.
+   */
+  public boolean undoCulprits() {
+    return getBoolean("undoCulprits");
+  }
+
   /** connected or disconnected. */
   public String state() {
     return getString("state");

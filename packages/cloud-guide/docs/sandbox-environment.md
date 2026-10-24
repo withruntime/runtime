@@ -334,15 +334,12 @@ docker compose up -d
   runs no containers spends nothing on it.
 - Images and containers live on the sandbox's disk. Give a sandbox that runs
   containers more than the default, such as `diskMiB: 8192`.
-- Containers reach the web through the sandbox's proxy. Each one gets
-  `HTTP_PROXY` and `HTTPS_PROXY` set to `http://172.17.0.1:10800`, and so does
-  every `docker build` step. Docker Hub images come through Google's public
-  mirror, `mirror.gcr.io`, first.
-- Compose services reach each other by name, as anywhere. An HTTP client that
-  honours `HTTP_PROXY` sends a call to another service through the proxy unless
-  that name is in `NO_PROXY`, so list the names a service calls in its
-  `environment`, under both spellings: `NO_PROXY: localhost,api,db` and
-  `no_proxy: localhost,api,db`.
+- Containers reach the web with no proxy settings: their connections out go
+  through the sandbox's relay, as a program in the sandbox that ignores
+  `HTTP_PROXY` does. Docker Hub images come through Google's public mirror,
+  `mirror.gcr.io`, first.
+- Compose services, and containers on one Docker network, reach each other by
+  name, as anywhere.
 - A published port (`-p 8080:80`) listens inside the sandbox, so
   `runtime sandboxes port-forward <id> 8080` brings it to your machine and a preview
   shares it.

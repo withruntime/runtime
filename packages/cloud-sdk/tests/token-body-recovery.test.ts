@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beginDeviceLogin } from "../src/login";
 import { connectionStore } from "../src/credentials";
+import "./fixtures/sealing";
 
 const directories: string[] = [];
 afterEach(async () => {

@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 import { Runtime } from "../src/index";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* Lifecycle and fork calls keep the caller's deadline as given (1 October
    2026 audit): a command's timeoutMs is its limit in the guest, plus a minute

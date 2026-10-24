@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beginDeviceLogin } from "../src/login";
 import { sandboxMarker } from "../src/transport";
+import "./fixtures/sealing";
 
 /* Inside a sandbox, a login's calls to the website carry the sandbox's
    identity token, so the website counts its per-network limit against this

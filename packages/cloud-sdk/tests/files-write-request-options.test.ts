@@ -2,6 +2,9 @@
 import { expect, test } from "bun:test";
 import { Files } from "../src/sandbox";
 import { Transport, type Call } from "../src/transport";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 const CHUNK = 1_048_576;
 function fixture(chunkBytes: unknown = CHUNK, failure?: Error) {

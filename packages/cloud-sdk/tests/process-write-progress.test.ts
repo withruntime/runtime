@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { Process } from "../src/sandbox";
 import { Transport } from "../src/transport";
 import type { ProcessInfo } from "../src/types";
+import { onFakeClockFor } from "./fixtures/fake-clock";
 
 /** `length` bytes, byte i being `at(i)`: a plain loop, where Uint8Array.from
  * with a callback took 15 times as long for megabytes. */
@@ -52,22 +53,25 @@ async function partialPipe(input: Uint8Array, zeroFirst = false) {
   }
 }
 
-test("partial pipe acceptance adapts payload size instead of amplifying an eight MiB upload", async () => {
-  const input = bytesOf(8 * 1_048_576, (i) => i % 256);
+// Two MiB, not eight: 32 calls show the payload shrinks as well as 128 did.
+test("partial pipe acceptance adapts payload size instead of amplifying a two MiB upload", async () => {
+  const input = bytesOf(2 * 1_048_576, (i) => i % 256);
   const { payloads, wireBytes } = await partialPipe(input);
   expect(payloads[0]).toBe(1_048_576);
   expect(payloads.slice(1).every((size) => size === 65_536)).toBe(true);
-  expect(payloads).toHaveLength(128);
-  expect(payloads.reduce((sum, size) => sum + size, 0)).toBe(9_371_648);
+  expect(payloads).toHaveLength(32);
+  expect(payloads.reduce((sum, size) => sum + size, 0)).toBe(3_080_192);
   // Base64 adds a third; the small JSON envelope must stay within this budget.
-  expect(wireBytes).toBeLessThan(12_510_000);
+  expect(wireBytes).toBeLessThan(4_111_000);
 });
 
-test("zero-progress backpressure retains every byte and resumes with a bounded payload", async () => {
-  const input = bytesOf(2 * 1_048_576, (i) => (i * 19) % 256);
-  const { payloads } = await partialPipe(input, true);
-  expect(payloads[0]).toBe(1_048_576);
-  expect(payloads.slice(1).every((size) => size === 65_536)).toBe(true);
-  expect(payloads).toHaveLength(33);
-  expect(payloads.reduce((sum, size) => sum + size, 0)).toBe(input.length + 1_048_576);
-});
+// The pause after a write that took nothing, on the fake clock.
+test("zero-progress backpressure retains every byte and resumes with a bounded payload", () =>
+  onFakeClockFor(async () => {
+    const input = bytesOf(2 * 1_048_576, (i) => (i * 19) % 256);
+    const { payloads } = await partialPipe(input, true);
+    expect(payloads[0]).toBe(1_048_576);
+    expect(payloads.slice(1).every((size) => size === 65_536)).toBe(true);
+    expect(payloads).toHaveLength(33);
+    expect(payloads.reduce((sum, size) => sum + size, 0)).toBe(input.length + 1_048_576);
+  }));

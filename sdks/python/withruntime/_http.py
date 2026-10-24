@@ -220,9 +220,7 @@ class SyncResponse:
         """The whole body; ``limit=None`` for a file's bytes, which have no cap."""
         try:
             with _socket_deadline(self._socket, self._deadline):
-                data = self._response.read() if limit is None else self._response.read(limit + 1)
-            if limit is not None and len(data) > limit:
-                raise ValueError("Response exceeds 64 MiB")
+                data = self._response.read() if limit is None else self._read_within(limit)
             # read(amt), unlike read(), does not refuse a Content-Length body
             # cut short. Never turn that partial body into an apparent answer.
             if self._response.length not in (None, 0):
@@ -236,6 +234,21 @@ class SyncResponse:
             raise
         finally:
             self.close()
+
+    def _read_within(self, limit: int) -> bytes:
+        # In 64 KiB pieces: before Python 3.10, read(amt) allocates and zeroes
+        # amt bytes before it reads, 64 MiB and 40 ms for every answer however
+        # small (24 October 2026). read(), not read1(), so the response is
+        # closed at its end and its connection goes back to the pool.
+        parts, size = [], 0
+        while True:
+            data = self._response.read(65536)
+            if not data:
+                return b"".join(parts)
+            size += len(data)
+            if size > limit:
+                raise ValueError("Response exceeds 64 MiB")
+            parts.append(data)
 
     def chunks(self) -> Iterator[bytes]:
         """The body in pieces as it arrives, for a file too big to hold."""

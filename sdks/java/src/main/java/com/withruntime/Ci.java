@@ -46,7 +46,7 @@ public final class Ci {
     return flakes;
   }
 
-  /** {@code ci().repositories()}: connect, list and disconnect. */
+  /** {@code ci().repositories()}: connect, list, set undo and disconnect. */
   public static final class Repositories {
     private final Transport t;
 
@@ -66,6 +66,18 @@ public final class Ci {
 
     public Page<CiRepository> list(ListResources filter) {
       return ListResources.read(t, "/v1/ci/repositories", filter, CiRepository::new);
+    }
+
+    /**
+     * Turns on (or off) the undo of a red production branch's culprit: when main's check fails,
+     * CI/CD finds the first commit that fails it and opens a pull request reverting it, which lands
+     * once its own check passes. Off until set; only an owner's or admin's full key sets it.
+     */
+    public CiRepository setUndo(String id, boolean on) {
+      return new CiRepository(
+          t.object(
+              new Transport.Call("POST", "/v1/ci/repositories/" + Transport.segment(id) + ":update")
+                  .body(java.util.Map.of("undoCulprits", on))));
     }
 
     /** Disconnects a repository; its checks still going are cancelled. */

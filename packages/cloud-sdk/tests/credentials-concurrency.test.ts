@@ -6,6 +6,9 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { connectionOrigins, connectionStore, type SavedConnection } from "../src/credentials";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -47,30 +50,27 @@ test("independent CLI processes serialize account saves", async () => {
   const kit = await setup();
   const source = new URL("../src/credentials.ts", import.meta.url).pathname;
   const connections = [kit.saved("org-a"), kit.saved("org-b")];
-  const children = connections.map((connection, index) =>
+  // Each child says it is ready, then waits for the word to save: no clock.
+  const children = connections.map((connection) =>
     Bun.spawn(
       [
         process.execPath,
         "--eval",
         `import { connectionStore } from ${JSON.stringify(source)};
-     import { access, writeFile } from "node:fs/promises";
-     await writeFile(${JSON.stringify(join(kit.directory, `ready-${index}`))}, "ready");
-     for (;;) { try { await access(${JSON.stringify(join(kit.directory, "go"))}); break; } catch { await Bun.sleep(5); } }
-     await connectionStore(${JSON.stringify(kit.env)}).save(${JSON.stringify(connection)});`,
+     const store = connectionStore(${JSON.stringify(kit.env)});
+     process.stdout.write("ready");
+     await Bun.stdin.stream().getReader().read();
+     await store.save(${JSON.stringify(connection)});`,
       ],
-      { stdout: "pipe", stderr: "pipe" },
+      { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
     ),
   );
   try {
-    const until = performance.now() + 3000;
-    while (
-      (await readdir(kit.directory)).filter((name) => name.startsWith("ready-")).length !== 2
-    ) {
-      if (performance.now() >= until)
-        throw new Error("Credential subprocesses did not reach the barrier.");
-      await Bun.sleep(5);
+    await Promise.all(children.map((child) => child.stdout.getReader().read()));
+    for (const child of children) {
+      void child.stdin.write("go\n");
+      void child.stdin.end();
     }
-    await writeFile(join(kit.directory, "go"), "go");
     expect(await Promise.all(children.map((child) => child.exited))).toEqual([0, 0]);
     expect(await retained(kit.env)).toEqual(["org-a", "org-b"]);
   } finally {

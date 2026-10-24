@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { generateKeyPair, privateDecrypt } from "node:crypto";
+import { privateDecrypt } from "node:crypto";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { me, named } from "./cli-name.js";
@@ -7,6 +7,7 @@ import { Runtime } from "./client.js";
 import { checkBrowserOrigins, connectionOrigins, connectionStore } from "./credentials.js";
 import { sandboxIdentityHeaders } from "./identity.js";
 import { describeRoute, envFetch } from "./proxy.js";
+import { sealing } from "./sealing.js";
 
 class ConnectionError extends Error {
   constructor(
@@ -81,16 +82,19 @@ function connection(env: NodeJS.ProcessEnv, options: LoginOptions) {
   async function request(path: string, body?: unknown, key?: string) {
     let response: Response;
     const address = `${origins.auth}/api/connect/${path}`;
+    // The sandbox's identity first: its own lookup has its own deadline, and
+    // the call's 20 s start when the call does.
+    const identity = await sandboxIdentityHeaders();
     try {
       response = await fetcher(address, {
         method: "POST",
         redirect: "error",
-        signal: AbortSignal.timeout(20_000),
         headers: {
           "content-type": "application/json",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
-          ...(await sandboxIdentityHeaders()),
+          ...identity,
         },
+        signal: AbortSignal.timeout(20_000),
         body: JSON.stringify(body ?? {}),
       });
     } catch (cause) {
@@ -303,11 +307,7 @@ export async function beginDeviceLogin(
   let pending = await store.readPending();
   const resumed = pending !== null;
   if (!pending) {
-    const pair = await promisify(generateKeyPair)("rsa", {
-      modulusLength: 2048,
-      publicKeyEncoding: { type: "spki", format: "pem" },
-      privateKeyEncoding: { type: "pkcs8", format: "pem" },
-    });
+    const pair = await sealing.pair();
     // The computer's own name goes to the approval page beside the code, so an
     // owner can tell this request from a link somebody else started.
     const started = await request("start", {

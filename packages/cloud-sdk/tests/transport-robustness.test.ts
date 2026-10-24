@@ -274,52 +274,54 @@ test("a failed response callback cancels the unread body and keeps its error", (
     expect(cancelled).toBe(true);
   }));
 
-test("a real HTTP response cut after headers replays a write exactly once", async () => {
-  let calls = 0;
-  let writes = 0;
-  const keys = new Set<string>();
-  const server = createServer((request, response) => {
-    request.resume();
-    request.on("end", () => {
-      calls++;
-      const key = String(request.headers["idempotency-key"]);
-      if (!keys.has(key)) {
-        keys.add(key);
-        writes++;
-      }
-      response.writeHead(200, { "content-type": "application/json", "content-length": "11" });
-      if (calls === 1) {
-        response.write('{"ok":');
-        setTimeout(() => response.destroy(), 5);
-      } else response.end('{"ok":true}');
+// The retry's backoff on the fake clock; the server and its cut are real.
+test("a real HTTP response cut after headers replays a write exactly once", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    let writes = 0;
+    const keys = new Set<string>();
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        calls++;
+        const key = String(request.headers["idempotency-key"]);
+        if (!keys.has(key)) {
+          keys.add(key);
+          writes++;
+        }
+        response.writeHead(200, { "content-type": "application/json", "content-length": "11" });
+        if (calls === 1) {
+          response.write('{"ok":');
+          setTimeout(() => response.destroy(), 5);
+        } else response.end('{"ok":true}');
+      });
     });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  try {
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("No local server port");
-    const t = new Transport({
-      apiKey: "rk_test",
-      baseUrl: `http://127.0.0.1:${address.port}`,
-      fetch,
-      maxRetries: 1,
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
     });
-    expect(
-      await t.json<{ ok: boolean }>({
-        method: "POST",
-        path: "/v1/feedback",
-        body: { summary: "hello" },
-      }),
-    ).toEqual({ ok: true });
-    expect({ calls, writes, keys: keys.size }).toEqual({ calls: 2, writes: 1, keys: 1 });
-  } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No local server port");
+      const t = new Transport({
+        apiKey: "rk_test",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        fetch,
+        maxRetries: 1,
+      });
+      expect(
+        await t.json<{ ok: boolean }>({
+          method: "POST",
+          path: "/v1/feedback",
+          body: { summary: "hello" },
+        }),
+      ).toEqual({ ok: true });
+      expect({ calls, writes, keys: keys.size }).toEqual({ calls: 2, writes: 1, keys: 1 });
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }));
 
 for (const read of ["send", "json"] as const) {
   test(`${read}: a deadline ends an unresolved credential lookup`, async () => {
@@ -657,25 +659,26 @@ test("a write whose connection was refused never left, and is sent again at once
   expect(t.keys).toEqual(["k1", "k1"]);
 });
 
-test("a connection reset after the request was sent keeps the backoff", async () => {
-  const server = createServer((request) => request.socket.destroy());
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
-  const port = (server.address() as { port: number }).port;
-  try {
-    const t = tries(() =>
-      fetch(`http://127.0.0.1:${port}/v1/sandboxes`, { method: "POST", body: "{}" }),
-    );
-    await transport(t.fetcher).json({
-      method: "POST",
-      path: "/v1/sandboxes",
-      idempotencyKey: "k2",
-    });
-    expect(t.gap()).toBeGreaterThanOrEqual(120);
-    expect(t.keys).toEqual(["k2", "k2"]);
-  } finally {
-    server.close();
-  }
-});
+test("a connection reset after the request was sent keeps the backoff", () =>
+  onFakeClockFor(async () => {
+    const server = createServer((request) => request.socket.destroy());
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const t = tries(() =>
+        fetch(`http://127.0.0.1:${port}/v1/sandboxes`, { method: "POST", body: "{}" }),
+      );
+      await transport(t.fetcher).json({
+        method: "POST",
+        path: "/v1/sandboxes",
+        idempotencyKey: "k2",
+      });
+      expect(t.gap()).toBeGreaterThanOrEqual(120);
+      expect(t.keys).toEqual(["k2", "k2"]);
+    } finally {
+      server.close();
+    }
+  }));
 
 test("a timeout keeps the backoff: the request may have reached a server", () =>
   onFakeClockFor(async () => {

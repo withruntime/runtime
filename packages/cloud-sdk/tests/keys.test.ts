@@ -3,6 +3,7 @@ import { publicEncrypt, randomBytes, randomUUID } from "node:crypto";
 import { run } from "../src/cli";
 import { createKey, dailyLimitMicros, type KeyRequest } from "../src/keys";
 import { onFakeClockFor } from "./fixtures/fake-clock";
+import "./fixtures/sealing";
 
 /* `runtime keys create`: ARCHITECTURE.md section 10, "Keys from the
    terminal". The website half is proven in packages/db/tests/

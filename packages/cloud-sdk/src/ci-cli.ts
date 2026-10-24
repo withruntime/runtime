@@ -47,6 +47,10 @@ export const CI_HELP = `runtime ci <command>
                                               keeping the Apps it trusts already
   repos untrust <repoId | owner/name> <app-slug>[bot]...
                                               Stop trusting those Apps, keeping the rest
+  repos undo <repoId | owner/name> on|off     When main's check fails, find the first commit that
+                                              fails it and open a pull request reverting it, which
+                                              lands once its check passes. Off until turned on;
+                                              takes an owner's or admin's full key
   disconnect <repoId | owner/name>            Stop checking it; its checks still going are cancelled
   ls [--repository <repoId>] [--branch <name>] [--commit <sha>] [--pr <number>]
      [--state <state>]... [--limit 20]        Checks, newest first, with their jobs by state
@@ -70,6 +74,7 @@ Examples
   runtime ci import --write
   runtime ci connect acme/web --config .runtime/ci.yml
   runtime ci repos trust acme/web acme-bot[bot]
+  runtime ci repos undo acme/web on
   runtime ci ls --commit $(git rev-parse HEAD)
   runtime ci logs <jobId>
 `;
@@ -222,6 +227,21 @@ export async function ciCommand(
         print(`${repo.repository} trusts ${trusted(repo)}.`, repo);
         return 0;
       }
+      if (action === "undo") {
+        const id = need(more[0], "the repository's id or owner/name");
+        const say = need(more[1], "on or off");
+        if (say !== "on" && say !== "off")
+          throw usage(`${say} is neither on nor off: ${me} ci repos undo ${id} on`);
+        const found = await api.repositories.find(id);
+        const repo = await api.repositories.setUndo(found?.id ?? id, say === "on");
+        print(
+          repo.undoCulprits
+            ? `${repo.repository}: when ${repo.productionBranch}'s check fails, its culprit is found and a pull request reverting it opens.`
+            : `${repo.repository}: a failing ${repo.productionBranch} is reported, never undone.`,
+          repo,
+        );
+        return 0;
+      }
       if (action === "connect") return ciCommand(["connect", ...more], out, client, kit);
       if (action === "disconnect" || action === "rm")
         return disconnect(need(more[0], "the repository's id or owner/name"));
@@ -232,6 +252,7 @@ export async function ciCommand(
           "connect",
           "trust",
           "untrust",
+          "undo",
           "disconnect",
         ]);
       const args = parse(listing, ["all"], []);
@@ -244,13 +265,14 @@ export async function ciCommand(
       print(
         all.length
           ? table([
-              ["ID", "REPOSITORY", "BRANCH", "CONFIG", "TRUSTED APPS", "STATE"],
+              ["ID", "REPOSITORY", "BRANCH", "CONFIG", "TRUSTED APPS", "UNDO", "STATE"],
               ...all.map((r) => [
                 r.id,
                 r.repository,
                 r.productionBranch,
                 r.configPath,
                 trusted(r),
+                r.undoCulprits ? "on" : "off",
                 r.state,
               ]),
             ])

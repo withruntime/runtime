@@ -2,6 +2,9 @@
 import { expect, test } from "bun:test";
 import { Runtime, Sandboxes } from "../src/client";
 import type { Call, Transport } from "../src/transport";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 test("sandbox create preserves HTTP request options in its fallback running poll", async () => {
   for (const timeoutMs of [0, 123]) {

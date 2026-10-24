@@ -19,6 +19,9 @@ import {
 } from "../../src/freestyle/index.js";
 import type { ProcessInfo } from "../../src/types.js";
 import type { Sandbox } from "../../src/sandbox.js";
+import { onFakeClock } from "../fixtures/fake-clock";
+
+onFakeClock();
 
 const VM = "00000000-0000-4000-8000-000000000001";
 

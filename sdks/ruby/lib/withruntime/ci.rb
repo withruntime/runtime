@@ -25,7 +25,8 @@ module WithRuntime
   # +runtime.ci.repositories+: the repositories whose checks run.
   #
   # A repository: id, name, labels, repository (owner/name), production_branch,
-  # config_path, installation, github_repository_id, state (connected or
+  # config_path, installation, github_repository_id, undo_culprits (whether a
+  # red production branch's culprit is undone: set_undo), state (connected or
   # disconnected), error, created_at, updated_at and deleted_at.
   class CIRepositories < Product
     # Connects +repository+ ("owner/name"), read through Runtime's GitHub App.
@@ -43,6 +44,15 @@ module WithRuntime
     # +label+ is "key:value" strings, +state+ connected or disconnected.
     def list(name: nil, label: nil, state: nil, limit: nil, cursor: nil)
       page("/v1/ci/repositories", { "name" => name, "label" => label, "state" => state, "limit" => limit, "cursor" => cursor })
+    end
+
+    # Turns on (or off) the undo of a red production branch's culprit: when
+    # main's check fails, CI/CD finds the first commit that fails it and opens
+    # a pull request reverting it, which lands once its own check passes. Off
+    # until set; only an owner's or admin's full key sets it.
+    def set_undo(id, on, idempotency_key: nil)
+      Record.new(@t.json("POST", "/v1/ci/repositories/#{seg(id)}:update", body: { "undoCulprits" => on },
+                                                                          key: idempotency_key))
     end
 
     # Stops running its checks; the checks already run stay readable.

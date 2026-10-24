@@ -1,5 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
 import { describeError, run } from "../src/cli";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 const ID = "11111111-2222-4333-8444-000000000001";
 const INFO = {

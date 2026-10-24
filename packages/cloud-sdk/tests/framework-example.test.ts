@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { INVOICE_EXAMPLE } from "../examples/verify-frameworks";
+import { INVOICE_EXAMPLE } from "../examples/invoice";
 
 test("the framework invoice example has a fixed useful result", async () => {
   const child = Bun.spawn(["python3", "-c", INVOICE_EXAMPLE], {

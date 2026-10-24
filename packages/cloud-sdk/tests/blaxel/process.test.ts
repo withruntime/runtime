@@ -8,6 +8,9 @@ import { envFileLines, parseProcessLine, processLine } from "../../src/blaxel/co
 import { ResponseError, SandboxInstance } from "../../src/blaxel/index";
 import { portWaitScript, resetProcesses } from "../../src/blaxel/process";
 import { BlaxelWorld, requests } from "./fake";
+import { onFakeClock } from "../fixtures/fake-clock";
+
+onFakeClock();
 
 let world: BlaxelWorld;
 const withruntime = () => ({ client: world.client() });

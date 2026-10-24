@@ -270,6 +270,7 @@ const repo = (trustedApps: string[] = [], state = "connected") => ({
   installation: 9100,
   githubRepositoryId: 42,
   trustedApps,
+  undoCulprits: false,
   state,
 });
 
@@ -335,6 +336,31 @@ test("ci repos untrust keeps the rest; a repository this key does not list chang
       ).rejects.toThrow("No connected CI/CD repository acme/other that this key lists");
       // Only the list was read: no update cleared anything.
       expect(sent.slice(before).map((s) => s.method)).toEqual(["GET"]);
+    },
+  );
+});
+
+test("ci repos undo turns a repository's undo on and off by its name, and shows it", async () => {
+  await withStub(
+    ({ method, path, body }) => {
+      if (method === "GET" && path === REPOS) return { data: [repo([])], nextCursor: null };
+      if (method === "POST" && path === `${REPOS}/${OURS}:update`)
+        return { ...repo([]), undoCulprits: (body as { undoCulprits: boolean }).undoCulprits };
+      return undefined;
+    },
+    async (lines, sent) => {
+      expect(
+        await run(["ci", "repos", "undo", "withruntime/runtime-cloud", "on"], env, out(lines)),
+      ).toBe(0);
+      expect(sent.at(-1)!.body).toEqual({ undoCulprits: true });
+      expect(lines.at(-1)).toContain("its culprit is found and a pull request reverting it opens");
+      expect(await run(["ci", "repos", "undo", OURS, "off"], env, out(lines))).toBe(0);
+      expect(sent.at(-1)!.body).toEqual({ undoCulprits: false });
+      await expect(run(["ci", "repos", "undo", OURS, "maybe"], env, out(lines))).rejects.toThrow(
+        "neither on nor off",
+      );
+      expect(await run(["ci", "repos", "ls"], env, out(lines))).toBe(0);
+      expect(lines.join("\n")).toContain("UNDO");
     },
   );
 });

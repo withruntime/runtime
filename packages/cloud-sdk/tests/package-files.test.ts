@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
+import ts from "typescript";
 
 /* The published package is dist, built from what tsconfig.build.json takes in.
  * withruntime@0.12.0 shipped dist/cli/logs.test.js and
@@ -10,38 +9,27 @@ import { join, relative, resolve } from "node:path";
  * beside the code included (orchestrator, 11 October 2026). */
 
 const ROOT = resolve(import.meta.dir, "..");
-const TSGO = resolve(ROOT, "../../node_modules/.bin/tsgo");
 
 test("the published build takes in no test file", () => {
-  /* The files tsc would build, as TypeScript 7 lists them (`tsgo
-     --listFilesOnly`, the same inclusion as the build's tsc 5, 0.45 s where
-     tsc 5's program in this process took 1.9 s), written straight to a file.
-     Through a pipe from tsc run under bun, on a busy 4-vCPU CI sandbox, the
-     766-line list lost its end on exit, src/cli/logs.ts included, with tsc
-     still answering 0 (9 CI runs, 13 October 2026); a native compiler's
-     writes to a file are whole when it exits, and the list must still hold
-     src/cli/logs.ts. */
-  const dir = mkdtempSync(join(tmpdir(), "package-files-"));
-  try {
-    const list = join(dir, "files.txt");
-    const out = openSync(list, "w");
-    const run = spawnSync(TSGO, ["-p", "tsconfig.build.json", "--listFilesOnly"], {
-      cwd: ROOT,
-      stdio: ["ignore", out, "pipe"],
-      encoding: "utf8",
-    });
-    closeSync(out);
-    expect({ status: run.status, stderr: run.stderr }).toEqual({ status: 0, stderr: "" });
-    const built = readFileSync(list, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((file) => relative(ROOT, file))
-      .filter((path) => path.startsWith("src/"));
-    expect(built).toContain("src/cli/logs.ts");
-    expect(built.filter((path) => /\.test\.[cm]?tsx?$/.test(path))).toEqual([]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  /* The build's files as TypeScript reads tsconfig.build.json (its include
+     and exclude, 30 ms; a compiler listing every file it would build took
+     0.7 s), and none of them imports a test file, so no test comes in
+     behind one. src/cli/logs.ts sits beside its test and must still be in. */
+  const config = ts.getParsedCommandLineOfConfigFile(
+    resolve(ROOT, "tsconfig.build.json"),
+    {},
+    { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (d) => expect(d).toBeUndefined() },
+  )!;
+  expect(config.errors).toEqual([]);
+  const built = config.fileNames.map((file) => relative(ROOT, file));
+  expect(built).toContain("src/cli/logs.ts");
+  expect(built.filter((path) => /\.test\.[cm]?tsx?$/.test(path))).toEqual([]);
+  const importsATest = built.filter((path) =>
+    /from\s+["'][^"']*\.test(\.[cm]?[jt]sx?)?["']|import\(\s*["'][^"']*\.test\b/.test(
+      readFileSync(resolve(ROOT, path), "utf8"),
+    ),
+  );
+  expect(importsATest).toEqual([]);
 });
 
 test("engines asks for the Node that require(esm) needs", () => {

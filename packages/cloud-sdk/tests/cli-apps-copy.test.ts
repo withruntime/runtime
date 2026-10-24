@@ -3,6 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "../src/cli";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* `runtime apps exec` and `runtime apps cp`: what an operator did with
    `runtime sandboxes cp <file> agents-hub:/workspace/hub/support-key` and

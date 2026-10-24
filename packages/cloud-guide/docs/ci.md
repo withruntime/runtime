@@ -140,7 +140,8 @@ runtime ci repos untrust acme/web 'my-bot[bot]'
 - Listing an App vouches only for that App's own pushes, and the pull
   requests of the commits it pushed: never for a fork's or anyone else's.
 
-Every repository's answer carries its `trustedApps`, sorted.
+Every repository's answer carries its `trustedApps`, sorted. The same update
+sets [`undoCulprits`](#undo-a-failing-production-branch), alone or with them.
 
 ### Errors
 
@@ -628,10 +629,38 @@ machine is handed its output instead.
   fork reads no store at all: what your production branch compiled can hold
   what its secrets put in (`option_env!`). Each check's machines get a
   grant that says so, signed by CI/CD and checked by the store. A setup reads
-  the production branch's entries alone and writes none, and a gate runs
+  the production branch's entries alone and writes them only for a push to
+  the production branch (its own code, as its steps are), and a gate runs
   without the cache, so nothing a pull request's code wrote reaches either.
   The grant is kept in a file on the machine only its user reads, never in a
   step's command.
+- **From any machine:** a laptop or another CI's Linux x86-64 machine reads
+  the same store with one line. Download the wrapper once with your key (its
+  SHA-256 is in the `x-content-sha256` header), then build as always:
+
+  ```sh
+  curl -fsSo ~/.cargo/bin/runtime-build-cache \
+    -H "Authorization: Bearer $RUNTIME_API_KEY" \
+    https://api.withruntime.com/v1/ci/build-cache/wrapper
+  chmod +x ~/.cargo/bin/runtime-build-cache
+  RUSTC_WRAPPER=runtime-build-cache cargo test
+  ```
+
+  Or set it once in `~/.cargo/config.toml` (`[build] rustc-wrapper =
+"runtime-build-cache"`). The key is `RUNTIME_API_KEY`, or the one
+  `npx withruntime login` keeps. The repository is found from the folder's
+  git `origin` (`RUNTIME_BUILD_CACHE_REPOSITORY` names it outright), and the
+  store is your account's own, made by the first compile when there is none.
+  Such a machine reads what your production branch's checks compiled and
+  writes a layer of its own, named by its key: no check, pull request or
+  other key reads what it wrote. An agent's own key (one a key made) downloads
+  the wrapper too. A production branch's push on another CI
+  writes the branch's entries with `RUNTIME_BUILD_CACHE_WRITE=main`. What it
+  keeps on the machine is in `~/.cache/runtime-build-cache`
+  (`RUNTIME_BUILD_CACHE_DIR`); when the store can't be reached, compiles run
+  as they would without it. `RUNTIME_BUILD_CACHE_SESSION=off` keeps it to
+  the machine's own folder.
+
 - **Its room on a machine:** the machine's folder holds at most 15% of the
   disk, the entries used longest ago going first, and never fills the last
   quarter (at least 4 GiB): that is the build's.
@@ -644,37 +673,42 @@ machine is handed its output instead.
   `cargo:rerun-if-changed` in a build script (as sqlx asks for its
   migrations), or turn the cache off for that step.
 
-`runtime-build-cache test` checks a crate as a task of a split: its format, its
-lints with `-D warnings`, its test binaries all at once and its doc tests, as
-`-p <name>`, so each crate's compiles are the same on every machine and only
-the crates a change reaches run:
+`runtime-build-cache build` builds a workspace once for every crate's check:
+its test binaries (`cargo test --workspace --no-run`), its lints with `-D
+warnings` and the doc tests of the libraries that have any.
+`runtime-build-cache test` then checks a crate as a task of a split: its
+format, and its own test binaries out of that one build, so a task compiles
+nothing the build made and only runs tests. A crate with a workspace of its
+own is checked whole from its folder: format, lints, tests and doc tests.
 
 ```yaml
 steps:
+  - name: crates build
+    run: /workspace/.runtime-build-cache/runtime-build-cache build
   - name: crates
     run: /workspace/.runtime-build-cache/runtime-build-cache test {files}
     split: { files: "crates/*/Cargo.toml" }
-    env: { CARGO_PROFILE_DEV_DEBUG: "false", CARGO_PROFILE_TEST_DEBUG: "false" }
+    needs: [crates build]
 ```
 
-Debug info off made a one-file change's test build a fifth faster and the
-build half the size (a 79-crate build, measured on 21 October 2026).
-
-Lints are kept as compiles are (clippy's version, its `CLIPPY_ARGS` and every
-`clippy.toml` it looks for are in the key, and what it printed is printed
-again). `runtime-build-cache warm <Cargo.toml>...` builds each crate's lints
-and test binaries exactly as its `test` task will, running nothing: put it in
-your `setup` so every fork starts with them. A workspace build
-(`cargo test --workspace`) is not the same, since cargo unifies a
-dependency's features across every crate it builds at once, and a crate's own
-`-p` check then compiles its dependencies again. On an 82-crate workspace (4
-vCPU, 22 October 2026) one crate's check took 61 s after a workspace build
-and 3 s after `warm`, or 8 s with one of its files changed:
+A build on a clean tree keeps its commit in `target/.built-at`, and a later
+build on that target folder looks only at the files that differ from it. Put
+it in your `setup` too, so every fork starts with it:
 
 ```yaml
 setup: |
-  /workspace/.runtime-build-cache/runtime-build-cache warm $(git ls-files '**/Cargo.toml')
+  /workspace/.runtime-build-cache/runtime-build-cache build
 ```
+
+Lints are kept as compiles are (clippy's version, its `CLIPPY_ARGS` and every
+`clippy.toml` it looks for are in the key, and what it printed is printed
+again). Until 23 October 2026 each crate's task built it alone (`-p <name>`),
+where cargo gives each dependency only that crate's features: the tasks of our
+82-crate workspace held 13 feature sets of tokio, and compiled the same
+dependencies again and again. `runtime-build-cache warm <Cargo.toml>...`
+builds what those manifests' tasks will, running nothing: the workspace's one
+test build for its members, and lints and test binaries for a crate with a
+workspace of its own.
 
 ## Flaky tests
 
@@ -776,6 +810,48 @@ main's apart. Anything else is the change's, as it always was:
 Your production branch's own checks are never judged this way: main stays red
 until a fix lands, and nothing it gates releases before then.
 
+## Main is checked after merges, in batches
+
+A merge never waits for a check. Your production branch has at most one check
+running at a time, and it starts on the newest commit there. Nothing cancels
+it once it starts, however many merges land meanwhile. The merges that land
+while it runs wait together for the next check, which starts as soon as this
+one gives its verdict and covers every one of them. A pass covers every commit
+up to the one it checked.
+
+## Undo a failing production branch
+
+Turn this on and a failing production branch fixes itself. When main's check
+fails, CI/CD runs the failing jobs again on the commits since main last
+passed, at most 64 at once. Each round narrows the range, so 240 commits take
+two rounds. It names the first commit where they fail, if the commit before
+it passes them. Then it opens a pull request in your repository that reverts
+only that commit, keeping the rest. The revert merges by itself once its own
+check passes. The culprit's author is told why on their pull request, with a
+link to the failing check.
+
+It is off until an owner or admin turns it on for the repository: on the
+CI/CD page of the console, with `runtime ci repos undo owner/name on`, or
+through the API:
+
+```bash no-run
+curl -X POST "https://api.withruntime.com/v1/ci/repositories/${REPOSITORY_ID}:update" \
+  -H "Authorization: Bearer $RUNTIME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: undo-culprits-on" \
+  -d '{"undoCulprits": true}'
+```
+
+In the SDKs it is `ci.repositories.setUndo(id, true)` (TypeScript and Java),
+`ci.repositories.set_undo(id, True)` (Python and Ruby) and
+`CI.Repositories.SetUndo(ctx, id, true)` (Go). Every repository's answer
+carries `undoCulprits`.
+
+Nothing is reverted when the evidence is not clear: a failure that passes when
+run again, one main's last pass fails too, or one that passes again on a later
+commit. A commit that added a database migration is never reverted. And
+neither is a file a later commit changed again. A person fixes those.
+
 ## What GitHub shows
 
 One check run per check, named `runtime`, the one a branch rule requires. It
@@ -841,9 +917,11 @@ npx withruntime ci tests <repoId> --quarantined
   at most 256, counted across all of them (a `runtime-ci` run by hand counts
   its own): past that, or when a region has no room, a check waits in line with
   the reason on its jobs. It never fails for want of room, a gate's machine
-  neither. A check takes its machines whole: one check of the account takes
-  machines at a time, and the others wait in line holding none, so no two
-  checks each hold part of what they need and wait on each other. A check
+  neither. A check takes its machines whole: while the account has room for
+  all a check asks, past what the checks ahead of it wait for, it takes them
+  at once. Short of room, one check of the account takes machines at a time,
+  and the others wait in line holding none, so no two checks each hold part
+  of what they need and wait on each other. A check
   starts once it has all it asked for, or, when no more came for 20 seconds,
   on those it has, and then runs on those alone. A push to the production
   branch goes first, then the checks already running, then a pull request

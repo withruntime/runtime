@@ -4,6 +4,9 @@ import { terminalSafe } from "../terminal.js";
 import { logs, traces, alerts, type TailEvent } from "../products/logs.js";
 import { Transport } from "../transport.js";
 import { InvalidRequestError } from "../errors.js";
+import { onFakeClock } from "../../tests/fixtures/fake-clock";
+
+onFakeClock();
 
 const input = {
   name: "errors",

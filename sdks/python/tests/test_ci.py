@@ -137,6 +137,15 @@ class CiTest(unittest.TestCase):
                                            "limit": ["5"]})
         self.assertEqual(Stub.seen[6][2], {"repositoryId": [REPO_ID], "quarantined": ["true"], "limit": ["10"]})
 
+    def test_set_undo_turns_a_repositorys_undo_on_and_off(self):
+        with self.client() as runtime:
+            runtime.ci.repositories.set_undo(REPO_ID, True, idempotency_key="undo-1")
+            runtime.ci.repositories.set_undo(REPO_ID, False)
+        self.assertEqual([(s[0], s[1], s[3]) for s in Stub.seen], [
+            ("POST", f"/v1/ci/repositories/{REPO_ID}:update", {"undoCulprits": True}),
+            ("POST", f"/v1/ci/repositories/{REPO_ID}:update", {"undoCulprits": False})])
+        self.assertEqual(Stub.seen[0][4], "undo-1")
+
     def test_a_connect_with_only_a_repository_sends_only_it(self):
         with self.client() as runtime:
             runtime.ci.repositories.connect("acme/web")

@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { run } from "../src/cli";
 import type { RuntimeError } from "../src/errors";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* Every command declares the options it takes, and refuses any other before a
    request is sent. Until 0.7.0 an unknown option was taken silently: on

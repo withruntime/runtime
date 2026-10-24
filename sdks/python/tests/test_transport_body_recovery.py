@@ -77,7 +77,7 @@ class BodyRecovery(unittest.TestCase):
             answer.status, answer.length, answer.will_close = 200, 4, False
             answer.getheaders.return_value = []
             answer.isclosed.return_value = True
-            answer.read.return_value = b'{"ok'
+            answer.read.side_effect = [b'{"ok', b'']
             answer.read1.side_effect = [b'{"ok', b'']
             response = SyncResponse(pool, connection, answer)
             with self.assertRaises(ConnectionResetError):
@@ -87,6 +87,17 @@ class BodyRecovery(unittest.TestCase):
                     response.read()
             pool.release.assert_not_called()
             connection.close.assert_called_once()
+
+    def test_a_small_answer_never_asks_for_a_64_mib_buffer(self):
+        # Before Python 3.10, read(amt) zeroes amt bytes first: 40 ms an answer.
+        pool, connection, answer = Mock(), Mock(), Mock()
+        answer.status, answer.length, answer.will_close = 200, 0, False
+        answer.getheaders.return_value = []
+        answer.isclosed.return_value = True
+        answer.read.side_effect = [b'{"ok":', b"true}", b""]
+        self.assertEqual(SyncResponse(pool, connection, answer).read(), b'{"ok":true}')
+        self.assertTrue(all(0 < c.args[0] <= 65536 for c in answer.read.call_args_list))
+        pool.release.assert_called_once_with(connection)
 
     def call(self, world, asynchronous, operation="json", max_retries=1):
         if asynchronous:

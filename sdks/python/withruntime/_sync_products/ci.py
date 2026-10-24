@@ -53,6 +53,15 @@ class CiRepositories:
             return Page(body["data"], body.get("nextCursor"), fetch)
         return fetch(cursor)
 
+    def set_undo(self, repository_id: str, on: bool, *,
+                       idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Turn on (or off) the undo of a red production branch's culprit:
+        when main's check fails, CI/CD finds the first commit that fails it
+        and opens a pull request reverting it, which lands once its own check
+        passes. Off until set; only an owner's or admin's full key sets it."""
+        return self._t.json("POST", f"/v1/ci/repositories/{_enc(repository_id)}:update",
+                                  body={"undoCulprits": on}, idempotency_key=idempotency_key)
+
     def disconnect(self, repository_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Stop running its checks; the checks already run stay readable."""
         return self._t.json("DELETE", f"/v1/ci/repositories/{_enc(repository_id)}",

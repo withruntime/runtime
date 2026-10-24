@@ -33,6 +33,9 @@ type CIRepository struct {
 	// App the repository is read through.
 	Installation       int64  `json:"installation"`
 	GithubRepositoryID *int64 `json:"githubRepositoryId"`
+	// UndoCulprits is whether a red production branch's culprit is undone
+	// by a pull request CI/CD opens: off until SetUndo turns it on.
+	UndoCulprits bool `json:"undoCulprits"`
 	// State is connected or disconnected.
 	State string `json:"state"`
 }
@@ -445,6 +448,18 @@ func (s *CIRepositoryService) List(ctx context.Context, opts *CIRepositoryListOp
 // All walks every repository a list with these options finds.
 func (s *CIRepositoryService) All(ctx context.Context, opts *CIRepositoryListOptions) iter.Seq2[CIRepository, error] {
 	return walk(ctx, func() (*Page[CIRepository], error) { return s.List(ctx, opts) })
+}
+
+// SetUndo turns on (or off) the undo of a red production branch's culprit:
+// when main's check fails, CI/CD finds the first commit that fails it and
+// opens a pull request reverting it, which lands once its own check passes.
+// Off until set; only an owner's or admin's full key sets it.
+func (s *CIRepositoryService) SetUndo(ctx context.Context, id string, on bool) (*CIRepository, error) {
+	var repo CIRepository
+	body := struct {
+		UndoCulprits bool `json:"undoCulprits"`
+	}{on}
+	return &repo, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/ci/repositories/" + url.PathEscape(id) + ":update", body: body}, &repo)
 }
 
 // Disconnect disconnects a repository; its checks still going are cancelled.

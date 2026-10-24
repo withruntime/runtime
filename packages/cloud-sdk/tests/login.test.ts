@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { authenticationCommand, beginDeviceLogin, named } from "../src/login";
 import { connectionStore, resolveCredential } from "../src/credentials";
 import { sandboxMarker } from "../src/transport";
+import "./fixtures/sealing";
 
 let directory: string;
 let env: NodeJS.ProcessEnv;
