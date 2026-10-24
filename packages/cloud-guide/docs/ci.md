@@ -240,6 +240,12 @@ and was killed.` A limit left at its default says so. The check's machines
   steps, and is read from the base's file, so a pull request can't loosen
   it. Seconds go to the millisecond (`0.5`), each step is in one budget at
   most, and a file holds up to 16.
+- **A job is never silent:** while its files run, or wait their turn behind
+  files that are ending, its log says how it goes at least once a minute, as in
+  `Still running: 35 of 40 ended; 2 running, the longest for 12 s`. A test
+  file with a recorded time that runs past three times it and prints nothing
+  for a minute (or its usual time, when longer) is moved, once, to another
+  machine, where it runs to its own limit: quiet never fails a file.
 - **Errors** fail the check at once, before any machine is made, with one run
   that names the key at fault: `runtime.yml: is over 64 KiB`.
 
@@ -554,6 +560,16 @@ Only a push to the production branch seeds a warm snapshot, never a pull
 request, even one from a fork's branch named `main`. A small public
 repository, {{ci-small-repo}}, took {{ci-small-cold}} for its first check and
 {{ci-small-pull-request}} for a pull request this way ({{ci-measured-on}}).
+
+When a check's key has no warm snapshot yet (its setup or a `cache` file
+changed), it sets up over your repository's newest warm snapshot of the same
+machine, so only what changed is done again, and a change that breaks the
+setup fails its own check. If every step installs what its commit needs
+itself (`npm ci`, `bun install --frozen-lockfile`, a build tool that fetches
+its own dependencies), set `steps_install: true`: a change of the `cache`
+files alone then forks that warm snapshot as it is and starts its first job
+in seconds, while the production branch's push makes the new warm snapshot
+in the background. A change of `setup` itself is still set up in its check.
 
 A check starts each of its machines from the warm snapshot at once, each in
 the time of one (1 to 6 seconds), spread across the servers that hold the
