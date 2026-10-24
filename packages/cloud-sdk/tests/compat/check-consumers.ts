@@ -30,7 +30,7 @@ export async function checkConsumers(
     const fixture = join(dir, "workflows.ts");
     await writeFile(
       fixture,
-      await readFile(new URL("./consumers/workflows.ts.txt", import.meta.url), "utf8"),
+      await readFile(new URL("./consumers/workflows.ts", import.meta.url), "utf8"),
     );
     const paths: Record<string, string[]> = {};
     const lock = JSON.parse(await readFile(resolve(root, "compatibility-lock.json"), "utf8")) as {

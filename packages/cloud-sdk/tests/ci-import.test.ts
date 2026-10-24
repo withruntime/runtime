@@ -341,3 +341,42 @@ jobs:
     "set -e\n(\n  cd 'web'\n  npm ci\n)\n(\n  cd api\n  npm ci\n)\n(\n  export NPM_CONFIG_PRODUCTION='true'\n  npm ci\n)",
   );
 });
+
+test("a job's timeout-minutes is its step's timeout in seconds; none keeps the 6-hour default", () => {
+  const made = importCi([
+    {
+      path: ".github/workflows/ci.yml",
+      text: `
+on: [push]
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps: [{ run: npm test }]
+  plain:
+    runs-on: ubuntu-latest
+    steps: [{ run: npm run lint }]
+  long:
+    runs-on: ubuntu-latest
+    timeout-minutes: 600
+    steps: [{ run: make all }]
+  odd:
+    runs-on: ubuntu-latest
+    timeout-minutes: \${{ inputs.minutes }}
+    steps: [{ run: make odd }]
+`,
+    },
+  ]);
+  const [suite, plain, long, odd] = steps<(Written & { timeout?: number })[]>(made.yaml);
+  // A 90-minute suite runs its 90 minutes, never cut at a default under it.
+  expect(suite!.timeout).toBe(5400);
+  expect(plain!.timeout).toBeUndefined();
+  expect(long!.timeout).toBe(21600);
+  expect(odd!.timeout).toBeUndefined();
+  expect(made.notes).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("asks 600 minutes; a step here runs at most 360, as on GitHub"),
+      expect.stringContaining("is not carried; the step has the default 6 hours"),
+    ]),
+  );
+});

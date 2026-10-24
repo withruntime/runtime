@@ -445,6 +445,9 @@ class BlaxelClient(DropInClient):
         next_cursor = (chunks[-1]["offset"] + len(chunks[-1]["text"].encode())) if chunks else cursor
         if not chunks and process.info["state"] == "running" and self._w.finish_on_wait:
             self._w.finish_on_wait(process)
+        elif not chunks and process.info["state"] == "running":
+            # The wait the server would have spent, on the world's clock.
+            self._w.waited += int((query or {}).get("waitMs") or 0) / 1000
         return {"chunks": chunks, "nextCursor": next_cursor, "truncated": False, "process": dict(process.info)}
 
 
@@ -454,6 +457,7 @@ class BlaxelWorld(DropInWorld):
 
     def __init__(self) -> None:
         super().__init__()
+        self.waited = 0.0
         self.snapshot_infos: Dict[str, Dict[str, Any]] = {}
         self.trial = False
         self.watch_events: List[Dict[str, Any]] = []

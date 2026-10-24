@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -197,8 +197,8 @@
   },
   "scripts": {
     "build": "node ../typescript-config/tsc5.mjs -p tsconfig.build.json",
-    "check-types": "tsgo --noEmit",
-    "lint": "oxlint -c ../eslint-config/oxlint.json --ignore-pattern 'dist/**' --ignore-pattern 'tests/fixtures/modal/**'",
+    "check-types": "tsgo --noEmit && tsgo -p tests/compat/consumers",
+    "lint": "oxlint -c ../eslint-config/oxlint.json --ignore-pattern 'dist/**' --ignore-pattern 'tests/fixtures/modal/**' --ignore-pattern 'tests/compat/consumers/**'",
     "test": "bun test"
   },
   "devDependencies": {

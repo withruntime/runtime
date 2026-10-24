@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Runtime, RuntimeError } from "../src/index";
 import { Sandbox as E2BSandbox } from "../src/e2b/index";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* 25 September 2026: `runtime sandbox cp` of a 50 MB file wrote 29 MB and
    printed "Copied", exit 0; files.read returned short with no error. A stream

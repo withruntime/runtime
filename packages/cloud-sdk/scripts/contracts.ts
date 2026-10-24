@@ -23,13 +23,22 @@ export function steps(temp: string): [string, string[][]][] {
   return [
     [
       "Local compatibility regressions",
-      [["bun", "run", "--cwd", "packages/cloud-sdk", "test:compat"]],
+      [
+        ["bun", "run", "--cwd", "packages/cloud-sdk", "test:compat"],
+        // The consumers' unchanged typed code, against the adapters.
+        ["bun", "run", "--cwd", "packages/cloud-sdk", "check-types"],
+      ],
     ],
     [
       "Built package exports and declarations",
       [
         ["bun", "run", "--cwd", "packages/cloud-sdk", "build"],
-        ["bun", "test", "packages/cloud-sdk/tests/cjs-require.test.ts"],
+        [
+          "bun",
+          "test",
+          "--path-ignore-patterns=",
+          "packages/cloud-sdk/tests/cjs-require.e2e.test.ts",
+        ],
       ],
     ],
     [

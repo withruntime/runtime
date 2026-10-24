@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from withruntime import (AsyncRuntime, AuthenticationError, ConflictError, InvalidRequestError, NotFoundError,
                          PermissionDeniedError, RateLimitError, Runtime)
 from withruntime import RuntimeError as RuntimeAPIError
+from tests.instant_sleeps import instant_sleeps
 
 AGENT_ID = "11111111-1111-4111-8111-111111111111"
 SESSION_ID = "22222222-2222-4222-8222-222222222222"
@@ -316,7 +317,7 @@ class AgentsTest(unittest.TestCase):
         with self.client() as runtime:
             handle = runtime.agents.sessions.get(SESSION_ID)
             with self.assertRaises(RuntimeAPIError) as caught:
-                handle.wait(timeout=0.3)
+                handle.wait(timeout=0.05)
             self.assertEqual(caught.exception.code, "timeout")
             with self.assertRaises(InvalidRequestError):
                 handle.wait(timeout=-1)
@@ -372,12 +373,14 @@ class AgentsTest(unittest.TestCase):
     def test_refusals_are_the_sdks_own_errors(self):
         for mode, (status, code, kind) in REFUSALS.items():
             Stub.seen, Stub.mode = [], mode
-            with self.client() as runtime:
+            with self.client() as runtime, instant_sleeps() as slept:
                 with self.assertRaises(kind) as caught:
                     runtime.agents.start("dev", "hi")
             self.assertEqual((caught.exception.code, caught.exception.status), (code, status))
-            # A 429 is retried as every product's is (with the same key); the rest are refused once.
+            # A 429 is retried as every product's is (with the same key), after
+            # its back-offs; the rest are refused once.
             self.assertEqual(len(Stub.seen), 3 if status == 429 else 1, mode)
+            self.assertEqual(len(slept), 2 if status == 429 else 0, mode)
 
     def test_templates_are_the_guides_and_merge_a_use_over_a_harness(self):
         with self.client() as runtime:

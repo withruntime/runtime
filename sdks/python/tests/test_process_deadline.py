@@ -15,13 +15,17 @@ from withruntime._errors import RuntimeError
 
 
 # A deadline on a request that completes, and the later /slow answer on the same
-# connection that the deadline's timer must not reach: /slow waits well past it,
-# and the deadline leaves a loaded machine room to finish /ok.
-FINISHED_DEADLINE, SLOW = 0.2, 0.5
+# connection that the deadline's timer must not reach: /slow waits past it, the
+# timer firing half way, and the deadline leaves a loaded machine 100 ms to
+# finish a loopback /ok.
+FINISHED_DEADLINE, SLOW = 0.1, 0.2
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # A header and its body, written apart, each go at once: with Nagle a
+    # kept-alive answer waited 40 ms on the client's delayed ACK.
+    disable_nagle_algorithm = True
 
     def log_message(self, *args):
         pass
@@ -76,7 +80,7 @@ class ProcessDeadlineTests(unittest.TestCase):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         cls.server.paths = []
         cls.server.peers = []
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
         cls.url = "http://127.0.0.1:%d" % cls.server.server_port
 

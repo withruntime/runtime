@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { RateLimitError, Runtime, RuntimeError } from "../src/index";
 import { describeError } from "../src/cli";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /** A Runtime whose every call is answered by `answer`, counting calls and
  * the Idempotency-Key and time of each. */

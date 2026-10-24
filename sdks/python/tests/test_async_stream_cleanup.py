@@ -231,7 +231,7 @@ class SyncStreamCleanupTest(unittest.TestCase):
                     eof.set()
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01})
         self.thread.start()
         self.transport = SyncTransport('fixture', f'http://127.0.0.1:{self.server.server_port}', 5, 0)
 

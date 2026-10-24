@@ -5,5 +5,5 @@
     "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "examples/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["tests/fixtures/modal"]
+  "exclude": ["tests/fixtures/modal", "tests/compat/consumers"]
 }

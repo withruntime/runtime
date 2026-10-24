@@ -3,6 +3,14 @@ import { Process } from "../src/sandbox";
 import { Transport } from "../src/transport";
 import type { ProcessInfo } from "../src/types";
 
+/** `length` bytes, byte i being `at(i)`: a plain loop, where Uint8Array.from
+ * with a callback took 15 times as long for megabytes. */
+function bytesOf(length: number, at: (i: number) => number) {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i++) out[i] = at(i);
+  return out;
+}
+
 async function partialPipe(input: Uint8Array, zeroFirst = false) {
   const accepted: Buffer[] = [];
   const payloads: number[] = [];
@@ -45,7 +53,7 @@ async function partialPipe(input: Uint8Array, zeroFirst = false) {
 }
 
 test("partial pipe acceptance adapts payload size instead of amplifying an eight MiB upload", async () => {
-  const input = Uint8Array.from({ length: 8 * 1_048_576 }, (_, i) => i % 256);
+  const input = bytesOf(8 * 1_048_576, (i) => i % 256);
   const { payloads, wireBytes } = await partialPipe(input);
   expect(payloads[0]).toBe(1_048_576);
   expect(payloads.slice(1).every((size) => size === 65_536)).toBe(true);
@@ -56,7 +64,7 @@ test("partial pipe acceptance adapts payload size instead of amplifying an eight
 });
 
 test("zero-progress backpressure retains every byte and resumes with a bounded payload", async () => {
-  const input = Uint8Array.from({ length: 2 * 1_048_576 }, (_, i) => (i * 19) % 256);
+  const input = bytesOf(2 * 1_048_576, (i) => (i * 19) % 256);
   const { payloads } = await partialPipe(input, true);
   expect(payloads[0]).toBe(1_048_576);
   expect(payloads.slice(1).every((size) => size === 65_536)).toBe(true);

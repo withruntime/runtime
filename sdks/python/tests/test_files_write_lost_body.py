@@ -22,6 +22,9 @@ class CutFirstAnswer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            # A header and its body, written apart, each go at once: with Nagle a
+            # kept-alive answer waited 40 ms on the client's delayed ACK.
+            disable_nagle_algorithm = True
 
             def log_message(self, *_):
                 pass
@@ -41,7 +44,7 @@ class CutFirstAnswer:
                 self.wfile.write(body)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 

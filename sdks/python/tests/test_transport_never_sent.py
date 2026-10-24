@@ -101,7 +101,7 @@ class NeverSent(unittest.TestCase):
             with self.subTest(sync=sync):
                 server = Server("hold")
                 try:
-                    seen = delays(f"http://127.0.0.1:{server.port}", sync, timeout=0.2)
+                    seen = delays(f"http://127.0.0.1:{server.port}", sync, timeout=0.05)
                     self.assertTrue(seen)
                     self.assertTrue(all(delay == BACKOFF for delay in seen), seen)
                 finally:

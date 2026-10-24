@@ -7,6 +7,7 @@ import json
 import unittest
 
 from withruntime import AsyncRuntime, ConnectionError, Runtime
+from tests.instant_sleeps import instant_sleeps
 
 ID = "8a1f9c2e-0d1b-4c3a-9e8f-7a6b5c4d3e2f"
 INFO = json.dumps({"id": ID, "kind": "sandbox", "state": "running", "status": "active"}).encode()
@@ -184,16 +185,20 @@ class Outage(unittest.TestCase):
             runtime = (AsyncRuntime if is_async else Runtime)(api_key="rk", base_url="https://api.example.test",
                                                                max_retries=0)
             runtime._t._http = wire
-            if is_async:
-                async def go():
-                    sbx = await runtime.sandboxes.get(ID)
-                    return await sbx.exec("x", on_stdout=lambda _: None)
-                result = asyncio.run(go())
-            else:
-                result = runtime.sandboxes.get(ID).exec("x", on_stdout=lambda _: None)
+            # Each reconnect's pause is recorded, not slept.
+            with instant_sleeps() as slept:
+                if is_async:
+                    async def go():
+                        sbx = await runtime.sandboxes.get(ID)
+                        return await sbx.exec("x", on_stdout=lambda _: None)
+                    result = asyncio.run(go())
+                else:
+                    result = runtime.sandboxes.get(ID).exec("x", on_stdout=lambda _: None)
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.stdout, "a\nb\n")
             self.assertEqual(sum("/output" in t for t in wire.targets), 6)
+            # The follow's own pauses double while the spell lasts.
+            self.assertEqual(slept[-3:], [0.05, 0.1, 0.2])
 
     def test_a_deliberate_refusal_still_ends_the_follow_at_once(self):
         routes = {":exec": ([{"type": "start", "processId": "p1"}], True)}

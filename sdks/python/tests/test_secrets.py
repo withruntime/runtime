@@ -56,7 +56,7 @@ class SecretsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
 
     @classmethod
@@ -231,7 +231,7 @@ class UpstreamProxyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamProxyStub)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
 
     @classmethod
@@ -305,7 +305,7 @@ class ShareTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), ShareStub)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
 
     @classmethod

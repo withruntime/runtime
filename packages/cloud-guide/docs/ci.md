@@ -193,7 +193,7 @@ machine: 4cpu # 2cpu, 4cpu (default), 8cpu or 16cpu; 4 GiB of memory per vCPU
 setup: bun install --frozen-lockfile # run once, kept as the warm machine
 cache: [bun.lock, package.json] # files whose bytes key the warm machine
 keep: 8 # machines a pull request keeps for its next push: 0 (default) to 16
-timeout: 120 # seconds the whole check may take from its start: 10 to 21600 (default 3600)
+timeout: 120 # seconds the whole check may take from its start: 10 to 21600 (default 21600)
 steps:
   - name: lint
     run: bun run lint
@@ -202,10 +202,12 @@ steps:
     run: bun test {files}
     split: { files: "**/*.test.ts" } # parts left out: by recorded times
     needs: [lint]
-    timeout: 30 # seconds each run may take, each test file apart (default 1800)
+    timeout: 30 # seconds each run may take, each test file apart (default 21600)
   - name: review rules
     run: ./check-rules.sh
     gate: true # the base's own; a pull request can't rewrite or drop it
+budgets: # machine seconds steps may take together, cold; the base's own
+  tests: { seconds: 20, steps: [lint, test] }
 ```
 
 - **Steps** run side by side unless one `needs` another; a step whose needs
@@ -214,14 +216,30 @@ steps:
 - **Limits:** the file is at most 64 KiB, with at most 64 steps; `run` and
   `setup` are at most 8 KiB each.
 - **Timeouts:** each run of a step (each file of a split step apart) is
-  killed past its `timeout:` (30 minutes unless it says), and is never given
-  more than the check has left. The whole check is cut at its own `timeout:`
-  (an hour unless it says), counted from its start, waiting for machines
-  included: every job still waiting or running then fails, and each says what
-  it was doing and for how long, such as `Cut at the check's 120 s timeout
-(timeout: in runtime.yml): still running after 95 s: test/slow.test.ts`. A
-  killed run says its file and time: `t/slow.sh ran 30 s, past its step's
-30 s timeout:, and was killed.` The check's machines end with it.
+  killed past its `timeout:`, and is never given more than the check has
+  left. The whole check is cut at its own `timeout:`, counted from its start,
+  waiting for machines included. Both are 6 hours unless the file says, as
+  GitHub Actions' own job limit, so a suite that ran there runs here. Every
+  job still waiting or running at the check's timeout fails, and each says
+  what it was doing, for how long, and where the limit is set, such as `Cut
+at the check's 120 s timeout (timeout: in runtime.yml): still running after
+95 s: test/slow.test.ts`. A killed run says its file and time: `t/slow.sh
+ran 30 s, past its step's 30 s timeout (the step's timeout: in runtime.yml),
+and was killed.` A limit left at its default says so. The check's machines
+  end with it. `runtime ci import` carries a GitHub job's `timeout-minutes`
+  as its step's `timeout:`.
+- **Budgets** keep a suite fast as it grows. A budget's time is the machine
+  time of every file of its split steps, each counted at its run on this
+  check or, where a pass of the same files stood for it, its recorded time,
+  plus its whole steps that ran. That is what the suite takes cold, never
+  only what a change touched, and a test that runs 20 times to prove itself
+  counts once. Over it, the check fails as `budget <name>`, with the time
+  and the slowest files: `budget tests: 23.4 s of machine time cold over its
+412 files and steps, over its 20.0 s budget; slowest: test/db.test.ts
+3.1 s, …`. A budget is judged only on a check that ran one of its files or
+  steps, and is read from the base's file, so a pull request can't loosen
+  it. Seconds go to the millisecond (`0.5`), each step is in one budget at
+  most, and a file holds up to 16.
 - **Errors** fail the check at once, before any machine is made, with one run
   that names the key at fault: `runtime.yml: is over 64 KiB`.
 
@@ -575,6 +593,21 @@ machine is handed its output instead.
   with `cargo:rerun-if-changed` and `cargo:rerun-if-env-changed`, and for a
   binary, test or proc macro the linker's version. Change any of them and it compiles
   again.
+- **Any folder:** paths count by where they are in the build, not by the
+  machine's folders: the repository, the target folder, `CARGO_HOME` and
+  `RUSTUP_HOME` are each keyed by name, so a crate compiled in
+  `/workspace/app` is found from `/home/runner/work/app/app`, with the
+  registry anywhere. What is restored names this machine's folders, so cargo
+  holds it fresh. A crate that reads its own folder with
+  `env!("CARGO_MANIFEST_DIR")` (a test finding its files) is found only in
+  the same folder, and so is every crate built on it; a build script's
+  `OUT_DIR` counts by name. Our engines' test build, 736 compiles on 4 vCPU:
+  215 s from nothing, 82 s in another folder from the cache (576 found; the
+  rest stand on a crate that reads its own folder), 23 October 2026.
+- **Why a compile missed:** with `RUNTIME_BUILD_CACHE_EXPLAIN=1`, each
+  compile's key is written field by field to `explain/<crate>-<key>` in the
+  cache's folder (`/workspace/.runtime-build-cache` on a check's machine):
+  compare two machines' files to see what differed.
 - **Where it is kept:** on each machine, so a warm snapshot carries it to
   every check, and in the repository's store: one sandbox of your account,
   `build-cache-<key>`, labelled `runtime-ci-build-cache`, made by the first

@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 import { RateLimitError, Runtime } from "../src/index";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* A create that finds every trial slot, the account's quota or the region full
    waits for room and sends the same call again, instead of failing a CI job

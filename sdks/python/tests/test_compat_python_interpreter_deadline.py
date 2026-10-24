@@ -16,7 +16,7 @@ from withruntime._errors import RuntimeError
 from withruntime._request_scope import request_scope, current
 
 
-BODY_DELAY, BUDGET = .3, .1
+BODY_DELAY, BUDGET = .2, .065
 
 
 class InterpreterDeadline(unittest.TestCase):

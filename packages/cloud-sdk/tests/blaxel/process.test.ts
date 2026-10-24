@@ -511,11 +511,12 @@ describe("the process line", () => {
       });
     writeFileSync(tcp, `${header}   0: 00000000:0BB8 00000000:0000 0A\n`);
     expect(wait(5).status).toBe(0);
+    // No time left: one read of the tables decides, with no second waited.
     writeFileSync(tcp, `${header}   0: 0100007F:0BB8 00000000:0000 0A\n`);
-    expect(wait(1).status).toBe(1);
+    expect(wait(0).status).toBe(1);
     writeFileSync(tcp, `${header}   0: 00000000:0BB8 00000000:0000 01\n`);
-    expect(wait(1).status).toBe(1);
-    const none = spawnSync("bash", ["-c", portWaitScript([3000], 1, [missing])], {
+    expect(wait(0).status).toBe(1);
+    const none = spawnSync("bash", ["-c", portWaitScript([3000], 0, [missing])], {
       encoding: "utf8",
       timeout: 10_000,
     });

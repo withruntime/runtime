@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from withruntime import AsyncRuntime, InvalidRequestError, PermissionDeniedError, Runtime
 from withruntime import RuntimeError as RuntimeAPIError
+from tests.instant_sleeps import instant_sleeps
 
 APP_ID = "11111111-1111-4111-8111-111111111111"
 DEPLOY_ID = "22222222-2222-4222-8222-222222222222"
@@ -115,7 +116,7 @@ class AppsBuildsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
 
     @classmethod
@@ -220,7 +221,7 @@ class AppsBuildsTest(unittest.TestCase):
         Stub.deploys = ["warming"]
         with self.client() as runtime:
             with self.assertRaises(RuntimeAPIError) as caught:
-                runtime.apps.deploy(APP_ID, image="web", wait=True, timeout=0.3, poll=0.05,
+                runtime.apps.deploy(APP_ID, image="web", wait=True, timeout=0.1, poll=0.02,
                                     idempotency_key="deploy-2")
         self.assertEqual(caught.exception.code, "timeout")
         self.assertEqual(caught.exception.idempotency_key, "deploy-2")
@@ -338,9 +339,11 @@ class AppsBuildsTest(unittest.TestCase):
 
     def test_a_follow_whose_stream_keeps_ending_says_where_to_resume(self):
         Stub.follows = [[line("c1", "one")], [], [], []]
-        with self.client() as runtime:
+        with self.client() as runtime, instant_sleeps() as slept:
             with self.assertRaises(RuntimeAPIError) as caught:
                 list(runtime.builds.logs(BUILD_ID, follow=True))
+        # Each try again after its pause, recorded, not slept.
+        self.assertEqual(len(slept), 3)
         self.assertEqual((caught.exception.code, caught.exception.details), ("build_log_interrupted", {"cursor": "c1"}))
 
     def test_an_app_log_follow_resumes_on_continue_with_its_filters_and_gives_each_line_once(self):
@@ -366,9 +369,11 @@ class AppsBuildsTest(unittest.TestCase):
 
     def test_an_app_log_follow_retries_a_dropped_stream_three_times_then_says_where_to_resume(self):
         Stub.follows = [[app_line("c1", "one")], [], [], []]
-        with self.client() as runtime:
+        with self.client() as runtime, instant_sleeps() as slept:
             with self.assertRaises(RuntimeAPIError) as caught:
                 list(runtime.functions.logs(APP_ID, follow=True))
+        # Each try again after its pause, recorded, not slept.
+        self.assertEqual(len(slept), 3)
         self.assertEqual((caught.exception.code, caught.exception.details), ("app_log_interrupted", {"cursor": "c1"}))
         self.assertEqual([s[2] for s in Stub.seen],
                          [{"follow": ["true"]}] + [{"follow": ["true"], "cursor": ["c1"]}] * 3)

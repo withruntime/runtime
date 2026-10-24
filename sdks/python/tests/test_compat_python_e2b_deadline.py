@@ -3,12 +3,13 @@
 The local peer retains process output independently of a subscription. A client
 timeout may close the socket, but must never send a process signal.
 
-The client's deadline is half a second and the child runs for a second and a
-half, so the request reaches the peer and the deadline ends while the child
-runs, even on a loaded machine.
-With 30 ms against 0.4 s, a full check on 3 October 2026 (load 24) timed out
-before the peer's thread had started the child, and the test read a child that
-did not exist yet.
+The child runs until the test releases it (closes its stdin), so the deadline
+ends while it runs by construction, not by a race between two sleeps: a child
+of a second and a half cost each test that much (23 October 2026). The
+client's deadline is a quarter second, room for the request to reach the peer
+and the peer to start the child on a loaded machine: with 30 ms, a full check
+on 3 October 2026 (load 24) timed out before the peer's thread had started the
+child, and the test read a child that did not exist yet.
 """
 import asyncio
 import json
@@ -20,9 +21,8 @@ import time
 from types import SimpleNamespace
 import unittest
 
-# The client's deadline, and how long the child runs: far apart on purpose.
-DEADLINE_S = 0.5
-CHILD_S = 1.5
+# The client's deadline; the child outlives it until released.
+DEADLINE_S = 0.25
 
 from withruntime._sync_client import _Transport, Process, Sandbox
 from withruntime._async_client import _Transport as AsyncTransport, AsyncProcess, AsyncSandbox
@@ -95,6 +95,7 @@ class Deadline(unittest.TestCase):
 
     def tearDown(self):
         if self.job is not None:
+            self.release_child()
             if not self.completed.wait(5):
                 self.job.kill()
             self.collector.join(5)
@@ -103,15 +104,20 @@ class Deadline(unittest.TestCase):
         self.server_thread.join(3)
 
     def start_child(self):
-        self.job = subprocess.Popen([sys.executable, "-c", f"import time;time.sleep({CHILD_S});print('finished')"],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.job = subprocess.Popen([sys.executable, "-c", "import sys;sys.stdin.read();print('finished')"],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.started.set()
         def collect():
-            self.payload, _ = self.job.communicate()
+            self.payload = self.job.stdout.read()
+            self.job.wait()
             self.completed.set()
         self.collector = threading.Thread(target=collect)
         self.collector.start()
         return {"id": "local-process", "state": "running", "stdinOpen": False, "outputBytes": 0}
+
+    def release_child(self):
+        if not self.job.stdin.closed:
+            self.job.stdin.close()
 
     def commands(self, asynchronous=False):
         transport = (AsyncTransport if asynchronous else _Transport)("local-test", self.origin, 2, 0)
@@ -154,6 +160,7 @@ class Deadline(unittest.TestCase):
             with self.assertRaises(TimeoutException):
                 commands.run("local child", timeout=DEADLINE_S)
             self.assert_not_killed()
+            self.release_child()
             result = commands.connect(pid_of("local-process"), timeout=0).wait()
             self.assertEqual((result.stdout, result.exit_code), ("finished\n", 0))
             self.assert_not_killed() if self.job.poll() is None else None
@@ -168,6 +175,7 @@ class Deadline(unittest.TestCase):
             with self.assertRaises(TimeoutException):
                 handle.wait()
             self.assert_not_killed()
+            self.release_child()
             result = commands.connect(handle.pid, timeout=None).wait()
             self.assertEqual(result.stdout, "finished\n")
         finally:
@@ -187,6 +195,7 @@ class Deadline(unittest.TestCase):
                 with self.assertRaises(asyncio.CancelledError):
                     await waiter
                 self.assert_not_killed()
+                self.release_child()
                 final = await commands.connect(handle.pid, timeout=0)
                 self.assertEqual((await final.wait()).stdout, "finished\n")
             finally:

@@ -471,20 +471,34 @@ test("the restart policy is kept: set at create, read back, changed by an update
 
 /** The supervisor itself, run by this computer's sh: how many times it runs
  * a program that always fails, and what it exits with. */
+/* The supervisor's second between runs is a `sleep 1` it runs by name: a
+   `sleep` first on PATH writes down what it was asked and returns at once. */
 async function supervise(policy: string, program: string) {
-  const dir = await import("node:fs/promises").then((fs) => fs.mkdtemp("/tmp/fly-sup-"));
+  const fs = await import("node:fs/promises");
+  const dir = await fs.mkdtemp("/tmp/fly-sup-");
+  await fs.writeFile(`${dir}/sleep`, `#!/bin/sh\necho "$@" >> ${dir}/sleeps\n`, { mode: 0o755 });
   const argv = supervised(["sh", "-c", `echo run >> ${dir}/runs; ${program}`]);
-  const child = Bun.spawn(argv, { env: { ...process.env, RUNTIME_FLY_RESTART: policy } });
+  const child = Bun.spawn(argv, {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNTIME_FLY_RESTART: policy },
+  });
   const code = await child.exited;
   const runs = (await Bun.file(`${dir}/runs`).text()).trim().split("\n").length;
-  return { code, runs };
+  const sleeps = await Bun.file(`${dir}/sleeps`)
+    .text()
+    .then((text) => text.trim().split("\n"))
+    .catch(() => []);
+  return { code, runs, sleeps };
 }
 
 test("the supervisor runs a failing program again as flyd would", async () => {
-  expect(await supervise("no", "exit 4")).toEqual({ code: 4, runs: 1 });
-  expect(await supervise("on-failure:2", "exit 5")).toEqual({ code: 5, runs: 3 });
-  expect(await supervise("on-failure:2", "exit 0")).toEqual({ code: 0, runs: 1 });
-}, 15_000);
+  expect(await supervise("no", "exit 4")).toEqual({ code: 4, runs: 1, sleeps: [] });
+  expect(await supervise("on-failure:2", "exit 5")).toEqual({
+    code: 5,
+    runs: 3,
+    sleeps: ["1", "1"],
+  });
+  expect(await supervise("on-failure:2", "exit 0")).toEqual({ code: 0, runs: 1, sleeps: [] });
+});
 
 test("served beyond loopback, the login is never lent: each request needs its own key", async () => {
   const w = world();

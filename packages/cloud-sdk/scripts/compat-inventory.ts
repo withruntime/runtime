@@ -643,18 +643,33 @@ function classItems(
       }
 }
 
+const OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+  skipLibCheck: true,
+  noEmit: true,
+  strict: true,
+  types: [],
+};
+
+/* The adapters share the SDK's source and the libs, so one program over every
+   TypeScript adapter's entry serves them all: a program each took 7.4 s for
+   the twelve, one 2 s (23 October 2026). An entry outside it, an upstream
+   package's, gets a program of its own. */
+let adapters: ts.Program | undefined;
+function programFor(entry: string) {
+  adapters ??= ts.createProgram(
+    SOURCES.filter((s) => s.language === "typescript").map((s) => join(ROOT, s.runtime)),
+    OPTIONS,
+  );
+  return adapters.getSourceFile(entry) ? adapters : ts.createProgram([entry], OPTIONS);
+}
+
 export function typescriptSurface(entry: string, names: readonly string[] | null) {
   const runtime = names !== null;
-  const program = ts.createProgram([entry], {
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
-    skipLibCheck: true,
-    noEmit: true,
-    strict: true,
-    types: [],
-  });
+  const program = programFor(entry);
   const checker = program.getTypeChecker();
   const file = program.getSourceFile(entry);
   if (!file) throw new Error(`Cannot read ${entry}`);

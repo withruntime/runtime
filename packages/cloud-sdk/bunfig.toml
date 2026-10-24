@@ -1,2 +1,6 @@
 [test]
 preload = ["./tests/preload.ts"]
+# An end-to-end test (*.e2e.test.*) runs on main's check only
+# (.runtime/e2e-files.sh), so a plain `bun test` here matches a pull
+# request's. Run one with bun test --path-ignore-patterns='' <its path>.
+pathIgnorePatterns = ["**/*.e2e.test.*"]

@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 from withruntime import AsyncRuntime, Runtime
+from tests.instant_sleeps import instant_sleeps
 
 
 class SilentFirst:
@@ -21,6 +22,9 @@ class SilentFirst:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            # A header and its body, written apart, each go at once: with Nagle a
+            # kept-alive answer waited 40 ms on the client's delayed ACK.
+            disable_nagle_algorithm = True
 
             def log_message(self, *_):
                 pass
@@ -39,7 +43,7 @@ class SilentFirst:
                 self.wfile.write(body)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -57,7 +61,8 @@ class AnswerStart(unittest.TestCase):
                 world = SilentFirst()
                 try:
                     started = time.monotonic()
-                    with mock.patch("withruntime._http.ANSWER_START_SECONDS", 0.3, create=True):
+                    with mock.patch("withruntime._http.ANSWER_START_SECONDS", 0.1, create=True), \
+                            instant_sleeps() as slept:
                         if asynchronous:
                             async def run():
                                 async with AsyncRuntime(api_key="rk_test", base_url=world.url) as rt:
@@ -70,6 +75,7 @@ class AnswerStart(unittest.TestCase):
                     self.assertEqual(len(world.keys), 2)
                     self.assertTrue(world.keys[0])
                     self.assertEqual(world.keys[0], world.keys[1])
+                    self.assertEqual(len(slept), 1)
                     self.assertLess(time.monotonic() - started, 5)
                 finally:
                     world.close()

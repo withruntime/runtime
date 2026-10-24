@@ -6,6 +6,12 @@ import { chmod } from "node:fs/promises";
 import { quote } from "../../src/compat/core.js";
 import { spawnSync } from "node:child_process";
 
+/* End to end, on main's check after merge (.runtime/e2e-files.sh): only
+   real processes under the guest service's real supervisor (python, process
+   groups, signals a descendant ignores, its lock and log files) prove what a
+   CodeSandbox task or setup step does in a sandbox. 5 s, most of it the
+   supervisor's start and its processes' own lives. */
+
 async function until<T>(read: () => Promise<T>, accepts: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5000;
   for (;;) {

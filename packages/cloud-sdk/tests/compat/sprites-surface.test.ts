@@ -13,6 +13,7 @@ import {
   parseAPIError,
   proxyPorts,
 } from "../../src/sprites/index.js";
+import { onFakeClockFor } from "../fixtures/fake-clock";
 
 const ID = "00000000-0000-0000-0000-000000000001";
 type Call = { method: string; args?: unknown };
@@ -535,32 +536,42 @@ test("filesystem watch maps Runtime's file events and stops them on close", asyn
   );
 });
 
-test("watchPorts lists listening ports, then reports each one opened and closed", async () => {
-  const f = fake();
-  f.answer([
-    { exitCode: 0, stdout: 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=12,fd=19))\n' },
-    { exitCode: 0, stdout: "LISTEN 0 4096 [::]:8080 [::]:*\n" },
-  ]);
-  const watcher = await f.sprite.watchPorts();
-  expect(await watcher.next()).toEqual({
-    type: "port_list",
-    ports: [{ type: "port_opened", port: 3000, address: "0.0.0.0", pid: 12 }],
-  });
-  expect(await watcher.next()).toEqual({
-    type: "port_closed",
-    port: 3000,
-    address: "0.0.0.0",
-    pid: 12,
-  });
-  expect(await watcher.next()).toEqual({ type: "port_opened", port: 8080, address: "::", pid: 0 });
-  watcher.close();
-  expect(f.execs.every((argv) => argv.join(" ") === "ss -Hltnp")).toBe(true);
-  const broken = fake();
-  broken.answer([{ exitCode: 0 }, { exitCode: 127, stderr: "ss: not found" }]);
-  const failing = await broken.sprite.watchPorts();
-  expect(await failing.next()).toEqual({ type: "port_list", ports: [] });
-  await expect(failing.next()).rejects.toThrow("ss: not found");
-});
+// The watcher's one-second polls, on the fake clock.
+test("watchPorts lists listening ports, then reports each one opened and closed", () =>
+  onFakeClockFor(async () => {
+    const f = fake();
+    f.answer([
+      {
+        exitCode: 0,
+        stdout: 'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=12,fd=19))\n',
+      },
+      { exitCode: 0, stdout: "LISTEN 0 4096 [::]:8080 [::]:*\n" },
+    ]);
+    const watcher = await f.sprite.watchPorts();
+    expect(await watcher.next()).toEqual({
+      type: "port_list",
+      ports: [{ type: "port_opened", port: 3000, address: "0.0.0.0", pid: 12 }],
+    });
+    expect(await watcher.next()).toEqual({
+      type: "port_closed",
+      port: 3000,
+      address: "0.0.0.0",
+      pid: 12,
+    });
+    expect(await watcher.next()).toEqual({
+      type: "port_opened",
+      port: 8080,
+      address: "::",
+      pid: 0,
+    });
+    watcher.close();
+    expect(f.execs.every((argv) => argv.join(" ") === "ss -Hltnp")).toBe(true);
+    const broken = fake();
+    broken.answer([{ exitCode: 0 }, { exitCode: 127, stderr: "ss: not found" }]);
+    const failing = await broken.sprite.watchPorts();
+    expect(await failing.next()).toEqual({ type: "port_list", ports: [] });
+    await expect(failing.next()).rejects.toThrow("ss: not found");
+  }));
 
 test("proxyPort forwards a local port over Runtime's tunnel", async () => {
   const f = fake();

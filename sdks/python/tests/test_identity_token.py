@@ -41,7 +41,7 @@ class Stub(BaseHTTPRequestHandler):
 class IdentityTokenTest(unittest.TestCase):
     def setUp(self):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Stub)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.saved = {k: os.environ.get(k) for k in ("RUNTIME_ID_TOKEN_REQUEST_URL", "RUNTIME_ID_TOKEN_REQUEST_TOKEN")}
         os.environ["RUNTIME_ID_TOKEN_REQUEST_URL"] = f"http://127.0.0.1:{self.server.server_port}/v1/identity/token"

@@ -17,17 +17,23 @@ SANDBOX = {"id": "sbx", "kind": "sandbox", "state": "running", "status": "active
 
 
 class Wire:
-    """Counts connections open at once. A stream stays open ``hold`` seconds."""
+    """Counts connections open at once. A stream stays open ``hold`` seconds,
+    or, given ``until_open``, until that many are open at once: the width a
+    test proves, reached in milliseconds, where a fixed hold made each test
+    wait it out (a second each, 23 October 2026)."""
 
-    def __init__(self, is_async, hold=0.015):
+    def __init__(self, is_async, hold=0.015, until_open=None):
         self.is_async, self.hold, self.open, self.peak, self.lock = is_async, hold, 0, 0, threading.Lock()
         self.count = 0
+        self.until_open, self.full = until_open, threading.Event()
 
     def _opened(self):
         with self.lock:
             self.open += 1
             self.count += 1
             self.peak = max(self.peak, self.open)
+            if self.until_open is not None and self.open >= self.until_open:
+                self.full.set()
 
     def _closed(self):
         with self.lock:
@@ -58,7 +64,12 @@ class Wire:
 
                 async def lines(self, deadline=None):
                     yield body[0]
-                    await asyncio.sleep(wire.hold)
+                    if wire.until_open is None:
+                        await asyncio.sleep(wire.hold)
+                    else:
+                        end = time.monotonic() + wire.hold
+                        while not wire.full.is_set() and time.monotonic() < end:
+                            await asyncio.sleep(0.002)
                     for line in body[1:]:
                         yield line
 
@@ -72,7 +83,10 @@ class Wire:
 
                 def lines(self, deadline=None):
                     yield body[0]
-                    time.sleep(wire.hold)
+                    if wire.until_open is None:
+                        time.sleep(wire.hold)
+                    else:
+                        wire.full.wait(wire.hold)
                     yield from body[1:]
 
                 def close(self):
@@ -102,7 +116,7 @@ class ConnectionCap(unittest.TestCase):
     def test_streams_keep_connections_for_calls_sync_and_async(self):
         # Twenty streams at once on a cap of twelve: at most four are open
         # (eight are kept for calls), and calls beside them never wait long.
-        wire = Wire(True, hold=0.05)
+        wire = Wire(True, hold=0.025)
         client = AsyncRuntime(api_key="rk", base_url="https://api.example.test", max_connections=12)
         client._t._http = wire
 
@@ -121,7 +135,7 @@ class ConnectionCap(unittest.TestCase):
         self.assertLess(calls, 0.04)
         self.assertLessEqual(wire.peak, 12)
 
-        wire = Wire(False, hold=0.05)
+        wire = Wire(False, hold=0.025)
         client = Runtime(api_key="rk", base_url="https://api.example.test", max_connections=12)
         client._t._http = wire
         done = []
@@ -166,7 +180,7 @@ class AdapterClientIsWide(unittest.TestCase):
 
     def test_a_hundred_commands_at_once_async(self):
         from withruntime.e2b import _async_sandbox
-        wire = Wire(True, hold=1.0)
+        wire = Wire(True, hold=1.0, until_open=100)
         client = _async_sandbox._client(None, None)
         client._t._http = wire
 
@@ -177,15 +191,15 @@ class AdapterClientIsWide(unittest.TestCase):
             return results, time.monotonic() - started
         results, seconds = asyncio.run(main())
         self.assertTrue(all(r.exit_code == 0 for r in results))
-        # All 100 open at once is the proof of width; the time only bounds what
-        # is added around one 1 s hold, with room for a busy check machine.
+        # All 100 open at once is the proof of width (each holds until they
+        # are, or a second); the time bounds a client that reads them in waves.
         self.assertEqual(wire.peak, 100)
         self.assertLess(seconds, 3)
 
     def test_a_hundred_commands_at_once_sync(self):
         from concurrent.futures import ThreadPoolExecutor
         from withruntime.e2b import _sync_sandbox, Sandbox
-        wire = Wire(False, hold=1.0)
+        wire = Wire(False, hold=1.0, until_open=100)
         client = _sync_sandbox._client(None, None)
         client._t._http = wire
         sbx = Sandbox.create()
@@ -194,8 +208,8 @@ class AdapterClientIsWide(unittest.TestCase):
             results = list(pool.map(lambda _: sbx.commands.run("sleep 1"), range(100)))
         seconds = time.monotonic() - started
         self.assertTrue(all(r.exit_code == 0 for r in results))
-        # All 100 open at once is the proof of width; the time only bounds what
-        # is added around one 1 s hold, with room for a busy check machine.
+        # All 100 open at once is the proof of width (each holds until they
+        # are, or a second); the time bounds a client that reads them in waves.
         self.assertEqual(wire.peak, 100)
         self.assertLess(seconds, 3)
 

@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { builds, type Build, type BuildLogEvent } from "../src/products/builds.js";
 import { ConnectionError, errorFor } from "../src/errors.js";
 import { Transport, type Call } from "../src/transport.js";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 const info: Build = {
   id: "build /?#",

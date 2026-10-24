@@ -4,6 +4,12 @@ import { localSandbox } from "./codesandbox-local.js";
 import { chmod, mkdir } from "node:fs/promises";
 import { ManagedTasks } from "../../src/codesandbox/guest-service.js";
 
+/* End to end, on main's check after merge (.runtime/e2e-files.sh): only
+   real processes under the guest service's real supervisor (python, process
+   groups, signals a descendant ignores, its lock and log files) prove what a
+   CodeSandbox task or setup step does in a sandbox. 2 s, most of it the
+   supervisor's start and its processes' own lives. */
+
 test("CodeSandbox zero-exit setup runner fails on lock-free stale progress", async () => {
   const world = await localSandbox();
   try {

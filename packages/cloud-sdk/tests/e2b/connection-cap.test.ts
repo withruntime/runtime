@@ -1,6 +1,9 @@
 import { expect, spyOn, test } from "bun:test";
 import { Runtime } from "../../src/client";
 import { Sandbox } from "../../src/e2b/sandbox";
+import { onFakeClock } from "../fixtures/fake-clock";
+
+onFakeClock();
 
 /* An orchestrator moved from E2B runs one agent per sandbox, a thousand at
    once, each in commands.run. One address may hold 64 connections to the API,

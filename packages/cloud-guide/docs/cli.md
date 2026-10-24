@@ -142,7 +142,7 @@ id=$(runtime sandboxes create --name demo --label team=search)
 runtime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
 runtime sandboxes exec "${id}" --cwd /workspace --env API_TOKEN -- env
 runtime sandboxes exec "${id}" --root -- apt-get install -y jq
-runtime sandboxes exec "${id}" --trace-files read.json -- bun test src/a.test.ts
+runtime sandboxes exec "${id}" --trace-files read.json -- python3 -c 'import json'
 runtime sandboxes ls
 runtime sandboxes ls --state running --label team=search
 runtime sandboxes get "${id}"
@@ -207,6 +207,10 @@ starts, `nohup … &` included, ends when the command returns; start a server wi
 with `--env NAME` alone, which reads it from your shell, never written into
 the command. Piped input reaches
 the command, up to 1 MiB: `echo 'print(1)' | runtime sandboxes exec "${id}" -- python3 -`.
+`--trace-files <file.json>` writes to that file, on your machine, every file
+the command and anything it started read and wrote, as
+`{"read", "written", "truncated"}`: key a test cache by what a test really
+read ([which files a command read](./api#commands-and-processes)).
 A program is found on the sandbox's own `PATH`, so `python` in an image from
 `python:3.12-slim` runs as it does there.
 

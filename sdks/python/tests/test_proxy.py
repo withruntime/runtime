@@ -139,7 +139,7 @@ class BehindAProxy(unittest.TestCase):
         cls.closed_port = spare.getsockname()[1]
         spare.close()
         for server in (cls.api, cls.proxy):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
+            threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         # Trust the throwaway certificate, as NODE_EXTRA_CA_CERTS does for Node.
         cls.saved_context = http_module._CONTEXT
         http_module._CONTEXT = ssl.create_default_context(cafile=cert)

@@ -7,7 +7,6 @@ import asyncio
 import io
 from pathlib import Path
 import sys
-import time
 import traceback
 import unittest
 from unittest.mock import patch
@@ -51,10 +50,24 @@ class ModalExamples(World):
 
     def test_a_timeout_under_a_minute_ends_the_sandbox_on_time(self):
         # guide/sandboxes "Running a Sandbox with an entrypoint": timeout=10.
-        box = Sandbox.create("python", "-m", "http.server", "8080", timeout=1, client=self.client)
+        # The client's own timer, caught and fired: its second is asserted,
+        # not slept (1.3 s, 23 October 2026).
+        timers = []
+
+        class Timer:
+            def __init__(self, interval, function):
+                self.interval, self.function, self.daemon = interval, function, False
+                timers.append(self)
+
+            def start(self):
+                pass
+        with patch("withruntime.modal.threading.Timer", Timer):
+            box = Sandbox.create("python", "-m", "http.server", "8080", timeout=1, client=self.client)
         self.assertEqual(self.world.called("sandboxes.create")[0][0]["timeout_seconds"], 60)
+        self.assertEqual([(timer.interval, timer.daemon) for timer in timers], [(1, True)])
         stops = len(self.world.called("sandbox.stop"))
-        time.sleep(1.3)
+        self.assertFalse(box._terminated)
+        timers[0].function()
         self.assertGreater(len(self.world.called("sandbox.stop")), stops)
         self.assertTrue(box._terminated)
 

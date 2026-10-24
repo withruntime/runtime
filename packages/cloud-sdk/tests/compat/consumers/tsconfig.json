@@ -1,0 +1,35 @@
+{
+  // Unchanged typed consumer code of each vendor's SDK, against Runtime's
+  // adapters: the package's check-types compiles it (TypeScript 7, 0.8 s),
+  // with the options check-consumers.ts and codesandbox-consumers.ts compile
+  // the same files with against the pinned upstream declarations. Only
+  // import resolution differs between the two.
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "types": ["node"],
+    "typeRoots": ["../../../node_modules/@types"],
+    "paths": {
+      "@compat/runloop": ["../../../src/runloop/index.ts"],
+      "@compat/codesandbox": ["../../../src/codesandbox/index.ts"],
+      "@compat/sprites": ["../../../src/sprites/index.ts"],
+      "@compat/freestyle": ["../../../src/freestyle/index.ts"],
+      "@compat/modal": ["../../../src/modal/index.ts"],
+      "@compat/cloudflare": ["../../../src/cloudflare/index.ts"],
+      "@compat/e2b": ["../../../src/e2b/index.ts"],
+      "@compat/e2b-interpreter": ["../../../src/e2b/code-interpreter.ts"],
+      "@compat/daytona": ["../../../src/daytona/index.ts"],
+      "@compat/vercel": ["../../../src/vercel/index.ts"],
+      "@compat/blaxel": ["../../../src/blaxel/index.ts"],
+      // The official interpreter inherits Sandbox from its real e2b dependency.
+      "e2b": ["../../../src/e2b/index.ts"],
+      "@sandbox": ["../../../src/codesandbox/index.ts"]
+    }
+  },
+  "files": ["workflows.ts", "codesandbox.ts"]
+}

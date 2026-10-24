@@ -44,7 +44,7 @@ class Server:
             while b"\r\n\r\n" not in request:
                 request += conn.recv(4096)
             conn.sendall(HEAD)
-            time.sleep(0.3)
+            time.sleep(0.05)
             if self.then == "rest":
                 conn.sendall(b"0\r\n\r\n")
             else:

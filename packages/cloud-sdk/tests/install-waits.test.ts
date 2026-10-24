@@ -3,6 +3,9 @@ import { sandboxBrowser } from "../src/products/browser";
 import { sandboxDesktop } from "../src/products/desktop";
 import { sandboxMcp } from "../src/products/mcp";
 import { Transport } from "../src/transport";
+import { onFakeClock } from "./fixtures/fake-clock";
+
+onFakeClock();
 
 /* Waits for a first install, and for MCP servers to be ready, keep the
    caller's one deadline and stop on abort (1 October 2026 audit): no wait

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -437,12 +438,12 @@ class ProcessLines(unittest.TestCase):
                 table = Path(directory, "tcp")
                 table.write_text(head + row + "\n")
                 missing = str(Path(directory, "tcp6"))  # a guest without IPv6
-                result = subprocess.run(["bash", "-c", core.port_wait_script([3000], 1, (str(table), missing))[-1]],
+                result = subprocess.run(["bash", "-c", core.port_wait_script([3000], 0, (str(table), missing))[-1]],
                                         capture_output=True, timeout=10)
             self.assertEqual(result.returncode == 0, ready, row)
         with tempfile.TemporaryDirectory() as directory:
             both = (str(Path(directory, "tcp")), str(Path(directory, "tcp6")))
-            result = subprocess.run(["bash", "-c", core.port_wait_script([3000], 1, both)[-1]], capture_output=True,
+            result = subprocess.run(["bash", "-c", core.port_wait_script([3000], 0, both)[-1]], capture_output=True,
                                     timeout=10)
         self.assertEqual(result.returncode, 1)
 
@@ -515,10 +516,12 @@ class Processes(Base):
     def test_a_wait_past_timeout_raises_and_leaves_it_running(self):
         self.keep_running()
         box = self.create()
-        started = time.monotonic()
-        with self.assertRaises(ResponseError) as caught:
+        # The deadline on the world's clock, which an output read moves by the
+        # wait it asks the server for: the second passes in one read, unslept.
+        with patch("withruntime.blaxel._sync_sandbox.now", lambda: self.world.waited), \
+                self.assertRaises(ResponseError) as caught:
             box.process.exec({"command": "sleep 99", "name": "slow", "wait_for_completion": True, "timeout": 1})
-        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(self.world.waited, 1)
         self.assertEqual(caught.exception.status_code, 422)
         self.assertEqual(str(caught.exception), "Sandbox request failed with status 422: process timed out after 1 seconds")
         self.assertEqual(self.world.called("request")[-1][0], "GET")

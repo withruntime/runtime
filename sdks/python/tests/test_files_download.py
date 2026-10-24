@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from withruntime import AsyncRuntime, Runtime
 from withruntime._errors import RuntimeError
+from tests.instant_sleeps import instant_sleeps
 
 ID = "8a1f9c2e-0d1b-4c3a-9e8f-7a6b5c4d3e2f"
 WHOLE = bytes((i * 31) & 0xFF for i in range(3 * 1_048_576 + 7))
@@ -29,6 +30,9 @@ class World:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            # A header and its body, written apart, each go at once: with Nagle a
+            # kept-alive answer waited 40 ms on the client's delayed ACK.
+            disable_nagle_algorithm = True
 
             def log_message(self, *args):
                 pass
@@ -64,7 +68,7 @@ class World:
                 self.wfile.write(data)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         self.url = f"http://localhost:{self.server.server_address[1]}"
 
     def close(self):
@@ -73,6 +77,12 @@ class World:
 
 
 class Downloads(unittest.TestCase):
+    def setUp(self):
+        # A read again waits its back-off first: recorded, not slept.
+        sleeps = instant_sleeps()
+        self.slept = sleeps.__enter__()
+        self.addCleanup(sleeps.__exit__, None, None, None)
+
     def world(self, cuts, sha=None):
         world = World(cuts, sha)
         self.addCleanup(world.close)
@@ -90,6 +100,8 @@ class Downloads(unittest.TestCase):
         self.assertEqual(caught.exception.code, "download_incomplete")
         self.assertEqual(caught.exception.details, {"received": 30, "expected": len(WHOLE)})
         self.assertEqual(world.reads, 3)
+        self.assertEqual(len(self.slept), 2)
+        self.assertGreaterEqual(self.slept[1], 0.25)
 
     def test_digest_mismatch_raises(self):
         _, runtime = self.world([], sha="0" * 64)

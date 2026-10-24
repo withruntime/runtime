@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { Runtime } from "../src/client";
 import { ConnectionError } from "../src/errors";
 import { Transport } from "../src/transport";
+import { onFakeClockFor } from "./fixtures/fake-clock";
 
 const transport = (
   fetcher: typeof fetch,
@@ -60,209 +61,218 @@ for (const read of ["json", "bytes", "fileBytes"] as const) {
   }
 }
 
-test("abort during retry backoff retains the SDK error and the write key", async () => {
-  const controller = new AbortController();
-  let calls = 0;
-  const t = transport((async () => {
-    calls++;
-    setTimeout(() => controller.abort(), 5);
-    throw new TypeError("connection reset");
-  }) as unknown as typeof fetch);
-  const error = await t
-    .json({ method: "POST", path: "/v1/feedback", signal: controller.signal })
-    .catch((error: unknown) => error);
-  expect(error).toBeInstanceOf(ConnectionError);
-  expect(error).toMatchObject({ code: "timeout" });
-  expect((error as ConnectionError).idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-  expect(calls).toBe(1);
-});
-
-test("a cut response body is retried with the original write key and body", async () => {
-  const seen: Array<{ key: string | null; body: unknown }> = [];
-  const t = transport(
-    (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      seen.push({ key: new Headers(init?.headers).get("idempotency-key"), body: init?.body });
-      if (seen.length === 1)
-        return new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.error(new TypeError("socket closed while reading"));
-            },
-          }),
-        );
-      return Response.json({ ok: true });
-    }) as unknown as typeof fetch,
-    { maxRetries: 1 },
-  );
-  expect(
-    await t.json<{ ok: boolean }>({
-      method: "POST",
-      path: "/v1/feedback",
-      body: { summary: "hello" },
-    }),
-  ).toEqual({ ok: true });
-  expect(seen).toHaveLength(2);
-  expect(seen[0]).toEqual(seen[1]);
-  expect(seen[0]!.key).toMatch(/^[0-9a-f-]{36}$/);
-});
-
-test("a cut response for a call that cannot be replayed is a typed error, sent once", async () => {
-  let calls = 0;
-  const t = transport((async () => {
-    calls++;
-    return new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.error(new TypeError("socket closed while reading"));
-        },
-      }),
-    );
-  }) as unknown as typeof fetch);
-  await expect(
-    t.json({ method: "POST", path: "/v1/support/messages", retry: false }),
-  ).rejects.toMatchObject({ code: "connection_error" });
-  expect(calls).toBe(1);
-});
-
-test("a cleanly truncated JSON answer retries under the original write key", async () => {
-  const keys: Array<string | null> = [];
-  const t = transport(
-    (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      keys.push(new Headers(init?.headers).get("idempotency-key"));
-      return keys.length === 1 ? new Response('{"ok":') : Response.json({ ok: true });
-    }) as unknown as typeof fetch,
-    { maxRetries: 1 },
-  );
-  expect<unknown>(await t.json({ method: "POST", path: "/v1/feedback" })).toEqual({ ok: true });
-  expect(keys).toHaveLength(2);
-  expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
-  expect(keys[1]).toBe(keys[0]);
-});
-
-test("unusable JSON answers retain the typed failure and write key", async () => {
-  for (const retry of [true, false]) {
+test("abort during retry backoff retains the SDK error and the write key", () =>
+  onFakeClockFor(async () => {
+    const controller = new AbortController();
     let calls = 0;
-    const t = transport(
-      (async () => {
-        calls++;
-        return new Response('{"ok":');
-      }) as unknown as typeof fetch,
-      { maxRetries: 0 },
-    );
+    const t = transport((async () => {
+      calls++;
+      setTimeout(() => controller.abort(), 5);
+      throw new TypeError("connection reset");
+    }) as unknown as typeof fetch);
     const error = await t
-      .json({ method: "POST", path: "/v1/feedback", retry })
+      .json({ method: "POST", path: "/v1/feedback", signal: controller.signal })
       .catch((error: unknown) => error);
     expect(error).toBeInstanceOf(ConnectionError);
-    expect(error).toMatchObject({ code: "connection_error" });
+    expect(error).toMatchObject({ code: "timeout" });
     expect((error as ConnectionError).idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
     expect(calls).toBe(1);
-  }
-});
+  }));
 
-test("client timeoutMs: 0 keeps the documented disabled deadline", async () => {
-  const timeout = spyOn(AbortSignal, "timeout");
-  try {
-    const runtime = new Runtime({
-      apiKey: "rk_test",
-      timeoutMs: 0,
-      fetch: (async () => Response.json({ ok: true })) as unknown as typeof fetch,
-    });
-    await runtime.me();
-    expect(timeout).not.toHaveBeenCalled();
-  } finally {
-    timeout.mockRestore();
-  }
-});
-
-test("capacity waits do not spend the transport retry allowance", async () => {
-  let calls = 0;
-  const t = transport(
-    (async () => {
-      calls++;
-      if (calls <= 3)
-        return Response.json(
-          {
-            error: {
-              code: "no_credit_running_limit",
-              message: "full",
-              retryAfterMs: 1,
-            },
-          },
-          { status: 429 },
-        );
-      if (calls === 4) throw new TypeError("connection reset");
-      return Response.json({ ok: true });
-    }) as unknown as typeof fetch,
-    { maxRetries: 1 },
-  );
-  expect(
-    await t.json<{ ok: boolean }>({
-      method: "POST",
-      path: "/v1/sandboxes",
-      waitForCapacityMs: 2000,
-    }),
-  ).toEqual({
-    ok: true,
-  });
-  expect(calls).toBe(5);
-});
-
-test("errors from caller callbacks propagate without resending a call", async () => {
-  for (const callback of ["onResponse", "onCapacityWait"] as const) {
-    let calls = 0;
-    const failure = new Error("caller failed");
+test("a cut response body is retried with the original write key and body", () =>
+  onFakeClockFor(async () => {
+    const seen: Array<{ key: string | null; body: unknown }> = [];
     const t = transport(
-      (async () => {
-        calls++;
-        return callback === "onResponse"
-          ? Response.json({ ok: true })
-          : Response.json(
-              { error: { code: "no_credit_running_limit", message: "full" } },
-              { status: 429 },
-            );
+      (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push({ key: new Headers(init?.headers).get("idempotency-key"), body: init?.body });
+        if (seen.length === 1)
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError("socket closed while reading"));
+              },
+            }),
+          );
+        return Response.json({ ok: true });
       }) as unknown as typeof fetch,
       { maxRetries: 1 },
     );
-    const error = await t
-      .json({
+    expect(
+      await t.json<{ ok: boolean }>({
+        method: "POST",
+        path: "/v1/feedback",
+        body: { summary: "hello" },
+      }),
+    ).toEqual({ ok: true });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual(seen[1]);
+    expect(seen[0]!.key).toMatch(/^[0-9a-f-]{36}$/);
+  }));
+
+test("a cut response for a call that cannot be replayed is a typed error, sent once", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    const t = transport((async () => {
+      calls++;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("socket closed while reading"));
+          },
+        }),
+      );
+    }) as unknown as typeof fetch);
+    await expect(
+      t.json({ method: "POST", path: "/v1/support/messages", retry: false }),
+    ).rejects.toMatchObject({ code: "connection_error" });
+    expect(calls).toBe(1);
+  }));
+
+test("a cleanly truncated JSON answer retries under the original write key", () =>
+  onFakeClockFor(async () => {
+    const keys: Array<string | null> = [];
+    const t = transport(
+      (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        keys.push(new Headers(init?.headers).get("idempotency-key"));
+        return keys.length === 1 ? new Response('{"ok":') : Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      { maxRetries: 1 },
+    );
+    expect<unknown>(await t.json({ method: "POST", path: "/v1/feedback" })).toEqual({ ok: true });
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(keys[1]).toBe(keys[0]);
+  }));
+
+test("unusable JSON answers retain the typed failure and write key", () =>
+  onFakeClockFor(async () => {
+    for (const retry of [true, false]) {
+      let calls = 0;
+      const t = transport(
+        (async () => {
+          calls++;
+          return new Response('{"ok":');
+        }) as unknown as typeof fetch,
+        { maxRetries: 0 },
+      );
+      const error = await t
+        .json({ method: "POST", path: "/v1/feedback", retry })
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(ConnectionError);
+      expect(error).toMatchObject({ code: "connection_error" });
+      expect((error as ConnectionError).idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+      expect(calls).toBe(1);
+    }
+  }));
+
+test("client timeoutMs: 0 keeps the documented disabled deadline", () =>
+  onFakeClockFor(async () => {
+    const timeout = spyOn(AbortSignal, "timeout");
+    try {
+      const runtime = new Runtime({
+        apiKey: "rk_test",
+        timeoutMs: 0,
+        fetch: (async () => Response.json({ ok: true })) as unknown as typeof fetch,
+      });
+      await runtime.me();
+      expect(timeout).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  }));
+
+test("capacity waits do not spend the transport retry allowance", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    const t = transport(
+      (async () => {
+        calls++;
+        if (calls <= 3)
+          return Response.json(
+            {
+              error: {
+                code: "no_credit_running_limit",
+                message: "full",
+                retryAfterMs: 1,
+              },
+            },
+            { status: 429 },
+          );
+        if (calls === 4) throw new TypeError("connection reset");
+        return Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      { maxRetries: 1 },
+    );
+    expect(
+      await t.json<{ ok: boolean }>({
         method: "POST",
         path: "/v1/sandboxes",
         waitForCapacityMs: 2000,
-        [callback]: () => {
+      }),
+    ).toEqual({
+      ok: true,
+    });
+    expect(calls).toBe(5);
+  }));
+
+test("errors from caller callbacks propagate without resending a call", () =>
+  onFakeClockFor(async () => {
+    for (const callback of ["onResponse", "onCapacityWait"] as const) {
+      let calls = 0;
+      const failure = new Error("caller failed");
+      const t = transport(
+        (async () => {
+          calls++;
+          return callback === "onResponse"
+            ? Response.json({ ok: true })
+            : Response.json(
+                { error: { code: "no_credit_running_limit", message: "full" } },
+                { status: 429 },
+              );
+        }) as unknown as typeof fetch,
+        { maxRetries: 1 },
+      );
+      const error = await t
+        .json({
+          method: "POST",
+          path: "/v1/sandboxes",
+          waitForCapacityMs: 2000,
+          [callback]: () => {
+            throw failure;
+          },
+        })
+        .catch((error: unknown) => error);
+      expect(error).toBe(failure);
+      expect(calls).toBe(1);
+    }
+  }));
+
+test("a failed response callback cancels the unread body and keeps its error", () =>
+  onFakeClockFor(async () => {
+    let cancelled = false;
+    const failure = new Error("caller failed");
+    const t = transport(
+      (async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+        )) as unknown as typeof fetch,
+    );
+    const error = await t
+      .json({
+        method: "GET",
+        path: "/v1/me",
+        onResponse: () => {
           throw failure;
         },
       })
       .catch((error: unknown) => error);
     expect(error).toBe(failure);
-    expect(calls).toBe(1);
-  }
-});
-
-test("a failed response callback cancels the unread body and keeps its error", async () => {
-  let cancelled = false;
-  const failure = new Error("caller failed");
-  const t = transport(
-    (async () =>
-      new Response(
-        new ReadableStream({
-          cancel() {
-            cancelled = true;
-          },
-        }),
-      )) as unknown as typeof fetch,
-  );
-  const error = await t
-    .json({
-      method: "GET",
-      path: "/v1/me",
-      onResponse: () => {
-        throw failure;
-      },
-    })
-    .catch((error: unknown) => error);
-  expect(error).toBe(failure);
-  expect(cancelled).toBe(true);
-});
+    expect(cancelled).toBe(true);
+  }));
 
 test("a real HTTP response cut after headers replays a write exactly once", async () => {
   let calls = 0;
@@ -342,44 +352,45 @@ for (const refusal of [
   { code: "no_capacity", status: 503, room: true },
   { code: "rate_limited", status: 429, room: false },
 ] as const) {
-  test(`a call waiting out ${refusal.code} lends its connection slot to the next call`, async () => {
-    const order: string[] = [];
-    let refused = false;
-    const t = transport(
-      (async (url: string, init: RequestInit) => {
-        const path = new URL(url).pathname;
-        order.push(`${init.method} ${path}`);
-        if (path === "/v1/sandboxes" && !refused) {
-          refused = true;
-          return Response.json(
-            {
-              error: {
-                code: refusal.code,
-                status: refusal.status,
-                message: "m",
-                retryAfterMs: 300,
+  test(`a call waiting out ${refusal.code} lends its connection slot to the next call`, () =>
+    onFakeClockFor(async () => {
+      const order: string[] = [];
+      let refused = false;
+      const t = transport(
+        (async (url: string, init: RequestInit) => {
+          const path = new URL(url).pathname;
+          order.push(`${init.method} ${path}`);
+          if (path === "/v1/sandboxes" && !refused) {
+            refused = true;
+            return Response.json(
+              {
+                error: {
+                  code: refusal.code,
+                  status: refusal.status,
+                  message: "m",
+                  retryAfterMs: 300,
+                },
               },
-            },
-            { status: refusal.status },
-          );
-        }
-        return Response.json({ ok: true });
-      }) as unknown as typeof fetch,
-      { maxConnections: 1 },
-    );
-    const create = t.json({
-      method: "POST",
-      path: "/v1/sandboxes",
-      body: {},
-      ...(refusal.room ? { waitForCapacityMs: 5000 } : {}),
-    });
-    while (!refused) await Bun.sleep(1);
-    const started = performance.now();
-    await t.json({ method: "GET", path: "/v1/me" });
-    expect(performance.now() - started).toBeLessThan(200);
-    await create;
-    expect(order).toEqual(["POST /v1/sandboxes", "GET /v1/me", "POST /v1/sandboxes"]);
-  });
+              { status: refusal.status },
+            );
+          }
+          return Response.json({ ok: true });
+        }) as unknown as typeof fetch,
+        { maxConnections: 1 },
+      );
+      const create = t.json({
+        method: "POST",
+        path: "/v1/sandboxes",
+        body: {},
+        ...(refusal.room ? { waitForCapacityMs: 5000 } : {}),
+      });
+      while (!refused) await Bun.sleep(1);
+      const started = performance.now();
+      await t.json({ method: "GET", path: "/v1/me" });
+      expect(performance.now() - started).toBeLessThan(200);
+      await create;
+      expect(order).toEqual(["POST /v1/sandboxes", "GET /v1/me", "POST /v1/sandboxes"]);
+    }));
 }
 
 /* One address may hold 64 connections to the API; past that its edge resets
@@ -388,186 +399,194 @@ for (const refusal of [
    cap: the rest wait their turn, and a few connections are always kept for
    calls, so a stream's reader that makes a call is never stuck behind
    streams. */
-test("streams and calls together hold at most maxConnections, and calls keep their own", async () => {
-  let open = 0;
-  let peak = 0;
-  const gates: Array<() => void> = [];
-  const t = transport(
-    (async (url: string) => {
-      open++;
-      peak = Math.max(peak, open);
-      if (new URL(url).pathname === "/v1/me") {
-        open--;
-        return Response.json({ ok: true });
-      }
-      const encoder = new TextEncoder();
-      return new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(encoder.encode('{"type":"start"}\n'));
-            gates.push(() => {
-              open--;
-              controller.close();
-            });
-          },
-        }),
-      );
-    }) as unknown as typeof fetch,
-    { maxConnections: 12 },
-  );
-  // Twenty streams that stay open until told: four of the twelve stay free.
-  const readers = Array.from({ length: 20 }, async () => {
-    const seen: unknown[] = [];
-    for await (const event of t.events({ method: "GET", path: "/v1/stream" })) seen.push(event);
-    return seen;
-  });
-  while (gates.length < 4) await Bun.sleep(1);
-  await Bun.sleep(20);
-  expect(gates.length).toBe(4);
-  // A call is answered at once beside them, however many streams wait.
-  await Promise.all(Array.from({ length: 6 }, () => t.json({ method: "GET", path: "/v1/me" })));
-  expect(peak).toBeLessThanOrEqual(12);
-  // Each stream that ends lets the next one in, until all twenty are read.
-  let closed = 0;
-  while (closed < 20) {
-    while (gates.length === 0) await Bun.sleep(1);
-    gates.shift()!();
-    closed++;
-  }
-  for (const seen of await Promise.all(readers)) expect(seen).toEqual([{ type: "start" }]);
-  expect(peak).toBeLessThanOrEqual(12);
-});
+test("streams and calls together hold at most maxConnections, and calls keep their own", () =>
+  onFakeClockFor(async () => {
+    let open = 0;
+    let peak = 0;
+    const gates: Array<() => void> = [];
+    const t = transport(
+      (async (url: string) => {
+        open++;
+        peak = Math.max(peak, open);
+        if (new URL(url).pathname === "/v1/me") {
+          open--;
+          return Response.json({ ok: true });
+        }
+        const encoder = new TextEncoder();
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('{"type":"start"}\n'));
+              gates.push(() => {
+                open--;
+                controller.close();
+              });
+            },
+          }),
+        );
+      }) as unknown as typeof fetch,
+      { maxConnections: 12 },
+    );
+    // Twenty streams that stay open until told: four of the twelve stay free.
+    const readers = Array.from({ length: 20 }, async () => {
+      const seen: unknown[] = [];
+      for await (const event of t.events({ method: "GET", path: "/v1/stream" })) seen.push(event);
+      return seen;
+    });
+    while (gates.length < 4) await Bun.sleep(1);
+    await Bun.sleep(20);
+    expect(gates.length).toBe(4);
+    // A call is answered at once beside them, however many streams wait.
+    await Promise.all(Array.from({ length: 6 }, () => t.json({ method: "GET", path: "/v1/me" })));
+    expect(peak).toBeLessThanOrEqual(12);
+    // Each stream that ends lets the next one in, until all twenty are read.
+    let closed = 0;
+    while (closed < 20) {
+      while (gates.length === 0) await Bun.sleep(1);
+      gates.shift()!();
+      closed++;
+    }
+    for (const seen of await Promise.all(readers)) expect(seen).toEqual([{ type: "start" }]);
+    expect(peak).toBeLessThanOrEqual(12);
+  }));
 
-test("a download stream gives its connection back when read, cancelled or past its deadline", async () => {
-  let calls = 0;
-  const t = transport(
-    (async (_url: string, init: RequestInit) => {
-      calls++;
-      return new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new Uint8Array([1, 2, 3]));
-            init.signal?.addEventListener("abort", () => controller.error(init.signal!.reason));
-          },
-        }),
-        { headers: { "x-content-length": "3" } },
-      );
-    }) as unknown as typeof fetch,
-    { maxConnections: 9 },
-  );
-  // One stream slot (nine less the eight kept for calls): each download must
-  // give it back for the next to start.
-  const cancelled = await t.fileStream({ method: "GET", path: "/v1/a" });
-  await cancelled.cancel();
-  const late = await t.fileStream({ method: "GET", path: "/v1/b", timeoutMs: 30 });
-  const lateReader = late.getReader();
-  await lateReader.read();
-  await Bun.sleep(60);
-  const third = await Promise.race([
-    t.fileStream({ method: "GET", path: "/v1/c" }),
-    Bun.sleep(500).then(() => "still queued"),
-  ]);
-  expect(third).not.toBe("still queued");
-  expect(calls).toBe(3);
-});
+test("a download stream gives its connection back when read, cancelled or past its deadline", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    const t = transport(
+      (async (_url: string, init: RequestInit) => {
+        calls++;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1, 2, 3]));
+              init.signal?.addEventListener("abort", () => controller.error(init.signal!.reason));
+            },
+          }),
+          { headers: { "x-content-length": "3" } },
+        );
+      }) as unknown as typeof fetch,
+      { maxConnections: 9 },
+    );
+    // One stream slot (nine less the eight kept for calls): each download must
+    // give it back for the next to start.
+    const cancelled = await t.fileStream({ method: "GET", path: "/v1/a" });
+    await cancelled.cancel();
+    const late = await t.fileStream({ method: "GET", path: "/v1/b", timeoutMs: 30 });
+    const lateReader = late.getReader();
+    await lateReader.read();
+    await Bun.sleep(60);
+    const third = await Promise.race([
+      t.fileStream({ method: "GET", path: "/v1/c" }),
+      Bun.sleep(500).then(() => "still queued"),
+    ]);
+    expect(third).not.toBe("still queued");
+    expect(calls).toBe(3);
+  }));
 
 /* A server under disk pressure answers `guest_busy` ("nothing ran") several
    times in a row. Each such answer guarantees the call did nothing, so it is
    sent again, with the same key, until the caller's deadline: the worst a
    customer sees is slowness. A call that may have run is never replayed. */
-test("guest_busy is retried past maxRetries until it clears, with the same key", async () => {
-  const keys: (string | null)[] = [];
-  let refusals = 9;
-  const t = transport(
-    (async (_url: string, init: RequestInit) => {
-      keys.push(new Headers(init.headers).get("idempotency-key"));
-      if (refusals-- > 0)
+test("guest_busy is retried past maxRetries until it clears, with the same key", () =>
+  onFakeClockFor(async () => {
+    const keys: (string | null)[] = [];
+    let refusals = 9;
+    const t = transport(
+      (async (_url: string, init: RequestInit) => {
+        keys.push(new Headers(init.headers).get("idempotency-key"));
+        if (refusals-- > 0)
+          return Response.json(
+            {
+              error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 1 },
+            },
+            { status: 503 },
+          );
+        return Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      { maxRetries: 2 },
+    );
+    await expect(
+      t.json({ method: "POST", path: "/v1/sandboxes/s:exec", body: {} }),
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(keys).toHaveLength(10);
+    expect(new Set(keys).size).toBe(1);
+  }));
+
+test("a call that cannot be replayed is still sent again after an answer that ran nothing", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    const t = transport((async () => {
+      calls++;
+      if (calls <= 3)
         return Response.json(
           { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 1 } },
           { status: 503 },
         );
       return Response.json({ ok: true });
-    }) as unknown as typeof fetch,
-    { maxRetries: 2 },
-  );
-  await expect(t.json({ method: "POST", path: "/v1/sandboxes/s:exec", body: {} })).resolves.toEqual(
-    {
-      ok: true,
-    },
-  );
-  expect(keys).toHaveLength(10);
-  expect(new Set(keys).size).toBe(1);
-});
-
-test("a call that cannot be replayed is still sent again after an answer that ran nothing", async () => {
-  let calls = 0;
-  const t = transport((async () => {
-    calls++;
-    if (calls <= 3)
+    }) as unknown as typeof fetch);
+    await t.json({ method: "POST", path: "/v1/x", body: {}, retry: false });
+    expect(calls).toBe(4);
+    // A passing failure that may have run is not replayed for such a call.
+    let others = 0;
+    const strict = transport((async () => {
+      others++;
       return Response.json(
-        { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 1 } },
+        { error: { code: "host_unavailable", status: 503, message: "m", retryAfterMs: 1 } },
         { status: 503 },
       );
-    return Response.json({ ok: true });
-  }) as unknown as typeof fetch);
-  await t.json({ method: "POST", path: "/v1/x", body: {}, retry: false });
-  expect(calls).toBe(4);
-  // A passing failure that may have run is not replayed for such a call.
-  let others = 0;
-  const strict = transport((async () => {
-    others++;
-    return Response.json(
-      { error: { code: "host_unavailable", status: 503, message: "m", retryAfterMs: 1 } },
-      { status: 503 },
-    );
-  }) as unknown as typeof fetch);
-  await expect(
-    strict.json({ method: "POST", path: "/v1/x", body: {}, retry: false }),
-  ).rejects.toMatchObject({ code: "host_unavailable" });
-  expect(others).toBe(1);
-});
+    }) as unknown as typeof fetch);
+    await expect(
+      strict.json({ method: "POST", path: "/v1/x", body: {}, retry: false }),
+    ).rejects.toMatchObject({ code: "host_unavailable" });
+    expect(others).toBe(1);
+  }));
 
-test("guest_busy that never clears ends at the caller's deadline with its own error", async () => {
-  let calls = 0;
-  const t = transport((async () => {
-    calls++;
-    return Response.json(
-      { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
-      { status: 503 },
-    );
-  }) as unknown as typeof fetch);
-  const started = performance.now();
-  const error = await t
-    .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
-    .catch((error: unknown) => error);
-  expect(performance.now() - started).toBeLessThan(400);
-  expect(error).toMatchObject({ code: "guest_busy", status: 503 });
-  expect(calls).toBeGreaterThan(5);
-});
+test("guest_busy that never clears ends at the caller's deadline with its own error", () =>
+  onFakeClockFor(async () => {
+    let calls = 0;
+    const t = transport((async () => {
+      calls++;
+      return Response.json(
+        { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
+        { status: 503 },
+      );
+    }) as unknown as typeof fetch);
+    const started = performance.now();
+    const error = await t
+      .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
+      .catch((error: unknown) => error);
+    expect(performance.now() - started).toBeLessThan(400);
+    expect(error).toMatchObject({ code: "guest_busy", status: 503 });
+    expect(calls).toBeGreaterThan(5);
+  }));
 
 /* On a loaded machine bun can fire AbortSignal.timeout before a setTimeout
    that was due earlier (16 of 200 in a stalled loop, 11 October 2026): the
    deadline then ended a wait the transport had judged to fit, and the call
    failed as a timeout, not as the refusal it kept getting. Here every timer
    fires 300 ms late, so the deadline always comes first. */
-test("guest_busy whose wait the deadline overtakes still ends with its own error", async () => {
-  const real = globalThis.setTimeout;
-  globalThis.setTimeout = ((handler: () => void, ms?: number) =>
-    real(handler, (ms ?? 0) + 300)) as typeof setTimeout;
-  try {
-    const t = transport((async () =>
-      Response.json(
-        { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
-        { status: 503 },
-      )) as unknown as typeof fetch);
-    const error = await t
-      .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
-      .catch((error: unknown) => error);
-    expect(error).toMatchObject({ code: "guest_busy", status: 503 });
-  } finally {
-    globalThis.setTimeout = real;
-  }
-});
+test("guest_busy whose wait the deadline overtakes still ends with its own error", () =>
+  onFakeClockFor(async () => {
+    const real = globalThis.setTimeout;
+    globalThis.setTimeout = ((handler: () => void, ms?: number) =>
+      real(handler, (ms ?? 0) + 300)) as typeof setTimeout;
+    try {
+      const t = transport((async () =>
+        Response.json(
+          { error: { code: "guest_busy", status: 503, message: "Nothing ran.", retryAfterMs: 5 } },
+          { status: 503 },
+        )) as unknown as typeof fetch);
+      const error = await t
+        .json({ method: "GET", path: "/v1/x", timeoutMs: 200 })
+        .catch((error: unknown) => error);
+      expect(error).toMatchObject({ code: "guest_busy", status: 503 });
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  }));
 
 /* The leader drill on vin-5, 4 October 2026: a call in flight when the
    controller died waited, its connection silent, until its deadline, and
@@ -587,7 +606,7 @@ test("an attempt whose answer never starts is sent again under the same key", as
     const t = new Transport({
       apiKey: "rk_test",
       baseUrl: `http://localhost:${port}`,
-      answerStartMs: 200,
+      answerStartMs: 50,
       timeoutMs: 5_000,
     });
     const started = performance.now();
@@ -658,91 +677,103 @@ test("a connection reset after the request was sent keeps the backoff", async ()
   }
 });
 
-test("a timeout keeps the backoff: the request may have reached a server", async () => {
-  const t = tries(() =>
-    Promise.reject(new DOMException("The operation timed out.", "TimeoutError")),
-  );
-  await transport(t.fetcher).json({ method: "GET", path: "/v1/me" });
-  expect(t.gap()).toBeGreaterThanOrEqual(120);
-});
+test("a timeout keeps the backoff: the request may have reached a server", () =>
+  onFakeClockFor(async () => {
+    const t = tries(() =>
+      Promise.reject(new DOMException("The operation timed out.", "TimeoutError")),
+    );
+    await transport(t.fetcher).json({ method: "GET", path: "/v1/me" });
+    expect(t.gap()).toBeGreaterThanOrEqual(120);
+  }));
 
-test("a second refusal in a row waits the backoff, so a down API is not hammered", async () => {
-  const port = await closedPort();
-  const at: number[] = [];
-  const fetcher = (async () => {
-    at.push(performance.now());
-    if (at.length <= 2) return fetch(`http://127.0.0.1:${port}/v1/me`);
-    return Response.json({ ok: true });
-  }) as unknown as typeof fetch;
-  await transport(fetcher).json({ method: "GET", path: "/v1/me" });
-  expect(at).toHaveLength(3);
-  // The first retry waits no backoff: less than backoff(1)'s least, 250 ms. A
-  // bound of 100 ms failed on a loaded checker (604 ms run, 16 October 2026).
-  expect(at[1]! - at[0]!).toBeLessThan(240);
-  // backoff(1): 250 to 750 ms.
-  expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(240);
-});
+test("a second refusal in a row waits the backoff, so a down API is not hammered", () =>
+  onFakeClockFor(async () => {
+    const port = await closedPort();
+    const at: number[] = [];
+    const fetcher = (async () => {
+      at.push(performance.now());
+      if (at.length <= 2) return fetch(`http://127.0.0.1:${port}/v1/me`);
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch;
+    await transport(fetcher).json({ method: "GET", path: "/v1/me" });
+    expect(at).toHaveLength(3);
+    // The first retry waits no backoff: less than backoff(1)'s least, 250 ms. A
+    // bound of 100 ms failed on a loaded checker (604 ms run, 16 October 2026).
+    expect(at[1]! - at[0]!).toBeLessThan(240);
+    // backoff(1): 250 to 750 ms.
+    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(240);
+  }));
 
-test("a call without a room wait retries what the answer says; one whose wait is off is told at once", async () => {
-  // 503 and 429 since 17 October 2026, with Retry-After. A volume create has
-  // no room wait: the answer's own `retryable` decides, as for any call. A
-  // quota on what is kept says false and is told at once; room, or a limit
-  // on what runs at once, says true and is sent again.
-  const answering = (code: string, status: number, retryable: boolean, times: number) => {
-    let calls = 0;
+test("a call without a room wait retries what the answer says; one whose wait is off is told at once", () =>
+  onFakeClockFor(async () => {
+    // 503 and 429 since 17 October 2026, with Retry-After. A volume create has
+    // no room wait: the answer's own `retryable` decides, as for any call. A
+    // quota on what is kept says false and is told at once; room, or a limit
+    // on what runs at once, says true and is sent again.
+    const answering = (code: string, status: number, retryable: boolean, times: number) => {
+      let calls = 0;
+      const t = transport(
+        (async () => {
+          calls++;
+          return calls <= times
+            ? Response.json(
+                { error: { code, status, message: "full", retryable } },
+                { status, headers: retryable ? { "retry-after": "0" } : {} },
+              )
+            : Response.json({ ok: true });
+        }) as unknown as typeof fetch,
+        { maxRetries: 3 },
+      );
+      return { t, calls: () => calls };
+    };
+    for (const [code, status] of [
+      ["quota_exceeded", 409],
+      ["no_credit_kept_limit", 409],
+      ["rate_limited", 429],
+    ] as const) {
+      const { t, calls } = answering(code, status, false, 4);
+      await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).rejects.toMatchObject(
+        {
+          code,
+          status,
+        },
+      );
+      expect(calls()).toBe(1);
+    }
+    for (const [code, status] of [
+      ["no_capacity", 503],
+      ["quota_exceeded", 429],
+      ["no_credit_running_limit", 429],
+    ] as const) {
+      const { t, calls } = answering(code, status, true, 1);
+      await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).resolves.toEqual({
+        ok: true,
+      });
+      expect(calls()).toBe(2);
+      // A create, wake or restart whose owner turned its room wait off.
+      const off = answering(code, status, true, 1);
+      await expect(
+        off.t.json({
+          method: "POST",
+          path: "/v1/sandboxes/s:wake",
+          body: {},
+          waitForCapacityMs: 0,
+        }),
+      ).rejects.toMatchObject({ code, status });
+      expect(off.calls()).toBe(1);
+    }
+    let busy = 2;
     const t = transport(
-      (async () => {
-        calls++;
-        return calls <= times
+      (async () =>
+        busy-- > 0
           ? Response.json(
-              { error: { code, status, message: "full", retryable } },
-              { status, headers: retryable ? { "retry-after": "0" } : {} },
+              {
+                error: { code: "host_unavailable", status: 503, message: "away", retryAfterMs: 1 },
+              },
+              { status: 503 },
             )
-          : Response.json({ ok: true });
-      }) as unknown as typeof fetch,
+          : Response.json({ ok: true })) as unknown as typeof fetch,
       { maxRetries: 3 },
     );
-    return { t, calls: () => calls };
-  };
-  for (const [code, status] of [
-    ["quota_exceeded", 409],
-    ["no_credit_kept_limit", 409],
-    ["rate_limited", 429],
-  ] as const) {
-    const { t, calls } = answering(code, status, false, 4);
-    await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).rejects.toMatchObject({
-      code,
-      status,
-    });
-    expect(calls()).toBe(1);
-  }
-  for (const [code, status] of [
-    ["no_capacity", 503],
-    ["quota_exceeded", 429],
-    ["no_credit_running_limit", 429],
-  ] as const) {
-    const { t, calls } = answering(code, status, true, 1);
-    await expect(t.json({ method: "POST", path: "/v1/volumes", body: {} })).resolves.toEqual({
-      ok: true,
-    });
-    expect(calls()).toBe(2);
-    // A create, wake or restart whose owner turned its room wait off.
-    const off = answering(code, status, true, 1);
-    await expect(
-      off.t.json({ method: "POST", path: "/v1/sandboxes/s:wake", body: {}, waitForCapacityMs: 0 }),
-    ).rejects.toMatchObject({ code, status });
-    expect(off.calls()).toBe(1);
-  }
-  let busy = 2;
-  const t = transport(
-    (async () =>
-      busy-- > 0
-        ? Response.json(
-            { error: { code: "host_unavailable", status: 503, message: "away", retryAfterMs: 1 } },
-            { status: 503 },
-          )
-        : Response.json({ ok: true })) as unknown as typeof fetch,
-    { maxRetries: 3 },
-  );
-  await expect(t.json({ method: "GET", path: "/v1/me" })).resolves.toEqual({ ok: true });
-});
+    await expect(t.json({ method: "GET", path: "/v1/me" })).resolves.toEqual({ ok: true });
+  }));

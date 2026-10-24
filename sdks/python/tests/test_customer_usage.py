@@ -12,6 +12,9 @@ from withruntime import AsyncRuntime, InvalidRequestError, PermissionDeniedError
 
 class UsageHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # A header and its body, written apart, each go at once: with Nagle a
+    # kept-alive answer waited 40 ms on the client's delayed ACK.
+    disable_nagle_algorithm = True
 
     def log_message(self, *_):
         pass
@@ -46,7 +49,7 @@ class CustomerUsage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), UsageHandler)
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
         cls.url = f"http://127.0.0.1:{cls.server.server_port}"
 

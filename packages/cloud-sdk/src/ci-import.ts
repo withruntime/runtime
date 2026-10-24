@@ -25,7 +25,11 @@ type Step = {
   needs: string[];
   env: Record<string, string>;
   machine?: string;
+  /** Seconds each run may take: a GitHub job's `timeout-minutes`, else the default (6 hours, as GitHub's). */
+  timeout?: number;
 };
+/** The most a step's `timeout:` may say, in seconds: GitHub's own 6 hours. */
+const MOST_TIMEOUT_S = 6 * 3600;
 
 const MOST_STEPS = 64;
 const MOST_CACHE = 32;
@@ -262,8 +266,7 @@ function fromActions(w: Writer, file: CiSource) {
     }
     const runsOn = asText(job["runs-on"]);
     if (job.if) w.note(where, `its if (${asText(job.if)}) is not carried: it runs on every check`);
-    if (Number(job["timeout-minutes"]) > 30)
-      w.note(where, `asks ${asText(job["timeout-minutes"])} minutes; a job here runs at most 30`);
+    const timeout = jobTimeout(w, where, job["timeout-minutes"]);
     if (job["continue-on-error"])
       w.note(where, "continue-on-error is not carried: a failure fails the check");
     const dir = asText(obj(obj(job.defaults).run)["working-directory"]);
@@ -371,7 +374,13 @@ function fromActions(w: Writer, file: CiSource) {
         .map(([, v]) => v)
         .join(" ");
       const title = asText(job.name || id).includes("${{") ? id : asText(job.name || id);
-      steps.push({ name: w.unique(label ? `${title} ${label}` : title), run, needs: [], env });
+      steps.push({
+        name: w.unique(label ? `${title} ${label}` : title),
+        run,
+        needs: [],
+        env,
+        ...(timeout ? { timeout } : {}),
+      });
     }
     made.push({ steps, needs: names(job.needs) });
     named.set(
@@ -384,6 +393,27 @@ function fromActions(w: Writer, file: CiSource) {
       s.needs = m.needs.flatMap((n) => named.get(n) ?? []);
       w.steps.push(s);
     }
+}
+
+/** A GitHub job's `timeout-minutes` as a step's `timeout:` in seconds;
+ * undefined (the default, 6 hours as GitHub's) when it says none, or a value
+ * that is not a number, which is noted. */
+function jobTimeout(w: Writer, where: string, raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    w.note(
+      where,
+      `timeout-minutes ${asText(raw)} is not carried; the step has the default 6 hours`,
+    );
+    return undefined;
+  }
+  const seconds = Math.ceil(minutes * 60);
+  if (seconds > MOST_TIMEOUT_S) {
+    w.note(where, `asks ${asText(raw)} minutes; a step here runs at most 360, as on GitHub`);
+    return MOST_TIMEOUT_S;
+  }
+  return seconds;
 }
 
 // CircleCI's resource classes by vCPUs: medium is 2, large 4, xlarge 8, 2xlarge 16.
@@ -574,6 +604,7 @@ export function importCi(files: CiSource[]): CiImport {
     run: s.run,
     ...(s.needs.length ? { needs: s.needs } : {}),
     ...(s.machine ? { machine: s.machine } : {}),
+    ...(s.timeout ? { timeout: s.timeout } : {}),
     ...(Object.keys(s.env).length ? { env: s.env } : {}),
   }));
   const head = [

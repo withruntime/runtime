@@ -22,6 +22,7 @@ PATHS = [f"/v1/{path}" for path in ("sandboxes/fixture", "snapshots/fixture", "i
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True
 
     def log_message(self, *_):
         pass
@@ -40,7 +41,7 @@ class ProductAliases(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
         cls.url = f"http://127.0.0.1:{cls.server.server_port}"
 

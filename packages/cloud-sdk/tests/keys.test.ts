@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { publicEncrypt, randomBytes, randomUUID } from "node:crypto";
 import { run } from "../src/cli";
 import { createKey, dailyLimitMicros, type KeyRequest } from "../src/keys";
+import { onFakeClockFor } from "./fixtures/fake-clock";
 
 /* `runtime keys create`: ARCHITECTURE.md section 10, "Keys from the
    terminal". The website half is proven in packages/db/tests/
@@ -519,14 +520,18 @@ test("`keys create --sandbox --actions` with no key on the machine asks the brow
   try {
     const written: string[] = [];
     const notes: string[] = [];
+    // The CLI's five-second wait before it asks whether the key arrived, on
+    // the fake clock.
     expect(
-      await run(
-        ["keys", "create", "--sandbox", sandbox, "--actions", "get,exec", "--name", "helper"],
-        {
-          RUNTIME_AUTH_URL: `http://127.0.0.1:${site.port}`,
-          RUNTIME_API_URL: `http://127.0.0.1:${site.port}`,
-        },
-        { json: false, write: (t) => written.push(t), error: (t) => notes.push(t) },
+      await onFakeClockFor(() =>
+        run(
+          ["keys", "create", "--sandbox", sandbox, "--actions", "get,exec", "--name", "helper"],
+          {
+            RUNTIME_AUTH_URL: `http://127.0.0.1:${site.port}`,
+            RUNTIME_API_URL: `http://127.0.0.1:${site.port}`,
+          },
+          { json: false, write: (t) => written.push(t), error: (t) => notes.push(t) },
+        ),
       ),
     ).toBe(0);
     expect(calls.map((call) => call.path)).toEqual(["start", "token", "confirm"]);

@@ -4,6 +4,14 @@ import { Process } from "../src/sandbox";
 import type { Transport } from "../src/transport";
 import type { ProcessInfo } from "../src/types";
 
+/** `length` bytes, byte i being `at(i)`: a plain loop, where Uint8Array.from
+ * with a callback took 15 times as long for megabytes. */
+function bytesOf(length: number, at: (i: number) => number) {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i++) out[i] = at(i);
+  return out;
+}
+
 const MAX_CHUNK = 1_048_576;
 type Input = { offset: number; base64: string; eof?: boolean };
 
@@ -38,7 +46,7 @@ function reader(capacity: (call: number) => number, initialOffset = 0) {
 test("partial stdin acceptance shrinks later requests without losing bytes or adding calls", async () => {
   const capacity = 65_536;
   const f = reader(() => capacity);
-  const input = Uint8Array.from({ length: 2_500_000 }, (_, index) => index % 256);
+  const input = bytesOf(2_500_000, (index) => index % 256);
   await f.process.write(input, { eof: true });
   expect(Buffer.concat(f.received)).toEqual(Buffer.from(input));
   expect(f.calls).toHaveLength(Math.ceil(input.length / capacity));

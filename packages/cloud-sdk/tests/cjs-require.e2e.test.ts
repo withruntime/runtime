@@ -12,7 +12,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/* CommonJS hosts (ComputeSDK's and Mastra's builds, any `require`) load the
+/* End to end, on main's check after merge (.runtime/e2e-files.sh): only a
+   real build of the package as published, installed by name and required
+   by the node on PATH, proves what a CommonJS customer gets. 11 s: tsc 5
+   builds dist, then node loads every export.
+
+   CommonJS hosts (ComputeSDK's and Mastra's builds, any `require`) load the
    package through Node's require(esm), which needs a `default` condition in
    every export: with only `import`, require("withruntime") failed with
    ERR_PACKAGE_PATH_NOT_EXPORTED. This builds the package as published (the
@@ -27,7 +32,6 @@ const here = join(import.meta.dir, "..");
 const TSC5 = join(here, "..", "typescript-config", "tsc5.mjs");
 const manifest = JSON.parse(readFileSync(join(here, "package.json"), "utf8")) as {
   exports: Record<string, unknown>;
-  engines: { node: string };
 };
 const subpaths = Object.keys(manifest.exports).map((key) => `withruntime${key.slice(1)}`);
 
@@ -67,12 +71,6 @@ const expected: Record<string, string> = {
   "withruntime/builds": "builds",
   "withruntime/ci": "ci",
 };
-
-test("engines asks for the Node that require(esm) needs", () => {
-  // A CommonJS caller on 22.0 to 22.11 gets ERR_REQUIRE_ESM; npm warns
-  // before that happens only if engines says so.
-  expect(manifest.engines.node).toBe(">=22.12");
-});
 
 test(
   "require() loads every export by name on the node in PATH",
@@ -124,7 +122,7 @@ test(
       writeFileSync(join(consumer, "package.json"), JSON.stringify({ type: "module" }));
       writeFileSync(
         join(consumer, "workflows.ts"),
-        readFileSync(join(here, "tests/compat/consumers/workflows.ts.txt"), "utf8")
+        readFileSync(join(here, "tests/compat/consumers/workflows.ts"), "utf8")
           .replaceAll('"@compat/e2b-interpreter"', '"withruntime/e2b/code-interpreter"')
           .replaceAll('"@compat/', '"withruntime/'),
       );

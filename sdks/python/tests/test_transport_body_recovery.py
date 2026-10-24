@@ -9,6 +9,8 @@ from withruntime import AsyncRuntime, ConnectionError, Runtime, RuntimeError
 from withruntime._request_scope import request_scope
 from withruntime._http import SyncResponse
 
+from tests.instant_sleeps import instant_sleeps
+
 
 class World:
     def __init__(self, fault, failures=1):
@@ -17,6 +19,9 @@ class World:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            # A header and its body, written apart, each go at once: with Nagle a
+            # kept-alive answer waited 40 ms on the client's delayed ACK.
+            disable_nagle_algorithm = True
 
             def log_message(self, *_):
                 pass
@@ -54,7 +59,7 @@ class World:
 
         self.unstall = threading.Event()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -102,17 +107,22 @@ class BodyRecovery(unittest.TestCase):
                 with self.subTest(asynchronous=asynchronous, fault=fault):
                     world = World(fault)
                     try:
-                        self.assertEqual(self.call(world, asynchronous), {"ok": True})
+                        with instant_sleeps() as slept:
+                            self.assertEqual(self.call(world, asynchronous), {"ok": True})
                         self.assertEqual(len(world.keys), 2)
                         self.assertTrue(world.keys[0])
                         self.assertEqual(world.keys[0], world.keys[1])
+                        # The retry waited its back-off (0.25 s, jittered by half).
+                        self.assertEqual(len(slept), 1)
+                        self.assertGreaterEqual(slept[0], 0.125)
                     finally:
                         world.close()
 
     def test_async_malformed_chunk_delimiter_is_not_accepted(self):
         world = World("delimiter")
         try:
-            self.assertEqual(self.call(world, True), {"ok": True})
+            with instant_sleeps():
+                self.assertEqual(self.call(world, True), {"ok": True})
             self.assertEqual(len(world.keys), 2)
             self.assertEqual(world.keys[0], world.keys[1])
         finally:
@@ -122,7 +132,7 @@ class BodyRecovery(unittest.TestCase):
         for asynchronous in (False, True):
             world = World("length", failures=10)
             try:
-                with self.assertRaises(ConnectionError) as caught:
+                with self.assertRaises(ConnectionError) as caught, instant_sleeps():
                     self.call(world, asynchronous)
                 self.assertEqual(len(world.keys), 2)
                 self.assertEqual(caught.exception.idempotency_key, world.keys[0])
@@ -135,7 +145,10 @@ class BodyRecovery(unittest.TestCase):
             for operation in ("bytes", "file_bytes"):
                 world = World("length")
                 try:
-                    self.assertEqual(self.call(world, asynchronous, operation), b'{"ok":true}')
+                    with instant_sleeps() as slept:
+                        self.assertEqual(self.call(world, asynchronous, operation), b'{"ok":true}')
+                    self.assertEqual(len(slept), 1)
+                    self.assertGreaterEqual(slept[0], 0.125)
                     self.assertEqual(len(world.keys), 2)
                 finally:
                     world.close()
@@ -152,16 +165,17 @@ class BodyRecovery(unittest.TestCase):
                 world.close()
 
     def test_scope_expiring_during_retry_wait_keeps_typed_error_and_key(self):
-        # The retry waits 5 s and the scope is 1 s, so the scope ends in the
+        # The retry waits 5 s and the scope is 0.3 s, so the scope ends in the
         # wait and never before the first answer. With a 50 ms scope and the
         # real 125 to 375 ms wait, a loaded check machine could spend the 50 ms
-        # before the first request was answered, and no key was recorded.
+        # before the first request was answered, and no key was recorded; a
+        # 1 s scope cost the test 2 s (23 October 2026).
         for asynchronous in (False, True):
             world = World("length", failures=10)
             try:
                 with patch("withruntime._sync_client._backoff", return_value=5.0), \
                         patch("withruntime._async_client._backoff", return_value=5.0), \
-                        request_scope(1.0), self.assertRaises(RuntimeError) as caught:
+                        request_scope(0.3), self.assertRaises(RuntimeError) as caught:
                     self.call(world, asynchronous)
                 self.assertEqual(caught.exception.code, "request_timeout")
                 self.assertEqual(caught.exception.idempotency_key, world.keys[0])

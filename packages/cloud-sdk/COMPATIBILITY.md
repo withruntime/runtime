@@ -329,8 +329,8 @@ share the file path and `compat.provider` resource label.
 ## Evidence that can be repeated locally
 
 Run `bun test tests/compat` from the SDK package and run `bun run check-types`.
-The test run compiles unchanged typed consumer bodies from
-`tests/compat/consumers/workflows.ts.txt` against all ten TypeScript adapters,
+The type check (`tests/compat/consumers/tsconfig.json`) compiles unchanged typed consumer bodies from
+`tests/compat/consumers/workflows.ts` against all ten TypeScript adapters,
 including E2B's interpreter. Run
 `bun tests/compat/check-consumers.ts <verified-cache>` to compile the
 same bodies against the pinned upstream declarations; the script checks each
