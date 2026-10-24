@@ -1,7 +1,6 @@
 """The Modal drop-in's whole pinned surface: what it serves on Runtime, and what
 it refuses before any request (modal 1.6.2, compat-inventory.json)."""
 import asyncio
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -215,10 +214,6 @@ class Images(World):
             self.assertIn("RUN python -m pip install poetry==1.8.3", poetry._dockerfile)
             self.assertIn("poetry install --no-root --with dev --compile", poetry._dockerfile)
             Path(folder, "uv.lock").write_text("lock")
-            if sys.version_info < (3, 11) and importlib.util.find_spec("tomli") is None:
-                with self.assertRaises(ImportError):
-                    Image.debian_slim().uv_sync(folder, groups=["dev"], extras=["cli"])
-                return
             synced = Image.debian_slim().uv_sync(folder, groups=["dev"], extras=["cli"])
             self.assertIn("/.uv/uv sync --project=/.uv --no-install-workspace --compile-bytecode --group=dev "
                           "--extra=cli --frozen", synced._dockerfile)
@@ -227,10 +222,6 @@ class Images(World):
                 Image.debian_slim().uv_sync(os.path.join(folder, "missing"))
             with self.assertRaises(InvalidError):
                 Image.debian_slim().uv_sync(folder, groups="dev")
-            try:
-                import tomllib  # noqa: F401
-            except ImportError:
-                return
             Path(folder, "pyproject.toml").write_text(
                 '[project]\nname = "x"\ndependencies = ["httpx"]\n[project.optional-dependencies]\ntest = ["pytest"]\n')
             from_project = Image.debian_slim().pip_install_from_pyproject(str(Path(folder, "pyproject.toml")), ["test"])

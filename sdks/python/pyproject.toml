@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "withruntime"
-version = "0.31.0"
+version = "0.31.1"
 description = "Runtime Cloud: one client (sync and async) for every Runtime product. Sandboxes first."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
-dependencies = []
+# withruntime.modal's Image.uv_sync and poetry_install read pyproject.toml; tomllib is 3.11+.
+dependencies = ['tomli>=1.1.0; python_version < "3.11"']
 keywords = ["sandbox", "ai-agents", "agents", "microvm", "firecracker", "code-execution", "code-interpreter", "mcp", "llm"]
 
 [project.urls]

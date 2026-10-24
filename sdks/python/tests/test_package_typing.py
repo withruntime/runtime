@@ -13,7 +13,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.31.0"
+VERSION = "0.31.1"
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
@@ -58,6 +58,18 @@ class PackageTyping(unittest.TestCase):
             return
         self.assertIn("py.typed", ast.literal_eval(declaration.group(1)))
 
+    def test_tomli_fallback_is_a_declared_dependency(self):
+        # withruntime.modal fell back to `tomli` before 3.11 without declaring
+        # it, so Image.uv_sync and poetry_install crashed on 3.9 and 3.10.
+        project = (ROOT / "pyproject.toml").read_text()
+        declared = re.search(r"(?m)^dependencies = (\[[^\n]*\])$", project)
+        self.assertIsNotNone(declared, "dependencies must stay on one line")
+        if declared is None:
+            return
+        sources = "\n".join(path.read_text() for path in (ROOT / "withruntime").rglob("*.py"))
+        if re.search(r"(?m)^\s*import tomli\b", sources):
+            self.assertIn('tomli>=1.1.0; python_version < "3.11"', ast.literal_eval(declared.group(1)))
+
     def test_package_metadata_and_runtime_version_agree(self):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertRegex(project, rf'(?m)^version = "{re.escape(VERSION)}"$')
@@ -98,6 +110,7 @@ class PackageTyping(unittest.TestCase):
             self.assertEqual(wheel.read("withruntime/py.typed"), b"")
             metadata = message_from_bytes(wheel.read(metadata_name))
             self.assertEqual((metadata["Name"], metadata["Version"]), ("withruntime", VERSION))
+            self.assertIn('tomli>=1.1.0; python_version < "3.11"', metadata.get_all("Requires-Dist") or [])
         with expanded_tar(sdist_path) as expanded, tarfile.open(fileobj=expanded, mode="r|") as source:
             names = set()
             size = 0
