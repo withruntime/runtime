@@ -87,8 +87,10 @@ export type Signed = {
   /** prebuild: build these engines ahead of merge (engines-archive.ts),
    * never a release: a follower takes only its own action. ship: Marc's
    * ship it of a pull request's head, which CI/CD's gate reads
-   * (agents/ship-it.ts shipRefusal), never a follower. */
-  action: "release" | "unhold" | "prebuild" | "ship" | OrderAction;
+   * (agents/ship-it.ts shipRefusal), never a follower. card: an ask, never
+   * a record: the signer posts its own ship card for that head
+   * (agents/release-signer.py card) and signs nothing. */
+  action: "release" | "unhold" | "prebuild" | "ship" | "card" | OrderAction;
   target: string;
   sha: string;
   tree: string;

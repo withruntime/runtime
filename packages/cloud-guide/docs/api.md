@@ -698,9 +698,12 @@ dataset. `POST /v1/sandboxes/{id}/files:link` makes one and answers its `url`,
 - `method: "PUT"` makes an upload link: `curl -T report.pdf "$URL"` writes the
   body to `path`, making its folder, whole or not at all (a reader sees the old
   file or the new one), and answers 201 with `{"path", "size", "sha256"}`. Up to
-  `maxBytes`, 5 GiB by default and at most; the body must arrive within 5
-  minutes.
+  `maxBytes`, 5 GiB by default and at most, in one request: the body streams
+  into the sandbox as it arrives, so there is nothing to split. It must arrive
+  within 5 minutes.
 - `expiresInSeconds` is 3600 unless given, 60 to 604800 (7 days).
+- A link works from anywhere, another sandbox included: hand one to an agent
+  in a sandbox and it downloads or uploads with `curl`, no key.
 - A paused sandbox wakes for a link as for any file call. `wake: false` never
   wakes it (the link answers 409 `sandbox_paused`); `wake: true` wakes it even
   when it was made with `autoWake: false`, and needs a key that may wake the

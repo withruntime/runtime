@@ -193,7 +193,6 @@ request's.
 machine: 4cpu # 2cpu, 4cpu (default), 8cpu or 16cpu; 4 GiB of memory per vCPU
 setup: bun install --frozen-lockfile # run once, kept as the warm machine
 cache: [bun.lock, package.json] # files whose bytes key the warm machine
-keep: 8 # machines a pull request keeps for its next push: 0 (default) to 16
 timeout: 120 # seconds the whole check may take from its start: 10 to 21600 (default 21600)
 steps:
   - name: lint
@@ -268,6 +267,39 @@ record a gate checks. A review that approves, asks for changes or comments
 with words, or one dismissed, checks the head again. A gate runs
 on every commit, is never served an earlier pass, and has no `split`,
 `inputs`, `needs` or `machine`; no step needs one.
+
+### Fix and warnings
+
+Style should warn, not block. A step with `fix` runs a command that rewrites
+files (a formatter, a code generator) on the machine of the change as it would
+land, and fails nothing:
+
+```yaml
+steps:
+  - name: format
+    fix: bun run format # bash -c; no run, split or gate beside it
+```
+
+The step runs your command on a copy of the tree, never in the checkout your
+other steps run in at the same time, so a rewrite never lands under a compile or
+a test, and every step tests the commit. The copy holds the working tree as it
+is, uncommitted files too, with the checkout's ignored folders (`node_modules`,
+`target`, ...) linked in so your tools are found, and is removed after. If your
+command exits other than 0, or leaves files other than they were (compared as
+git trees before and after, so a change's own edits are not counted), each is a
+warning in the check's summary, naming up to five of the files. The step passes,
+and the files it rewrote are not kept: whoever pushes next fixes them. It runs on every commit unless it says
+`reuse: true`, so a warning is never hidden behind an earlier pass. It may
+set `name` (default `fix`), `inputs`, `needs`, `machine` and `env`.
+
+Any step can warn. A line of its output that starts with `::warning` (GitHub
+Actions' own syntax: `::warning::text`, or `::warning file=a.rs,line=3::text`)
+is kept with the job, at most 10 lines of 300 characters for each task, and the
+check's `runtime` run on GitHub names the job and its first lines under "N
+warnings, which do not block". The job's row says "passed with N warnings".
+A warning fails nothing: whether a step fails is its exit code alone, so a lint
+that should fail only on bugs is told which lints do (`clippy -- -D
+clippy::correctness`), and the rest warn.
 
 ### Steps that need no machine
 
@@ -437,36 +469,17 @@ deploy:
   `_ . -`. The machine has your `setup`'s tools and the commit's files, and
   every `RUNTIME_CI_*` a step has. Put nothing secret in the file.
 
-### A pull request's machines
+### A check's machines
 
-With `keep:` in `runtime.yml` (1 to 16; none unless it says), a pull
-request's check leaves the machines it ran on paused for the pull request's
-next push: at most `keep` of them in all, whatever checks left them. The next
-push's check
-wakes them instead of starting new ones, with its build caches and installed
-dependencies as the last push left them, and sends each only what changed.
-They are deleted when the pull request merges or closes, and one day after
-the push that left them in any case.
-
-- **Cost.** While paused, each is billed as any paused sandbox: its memory
-  and disk at {{paused-storage-rate}} per decimal GB per 30-day month
-  ([paused storage](./pricing#paused-storage)). A pull request left open with
-  no new push pays for its machines until their day is out. Without `keep:`,
-  or with `keep: 0`, every machine is deleted when its check ends.
-- **What it trades.** A kept machine holds what the last push's steps left,
-  files git ignores too: a build cache, installed tools, a hook. So a later
-  push's verdict can depend on an earlier push's change even once the pull
-  request no longer holds it, which a review of its final diff does not
-  show. Turn it on where every writer's earlier pushes can be trusted that
-  far; a push to the production branch always starts fresh.
-- **What runs on them.** What a push left on a machine, files git ignores
-  too, is run only by the same pull request's next push. Only a pull request
-  from the repository's own branches, pushed by a writer, keeps machines or
-  takes them: never a fork's, nor one a writer approved for someone else
-  ([Whose code runs](#whose-code-runs)). A push to the production branch
-  never runs on one, and neither does a gate: a check's gates share one
-  machine of their own, made from the image. Each machine is claimed for one check before it
-  wakes: two checks never run on the same one.
+Every machine a check runs on is started from the warm snapshot for that
+check alone, on any server with room, and deleted when the check ends,
+whether it passed, failed or was cancelled. Nothing waits between checks: no
+machine is kept paused for a pull request's next push or for the next check,
+so nothing is billed once a check is over, and no push's verdict depends on
+what an earlier push left on a machine. Each push starts fresh; its build
+caches come from the [build cache](#rust-build-cache), not a kept machine.
+A `runtime.yml` that still sets `keep:` or `pool:` checks as before: both
+are read and do nothing.
 
 ### Split test files
 
@@ -542,12 +555,12 @@ request, even one from a fork's branch named `main`. A small public
 repository, {{ci-small-repo}}, took {{ci-small-cold}} for its first check and
 {{ci-small-pull-request}} for a pull request this way ({{ci-measured-on}}).
 
-A few copies of the warm snapshot are kept paused, ready for the next checks,
-and a check wakes one (a wake takes about a tenth of a second): its first test
-starts on that one machine at once when one is all it needs. It asks for more
-only when what it has to run is longer than about a minute on one, and then
-takes them all before its tests start. A paused copy holds no server's
-processors or memory.
+A check starts each of its machines from the warm snapshot at once, each in
+the time of one (1 to 6 seconds), spread across the servers that hold the
+snapshot; when those have no room, a machine starts on any other server with
+room, the snapshot copied there. It asks for more than one only when what it
+has to run is longer than about a minute on one, and then takes them all
+before its tests start.
 
 The warm snapshots are in your account's snapshot list, and their storage is
 billed as any snapshot's. CI/CD keeps only what a check can still use: the
@@ -556,6 +569,16 @@ before it. When a push changes the setup, the machine size or a `cache` file, th
 branch has a new key, and the old key's warm snapshots are deleted an hour
 later. A check that copies its machine deletes the copy when it ends; a copy
 left by a check that ended any other way is deleted within minutes.
+
+Warm snapshots never fill your account's snapshot storage. A move to a new
+commit first deletes what earlier moves left past the two commits kept, then
+makes only as many servers' copies as fit under three quarters of your
+account's snapshot storage limit (the limits page lists it); the last quarter
+stays for the checks' forks, each of which keeps a snapshot while its copies
+start, and for what else you keep. With no room, the warm snapshot stays at its
+commit and the check's log says why. A fork refused at your account's snapshot
+storage limit is never waited for: its machines are made from the warm
+snapshot, which keeps nothing.
 
 ## Passed before
 
@@ -611,18 +634,23 @@ machine is handed its output instead.
   compare two machines' files to see what differed.
 - **Where it is kept:** on each machine, so a warm snapshot carries it to
   every check, and in the repository's store: one sandbox of your account,
-  `build-cache-<key>`, labelled `runtime-ci-build-cache`, made by the first
-  check that needs it (2 vCPU, 2 GiB, a 32 GiB disk). It serves through a
-  preview, so it moves at most a preview's daily bytes and rate; a repository
-  whose checks move more sets `build_cache: { shards: N }` in `runtime.yml`
-  (up to 16), and its store is N such sandboxes, `build-cache-<key>-1` and on,
-  each keeping the entries whose keys fall to it: N times the room, the
-  bytes a day and the speed, and N sandboxes woken for every check. They
-  pause when no check uses them and are billed as any sandbox; delete them
-  to start the cache empty. A changed count finds nothing kept under the old
-  until it is compiled again. The least used entries go first when a disk
-  fills. A store belongs to one repository, and nothing in it is shared with
-  another repository or account.
+  named `build-cache-<key>-<id>` and labelled `runtime-ci-build-cache`, made
+  by the first check that needs it (2 vCPU, 2 GiB, a 32 GiB disk). It serves
+  through a preview, so it moves at most a preview's daily bytes and rate; a
+  repository whose checks move more sets `build_cache: { shards: N }` in
+  `runtime.yml` (up to 16), and its store is N such sandboxes, each keeping
+  the entries whose keys fall to it: N times the room, the bytes a day and
+  the speed, and N sandboxes woken for every check. CI/CD records which
+  sandboxes it made, with a secret of its own, and uses only those: another
+  sandbox that takes the name or the label is never part of the store, nor
+  is one a laptop's or another CI's first compile made, nor a store from
+  before CI/CD kept this record. Your checks compile into a new store once;
+  an old one no check wakes is deleted after 14 days paused, or delete it
+  yourself. They pause when no check uses them and are billed as any
+  sandbox; delete one and the next check makes a new, empty one in its place. A
+  changed count finds nothing kept under the old until it is compiled again.
+  The least used entries go first when a disk fills. A store belongs to one
+  repository, and nothing in it is shared with another repository or account.
 - **Who reads what:** a push to the production branch writes the
   repository's entries; a pull request reads them and its own, writes only
   its own, and never sees another pull request's. A pull request from a
@@ -634,6 +662,21 @@ machine is handed its output instead.
   without the cache, so nothing a pull request's code wrote reaches either.
   The grant is kept in a file on the machine only its user reads, never in a
   step's command.
+- **On your private network:** check machines reach the store through its
+  private previews. With your organization's private network on, a
+  repository can have them reach it there first, by each sandbox's id, the
+  previews behind it:
+
+  ```yaml
+  build_cache:
+    private_network: true
+  ```
+
+  It is off by default: a check's compiles open many connections at once,
+  and they count toward the same private network limits as your own
+  sandboxes' connections to each other. When the private network refuses
+  one, that machine uses that sandbox's preview for a minute.
+
 - **From any machine:** a laptop or another CI's Linux x86-64 machine reads
   the same store with one line. Download the wrapper once with your key (its
   SHA-256 is in the `x-content-sha256` header), then build as always:
@@ -674,12 +717,16 @@ machine is handed its output instead.
   migrations), or turn the cache off for that step.
 
 `runtime-build-cache build` builds a workspace once for every crate's check:
-its test binaries (`cargo test --workspace --no-run`), its lints with `-D
-warnings` and the doc tests of the libraries that have any.
-`runtime-build-cache test` then checks a crate as a task of a split: its
-format, and its own test binaries out of that one build, so a task compiles
-nothing the build made and only runs tests. A crate with a workspace of its
-own is checked whole from its folder: format, lints, tests and doc tests.
+its test binaries (`cargo test --workspace --no-run`), its lints and the doc
+tests of the libraries that have any. `runtime-build-cache test` then checks a
+crate as a task of a split: its format, and its own test binaries out of that
+one build, so a task compiles nothing the build made and only runs tests. A
+crate with a workspace of its own is checked whole from its folder: format,
+lints, tests and doc tests. A format difference and every style lint warn: they
+are `::warning::` lines in the check's summary (a count first, by lint, then the
+first few), and fail nothing. Clippy runs with `-D clippy::correctness
+-D clippy::suspicious -D unused_must_use` and never `-D warnings`, so what
+fails the crate is what is wrong, not how it is written:
 
 ```yaml
 steps:
@@ -812,12 +859,16 @@ until a fix lands, and nothing it gates releases before then.
 
 ## Main is checked after merges, in batches
 
-A merge never waits for a check. Your production branch has at most one check
-running at a time, and it starts on the newest commit there. Nothing cancels
-it once it starts, however many merges land meanwhile. The merges that land
-while it runs wait together for the next check, which starts as soon as this
-one gives its verdict and covers every one of them. A pass covers every commit
-up to the one it checked.
+A merge never waits for a check. Your production branch's checks run as a
+pipeline: one sets up at a time, and the next starts on the newest commit there
+as soon as the one before begins its tests, so a verdict comes every setup's
+length rather than every whole check's. Nothing cancels a check once it
+starts, however many merges land meanwhile. The merges that land while one
+sets up wait together for the next, which covers every one of them. A pass
+covers every commit up to the one it checked, and a release only ever moves
+forward: an older check passing late never takes it back. A branch whose
+config has `deploy:` entries runs one check at a time, so its deploys go out
+in commit order.
 
 ## Undo a failing production branch
 
@@ -900,19 +951,15 @@ npx withruntime ci tests <repoId> --quarantined
   `commit` (a full SHA), `pullRequest` or `state` (`queued`, `running`,
   `passed`, `failed`, `cancelled`). `waiting` is true for a check that waits
   for a writer's approval. `counts` holds how many of its jobs are in each
-  state. `machines` says where its machines came from and how soon:
-  `reused` (its pull request's own, left paused by its last push), `pooled`
-  (the repository's warm pool), `forked` in `forks` batch forks, `created`
-  (from the warm snapshot), `kept` for the next push, `firstMs` to its first
-  machine, `firstTestMs` to its first test, and `lineMs` waiting in the
-  account's line.
+  state. `machines` says how many machines it ran on and how soon:
+  `created` (each from the warm snapshot), `firstMs` to its first machine,
+  `firstTestMs` to its first test, and `lineMs` waiting in the account's
+  line. `reused`, `pooled`, `forked`, `forks` and `kept` are 0 for every check
+  since 23 October 2026 (older checks woke or kept machines between checks).
 - **Where a check's machines come from.** First the ones it is done with
-  from its earlier steps, then its pull request's own machines, paused since
-  its last push with its build caches warm (all woken on its first ask),
-  then the warm pool, then one batch fork of up to 100 copies of a paused
-  pool machine, or, with none paused, all started from the warm snapshot at
-  once. A pull request's machines are deleted when it merges or closes, or a
-  day after its last push ([A pull request's machines](#a-pull-requests-machines)). An
+  from its earlier steps, then the rest all started from the warm snapshot
+  at once, on any server with room; every one is deleted when the check ends
+  ([A check's machines](#a-checks-machines)). An
   account's checks start at most 2 machines a second (100 at once) and hold
   at most 256, counted across all of them (a `runtime-ci` run by hand counts
   its own): past that, or when a region has no room, a check waits in line with
@@ -937,8 +984,14 @@ npx withruntime ci tests <repoId> --quarantined
   repositories its own agent connected.
 - **A job** is `queued`, `running`, `passed`, `failed`, `flaky` (its only
   failures were in quarantined files), `cached` (its content key passed
-  before, in `cachedFrom`), `cancelled` or `skipped`. Its `log` is the tail of
-  its output, the last 256 KiB.
+  before, in `cachedFrom`), `cancelled` or `skipped`. Its `log` is its output,
+  at most the last 256 KiB. A failed file's output is kept whole when it is
+  short; when it is long, the log keeps its first error, every line that says
+  a test failed (`panicked`, `FAILED`, `error[`) with the lines around it,
+  and its end, in the order written, saying how many lines each gap holds.
+  A key an owner or admin made account-wide reads every check and job of
+  the account, whichever key connected the repository; an agent's own key
+  reads its agent's.
 - **A failed job's sandbox may be kept paused.** Its `sandboxIds` are your
   own sandboxes: wake one and look around where it failed with
   `runtime sandboxes wake <id>` and `runtime sandboxes shell <id>`, or the
@@ -999,6 +1052,6 @@ A check machine is billed at **{{ci-vcpu-minute}} per vCPU-minute**, with
 {{ci-gib-per-vcpu}} of memory per vCPU, by the second
 ([pricing](./pricing#ci-cd)): the default, `4cpu`, is 4 vCPU and 16 GiB at
 {{ci-4vcpu-minute}} a minute. Every machine of a check is deleted when the
-check ends, whatever happened, except those a pull request's check keeps
-paused for its next push ([A pull request's machines](#a-pull-requests-machines)). CI/CD opens to an account once Runtime sets its
+check ends, whatever happened ([A check's machines](#a-checks-machines)):
+nothing is billed between checks. CI/CD opens to an account once Runtime sets its
 limits ([limits](./limits)).

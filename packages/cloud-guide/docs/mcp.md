@@ -111,6 +111,11 @@ comparison are not listed, and `runtime_account` returns usage and limits
 without names, internal identifiers or card details. The ordinary MCP
 connection keeps its usual credential behavior.
 
+**Only the docs?** `https://withruntime.com/mcp` is a separate, public MCP
+server with no sign-in: it searches and reads these guides
+(`search_runtime_docs`, `read_runtime_doc`, `list_runtime_docs`) and runs
+nothing.
+
 ## Tools
 
 The server answers `initialize` with instructions: the quick start, safe retries,

@@ -8,6 +8,27 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 24 October 2026
+
+- **Upload links take the 5 GiB they say.** An upload link (`files:link` with
+  `method: "PUT"`) refused a body over 64 MB as too large; it now takes up to
+  its `maxBytes`, 5 GiB at most, in one request, streamed into the sandbox,
+  with nothing to split. A sandbox can open a file link too, to download or
+  upload with no key. See [file links](./api#file-links).
+
+<!-- launch: ci -->
+
+## 22 October 2026
+
+- **A failed check's log keeps what matters.** A long failed log keeps its
+  first error, every line that says a test failed (`panicked`, `FAILED`,
+  `error[`) with the lines around it, and its end, not only its last few
+  thousand characters. A link to a check or job opens it in whichever of
+  your accounts holds it and that your sign-in may enter. See
+  [read checks, jobs and logs](./ci#read-checks-jobs-and-logs).
+
+<!-- /launch: ci -->
+
 ## 21 October 2026
 
 - **Previews are never indexed.** Every answer on a preview address, private

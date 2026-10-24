@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "runtime",
+  "version": "1.0.0",
+  "description": "Linux sandboxes for AI agents: run code, install packages, serve previews and move a project's sandbox work to Runtime Cloud. The remote MCP server signs in with OAuth.",
+  "author": { "name": "Runtime", "url": "https://withruntime.com" },
+  "homepage": "https://withruntime.com/docs/mcp",
+  "repository": "https://github.com/withruntime/runtime",
+  "license": "Apache-2.0",
+  "keywords": ["sandbox", "microvm", "mcp", "cloud", "code-execution"]
+}

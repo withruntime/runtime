@@ -42,6 +42,20 @@ export const ignores = globalIgnores([
 export const rules = defineConfig([
   js.configs.recommended,
   {
+    /* Style warns (see the TypeScript rules below): the recommended rules
+       that tidy working code rather than catch a bug. */
+    rules: {
+      "no-empty": "warn",
+      "no-extra-boolean-cast": "warn",
+      "no-useless-catch": "warn",
+      "no-useless-escape": "warn",
+      "no-unused-labels": "warn",
+      "no-regex-spaces": "warn",
+      "no-prototype-builtins": "warn",
+      "no-empty-static-block": "warn",
+    },
+  },
+  {
     files: ["**/*.ts", "**/*.tsx"],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: { parserOptions: { projectService: true } },
@@ -61,18 +75,49 @@ export const rules = defineConfig([
       "@typescript-eslint/prefer-promise-reject-errors": "error",
       /* `import type` keeps a type-only import from becoming a runtime import.
          Under `isolatedModules` each file is transpiled alone, so the emitter
-         cannot work out on its own which imports to drop. */
-      "@typescript-eslint/consistent-type-imports": "error",
+         cannot work out on its own which imports to drop. A warning: the
+         import works either way (see "Style warns" below). */
+      "@typescript-eslint/consistent-type-imports": "warn",
       /* An unused argument that names what the caller passes is documentation,
          so a leading underscore is how one is kept. */
       "@typescript-eslint/no-unused-vars": [
-        "error",
+        "warn",
         {
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
         },
       ],
+
+      /* Style warns, and never blocks (Marc, 22 October 2026: lint and
+         formatting aren't worth blocking anything). A rule is an error only
+         when it catches something that goes wrong at run time: the promise
+         rules above, the unsafe family, `unbound-method`, the restrict rules.
+         These tidy working code, so the check shows them as warnings in its
+         summary and fails on none. oxlint.json holds the same list, which
+         oxlint.test.ts holds equal to this file's rules. */
+      "@typescript-eslint/ban-ts-comment": "warn",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-namespace": "warn",
+      "@typescript-eslint/no-empty-object-type": "warn",
+      "@typescript-eslint/no-redundant-type-constituents": "warn",
+      "@typescript-eslint/no-duplicate-type-constituents": "warn",
+      "@typescript-eslint/no-require-imports": "warn",
+      "@typescript-eslint/no-this-alias": "warn",
+      "@typescript-eslint/no-unnecessary-type-assertion": "warn",
+      "@typescript-eslint/no-unnecessary-type-constraint": "warn",
+      "@typescript-eslint/no-unsafe-function-type": "warn",
+      "@typescript-eslint/no-wrapper-object-types": "warn",
+      "@typescript-eslint/prefer-as-const": "warn",
+      "@typescript-eslint/prefer-namespace-keyword": "warn",
+      "@typescript-eslint/triple-slash-reference": "warn",
+      "@typescript-eslint/no-extra-non-null-assertion": "warn",
+      "@typescript-eslint/no-array-constructor": "warn",
+      "@typescript-eslint/no-unused-expressions": "warn",
+      "prefer-const": "warn",
+      "no-var": "warn",
+      "prefer-rest-params": "warn",
+      "prefer-spread": "warn",
 
       /* Off, and here is what it cost to find that out.
 
