@@ -33,6 +33,12 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   and the copies start there, as a create from a kept snapshot already did.
   And a time limit (`timeoutSeconds`) set on a sandbox that is still starting
   or waking is taken at once, rather than answered `busy`.
+- **Fork copies on another server no longer wait minutes for the snapshot.**
+  A fork copy that starts on a server other than its source's could stay
+  `starting` for several minutes when that server was already receiving other
+  snapshot copies, or when the source sandbox ran on one of the newest
+  servers. The copy now starts as soon as the receiving server can take the
+  snapshot, and snapshots on every server can be copied.
 - **Secrets list in pages.** `runtime_secrets` action `list` takes `limit`
   (1 to 100) and `after`, as its MCP schema said it did; so do
   `GET /v1/egress-secrets` (its answer's `next` is the next page's `after`),
