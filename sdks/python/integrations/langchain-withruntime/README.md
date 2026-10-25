@@ -7,7 +7,7 @@
 Runtime sandbox integration for [Deep Agents](https://docs.langchain.com/oss/python/deepagents/overview).
 
 [Runtime](https://withruntime.com) runs each sandbox in a Firecracker microVM
-with its own kernel. `RuntimeSandbox` is a Deep Agents sandbox backend: the
+with its own kernel. `RuntimeSandbox` is a Deep Agents sandbox backend. The
 agent's `execute`, `ls`, `read_file`, `write_file`, `edit_file`, `glob` and
 `grep` tools all run in one sandbox.
 
@@ -19,8 +19,8 @@ pip install langchain-withruntime
 
 This installs the Runtime SDK, [`withruntime`](https://pypi.org/project/withruntime/),
 and Deep Agents. Set `RUNTIME_API_KEY` to a key from
-https://withruntime.com/account/keys, or run `npx -y withruntime login` once on
-this machine. A new account starts on a free trial with no card.
+https://withruntime.com/account/keys. You can also run `npx -y withruntime login`
+once on this machine. A new account starts on a free trial. No card is needed.
 
 ## Use it
 
@@ -41,7 +41,7 @@ with Sandbox.create() as sbx:
     print(result["messages"][-1].content)
 ```
 
-Leaving the `with` block stops the sandbox. The backend works on its own too:
+Leaving the `with` block stops the sandbox. The backend also works on its own:
 
 ```python
 from withruntime import Sandbox
@@ -55,12 +55,13 @@ with Sandbox.create() as sbx:
     print(backend.read("/workspace/notes.txt").file_data["content"])
 ```
 
-- `timeout_seconds` (default 1800) is the limit for a command that names none;
-  a command that runs past it is stopped and its output says so.
-- `max_output_chars` (default 100,000) keeps the end of a longer output and
-  marks it truncated.
-- `Sandbox.create()` takes the sandbox's settings: `image`, `region`, `vcpu`,
-  `memory_mib`, `timeout_seconds` (its lease), `network` and more. See the
+- `timeout_seconds` (default 1800) is the limit for a command that sets no
+  timeout of its own. A command that runs past the limit is stopped, and its
+  output says so.
+- `max_output_chars` (default 100,000) keeps the end of a longer output. It
+  marks the output as truncated.
+- `Sandbox.create()` takes the sandbox settings: `image`, `region`, `vcpu`,
+  `memory_mib`, `timeout_seconds` (the lease), `network` and more. See the
   [Python SDK guide](https://withruntime.com/docs/python).
 
 ## Deep Agents Code
@@ -72,10 +73,9 @@ dcode install langchain-withruntime --package
 dcode --sandbox runtime
 ```
 
-Each session gets a new sandbox, stopped when the session ends.
-`--sandbox-id <id>` attaches to a sandbox that is already running and leaves it
-running. `RuntimeProvider` is the same
-lifecycle in code:
+Each session gets a new sandbox. The sandbox stops when the session ends.
+`--sandbox-id <id>` attaches to a sandbox that is already running. It leaves
+that sandbox running. `RuntimeProvider` has the same lifecycle, in code:
 
 ```python
 from langchain_withruntime import RuntimeProvider
@@ -90,10 +90,10 @@ finally:
 
 ## Where it comes from
 
-`RuntimeSandbox` is maintained in the Runtime SDK as `withruntime.deepagents`
-(`pip install "withruntime[deepagents]"` gives the same class). This package
-installs it under the `langchain-<provider>` name the other Deep Agents sandbox
-packages use and adds the Deep Agents Code provider.
+`RuntimeSandbox` is maintained in the Runtime SDK as `withruntime.deepagents`.
+`pip install "withruntime[deepagents]"` gives the same class. This package
+installs it under the `langchain-<provider>` name that the other Deep Agents
+sandbox packages use. It also adds the Deep Agents Code provider.
 
 ## Tests
 
@@ -105,7 +105,7 @@ RUNTIME_API_KEY=... python scripts/e2e.py           # a Deep Agent with a script
 ```
 
 The offline tests run LangChain's standard `SandboxIntegrationTests` against a
-stand-in sandbox that executes on the local machine (Linux).
+stand-in sandbox. The stand-in runs on the local machine (Linux).
 
 ## Documentation
 

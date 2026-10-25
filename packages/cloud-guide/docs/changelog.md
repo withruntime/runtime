@@ -10,6 +10,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **SDK and CLI docs use plainer English.** The README on npm and PyPI, and
+  the compatibility pages for E2B, Daytona, Vercel Sandbox, Blaxel and the other
+  providers, are rewritten with short sentences and plain words. The code,
+  commands, links, numbers and prices are unchanged. No API, behavior, limit or
+  price changed.
 - **CI/CD checks back off when the region is short of room.** When a create
   for a check's machine returns `no_capacity`, `host_memory_pressure`, `busy`,
   `rate_limited` or a 429 `quota_exceeded`, the checks of the same account

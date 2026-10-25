@@ -1,11 +1,12 @@
 # Framework integrations, against real sandboxes
 
-`verify-frameworks.ts` runs every JavaScript framework integration in its
-framework's own agent loop against real Runtime sandboxes, with scripted models
-so no model is paid for: `withruntime/tools`, the Vercel AI SDK tools, the
-Claude Agent SDK server, the OpenAI Agents function tools and sandbox client
-(commands, a polled long command, a terminal, `apply_patch`), and the hosted
-MCP endpoint. It stops every sandbox it starts and prints any left running.
+`verify-frameworks.ts` runs every JavaScript framework integration in that
+framework's own agent loop. It uses real Runtime sandboxes and scripted models,
+so no model is paid for. The integrations are: `withruntime/tools`, the Vercel
+AI SDK tools, the Claude Agent SDK server, the OpenAI Agents function tools and
+sandbox client (commands, a polled long command, a terminal, `apply_patch`), and
+the hosted MCP endpoint. The script stops every sandbox it starts. It prints
+any sandbox left running.
 
 ```bash
 bun examples/verify-frameworks.ts   # RUNTIME_API_KEY, or this machine's `runtime login`
