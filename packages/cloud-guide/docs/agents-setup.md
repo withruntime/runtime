@@ -37,18 +37,20 @@ agents:
 ```
 
 Each agent takes a `template` (`claude-code`, `codex`, `gemini-cli`,
-`claude-agent-sdk`, `openai-agents-sdk`), which fills in its command and
-the secret its model key is stored as, and any field of an agent's
+`claude-agent-sdk`, `openai-agents-sdk`, or `review` and `judge`,
+[CI/CD agent steps'](./ci#agent-steps) reviewer and rule-checker), which fills in its command
+and the secret its model key is stored as, and any field of an agent's
 definition: `command`, `from`, `vcpu`, `memoryMiB`, `instructions` or
-`instructionsFile`, `env`, `secrets`, `mcp`, `volumes`, `idlePauseSeconds`,
+`instructionsFile`, `env`, `secrets`, `pool`, `mcp`, `volumes`, `idlePauseSeconds`,
 `maxSessionSeconds`, `maxConcurrent`, `maxSessionDollars`,
 `maxDayDollars` and `memory`. What you write wins over the template: `secrets:
 [CLAUDE_CODE_OAUTH_TOKEN]` uses your subscription's token in place of the
 API key. Without a size, an agent has 4 vCPU and 8 GiB.
 
-`triggers` lists `{kind, config}`: `schedule`, `webhook`, `slack` or
-`github` ([Agents](./agents)). Add `paused: <why>` to hold one. A trigger
-the file does not name is removed.
+`triggers` lists `{kind, config, rules?}`: `schedule`, `webhook`, `slack` or
+`github` ([Agents](./agents)), with [its rules](./agents#rules). Add `paused:
+<why>` to hold one. A trigger the file does not name is removed; one whose
+rules changed keeps its secret.
 
 A webhook's secret, which each of its calls carries, is never in the file:
 the deploy that adds the webhook prints it under that line (`secret

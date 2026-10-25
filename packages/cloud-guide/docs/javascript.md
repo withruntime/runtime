@@ -11,7 +11,7 @@ In a Cloudflare Worker it needs `nodejs_compat` and a wrapped `fetch`; see
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.33.3. `npm ls withruntime` shows the version
+This guide describes `withruntime` 0.34.0. `npm ls withruntime` shows the version
 you have; a method named here that yours lacks means an older one, and
 `npm install withruntime@latest` updates it.
 
@@ -742,6 +742,7 @@ await runtime.secrets.set("GITHUB_TOKEN", {
   rules: [{ methods: ["GET", "HEAD"], paths: ["/repos/acme/*"] }],
 });
 for (const secret of await runtime.secrets.list()) console.log(secret.name, secret.hosts);
+const page = await runtime.secrets.list({ limit: 10, after: "GITHUB_TOKEN" }); // one page, by name
 await runtime.secrets.delete("GITHUB_TOKEN");
 ```
 
@@ -1328,7 +1329,10 @@ The range includes settlements at `since` and excludes those at `until`;
 pending holds are excluded. Rows cover every visible product, with exact
 amount strings. Concatenate each server CSV page unchanged; the header appears
 only on the first. Each page checks current permissions and reads current
-settlements. See [export settled usage](./api#export-settled-usage).
+settlements. `page.finalThrough` is the time before which no more charges will
+settle (the range is final once it reaches `until`), and a row's `final` is
+true once its resource is deleted and can be charged nothing more. See
+[export settled usage](./api#export-settled-usage).
 
 ## Identity tokens
 

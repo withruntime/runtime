@@ -1,7 +1,7 @@
 # Persistent disks: ``volume = await runtime.volumes.create(10240)``, then
 # ``await runtime.sandboxes.create(volumes=[{"volume_id": volume["id"], "path": "/data"}])``.
-# A volume is backed up off its server daily unless that is turned off, and on
-# request with ``backup``; ``restore`` makes a new volume from a backup.
+# A volume is backed up off its server daily, or on a schedule of its own, unless
+# that is turned off, and on request with ``backup``; ``restore`` makes a new volume from a backup.
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -76,9 +76,23 @@ class AsyncVolumes:
                                   idempotency_key=idempotency_key)
 
     async def set_backup_policy(self, volume_id: str, *, daily: Optional[bool] = None,
-                                retention_days: Optional[int] = None) -> dict[str, Any]:
-        """Turns daily backups on or off, and sets how many days each is kept."""
-        body = {k: v for k, v in {"daily": daily, "retentionDays": retention_days}.items() if v is not None}
+                                retention_days: Optional[int] = None, every_minutes: Optional[int] = None,
+                                cron: Optional[str] = None, keep: Optional[dict[str, int]] = None,
+                                no_schedule: bool = False) -> dict[str, Any]:
+        """Turns automatic backups on or off and sets how many days a daily one is kept;
+        or backs the volume up on a schedule of its own: ``every_minutes`` (15 or more) or a
+        five-field UTC ``cron``, keeping the ``keep`` counts (``last``, ``hourly``, ``daily``,
+        ``weekly``, ``monthly``, ``yearly``). ``no_schedule=True`` goes back to daily backups."""
+        if sum([every_minutes is not None, cron is not None, no_schedule]) > 1:
+            raise ValueError("Give one of every_minutes, cron and no_schedule.")
+        body: dict[str, Any] = {k: v for k, v in {"daily": daily, "retentionDays": retention_days,
+                                                   "keep": keep}.items() if v is not None}
+        if every_minutes is not None:
+            body["schedule"] = {"everyMinutes": every_minutes}
+        elif cron is not None:
+            body["schedule"] = {"cron": cron}
+        elif no_schedule:
+            body["schedule"] = None
         return await self._t.json("POST", f"/v1/volumes/{_enc(volume_id)}:backup-policy", body=body)
 
     async def backups(self, volume_id: Optional[str] = None, *, state: Optional[str] = None,

@@ -95,6 +95,8 @@ func (s *SandboxInfo) UnmarshalJSON(data []byte) error {
 }
 
 // Network is a sandbox's network rules, as on create and sbx.network.set.
+// Internet false with Allow is allow-list only, stored as Internet true with
+// that list; without Allow it reaches nothing.
 type Network struct {
 	Internet bool     `json:"internet"`
 	Allow    []string `json:"allow,omitempty"`

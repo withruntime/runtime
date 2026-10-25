@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import ts from "typescript";
+import { expected } from "./cjs-exports";
 
 /* The published package is dist, built from what tsconfig.build.json takes in.
  * withruntime@0.12.0 shipped dist/cli/logs.test.js and
@@ -40,4 +41,13 @@ test("engines asks for the Node that require(esm) needs", () => {
     engines: { node: string };
   };
   expect(manifest.engines.node).toBe(">=22.12");
+});
+
+test("every export names what it hands a CommonJS caller", () => {
+  // cjs-require.e2e.test.ts requires each one, but only on main's check.
+  const manifest = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8")) as {
+    exports: Record<string, unknown>;
+  };
+  const exports = Object.keys(manifest.exports).map((key) => `withruntime${key.slice(1)}`);
+  expect(Object.keys(expected).sort()).toEqual(exports.sort());
 });

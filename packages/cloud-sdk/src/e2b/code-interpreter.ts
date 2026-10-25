@@ -6,9 +6,8 @@
  * stateful contexts in every E2B interpreter language. */
 import type { Runtime } from "../client.js";
 import type { InterpreterLanguage } from "../products/interpreter.js";
-import type { ConnectionOpts } from "./client.js";
 import { guard, NotSupportedError, SandboxError, TimeoutError } from "./errors.js";
-import { bind } from "./index.js";
+import { E2B as BaseE2B } from "./index.js";
 import { Sandbox as BaseSandbox } from "./sandbox.js";
 
 export * from "./index.js";
@@ -314,9 +313,7 @@ export class Sandbox extends BaseSandbox {
 export default Sandbox;
 
 /** E2B's client with bound options, for the code interpreter. */
-export class E2B {
-  readonly Sandbox: typeof Sandbox;
-  constructor(opts: Omit<ConnectionOpts, "signal"> & { client?: Runtime } = {}) {
-    this.Sandbox = bind(Sandbox, opts);
-  }
+export class E2B extends BaseE2B {
+  protected static override readonly sandboxClass: typeof BaseSandbox = Sandbox;
+  declare readonly Sandbox: typeof Sandbox;
 }

@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket, untrustedCertificate } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.33.3";
+export const VERSION = "0.34.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -84,6 +84,9 @@ export type Call = RequestOptions & {
   /** Seconds the server may hold the answer for a long-running result. */
   wait?: number;
   accept?: string;
+  /** Sent as the Bearer token instead of the client's API key: a webhook
+   * trigger's secret, which is all its calls carry. */
+  bearer?: string;
   /** Whether retrying after an unknown outcome is safe. Default: true for
    * reads and for writes (the key makes them safe); false only for calls
    * the server cannot deduplicate. */
@@ -479,7 +482,7 @@ export class Transport {
     let apiKey: string;
     try {
       call.signal?.throwIfAborted();
-      apiKey = await untilAborted(this.#key(), call.signal);
+      apiKey = call.bearer ?? (await untilAborted(this.#key(), call.signal));
     } catch (cause) {
       if (call.signal?.aborted) throw this.#connectionError(call, cause);
       throw cause;

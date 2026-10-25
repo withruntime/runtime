@@ -130,7 +130,15 @@ export async function checkConsumers(
       types: ["node"],
       typeRoots: [resolve(root, "node_modules/@types")],
     });
-    const diagnostics = ts.getPreEmitDiagnostics(program);
+    // The consumer's own diagnostics: the SDK's sources are type-checked by
+    // its own build, and checking them again here took most of the time.
+    const consumer = program.getSourceFile(fixture);
+    const diagnostics = [
+      ...program.getOptionsDiagnostics(),
+      ...program.getGlobalDiagnostics(),
+      ...program.getSyntacticDiagnostics(consumer),
+      ...program.getSemanticDiagnostics(consumer),
+    ];
     if (diagnostics.length)
       throw new Error(
         ts.formatDiagnosticsWithColorAndContext(diagnostics, {

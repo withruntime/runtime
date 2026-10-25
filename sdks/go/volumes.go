@@ -2,6 +2,8 @@ package withruntime
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"iter"
 	"net/http"
 	"net/url"
@@ -134,15 +136,21 @@ type VolumeBackup struct {
 	Region        string            `json:"region"`
 	VolumeID      string            `json:"volumeId"`
 	SizeMiB       int               `json:"sizeMiB"`
-	Trigger       string            `json:"trigger"`
+	// Trigger is manual, daily, or scheduled: made on the volume's own
+	// schedule and kept as its keep counts say.
+	Trigger string `json:"trigger"`
+	// RetentionDays is 0 while the volume's keep counts decide.
 	RetentionDays int               `json:"retentionDays"`
 	LogicalBytes  *int64            `json:"logicalBytes"`
 	StoredBytes   *int64            `json:"storedBytes"`
 	MeteredBytes  *int64            `json:"meteredBytes"`
 	Error         *string           `json:"error"`
+	ErrorCode     *string           `json:"errorCode"` // backup_stalled: its copy had not begun 15 minutes after CreatedAt
 	CreatedAt     time.Time         `json:"createdAt"`
+	CopyStartedAt *time.Time        `json:"copyStartedAt"` // when its copy off the volume's server began; nil until then
 	ReadyAt       *time.Time        `json:"readyAt"`
-	ExpiresAt     time.Time         `json:"expiresAt"`
+	// ExpiresAt is the zero time while the volume's keep counts decide.
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 type BackupVolumeOptions struct {
 	Name           string            `json:"name,omitempty"`
@@ -151,14 +159,65 @@ type BackupVolumeOptions struct {
 	IdempotencyKey string            `json:"-"`
 	Wait           *int              `json:"-"`
 }
+// BackupPolicy is a volume's automatic backups: daily, each kept
+// RetentionDays, or on its own Schedule keeping the Keep counts.
 type BackupPolicy struct {
-	Daily         bool       `json:"daily"`
-	RetentionDays int        `json:"retentionDays"`
-	LastReadyAt   *time.Time `json:"lastReadyAt"`
+	Daily         bool            `json:"daily"`
+	RetentionDays int             `json:"retentionDays"`
+	Schedule      *BackupSchedule `json:"schedule"`
+	Keep          *BackupKeep     `json:"keep"`
+	// NextAt is when the schedule next makes a backup; nil when daily or off.
+	NextAt      *time.Time `json:"nextAt"`
+	LastReadyAt *time.Time `json:"lastReadyAt"`
 }
+
+// BackupSchedule backs a volume up every EveryMinutes minutes (15 or more,
+// from 1970-01-01 UTC) or on Cron, five fields in UTC such as "0 */6 * * *".
+// Give one.
+type BackupSchedule struct {
+	EveryMinutes int    `json:"everyMinutes,omitempty"`
+	Cron         string `json:"cron,omitempty"`
+}
+
+// BackupKeep says which scheduled backups stay: the Last N, and the newest
+// in each of the newest N hours, days, weeks (from Monday), months and
+// years. Any backup a count keeps is kept; the newest ready one always is.
+type BackupKeep struct {
+	Last    int `json:"last,omitempty"`
+	Hourly  int `json:"hourly,omitempty"`
+	Daily   int `json:"daily,omitempty"`
+	Weekly  int `json:"weekly,omitempty"`
+	Monthly int `json:"monthly,omitempty"`
+	Yearly  int `json:"yearly,omitempty"`
+}
+
+// SetBackupPolicyOptions turns automatic backups on or off, sets the days a
+// daily backup is kept, or gives the volume a Schedule of its own with Keep
+// counts. NoSchedule takes the schedule off: back to daily backups.
 type SetBackupPolicyOptions struct {
-	Daily         *bool `json:"daily,omitempty"`
-	RetentionDays int   `json:"retentionDays,omitempty"`
+	Daily         *bool           `json:"daily,omitempty"`
+	RetentionDays int             `json:"retentionDays,omitempty"`
+	Schedule      *BackupSchedule `json:"schedule,omitempty"`
+	Keep          *BackupKeep     `json:"keep,omitempty"`
+	NoSchedule    bool            `json:"-"`
+}
+
+// MarshalJSON sends NoSchedule as "schedule": null.
+func (o SetBackupPolicyOptions) MarshalJSON() ([]byte, error) {
+	type plain SetBackupPolicyOptions
+	body, err := json.Marshal(plain(o))
+	if err != nil || !o.NoSchedule {
+		return body, err
+	}
+	if o.Schedule != nil {
+		return nil, errors.New("runtime: give Schedule or NoSchedule, not both")
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	fields["schedule"] = nil
+	return json.Marshal(fields)
 }
 type BackupListOptions struct {
 	VolumeID string

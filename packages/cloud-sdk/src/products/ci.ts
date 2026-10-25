@@ -158,17 +158,19 @@ export type CiReviewFinding = {
   /** What would put it right. */
   fix: string;
 };
-/** A review step's verdict on one commit: it passes only with no findings. */
+/** An agent step's verdict on one commit (`review:` is its short form): it
+ * passes only with no findings. */
 export type CiReview = {
   verdict: "pass" | "block";
   summary: string;
   findings: CiReviewFinding[];
   /** Things worth a look that do not block. */
   notes: { file: string; line: number; what: string }[];
-  /** The Runtime Agent that reviewed, the account it ran on and its model. */
+  /** The Runtime Agent that judged, and the model the step asked for. */
   agent: string;
-  account: string;
-  model: string;
+  model: string | null;
+  /** The Claude account a verdict before agent steps ran on. */
+  account?: string;
   /** The agent session that gave the verdict. */
   session: string;
   /** True when the diff was too long and its end was not read. */
@@ -420,6 +422,15 @@ export function ci(t: Transport) {
         t.json<CiCheckDetail | CiCancelled>({
           method: "POST",
           path: `${at("/v1/ci/checks", id)}:cancel`,
+          ...options,
+        }),
+      /** Run a check again, as GitHub's Re-run does: a new check of the
+       * same commit (a pull request's as it would land now), trusted only as
+       * the commit's last check was. A check still going is answered as it is. */
+      rerun: (id: string, options?: RequestOptions) =>
+        t.json<CiCheckDetail | CiCancelled>({
+          method: "POST",
+          path: `${at("/v1/ci/checks", id)}:rerun`,
           ...options,
         }),
     },

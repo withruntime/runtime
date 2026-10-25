@@ -165,7 +165,8 @@ sandbox is running (`--no-wait` returns at once). Its options:
   withruntime 0.17.1, `--env K` alone sends `K`'s value from your own shell, so
   a secret is in no command line ([shared keys](./security#a-secret-your-sandbox-checks-on-requests-it-receives))
 - network rules: `--no-internet`, `--allow <host>`, `--deny <host>` and
-  `--connect <host:port>`
+  `--connect <host:port>`; `--no-internet --allow <host>` reaches only the
+  hosts listed
 - `--secret NAME` (repeatable) lets it use only the egress secrets you name,
   of those that would otherwise reach it; `--no-secrets` gives it none.
   Without either it gets every one that reaches it. Fixed for its life: `fork`
@@ -425,6 +426,7 @@ runtime secrets scope SLACK_APP_TOKEN --only-label role=hub                     
 runtime secrets set GITHUB_TOKEN --keep-value --allow 'GET /repos/acme/app/*'               # narrow it, no value
 printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
 runtime secrets ls
+runtime secrets ls --limit 10 --after GITHUB_TOKEN    # a page of 10, by name
 runtime secrets rotate DB_PASSWORD < new-password.txt
 runtime secrets reveal DB_PASSWORD
 runtime secrets share DB_PASSWORD --agent "${agent}"   # or --all, or --none
@@ -497,6 +499,20 @@ default: Cloudflare's CDN sits in front of the App's `runtimehost.com` address
 and its custom domains. Off sends visitors straight to Runtime's routers, with
 nothing cached. It is part of the price of Apps and Functions. See
 [App and Function CDN](./api#app-and-function-cdn).
+
+```bash no-run
+runtime apps create web --vcpu 1 --memory 512 --max-copies 8 --release staged --soak 300
+runtime apps update web --release at-once
+```
+
+`--release staged` releases each new version a stage at a time: one copy
+beside the live version's, then about 10%, 50% and all of them, each stage
+running `--soak` seconds (60 to 3600, 300 by default) once its copies serve
+and judged on its visitors' errors and speed before the next. A stage that
+does worse goes back, and `runtime apps deploy` exits 1 with
+`deploy_stage_failed` and the stage's numbers; the live version never stops
+serving. A staged App's deploy waits through its stages. `runtime apps get`
+shows `stagedRelease`. See [staged releases](./api#staged-releases).
 
 ## App logs
 
@@ -627,9 +643,11 @@ off-server copy has been checked. See
 Forks and snapshots:
 
 - A fork or snapshot pauses a running sandbox for the moment it takes, then
-  wakes it. A sandbox with volumes cannot be snapshotted. Copies and snapshots
-  run on the source's server. Each kept snapshot is also copied off its server after its
-  final compressed form is ready.
+  wakes it. A sandbox with volumes cannot be snapshotted. Snapshots are kept
+  on the source's server, and copies start there while it has room; when it is
+  full, a copy starts on another server once the snapshot is copied there. Each
+  kept snapshot is also copied off its server after its final compressed form
+  is ready.
 - Copies run on what the account's new sandboxes run on (`--trial` and `--paid`
   are accepted and ignored). Copies keep the source's size and CPU, reserved or
   a raised floor, and are billed as a create with those would be. On an account without credit, a copy must fit the limits without credit.
@@ -724,7 +742,10 @@ runtime ls
 --until 2026-10-01T00:00:00Z > usage.csv`. This follows every page and prints
   the server's CSV with one header. It includes settled intervals at `since`
   and excludes those at `until`, by settlement time; running time not yet settled is left out.
-  Amounts remain exact. `--json` prints one complete server page per line.
+  Amounts remain exact. When it finishes, it says on stderr how far the range
+  is final: no more charges will settle before that time, and the CSV's
+  `final` column says which resources can be charged nothing more.
+  `--json` prints one complete server page per line.
   Each page rechecks current permissions and reads current settlements. See
   [export settled usage](./api#export-settled-usage).
 - `runtime limits` says whether this machine's key is read-only and what its

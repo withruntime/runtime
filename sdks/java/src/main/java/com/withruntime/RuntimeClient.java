@@ -25,7 +25,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.17.0";
+  public static final String VERSION = "0.18.0";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -371,6 +371,21 @@ public final class RuntimeClient {
   /** The account's credit, holds, free time and per-resource charges. */
   public Usage usage() {
     return new Usage(transport.object(new Transport.Call("GET", "/v1/usage")));
+  }
+
+  /**
+   * One page of settled usage for every product the key sees: settled at since or later and before
+   * until (UTC, ending in Z). Follow nextCursor with the same range until it is null (cursor and
+   * limit may be null). The page's finalThrough says how far the range can no longer change.
+   */
+  public UsageExportPage usageExport(String since, String until, String cursor, Integer limit) {
+    return new UsageExportPage(
+        transport.object(
+            new Transport.Call("GET", "/v1/usage/export")
+                .query("since", since)
+                .query("until", until)
+                .query("cursor", cursor)
+                .query("limit", limit)));
   }
 
   /**

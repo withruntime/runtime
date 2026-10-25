@@ -116,9 +116,28 @@ public final class Products {
       return new JsonObject(t.object(new Transport.Call("PUT", path(name) + "/rules").body(body)));
     }
 
-    /** Names, hosts and placeholders. Never values. */
+    /** Names, hosts and placeholders, every secret. Never values. */
     public List<JsonObject> list() {
-      return new JsonObject(t.object(new Transport.Call("GET", "/v1/egress-secrets"))).getObjects("secrets");
+      List<JsonObject> all = new java.util.ArrayList<>();
+      String after = null;
+      do {
+        JsonObject page = listPage(null, after);
+        all.addAll(page.getObjects("secrets"));
+        after = page.getString("next");
+      } while (after != null && !after.isEmpty());
+      return all;
+    }
+
+    /** One page by name: at most limit (1 to 100, null for 50) secrets named
+     * after after (null: from the first). The next page's after is this
+     * page's last name. */
+    public List<JsonObject> list(Integer limit, String after) {
+      return listPage(limit, after).getObjects("secrets");
+    }
+
+    private JsonObject listPage(Integer limit, String after) {
+      return new JsonObject(
+          t.object(new Transport.Call("GET", "/v1/egress-secrets").query("limit", limit).query("after", after)));
     }
 
     /** Erases a secret; its placeholder stops working. */

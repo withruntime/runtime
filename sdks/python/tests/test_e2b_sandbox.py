@@ -743,6 +743,60 @@ class ForksPortsAndGaps(Base):
         self.assertIn("withruntime secrets set", str(caught.exception))
 
 
+class Client(Base):
+    """E2B's client, ``E2B(api_key=...)``: until 24 October 2026 it raised on
+    construction, so its Template, Volume and Secret never named Runtime's
+    alternative."""
+
+    def test_template_volume_and_secret_refuse_naming_the_alternative(self):
+        from withruntime.e2b.code_interpreter import E2B as InterpreterE2B
+        for client in (e2b.E2B(client=self.world.client()), InterpreterE2B(client=self.world.client())):
+            for call, alternative in ((client.Template, "withruntime images build"),
+                                      (client.AsyncTemplate, "withruntime images build"),
+                                      (lambda: client.Template.exists("t"), "withruntime images build"),
+                                      (lambda: client.Volume.create("v"), "'volumes'"),
+                                      (lambda: client.AsyncVolume.list(), "'volumes'"),
+                                      (lambda: client.Secret.create("s"), "withruntime secrets set"),
+                                      (lambda: client.AsyncSecret.list(), "withruntime secrets set")):
+                with self.assertRaises(NotSupportedException) as caught:
+                    call()
+                self.assertIn(alternative, str(caught.exception))
+
+    def test_its_sandbox_uses_the_client_unless_a_call_names_its_own(self):
+        from withruntime.e2b.code_interpreter import E2B as InterpreterE2B, Sandbox as InterpreterSandbox
+        client = e2b.E2B(client=self.world.client(), request_timeout=30)
+        sbx = client.Sandbox.create(timeout=90)
+        self.assertIsInstance(sbx, Sandbox)
+        self.assertEqual(sbx._request_timeout, 30)
+        self.assertEqual(self.last_create()["timeout_seconds"], 90)
+        self.assertEqual(client.Sandbox.connect(sbx.sandbox_id).sandbox_id, sbx.sandbox_id)
+        self.assertEqual([s.sandbox_id for s in client.Sandbox.list().next_items()], [sbx.sandbox_id])
+        self.assertTrue(client.Sandbox.kill(sbx.sandbox_id))
+        # The top-level Sandbox keeps its own options.
+        self.assertEqual(Sandbox._bound, {})
+        other = World()
+        self.assertIsInstance(client.Sandbox.create(client=other.client()), Sandbox)
+        self.assertEqual(len(other.called("sandboxes.create")), 1)
+        interpreter = InterpreterE2B(client=self.world.client()).Sandbox.create()
+        self.assertIsInstance(interpreter, InterpreterSandbox)
+        self.assertTrue(callable(interpreter.run_code))
+
+    def test_its_async_sandbox_uses_the_async_client(self):
+        world = World()
+
+        async def scenario():
+            client = e2b.E2B(async_client=world.async_client())
+            sbx = await client.AsyncSandbox.create()
+            self.assertIsInstance(sbx, AsyncSandbox)
+            self.assertTrue(await client.AsyncSandbox.kill(sbx.sandbox_id))
+        asyncio.run(scenario())
+
+    def test_options_runtime_cannot_honor_are_refused_at_once(self):
+        with self.assertRaises(NotSupportedException) as caught:
+            e2b.E2B(domain="e2b.app")
+        self.assertIn("domain", str(caught.exception))
+
+
 class Async(unittest.TestCase):
     def test_get_host_answers_at_once_and_the_share_lands_beside_it(self):
         world = World()

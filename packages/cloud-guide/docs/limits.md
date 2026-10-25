@@ -130,10 +130,13 @@ the two storage limits count every region together.
 | --------------------------------------------------- | -------------- | ----------- |
 | Agents (`agent.count`)                              | 20             | 20          |
 | Agent sessions open at once (`agent-session.count`) | 50             | 50          |
+| Agent triggers (`agent-trigger.count`)              | 100            | 100         |
 
 An agent session's sandbox counts toward the sandbox rows above too. A session
 tree goes at most 3 levels deep with at most 20 open children
-([subagents](./agents#subagents)).
+([subagents](./agents#subagents)). A trigger past the account's 100 is refused
+`quota_exceeded` ("The account's triggers are at its limit."): remove one you no
+longer need first.
 
 <!-- /launch: agents -->
 
@@ -148,6 +151,15 @@ the account, bought or given." A container is 1 to 16 vCPUs and 128 MiB to
 64 GiB of memory ([Containers](./containers)).
 
 <!-- /launch: containers -->
+
+<!-- launch: browsers -->
+
+**Browsers** and **Desktops** are sandboxes: each counts toward the sandboxes
+an account runs at once and their memory, and is refused as a sandbox past
+them is. A browser or a desktop is 1 to 16 vCPUs and 1 to 16 GiB of memory,
+with at most 30 labels ([Browsers](./browsers), [Desktops](./desktops)).
+
+<!-- /launch: browsers -->
 
 Without credit, a sandbox is at most 2 vCPU, 4 GiB of memory and a 10 GiB
 disk, an account keeps {{no-credit-kept}} sandboxes, running, paused or stopped,

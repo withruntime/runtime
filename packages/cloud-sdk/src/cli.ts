@@ -21,7 +21,12 @@ import { envFetch } from "./proxy.js";
 import { logStream, terminalSafe, terminalSafeLines } from "./terminal.js";
 import { VERSION, type RequestOptions } from "./transport.js";
 import type { CreateSandbox, FeedbackKind, OutOfMemory, SandboxInfo, Usage } from "./types.js";
-import type { MetricRange, SandboxMetrics, WebhookEventType } from "./products/observability.js";
+import type {
+  MetricRange,
+  SandboxMetrics,
+  UsageExportPage,
+  WebhookEventType,
+} from "./products/observability.js";
 import type { SwitchingSummary, SwitchProvider } from "./products/switching.js";
 import type { LimitedKeyAction } from "./products/api-keys.js";
 import type { SecretRule, SecretScope, SecretUse } from "./products/secrets.js";
@@ -98,7 +103,9 @@ Account
                                                (job create --secret NAME); with --host, both
   secrets scope <NAME> --only-label k=v... | --only-sandbox <id>... | --only-app <id>... | --all-sandboxes
                                                Change which sandboxes get it; no value needed
-  secrets ls | get <NAME>                      Names, hosts, placeholders and jobs versions, never values
+  secrets ls [--limit N] [--after NAME] | get <NAME>
+                                               Names, hosts, placeholders and jobs versions, never values;
+                                               by name, a page of N after NAME
   secrets rotate <NAME>                        A new version of the jobs copy, from standard input
   secrets reveal <NAME> [--version N]          Print the jobs copy's value. The sandboxes' copy is
                                                never readable, by anyone
@@ -165,6 +172,8 @@ Products
   builds     A connected repository's commits built into what an App deploys (beta)
   ci         CI/CD: each push and pull request of a repository checked in sandboxes (beta)
   containers One OCI image's process on its own microVM, at the sandbox rates (beta)
+  browsers   Chromium on its own sandbox: a CDP address and screenshots (beta)
+  desktops   A Linux desktop on its own sandbox: live view, computer use (beta)
   agents     Claude Code, Codex, Gemini CLI or your own agent in a sandbox per session (beta)
   domains    Your own hostname for a sandbox's port, with HTTPS
   ports      A public TCP port to a sandbox: databases, game servers
@@ -544,6 +553,8 @@ const COMMANDS = [
   "builds",
   "ci",
   "containers",
+  "browsers",
+  "desktops",
   "agents",
   "domains",
   "ports",
@@ -568,6 +579,8 @@ const OWN_HELP = [
   "builds",
   "ci",
   "containers",
+  "browsers",
+  "desktops",
   "agents",
   "keys",
   "reservations",
@@ -1000,6 +1013,8 @@ export async function run(
       const rt = await client(env);
       const cursors = new Set<string>();
       let cursor: string | undefined;
+      // The export is final only as far as its earliest page's finalThrough.
+      let finalThrough: string | null | undefined;
       for (;;) {
         const page = await rt.usageExport({
           since,
@@ -1017,7 +1032,19 @@ export async function run(
         if (out.json) out.write(JSON.stringify(page));
         else if (page.csv) out.write(page.csv);
         await out.drain?.();
-        if (page.nextCursor === null) return 0;
+        const at = page.finalThrough;
+        finalThrough =
+          finalThrough === undefined
+            ? at
+            : finalThrough === null || at === null
+              ? null
+              : at < finalThrough
+                ? at
+                : finalThrough;
+        if (page.nextCursor === null) {
+          out.error(finalLine({ until: page.until, finalThrough: finalThrough ?? null }));
+          return 0;
+        }
         cursors.add(page.nextCursor);
         cursor = page.nextCursor;
       }
@@ -1545,6 +1572,16 @@ export async function run(
       kit,
     );
   }
+  if (["browser", "browsers", "desktop", "desktops"].includes(command)) {
+    product = command.endsWith("s") ? command : `${command}s`;
+    return (await import("./browsers-cli.js")).machineProductCommand(
+      product as "browsers" | "desktops",
+      rest,
+      out,
+      () => client(env),
+      kit,
+    );
+  }
   if (command === "agent" || command === "agents") {
     product = "agents";
     return (await import("./agents-cli.js")).agentsCommand(rest, env, out, () => client(env), kit);
@@ -1568,6 +1605,16 @@ export async function run(
     );
   }
   throw unknown("command", command, COMMANDS);
+}
+
+/** `usage export`'s last word, on stderr beside the CSV: how much of the
+ * range can still change. */
+export function finalLine(page: Pick<UsageExportPage, "until" | "finalThrough">): string {
+  if (page.finalThrough === null)
+    return "Charges in this range may still settle; export it again later for a final copy.";
+  if (Date.parse(page.finalThrough) >= Date.parse(page.until))
+    return "Final: no more charges will settle in this range.";
+  return `Final up to ${page.finalThrough}; charges after that may still settle. Export again later for the rest.`;
 }
 
 /** `runtime usage` for a person: the balance, the free usage and what each kind
@@ -3097,6 +3144,8 @@ export async function secretsCommand(
       "only-app",
       "agent",
       "env",
+      "limit",
+      "after",
     ],
   );
   const print = (human: string, value: unknown) =>
@@ -3117,12 +3166,22 @@ export async function secretsCommand(
         ])
       : "No secrets.";
   if (verb === "ls" || verb === "list" || verb === undefined) {
+    const limit = integer(args, "limit");
+    if (limit !== undefined && (limit < 1 || limit > 100))
+      throw usage("--limit takes 1 to 100 secrets a page.");
+    const after = flag(args, "after");
     const runtime = await client(env);
-    const all = await runtime.secrets.all();
+    // A page of both copies by name, as the API pages each: an organization
+    // keeps at most 50 secrets for sandboxes, so both are read whole.
+    const every = (await runtime.secrets.all()).filter(
+      (s) => after === undefined || s.name > after,
+    );
+    const all = limit === undefined ? every : every.slice(0, limit);
+    const more = all.length < every.length ? all.at(-1)!.name : undefined;
     // --json keeps the sandboxes' list it always printed; the jobs copies
     // are in `runtime secrets get <NAME> --json`.
     print(
-      rows(all),
+      more ? `${rows(all)}\nMore: ${me} secrets ls --limit ${limit} --after ${more}` : rows(all),
       all.flatMap((s) => (s.sandboxes ? [s.sandboxes] : [])),
     );
     return 0;
@@ -5024,10 +5083,50 @@ const VOLUME_HELP = `runtime volumes <command>
   backup-rm <backupId>                        Delete a backup
   backup-policy <id> [--daily on|off] [--retention-days N]
                                               Daily backups on or off, and how long each is kept
+  backup-policy <id> --every <minutes> | --cron "<m h dom mon dow>" [--keep hourly=24,daily=7,...]
+                                              Back up on a schedule of its own (UTC), keeping
+                                              last, hourly, daily, weekly, monthly, yearly counts
+  backup-policy <id> --no-schedule            Back to daily backups
   Attach one: runtime sandboxes create --volume <id>:/data
-  Volumes are backed up off their host daily unless you turn it off.
+  Volumes are backed up off their host daily, or on their own schedule, unless you turn it off.
   Shared commands work where shared disks are enabled.
 `;
+
+const KEEP_TIERS = ["last", "hourly", "daily", "weekly", "monthly", "yearly"] as const;
+
+/** `hourly=24,daily=7` as keep counts; the server checks the numbers. */
+function keepCounts(text: string): Partial<Record<(typeof KEEP_TIERS)[number], number>> {
+  const counts: Partial<Record<(typeof KEEP_TIERS)[number], number>> = {};
+  for (const part of text.split(",")) {
+    const [name, value, extra] = part.trim().split("=");
+    const tier = KEEP_TIERS.find((t) => t === name);
+    if (!tier || value === undefined || extra !== undefined || !/^\d+$/.test(value))
+      throw usage(
+        `--keep takes name=count pairs such as hourly=24,daily=7; names: ${KEEP_TIERS.join(", ")}.`,
+      );
+    counts[tier] = Number(value);
+  }
+  return counts;
+}
+
+/** "daily backups on, kept 7 days", or the schedule, its keep counts and next run. */
+function backupPolicyWords(b: {
+  daily: boolean;
+  retentionDays: number;
+  schedule?: { everyMinutes: number } | { cron: string } | null;
+  keep?: Partial<Record<(typeof KEEP_TIERS)[number], number>> | null;
+  nextAt?: string | null;
+}): string {
+  if (!b.schedule) return `daily backups ${b.daily ? "on" : "off"}, kept ${b.retentionDays} days`;
+  const when =
+    "everyMinutes" in b.schedule
+      ? `every ${b.schedule.everyMinutes} minutes`
+      : `on cron "${b.schedule.cron.trim()}" (UTC)`;
+  const kept = KEEP_TIERS.filter((t) => (b.keep?.[t] ?? 0) > 0)
+    .map((t) => `${t} ${b.keep![t]}`)
+    .join(", ");
+  return `backups ${when}${b.daily ? "" : " (off)"}, keeping ${kept}${b.daily && b.nextAt ? `; next ${b.nextAt}` : ""}`;
+}
 
 async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<number> {
   const [verb, ...rest] = argv;
@@ -5147,7 +5246,7 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
                 String(b.sizeMiB),
                 b.storedBytes === null ? "-" : `${Math.ceil(b.storedBytes / 1048576)} MiB`,
                 b.createdAt,
-                b.expiresAt,
+                b.expiresAt ?? "by keep counts",
               ]),
             ])
           : "No backups yet.",
@@ -5173,22 +5272,36 @@ async function volume(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise
       return 0;
     }
     case "backup-policy": {
-      const args = parse(rest, [], ["daily", "retention-days"]);
+      const args = parse(
+        rest,
+        ["no-schedule"],
+        ["daily", "retention-days", "every", "cron", "keep"],
+      );
       const id = need(args.positional[0], "a volume id");
       const daily = flag(args, "daily");
       if (daily !== undefined && !["on", "off", "true", "false"].includes(daily))
         throw usage("--daily takes on or off.");
       const days = integer(args, "retention-days");
-      if (daily === undefined && days === undefined)
-        throw usage("Give --daily on|off, --retention-days N or both.");
+      const every = integer(args, "every");
+      const cron = flag(args, "cron");
+      const off = has(args, "no-schedule");
+      if ([every !== undefined, cron !== undefined, off].filter(Boolean).length > 1)
+        throw usage("Give one of --every, --cron and --no-schedule.");
+      const keepText = flag(args, "keep");
+      const keep = keepText === undefined ? undefined : keepCounts(keepText);
+      if ([daily, days, every, cron, keep].every((x) => x === undefined) && !off)
+        throw usage(
+          "Give --daily on|off, --retention-days N, --every, --cron, --keep or --no-schedule.",
+        );
       const updated = await api.setBackupPolicy(id, {
         ...(daily === undefined ? {} : { daily: daily === "on" || daily === "true" }),
         ...(days === undefined ? {} : { retentionDays: days }),
+        ...(every === undefined ? {} : { schedule: { everyMinutes: every } }),
+        ...(cron === undefined ? {} : { schedule: { cron } }),
+        ...(off ? { schedule: null } : {}),
+        ...(keep === undefined ? {} : { keep }),
       });
-      print(
-        `${updated.id} daily backups ${updated.backups.daily ? "on" : "off"}, kept ${updated.backups.retentionDays} days`,
-        updated,
-      );
+      print(`${updated.id} ${backupPolicyWords(updated.backups)}`, updated);
       return 0;
     }
   }

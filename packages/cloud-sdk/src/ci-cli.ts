@@ -57,6 +57,8 @@ export const CI_HELP = `runtime ci <command>
   check <checkId>                             One check and its jobs in plan order (or get)
   cancel <checkId>                            Cancel a queued or running check: its jobs end,
                                               its machines are let go, GitHub is told
+  rerun <checkId>                             Run a check again: a new check of its commit, a
+                                              pull request's as it would land now
   logs <jobId>                                A job's output, its last 256 KiB, and its sandboxes
   tests <repoId> [--quarantined]              Its test files: time, recent outcomes, quarantine
   flakes [--repository <repoId>] [--all]      Flaky tests: each quarantined (or still gating), its
@@ -368,6 +370,19 @@ export async function ciCommand(
       );
       return 0;
     }
+    case "rerun": {
+      const check = await api.checks.rerun(need(rest[0], "a check's id (runtime ci ls)"));
+      // A key that may run the check again but not read it is told the new one's id alone.
+      if (!("commit" in check)) {
+        print(`${check.id}: ${check.state}`, check);
+        return 0;
+      }
+      print(
+        `${check.id} ${check.repository} ${check.commit.slice(0, 12)} ${where(check)}: ${check.state}${check.reason ? ` (${check.reason})` : ""}`,
+        check,
+      );
+      return 0;
+    }
     case "logs":
     case "job": {
       const job = await api.jobs.get(need(rest[0], "a job's id (runtime ci get <checkId>)"));
@@ -526,6 +541,7 @@ export async function ciCommand(
     "ls",
     "get",
     "cancel",
+    "rerun",
     "logs",
     "tests",
     "flakes",
@@ -534,15 +550,15 @@ export async function ciCommand(
   ]);
 }
 
-/** A review's verdict in words: each finding with its place and fix, then
- * the notes, then who reviewed. */
+/** An agent step's verdict in words: each finding with its place and fix,
+ * then the notes, then who judged. */
 function reviewed(r: CiReview): string {
   const at = (f: { file: string; line: number }) => (f.line > 0 ? `${f.file}:${f.line}` : f.file);
   return [
     `\n${r.verdict === "pass" ? "Passed review" : `Blocked: ${r.findings.length} finding(s)`}. ${r.summary}`,
     ...r.findings.map((f) => `  ${f.kind} at ${at(f)}: ${f.what}\n    Fix: ${f.fix}`),
     ...r.notes.map((n) => `  note at ${at(n)}: ${n.what}`),
-    `Reviewed by agent ${r.agent} (${r.model}) on ${r.account}${r.cut ? ", diff cut short" : ""}: session ${r.session}`,
+    `Judged by agent ${r.agent}${r.model ? ` (${r.model})` : ""}${r.account ? ` on ${r.account}` : ""}${r.cut ? ", diff cut short" : ""}: session ${r.session}`,
     "",
   ].join("\n");
 }

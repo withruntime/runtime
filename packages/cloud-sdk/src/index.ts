@@ -58,6 +58,7 @@ export type {
   SecretRule,
   SecretScope,
   SecretUse,
+  ListSecrets,
   SetSecret,
 } from "./products/secrets.js";
 export { SecretPartlyStoredError } from "./products/secrets.js";
@@ -76,7 +77,14 @@ export type {
   TailscaleNode,
   TailscaleStatus,
 } from "./products/tailscale.js";
-export type { Volume, VolumeBackup, CreateVolume, VolumeAttachment } from "./products/volumes.js";
+export type {
+  Volume,
+  VolumeBackup,
+  VolumeBackupKeep,
+  VolumeBackupSchedule,
+  CreateVolume,
+  VolumeAttachment,
+} from "./products/volumes.js";
 export type {
   CreateJob,
   Job,
@@ -199,8 +207,11 @@ export type {
 export type { SsoConnection, SsoStatus } from "./products/sso.js";
 export type {
   Agent,
+  AgentAsk,
+  AgentAskState,
   AgentDefinition,
   AgentEvent,
+  AgentHeldCall,
   AgentMemoryEntry,
   AgentMemoryFile,
   AgentMemoryHit,
@@ -213,10 +224,15 @@ export type {
   AgentTemplate,
   AgentTemplateKey,
   AgentTrigger,
+  AgentTriggerCall,
+  AgentTriggerCallOutcome,
   AgentTriggerKind,
+  AgentTriggerRules,
   AgentUse,
+  AnswerAgentAsk,
   CreateAgent,
   CreateAgentTrigger,
+  ListAgentAsks,
   StartAgentSession,
 } from "./products/agents.js";
 export { AGENT_TEMPLATES, AGENT_USES } from "./products/agents.js";
@@ -237,6 +253,22 @@ export type {
   CreateContainer,
   UpdateContainer,
 } from "./products/containers.js";
+export type {
+  Browser,
+  BrowserConnectOptions,
+  BrowserInfo,
+  BrowserScreenshot,
+  BrowserScreenshotResult,
+  CreateBrowser,
+  UpdateBrowser,
+} from "./products/browsers.js";
+export type {
+  CreateDesktop,
+  Desktop,
+  DesktopAct,
+  DesktopState,
+  UpdateDesktop,
+} from "./products/desktops.js";
 export type {
   CiFlake,
   CiFlakeDetail,

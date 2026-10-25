@@ -27,6 +27,8 @@ import { agents } from "./agents.js";
 import { builds } from "./builds.js";
 import { ci } from "./ci.js";
 import { containers } from "./containers.js";
+import { browsers } from "./browsers.js";
+import { desktops } from "./desktops.js";
 // The hub loads this file, so it loads apps.ts and resources.ts too: request
 // builders over Transport whose top level holds only types, functions and
 // imports of files the hub loads, so importing them runs nothing in the hub
@@ -76,6 +78,9 @@ export const clientExtensions = {
   // CI/CD (beta): the API answers product_in_beta outside its list.
   ci,
   containers,
+  // Browsers and Desktops (beta): the API answers product_in_beta outside its list.
+  browsers,
+  desktops,
   // A private beta (PRODUCT_BETAS): an account outside it is refused with
   // product_in_beta until Apps launches.
   apps,

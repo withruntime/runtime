@@ -10,11 +10,11 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.17.0</version>
+  <version>0.18.0</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.17.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.18.0")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
@@ -213,8 +213,8 @@ public class Lifecycle {
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on the same server; see [JavaScript](./javascript) for what forks
-and snapshots keep and how they are billed. If a copy fails, the exception's
+processes, on its server while it has room and on another when it is full; see
+[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the exception's
 `details().get("startedSandboxIds")` names the copies that did start.
 `wake(Duration)` and `extend(Duration)` set and move a time limit, for a
 sandbox that has one; on one without, `extend` changes nothing.
@@ -393,6 +393,11 @@ public class Configured {
   `java.net.http.HttpClient`.
 - Money is integer microdollars: 1,000,000 is one US dollar.
   `runtime.usage()` returns the account's balance exactly, as `BigInteger`.
+- `runtime.usageExport(since, until, cursor, limit)` reads one page of settled
+  usage over a UTC range, with its server CSV; follow `nextCursor()` until it
+  is null. `finalThrough()` is the time before which no more charges will
+  settle, and a row's `isFinal()` is true once its resource is deleted and can
+  be charged nothing more ([export settled usage](./api#export-settled-usage)).
 
 ## Network products and backups
 
@@ -427,7 +432,10 @@ public class NetworkProductsExample {
 ```
 
 `volumes().backup`, `backups`, `getBackup`, `deleteBackup`, `setBackupPolicy`
-and `restore` manage backups. A restore creates a new volume; it does not
+and `restore` manage backups. `setBackupSchedule(id, 60, null, Map.of("hourly",
+24, "daily", 7))` backs the volume up every 60 minutes (or pass a UTC cron
+instead of the minutes) and keeps backups by those counts;
+`clearBackupSchedule(id, null)` goes back to daily. A restore creates a new volume; it does not
 replace the original. A backup's `backedUp` field is true once its copy has
 been checked off the source host. Writes after that backup are not in it.
 

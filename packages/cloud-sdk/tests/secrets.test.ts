@@ -542,3 +542,46 @@ test("`runtime secrets scope --only-app` gives a secret to every copy of an App,
     );
   expect(scopeText({ apps: [APP], sandboxes: ["s1"] })).toBe(`s1 | app ${APP}`);
 });
+
+test("secrets.list pages by limit and after, and reads every page without them", async () => {
+  // 24 October 2026: the MCP tool listed limit and its list refused it.
+  const named = (name: string) => ({ ...SECRET, name });
+  const pages: Record<string, unknown> = {
+    "": { secrets: [named("A")], next: "A" },
+    after_A: { secrets: [named("B")], next: null },
+    limit_1: { secrets: [named("A")], next: "A" },
+  };
+  await withStub(
+    (request) => {
+      const query = new URL(request.url).searchParams;
+      const key = [...query].map(([k, v]) => `${k}_${v}`).join("&");
+      return pages[key] ?? { secrets: [], next: null };
+    },
+    async (seen) => {
+      const runtime = new Runtime({ apiKey: "rk_x", baseUrl: "https://api.example.test" });
+      expect((await runtime.secrets.list()).map((s) => s.name)).toEqual(["A", "B"]);
+      expect((await runtime.secrets.list({ limit: 1 })).map((s) => s.name)).toEqual(["A"]);
+      expect((await runtime.secrets.list({ after: "A" })).map((s) => s.name)).toEqual(["B"]);
+      expect(seen.length).toBe(4);
+    },
+  );
+});
+
+test("`runtime secrets ls --limit 1 --after` pages by name and says how to go on", async () => {
+  const named = (name: string) => ({ ...SECRET, name });
+  await withStub(
+    () => ({ secrets: [named("C_KEY"), named("A_KEY"), named("B_KEY")], next: null }),
+    async () => {
+      const { lines, out } = output();
+      expect(await run(["secrets", "ls", "--limit", "1", "--after", "A_KEY"], env, out)).toBe(0);
+      const text = lines.join("\n");
+      expect(text).toContain("B_KEY");
+      expect(text).not.toContain("A_KEY api");
+      expect(text).not.toMatch(/^C_KEY/m);
+      expect(text).toContain("secrets ls --limit 1 --after B_KEY");
+      await expect(run(["secrets", "ls", "--limit", "101"], env, output().out)).rejects.toThrow(
+        "--limit takes 1 to 100 secrets a page.",
+      );
+    },
+  );
+});

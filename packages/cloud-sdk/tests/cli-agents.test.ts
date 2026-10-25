@@ -131,6 +131,43 @@ test("create fills the definition from a template and a use, and warns of a subs
   await expect(run(["agents", "create", "x"], env, out([]))).rejects.toThrow("Give --template");
 });
 
+test("create makes a reviewer from the review template, its pool the accounts given", async () => {
+  await withStub(
+    ({ method, path, body }) =>
+      method === "POST" && path === "/v1/agents"
+        ? agent((body as { definition: Record<string, unknown> }).definition)
+        : undefined,
+    async (lines, sent) => {
+      const code = await run(
+        [
+          "agents",
+          "create",
+          "ci-review",
+          "--template",
+          "review",
+          "--pool",
+          "CLAUDE_1",
+          "--pool",
+          "CLAUDE_2",
+          "--pool",
+          "CLAUDE_1",
+        ],
+        env,
+        out(lines),
+      );
+      expect(code).toBe(0);
+      const body = sent[0]!.body as { definition: Record<string, unknown> };
+      expect(body.definition).toEqual({
+        command: "python3 ~/.runtime-agent/runtime-agent review",
+        pool: ["CLAUDE_1", "CLAUDE_2"],
+        vcpu: 2,
+        memoryMiB: 2048,
+        maxSessionSeconds: 1800,
+      });
+    },
+  );
+});
+
 test("update keeps what it is not told to change", async () => {
   await withStub(
     ({ method, path, body }) => {
@@ -343,5 +380,161 @@ test("memory ls, search, cat, put and rm send what the API takes, the shared sco
   // in is told what to give, and no file is replaced with nothing.
   await expect(run(["agents", "memory", "put", "helper", "tone.md"], env, out([]))).rejects.toThrow(
     "- for stdin",
+  );
+});
+
+const ASK = "33333333-3333-4333-8333-333333333333";
+const inboxRow = (state = "open") => ({
+  id: ASK,
+  agentId: AGENT,
+  step: "backup-bucket-cap",
+  question: "Raise the backup bucket's cap?",
+  why: "Backups stop at the cap tonight.",
+  options: [{ label: "Raise to 20 TB", detail: "About $40 a month more." }, { label: "Keep it" }],
+  pick: "Raise to 20 TB",
+  labels: { team: "infra" },
+  state,
+  answer: state === "answered" ? { option: "Raise to 20 TB" } : null,
+  answeredBy: null,
+  sessions: [
+    {
+      sessionId: SESSION,
+      state: state === "answered" ? "answered" : "asking",
+      seq: 2,
+      answerSeq: null,
+    },
+    {
+      sessionId: AGENT,
+      state: state === "answered" ? "answered" : "asking",
+      seq: 3,
+      answerSeq: null,
+    },
+  ],
+  expiresAt: null,
+  createdAt: "2025-10-09T08:53:20.000Z",
+  updatedAt: "2025-10-09T08:53:20.000Z",
+  closedAt: null,
+});
+
+test("asks lists the inbox, one row per step with its sessions, and answer sends the option and words", async () => {
+  await withStub(
+    ({ method, path }) => {
+      if (method === "GET" && path === "/v1/agents/asks")
+        return { data: [inboxRow()], nextCursor: null };
+      if (method === "POST" && path === `/v1/agents/asks/${ASK}/answer`)
+        return inboxRow("answered");
+    },
+    async (lines, sent) => {
+      expect(
+        await run(["agents", "asks", "--label", "team=infra", "--state", "open"], env, out(lines)),
+      ).toBe(0);
+      expect(sent[0]!.query.getAll("label")).toEqual(["team:infra"]);
+      expect(sent[0]!.query.getAll("state")).toEqual(["open"]);
+      expect(lines.at(-1)).toContain("step backup-bucket-cap, 2 sessions asking");
+      expect(lines.at(-1)).toContain("options: Raise to 20 TB (pick) | Keep it");
+      expect(
+        await run(
+          ["agents", "answer", ASK, "Raise", "to", "20", "TB", "--text", "Done."],
+          env,
+          out(lines),
+        ),
+      ).toBe(0);
+      expect(sent.at(-1)!.body).toEqual({ option: "Raise to 20 TB", text: "Done." });
+      expect(lines.at(-1)).toBe(`${ASK} answered; 2 session(s) woken.`);
+      expect(run(["agents", "answer", ASK], env, out(lines))).rejects.toThrow(
+        "Give an option's label, --text, or both",
+      );
+    },
+  );
+});
+
+test("triggers rules, call, held, held start and dismiss send what the API takes; a call carries the secret, not the key", async () => {
+  const hook = {
+    id: "t2",
+    agentId: AGENT,
+    kind: "webhook",
+    config: {},
+    rules: { key: "{cause}", onEnded: "ask" },
+    pausedAt: null,
+    pausedWhy: null,
+    createdAt: "2025-10-09T08:53:20.000Z",
+    updatedAt: "2025-10-09T08:53:20.000Z",
+  };
+  const held = {
+    id: "c1",
+    triggerId: "t2",
+    agentId: AGENT,
+    key: "disk",
+    text: "disk full\non vin-5",
+    labels: {},
+    why: "ended",
+    state: "held",
+    sessionId: null,
+    notify: "email",
+    createdAt: "2025-10-09T08:53:20.000Z",
+    resolvedAt: null,
+  };
+  const bearers: string[] = [];
+  await withStub(
+    ({ method, path }) => {
+      if (method === "PATCH" && path === "/v1/agents/triggers/t2") return hook;
+      if (method === "POST" && path === "/v1/agents/triggers/t2/calls")
+        return {
+          outcome: "joined",
+          sessionId: SESSION,
+          seq: 2,
+          callId: null,
+          why: null,
+          replayed: false,
+        };
+      if (method === "GET" && path === "/v1/agents/triggers/t2/held")
+        return { data: [held], nextCursor: null };
+      if (method === "POST" && path === "/v1/agents/triggers/t2/held/c1/start")
+        return { session: session(), joined: false, calls: 2 };
+      if (method === "POST" && path === "/v1/agents/triggers/t2/held/c1/dismiss")
+        return { ...held, state: "dismissed" };
+    },
+    async (lines, sent) => {
+      const stubbed = globalThis.fetch;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        bearers.push(new Request(input, init).headers.get("authorization") ?? "");
+        return stubbed(input, init);
+      }) as typeof fetch;
+      await run(
+        ["agents", "triggers", "rules", "t2", '{"key":"{cause}","onEnded":"ask"}'],
+        env,
+        out(lines),
+      );
+      await run(
+        [
+          "agents",
+          "triggers",
+          "call",
+          "t2",
+          "disk",
+          "full",
+          "--key",
+          "disk",
+          "--secret",
+          "rtat_s3cret_value_1234",
+        ],
+        env,
+        out(lines),
+      );
+      await run(["agents", "triggers", "held", "t2", "--state", "held"], env, out(lines));
+      await run(["agents", "triggers", "held", "start", "t2", "c1"], env, out(lines));
+      await run(["agents", "triggers", "held", "dismiss", "t2", "c1"], env, out(lines));
+      expect(sent[0]!.body).toEqual({ rules: { key: "{cause}", onEnded: "ask" } });
+      expect(sent[1]!.body).toEqual({ text: "disk full", key: "disk" });
+      expect(bearers[1]).toBe("Bearer rtat_s3cret_value_1234");
+      expect(bearers[0]).toBe("Bearer rk_cli");
+      expect(sent[2]!.query.getAll("state")).toEqual(["held"]);
+      expect(lines[0]).toBe('t2 rules {"key":"{cause}","onEnded":"ask"}');
+      expect(lines[1]).toBe(`joined ${SESSION} seq 2`);
+      expect(lines[2]).toContain("c1");
+      expect(lines[2]).toContain("disk full on vin-5");
+      expect(lines[3]).toBe(`started ${SESSION} with 2 held calls`);
+      expect(lines[4]).toBe("c1 dismissed.");
+    },
   );
 });

@@ -214,8 +214,8 @@ module WithRuntime
     end
 
     # Starts copies of this sandbox as it is now (files, memory, running
-    # processes), each its own sandbox, on the same server, answered once they
-    # run. One copy without +count+; an array with it. If a copy fails, the
+    # processes), each its own sandbox, on its server while it has room and on
+    # another when it is full, answered once they run. One copy without +count+; an array with it. If a copy fails, the
     # error's +details["startedSandboxIds"]+ names the copies that did start.
     # +funding+ is accepted and ignored: copies run on free usage first, then credit.
     # +secrets: [name, ...]+ is the egress secrets the copies may use, by name:

@@ -170,6 +170,10 @@ export type JobSecret = {
 /** One secret by name, and where its value may go: to sandboxes through the
  * egress proxy (`sandboxes`), into scheduled jobs' environments (`jobs`), or
  * both. */
+/** A page of `secrets.list`: at most `limit` (1 to 100, default 50) secrets,
+ * by name, those named after `after`. The next page's `after` is the last
+ * name of this one; a page shorter than `limit` is the last. */
+export type ListSecrets = { limit?: number; after?: string };
 export type SecretUse = { name: string; sandboxes: Secret | null; jobs: JobSecret | null };
 
 /** A write that reached one copy of a secret and not the other: `stored`
@@ -204,14 +208,28 @@ export function secrets(t: Transport) {
   }
   const liveCopy = async (name: string, options?: RequestOptions) =>
     (await jobCopies(options)).find((s) => s.name === name && s.deletedAt === null);
-  const list = async (options?: RequestOptions) =>
-    (
-      await t.json<{ secrets: Secret[] }>({
+  /** One page with `limit` or `after`; every secret, page after page, without. */
+  async function list(query: ListSecrets & RequestOptions = {}): Promise<Secret[]> {
+    const { limit, after, ...options } = query;
+    const paged = limit !== undefined || after !== undefined;
+    const all: Secret[] = [];
+    let from = after;
+    for (;;) {
+      const params = {
+        ...(limit === undefined ? {} : { limit }),
+        ...(from === undefined ? {} : { after: from }),
+      };
+      const page = await t.json<{ secrets: Secret[]; next?: string | null }>({
         method: "GET",
         path: "/v1/egress-secrets",
+        ...(Object.keys(params).length ? { query: params } : {}),
         ...options,
-      })
-    ).secrets;
+      });
+      all.push(...page.secrets);
+      if (paged || !page.next) return all;
+      from = page.next;
+    }
+  }
   const key = (options: RequestOptions | undefined, part: string): RequestOptions | undefined =>
     options?.idempotencyKey
       ? { ...options, idempotencyKey: `${options.idempotencyKey}:${part}`.slice(0, 128) }
@@ -292,7 +310,8 @@ export function secrets(t: Transport) {
         sandboxes: byName.get(j.name)?.sandboxes ?? null,
         jobs: j,
       });
-    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // By code point, as the API pages them (`after` compares names so).
+    return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
   function set(
     name: string,
@@ -373,7 +392,8 @@ export function secrets(t: Transport) {
         ...options,
       }),
     /** The sandboxes' secrets: names, hosts and placeholders. Never values.
-     * `all()` includes the jobs copies. */
+     * `list({ limit, after })` gives one page, by name; `all()` includes
+     * the jobs copies. */
     list,
     /** Every secret by name, with where its value may go. */
     all,

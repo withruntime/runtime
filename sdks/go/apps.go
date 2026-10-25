@@ -48,6 +48,18 @@ type App struct {
 	// speed get clearly worse in its first 15 minutes: alert (tell the
 	// owners), rollback (go back and tell them) or off.
 	ReleaseWatch string `json:"releaseWatch,omitempty"`
+	// ReleaseStages is an App's: how a new version goes live. at_once
+	// switches every copy together; staged starts one copy of it beside the
+	// live version's, then about 10%, 50% and all of them, each stage
+	// judged on its visitors' errors and speed before the next. Empty for a
+	// Function.
+	ReleaseStages string `json:"releaseStages,omitempty"`
+	// ReleaseSoakSeconds is how long each stage runs once its copies serve
+	// before it is judged: 60 to 3600. Zero for a Function.
+	ReleaseSoakSeconds int `json:"releaseSoakSeconds,omitempty"`
+	// StagedRelease is an App's staged release under way, or its last; nil
+	// before its first.
+	StagedRelease *StagedRelease `json:"stagedRelease,omitempty"`
 	// SleepAfterMs is a Function's: 250 to 5000, zero for an App.
 	SleepAfterMs int            `json:"sleepAfterMs,omitempty"`
 	CreatedAt    int64          `json:"createdAt"`
@@ -66,6 +78,29 @@ type App struct {
 	// wait ahead by lane, and why. Higher lanes get room first. Nil while
 	// nothing of it waits.
 	Line *AppLine `json:"line,omitempty"`
+}
+
+// StagedRelease is an App's release in stages.
+type StagedRelease struct {
+	Version int `json:"version"`
+	// From is the version live when it began, serving beside it.
+	From int `json:"from"`
+	// State is rolling; back (a stage did worse, and its copies leave while
+	// the version before keeps serving); done (every copy runs it); failed
+	// (it went back, or its copies failed their health check, and the
+	// version failed); or ended (another deploy or a rollback took its
+	// place).
+	State  string `json:"state"`
+	Stage  int    `json:"stage"`
+	Stages int    `json:"stages"`
+	// Copies of the new version the stage serves, of Of.
+	Copies      int `json:"copies"`
+	Of          int `json:"of"`
+	SoakSeconds int `json:"soakSeconds"`
+	// Detail is its last step, in words.
+	Detail    string `json:"detail"`
+	StartedAt int64  `json:"startedAt"`
+	UpdatedAt int64  `json:"updatedAt"`
 }
 
 // AppLine is an App's place in its region's line for room.
@@ -114,8 +149,12 @@ type CreateAppOptions struct {
 	// routers, with nothing cached.
 	CDN *bool `json:"cdn,omitempty"`
 	// ReleaseWatch is alert unless set; rollback is opted into.
-	ReleaseWatch   string `json:"releaseWatch,omitempty"`
-	IdempotencyKey string `json:"-"`
+	ReleaseWatch string `json:"releaseWatch,omitempty"`
+	// ReleaseStages is at_once unless set, or staged (Apps only; see App).
+	ReleaseStages string `json:"releaseStages,omitempty"`
+	// ReleaseSoakSeconds is 60 to 3600 (Apps only); 300 unless set.
+	ReleaseSoakSeconds int    `json:"releaseSoakSeconds,omitempty"`
+	IdempotencyKey     string `json:"-"`
 }
 
 // UpdateAppOptions change settings in place; nil fields stay as they are.
@@ -126,24 +165,29 @@ type UpdateAppOptions struct {
 	// Labels replaces every label; an empty, non-nil map removes them all.
 	Labels map[string]string `json:"labels,omitempty"`
 	// MinCopies is for Apps only; SleepAfterMs (250 to 5000) for Functions only.
-	MinCopies      *int    `json:"minCopies,omitempty"`
-	MaxCopies      *int    `json:"maxCopies,omitempty"`
-	Concurrency    *int    `json:"concurrency,omitempty"`
-	Spares         *int    `json:"spares,omitempty"`
-	SleepAfterMs   *int    `json:"sleepAfterMs,omitempty"`
-	VCPU           *int    `json:"vcpu,omitempty"`
-	MemoryMiB      *int    `json:"memoryMiB,omitempty"`
-	Port           *int    `json:"port,omitempty"`
-	HealthPath     *string `json:"healthPath,omitempty"`
-	CDN            *bool   `json:"cdn,omitempty"`
-	ReleaseWatch   *string `json:"releaseWatch,omitempty"`
-	IdempotencyKey string  `json:"-"`
+	MinCopies    *int    `json:"minCopies,omitempty"`
+	MaxCopies    *int    `json:"maxCopies,omitempty"`
+	Concurrency  *int    `json:"concurrency,omitempty"`
+	Spares       *int    `json:"spares,omitempty"`
+	SleepAfterMs *int    `json:"sleepAfterMs,omitempty"`
+	VCPU         *int    `json:"vcpu,omitempty"`
+	MemoryMiB    *int    `json:"memoryMiB,omitempty"`
+	Port         *int    `json:"port,omitempty"`
+	HealthPath   *string `json:"healthPath,omitempty"`
+	CDN          *bool   `json:"cdn,omitempty"`
+	ReleaseWatch *string `json:"releaseWatch,omitempty"`
+	// ReleaseStages (at_once or staged) and ReleaseSoakSeconds (60 to
+	// 3600) are for Apps only.
+	ReleaseStages      *string `json:"releaseStages,omitempty"`
+	ReleaseSoakSeconds *int    `json:"releaseSoakSeconds,omitempty"`
+	IdempotencyKey     string  `json:"-"`
 }
 
 // AppDeployError is why a deploy failed or was superseded.
 type AppDeployError struct {
 	// Code is deploy_build_failed, deploy_health_failed, deploy_stop_failed,
-	// deploy_switch_failed or deploy_superseded.
+	// deploy_stage_failed (a stage of a staged release did worse and went
+	// back), deploy_switch_failed or deploy_superseded.
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Hint       string `json:"hint"`

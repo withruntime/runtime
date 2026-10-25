@@ -6,7 +6,7 @@ import java.util.List;
 public final class NetworkRules extends Params<NetworkRules> {
   public NetworkRules() {}
 
-  /** false refuses every outbound connection. */
+  /** false refuses every outbound connection; with allow, everything but the list. */
   public NetworkRules internet(boolean on) {
     return set("internet", on);
   }

@@ -658,6 +658,22 @@ class AsyncSandbox:
         self._users[name] = True
         return name
 
+    _bound: Dict[str, Any] = {}
+    """The options of the E2B client this class came from (``E2B(api_key=...).AsyncSandbox``)."""
+
+    @classmethod
+    def _runtime_client(cls, api_key: Optional[str], client: Optional[AsyncRuntime],
+                        connection: Dict[str, Any]) -> AsyncRuntime:
+        """The Runtime client a class call uses: the key or client it names,
+        else its E2B client's, else the environment's. The E2B client's other
+        options fill in ``connection`` where the call left them out."""
+        for name, value in cls._bound.items():
+            if name not in ("api_key", "client"):
+                connection.setdefault(name, value)
+        if api_key is None and client is None:
+            api_key, client = cls._bound.get("api_key"), cls._bound.get("client")
+        return _client(api_key, client, **connection)
+
     # ---- create, connect, list ---------------------------------------------
 
     @classmethod
@@ -677,7 +693,7 @@ class AsyncSandbox:
         Runtime: the free usage first, then prepaid credit, exactly as withruntime's own create. ``runtime_create`` passes
         Runtime fields (snake_case) over the adapter's."""
         core.refuse_create({"mcp": mcp, "network": network, "iam": iam, "volume_mounts": volume_mounts})
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         template = template or cls.default_template
         with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
             # The server keeps the deadline, up to 24 hours (0381). Without one
@@ -710,7 +726,9 @@ class AsyncSandbox:
                         me = await runtime_client.me()
                     except Exception:  # noqa: BLE001 - the error says what it can without it
                         me = None
-                    source = None if client is not None else core.key_source(api_key)
+                    named = client is not None or api_key is not None
+                    source = None if (client if named else cls._bound.get("client")) is not None else \
+                        core.key_source(api_key if named else cls._bound.get("api_key"))
                     raise core.template_missing(template, error, core.account_of(me, source)) from error
                 raise
         result = cls(created, runtime_client)
@@ -738,7 +756,7 @@ class AsyncSandbox:
     async def _cls_connect_sandbox(cls, sandbox_id: str, timeout: Optional[int] = None, *,
                                    on_resume: str = "restore", api_key: Optional[str] = None,
                                    client: Optional[AsyncRuntime] = None, **connection: Any) -> Any:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         with request_scope(connection.get("request_timeout") if connection.get("request_timeout") is not None else 60):
             runtime = await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id))
             await _resume(runtime, timeout, on_resume)
@@ -759,7 +777,7 @@ class AsyncSandbox:
              next_token: Optional[str] = None, order: Optional[str] = None, api_key: Optional[str] = None,
              client: Optional[AsyncRuntime] = None, **connection: Any) -> AsyncSandboxPaginator:
         """Running and paused sandboxes, a page at a time."""
-        return AsyncSandboxPaginator(_client(api_key, client, **connection),
+        return AsyncSandboxPaginator(cls._runtime_client(api_key, client, connection),
                                      core.list_filter(query, limit, next_token, order))
 
     # ---- lifecycle ------------------------------------------------------------
@@ -767,7 +785,7 @@ class AsyncSandbox:
     @classmethod
     async def _cls_kill(cls, sandbox_id: str, api_key: Optional[str] = None, client: Optional[AsyncRuntime] = None,
                         **connection: Any) -> bool:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         try:
             # Read first: a delete answers the same however often it is sent,
             # and E2B says False for one already gone.
@@ -794,7 +812,7 @@ class AsyncSandbox:
     @classmethod
     async def _cls_set_timeout(cls, sandbox_id: str, timeout: int, api_key: Optional[str] = None,
                                client: Optional[AsyncRuntime] = None, **connection: Any) -> None:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         await _extend_to(await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id)), timeout)
 
     @class_method_variant("_cls_set_timeout")
@@ -810,7 +828,7 @@ class AsyncSandbox:
     @classmethod
     async def _cls_get_info(cls, sandbox_id: str, api_key: Optional[str] = None,
                             client: Optional[AsyncRuntime] = None, **connection: Any) -> SandboxInfo:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         return core.sandbox_info((await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id))).info)
 
     @class_method_variant("_cls_get_info")
@@ -832,7 +850,7 @@ class AsyncSandbox:
     @classmethod
     async def _cls_pause(cls, sandbox_id: str, keep_memory: Optional[bool] = None, api_key: Optional[str] = None,
                          client: Optional[AsyncRuntime] = None, *, mode: Optional[str] = None, **connection: Any) -> bool:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         return await _pause(await _guard("sandbox", lambda: runtime_client.sandboxes.get(sandbox_id)), keep_memory, mode)
 
     @class_method_variant("_cls_pause")
@@ -893,7 +911,7 @@ class AsyncSandbox:
     @classmethod
     async def delete_snapshot(cls, snapshot_id: str, api_key: Optional[str] = None,
                               client: Optional[AsyncRuntime] = None, **connection: Any) -> bool:
-        runtime_client = _client(api_key, client, **connection)
+        runtime_client = cls._runtime_client(api_key, client, connection)
         try:
             await _guard("other", lambda: runtime_client.snapshots.delete(snapshot_id))
         except SandboxException as error:

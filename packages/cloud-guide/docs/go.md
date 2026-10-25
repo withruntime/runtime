@@ -449,8 +449,8 @@ func main() {
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on the same server; see [JavaScript](./javascript) for what forks and
-snapshots keep and how they are billed. If a copy fails, the error's
+processes, on its server while it has room and on another when it is full; see
+[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the error's
 `Details["startedSandboxIds"]` names the copies that did start.
 
 ## Share a port
@@ -906,6 +906,12 @@ func main() {
   `*http.Client`.
 - Money is integer microdollars: 1,000,000 is one US dollar. `client.Usage(ctx)`
   returns the account's balance as exact decimal strings.
+- `client.UsageExport(ctx, withruntime.UsageExportOptions{Since: ..., Until: ..., Cursor: ...})`
+  reads one page of settled usage over a UTC range, with its server CSV;
+  follow `NextCursor` until it is nil. `FinalThrough` is the time before which
+  no more charges will settle, and a row's `Final` is true once its resource is
+  deleted and can be charged nothing more
+  ([export settled usage](./api#export-settled-usage)).
 
 ## Domains, public ports and private networking
 
@@ -977,7 +983,11 @@ status and the website address where an owner manages it.
 
 `Volumes.Backup` requests a checked copy off the host. `Backups` lists copies;
 `GetBackup` and `DeleteBackup` read or remove one. `SetBackupPolicy` changes
-daily backups or retention. Restore makes a new volume from a ready backup.
+daily backups or retention, or backs the volume up on a schedule of its own:
+`SetBackupPolicyOptions{Schedule: &withruntime.BackupSchedule{EveryMinutes: 60},
+Keep: &withruntime.BackupKeep{Hourly: 24, Daily: 7}}` (or `Cron: "30 2 * * 1-5"`,
+in UTC); `NoSchedule: true` goes back to daily. Restore makes a new volume from
+a ready backup.
 
 ```go
 package main

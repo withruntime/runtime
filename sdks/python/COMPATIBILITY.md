@@ -17,7 +17,7 @@ interchangeable. Remaining implementation work is tracked in the repository's
 
 | Provider        | Upstream distribution examined                | Replacement imports                                                                                                                                             |
 | --------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| E2B             | `e2b==2.56.0`, `e2b-code-interpreter==2.11.0` | `from withruntime.e2b import Sandbox, AsyncSandbox`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox`                                       |
+| E2B             | `e2b==2.56.0`, `e2b-code-interpreter==2.11.0` | `from withruntime.e2b import Sandbox, AsyncSandbox, E2B`; `from withruntime.e2b.code_interpreter import Sandbox, AsyncSandbox, E2B`                             |
 | Runloop         | `runloop-api-client==2.0.0`                   | `from withruntime.runloop import Runloop, AsyncRunloop`; `from withruntime.runloop.sdk import RunloopSDK, AsyncRunloopSDK`                                      |
 | Prime Intellect | `prime-sandboxes==0.4.7`                      | `from withruntime.prime import SandboxClient, AsyncSandboxClient, APIClient, CreateSandboxRequest`                                                              |
 | Fly Sprites     | `sprites-py==0.7.2`                           | `from withruntime.sprites import SpritesClient, AsyncSpritesClient, SpriteConfig`; filesystem, client, sprite, types, exec and exceptions submodules also exist |

@@ -10,7 +10,7 @@ imports in about 30 ms and keeps its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.31.1. `pip show withruntime` shows the
+This guide describes `withruntime` 0.32.0. `pip show withruntime` shows the
 version you have; a method named here that yours lacks means an older one, and
 `pip install -U withruntime` updates it.
 
@@ -630,6 +630,7 @@ with Runtime() as runtime:
                         rules=[{"methods": ["GET", "HEAD"], "paths": ["/repos/acme/*"]}])
     for secret in runtime.secrets.list():  # names, hosts and placeholders, never values
         print(secret["name"], secret["hosts"])
+    page = runtime.secrets.list(limit=10, after="GITHUB_TOKEN")  # one page, by name
     runtime.secrets.delete("GITHUB_TOKEN")
 ```
 
@@ -705,7 +706,8 @@ Forks and snapshots:
   idempotency key answers the same error.
 - If a fork stops partway and left its source paused, the source stays paused,
   and an account notice says so and how to wake it.
-- Copies run on the source's server. A kept snapshot is stored on its source server and
+- Copies start on the source's server while it has room, and on another server
+  once the snapshot is copied there when it is full. A kept snapshot is stored on its source server and
   copied off it, encrypted, after its final compressed form is ready. It survives loss of the server once
   `backedUp` is `True`, meaning that copy has been checked
   ([storage and backups](./storage)).
@@ -974,6 +976,32 @@ longer windows. Counts are exact decimal strings, and `errorPercent` is `None`
 when no calls were counted. `AsyncRuntime` has the same method, awaited. A key
 needs the `usage` scope, read-only access or all-products access. See
 [account API calls](./observability#account-api-calls).
+
+## Export settled usage
+
+```python check
+from withruntime import Runtime
+
+with Runtime() as runtime:
+    cursor = None
+    while True:
+        page = runtime.usage_export(
+            "2026-09-01T00:00:00Z", "2026-10-01T00:00:00Z", cursor=cursor
+        )
+        print(page["csv"], end="")
+        cursor = page["nextCursor"]
+        if cursor is None:
+            break
+    print(page["finalThrough"])
+```
+
+The range includes settlements at `since` and excludes those at `until`;
+pending holds are excluded. Concatenate each page's CSV unchanged; the header
+is on the first only. `finalThrough` is the time before which no more charges
+will settle (the range is final once it reaches `until`), and a row's `final`
+is `True` once its resource is deleted and can be charged nothing more.
+`AsyncRuntime` has the same method, awaited. See
+[export settled usage](./api#export-settled-usage).
 
 ## Identity tokens
 

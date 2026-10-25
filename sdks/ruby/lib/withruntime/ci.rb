@@ -83,15 +83,20 @@ module WithRuntime
     # Cancels a queued or running check: its jobs end and its machines are let
     # go. A check that has ended is answered as it is.
     def cancel(id) = Record.new(@t.json("POST", "/v1/ci/checks/#{seg(id)}:cancel"))
+
+    # Runs a check again, as GitHub's Re-run does: a new check of the same
+    # commit, trusted only as the commit's last check was.
+    def rerun(id) = Record.new(@t.json("POST", "/v1/ci/checks/#{seg(id)}:rerun"))
   end
 
   # +runtime.ci.jobs+: one command of a check, run in sandboxes.
   class CIJobs < Product
     # The job with its +log+ (the tail, at most 256 KiB). A failed job's
     # sandbox_ids may be kept paused: wake one or exec in it with
-    # +runtime.sandboxes+. A review step's job has its +review+: the verdict
-    # (pass or block), summary, findings (kind, file, line, what, fix), notes,
-    # and the agent, account, model and session that gave it; nil otherwise.
+    # +runtime.sandboxes+. An agent step's job (+review:+ is its short form)
+    # has its +review+: the verdict (pass or block), summary, findings (kind,
+    # file, line, what, fix), notes, and the agent, the model the step asked
+    # for (nil when none) and the session that gave it; nil otherwise.
     def get(id) = Record.new(@t.json("GET", "/v1/ci/jobs/#{seg(id)}"))
   end
 

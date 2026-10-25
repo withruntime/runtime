@@ -57,6 +57,10 @@ const restored = await runtime.volumes.restore(backup.id, { name: "data-restored
 for await (const each of await runtime.volumes.backups({ volumeId: volume.id }))
   console.log(each.id);
 await runtime.volumes.setBackupPolicy(volume.id, { daily: true, retentionDays: 14 });
+await runtime.volumes.setBackupPolicy(volume.id, {
+  schedule: { everyMinutes: 60 },
+  keep: { hourly: 24, daily: 7, weekly: 4 },
+});
 ```
 
 ```python check
@@ -67,6 +71,7 @@ volume = runtime.volumes.create(10_240, name="data")
 backup = runtime.volumes.backup(volume["id"], retention_days=30)
 restored = runtime.volumes.restore(backup["id"], name="data-restored")
 runtime.volumes.set_backup_policy(volume["id"], daily=True, retention_days=14)
+runtime.volumes.set_backup_policy(volume["id"], every_minutes=60, keep={"hourly": 24, "daily": 7, "weekly": 4})
 ```
 
 ```bash no-run
@@ -74,12 +79,24 @@ runtime volumes backup "${vol}" --retention-days 30   # prints the backup id
 runtime volumes backups "${vol}"                      # newest first
 runtime volumes restore "${backup}" --name data-restored
 runtime volumes backup-policy "${vol}" --daily on --retention-days 14
+runtime volumes backup-policy "${vol}" --every 60 --keep hourly=24,daily=7,weekly=4
+runtime volumes backup-policy "${vol}" --no-schedule    # back to daily
 runtime volumes backup-rm "${backup}"
 ```
 
 - **Daily:** every volume is backed up once a day, starting an hour after it is
   created. Turn that off with `daily: false`. Each daily backup is kept for the
   volume's `retentionDays`, 7 unless you set 1 to 365.
+- **Your own schedule:** `schedule: { everyMinutes: n }` (15 or more, counted
+  from 1970-01-01 UTC) or `schedule: { cron: "30 2 * * 1-5" }` (five fields in
+  UTC) backs the volume up on that schedule instead of daily, and `keep` says
+  which of those backups stay: the `last` N, and the newest in each of the
+  newest N `hourly`, `daily`, `weekly` (from Monday), `monthly` and `yearly`
+  periods, each 0 to 1,000. A schedule with no `keep` keeps one a day for
+  `retentionDays`. A backup waits for the one before it to be copied, so a
+  slow copy is never stacked on. `schedule: null` goes back to daily, and its
+  backups are then kept `retentionDays` from that moment. While the account
+  has no credit, each backup is kept at most seven days, whatever the counts.
 - **On request:** `backup` makes one now and waits up to a minute for it to be
   ready. A backup can be kept for 1 to 365 days.
 - **Without credit**, a backup is kept at most seven days, whatever you ask
@@ -251,13 +268,16 @@ await sbx.exec("ls /data");
 - Backups and restores run at a lower priority than your sandboxes. A backup is
   `pending` until it is copied and checked, and a restored volume is `creating`
   until every byte is downloaded and checked.
-- A backup's `copyStartedAt` says when its copy off the volume's server began.
-  While it is `null` the backup is waiting its turn behind other copies on that
-  server; it still starts, and nothing needs doing. (A backup whose copy began
-  before this field existed shows `null` too.)
-- A backup that cannot start because no copy is being made from its server for
-  15 minutes fails with `errorCode` `backup_stalled`, rather than staying
-  `pending`. The volume is unchanged; back it up again.
+- A backup's copy goes ahead of Runtime's own copies on its volume's server:
+  it never waits behind one. `copyStartedAt` says when its copy off that server
+  began; while it is `null` the backup waits only for other backups there.
+  (A backup whose copy began before this field existed shows `null` too.)
+- A backup whose copy has not begun 15 minutes after you asked for it
+  (`createdAt`) fails with `errorCode` `backup_stalled`, rather than staying
+  `pending`, unless other backups on its server are being copied or one
+  finished there in the last 15 minutes: then it is moving up the line and
+  waits its turn. One whose copy began is never failed this way. The volume
+  is unchanged; back it up again.
 - Snapshot copies are part of the snapshot and its [price](./pricing).
 - Volume backups cost {{backup-rate}} per GB (10⁹ bytes) per 30-day month (a
   backup made before this price keeps {{backup-rate-before}} until

@@ -46,6 +46,11 @@ export type AgentDefinition = {
    * GEMINI_API_KEY, OPENROUTER_API_KEY, or an OpenAI-compatible endpoint's
    * key with env.OPENAI_BASE_URL). */
   secrets?: string[];
+  /** Claude accounts, 1 to 16 egress secrets' names: subscription tokens,
+   * or API keys for a name holding API_KEY. Each session takes the one with
+   * the most usage left; the review template moves to the next when one is
+   * out of usage, and waits for the soonest reset when all are. */
+  pool?: string[];
   /** MCP servers the harness may reach. */
   mcp?: { name: string; url: string }[];
   volumes?: { volume: string; path: string }[];
@@ -115,12 +120,80 @@ export type AgentEvent = {
   body: { text?: string } & Record<string, unknown>;
   createdAt: string;
 };
+export type AgentAskState = "open" | "answered" | "expired" | "withdrawn" | "closed";
+/** One row of the account's inbox: a question a session's harness needs
+ * answered to go on. Asks of one agent's sessions sharing a memory, with the same `step` are
+ * one row while it is open, and one answer reaches every session asking. */
+export type AgentAsk = {
+  id: string;
+  /** The agent of the session that asked first. */
+  agentId: string;
+  /** What it waits on, in the asker's words. */
+  step: string | null;
+  question: string;
+  /** Why it matters. */
+  why: string | null;
+  options: { label: string; detail?: string }[];
+  /** The recommended option's label; taken as the answer when it expires. */
+  pick: string | null;
+  /** Who sees it: its agent's labels with the ask's own over them. */
+  labels: Record<string, string>;
+  state: AgentAskState;
+  /** An option's label and/or words; `expired` when the pick was taken at
+   * expiry. */
+  answer: { option?: string; text?: string; expired?: boolean } | null;
+  /** A key's principal id, or `runtime` for a pick taken at expiry. */
+  answeredBy: string | null;
+  /** The sessions asking it, each with its ask event's seq and the answer
+   * event that woke it. */
+  sessions: {
+    sessionId: string;
+    state: "asking" | "answered" | "expired" | "withdrawn" | "ended";
+    seq: number;
+    answerSeq: number | null;
+  }[];
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+};
+export type ListAgentAsks = {
+  /** Open by default. */
+  state?: AgentAskState[];
+  agent?: string;
+  /** Asks carrying every one of these labels: who sees an ask. */
+  labels?: Record<string, string>;
+  cursor?: string;
+  limit?: number;
+};
+/** An option's label, words, or both. */
+export type AnswerAgentAsk = { option?: string; text?: string };
 export type AgentTriggerKind = "slack" | "github" | "schedule" | "webhook";
+/** A trigger's rules, each optional. */
+export type AgentTriggerRules = {
+  /** Queue order of its sessions when the agent's maxConcurrent is full:
+   * -100 to 100, higher first, then oldest. Default 0. */
+  priority?: number;
+  /** Sessions it may start in an hour; a call past it is held for you.
+   * Joining an open session is never capped. Default none. */
+  maxStartsPerHour?: number;
+  /** A call whose key's last session has ended: "start" a new one (the
+   * default), "note" it in the ended session's log and run nothing, or
+   * "ask" you (the call is held until you start it). */
+  onEnded?: "start" | "note" | "ask";
+  /** Where a held call is told: "email" to who added the trigger (the
+   * default), or "webhook", the account's webhooks' agent.call.held alone. */
+  notify?: "email" | "webhook";
+  /** A webhook's only: the key of a call that sends none, from its JSON's
+   * fields: "{cause}", "{alert.host}:{check}". */
+  key?: string;
+};
 export type AgentTrigger = {
   id: string;
   agentId: string;
   kind: AgentTriggerKind;
   config: Record<string, unknown>;
+  rules: AgentTriggerRules;
   pausedAt: string | null;
   pausedWhy: string | null;
   createdAt: string;
@@ -142,15 +215,59 @@ export type StartAgentSession = {
   key?: string;
   labels?: Record<string, string>;
 };
-export type CreateAgentTrigger =
+export type CreateAgentTrigger = (
   | { kind: "slack"; config: { team: string; channel: string } }
   | { kind: "github"; config: { installation: number; repository: string; events?: string[] } }
   | { kind: "schedule"; config: { cron: string; timezone?: string; input: string } }
-  | { kind: "webhook"; config: Record<string, never> };
+  | { kind: "webhook"; config: Record<string, never> }
+) & { rules?: AgentTriggerRules };
+/** One call to a webhook trigger: its words, and the key and labels of the
+ * session it starts or joins. */
+export type AgentTriggerCall = {
+  text: string;
+  key?: string;
+  labels?: Record<string, string>;
+};
+/** What a call did: started a session, joined its key's open one, was
+ * noted in its key's ended one, or was held for you (`why`). */
+export type AgentTriggerCallOutcome = {
+  outcome: "started" | "joined" | "noted" | "held";
+  sessionId: string | null;
+  seq: number | null;
+  callId: string | null;
+  why: AgentHeldCall["why"] | null;
+  replayed: boolean;
+};
+/** A call a trigger held for you because no session could take it. None is
+ * ever dropped. */
+export type AgentHeldCall = {
+  id: string;
+  triggerId: string;
+  agentId: string;
+  key: string | null;
+  text: string;
+  labels: Record<string, string>;
+  /** The trigger was paused; it had started maxStartsPerHour sessions this
+   * hour; its key's session had ended and onEnded is "ask"; the agent's day
+   * budget was spent; the account's sessions were at their limit; Agents
+   * was closed to the account. */
+  why: "paused" | "rate" | "ended" | "budget" | "quota" | "closed";
+  state: "held" | "started" | "dismissed";
+  sessionId: string | null;
+  notify: "email" | "webhook";
+  createdAt: string;
+  resolvedAt: string | null;
+};
 
-/** The five harnesses' names, so `templates["claude-code"]` is known to be there. */
+/** The harnesses' names, so `templates["claude-code"]` is known to be there. */
 export type AgentTemplateKey =
-  "claude-code" | "codex" | "gemini-cli" | "claude-agent-sdk" | "openai-agents-sdk";
+  | "claude-code"
+  | "codex"
+  | "gemini-cli"
+  | "claude-agent-sdk"
+  | "openai-agents-sdk"
+  | "review"
+  | "judge";
 
 /** A file of an agent's memory (`memory.list`). `scope` is whose: empty for
  * the shared memory, which every session reads (one keeping memory per key
@@ -206,7 +323,10 @@ export type AgentTemplate = {
   /** How your own subscription logs it in, for your own team's agents, or
    * null when it takes an API key alone. */
   subscription: string | null;
-  definition: { command: string; secrets: string[] };
+  definition: Pick<
+    AgentDefinition,
+    "secrets" | "pool" | "vcpu" | "memoryMiB" | "maxSessionSeconds"
+  > & { command: string };
 };
 /** A use: what an agent is for, merged into a template's definition. */
 export type AgentUse = {
@@ -224,8 +344,10 @@ const START =
 const CODEX =
   'npx -y @openai/codex exec --dangerously-bypass-approvals-and-sandbox "$(cat ~/.runtime-agent/start.md)"';
 const GEMINI = 'npx -y @google/gemini-cli --yolo -p "$(cat ~/.runtime-agent/start.md)"';
+const REVIEW = "python3 ~/.runtime-agent/runtime-agent review";
+const JUDGE = "python3 ~/.runtime-agent/runtime-agent judge";
 
-/** The five harnesses (agents-contract.md); tests/agents.test.ts holds them
+/** The harnesses (agents-contract.md); tests/agents.test.ts holds them
  * to packages/cloud-guide/agent-templates.json. */
 export const AGENT_TEMPLATES: Readonly<Record<AgentTemplateKey, AgentTemplate>> = {
   "claude-code": {
@@ -274,6 +396,38 @@ export const AGENT_TEMPLATES: Readonly<Record<AgentTemplateKey, AgentTemplate>> 
     apiKeyHost: "api.openai.com",
     subscription: null,
     definition: { command: "python3 ~/agent.py", secrets: ["OPENAI_API_KEY"] },
+  },
+  review: {
+    key: "review",
+    title: "Code review",
+    command: REVIEW,
+    apiKeySecret: "ANTHROPIC_API_KEY",
+    apiKeyHost: "api.anthropic.com",
+    subscription:
+      "a token per account: run `claude setup-token` on your own computer (Pro/Max) for each, store each with `runtime secrets set CLAUDE_1` scoped to api.anthropic.com, then name them all in pool (--pool CLAUDE_1 --pool CLAUDE_2)",
+    definition: {
+      command: REVIEW,
+      pool: ["ANTHROPIC_API_KEY"],
+      vcpu: 2,
+      memoryMiB: 2048,
+      maxSessionSeconds: 1800,
+    },
+  },
+  judge: {
+    key: "judge",
+    title: "Your rules",
+    command: JUDGE,
+    apiKeySecret: "ANTHROPIC_API_KEY",
+    apiKeyHost: "api.anthropic.com",
+    subscription:
+      "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block",
+    definition: {
+      command: JUDGE,
+      pool: ["ANTHROPIC_API_KEY"],
+      vcpu: 2,
+      memoryMiB: 2048,
+      maxSessionSeconds: 1800,
+    },
   },
 };
 
@@ -410,6 +564,39 @@ export function agents(t: Transport) {
       listSessions({ ...query, cursor }, options),
     );
   };
+  const listAsks = async (
+    query: ListAgentAsks = {},
+    options?: RequestOptions,
+  ): Promise<Page<AgentAsk>> => {
+    const { labels, ...rest } = query;
+    const page = await t.json<Wire<AgentAsk>>({
+      method: "GET",
+      path: "/v1/agents/asks",
+      query: {
+        ...rest,
+        ...(labels ? { label: Object.entries(labels).map(([k, v]) => `${k}:${v}`) } : {}),
+      },
+      ...options,
+    });
+    return new Page(page.data, page.nextCursor, (cursor) =>
+      listAsks({ ...query, cursor }, options),
+    );
+  };
+  const listHeld = async (
+    trigger: string,
+    query: { state?: AgentHeldCall["state"][]; cursor?: string; limit?: number } = {},
+    options?: RequestOptions,
+  ): Promise<Page<AgentHeldCall>> => {
+    const page = await t.json<Wire<AgentHeldCall>>({
+      method: "GET",
+      path: `/v1/agents/triggers/${enc(trigger)}/held`,
+      query,
+      ...options,
+    });
+    return new Page(page.data, page.nextCursor, (cursor) =>
+      listHeld(trigger, { ...query, cursor }, options),
+    );
+  };
   const listMemory = async (
     agent: string,
     query: { scope?: string; prefix?: string; cursor?: string; limit?: number } = {},
@@ -492,6 +679,23 @@ export function agents(t: Transport) {
         });
       },
     },
+    /** The account's inbox: the questions its agents' sessions need answered
+     * to go on, one row per step however many sessions ask it. */
+    asks: {
+      /** Newest first; open ones unless `state` says otherwise. */
+      list: listAsks,
+      get: (id: string, options?: RequestOptions) =>
+        t.json<AgentAsk>({ method: "GET", path: `/v1/agents/asks/${enc(id)}`, ...options }),
+      /** Every session asking it reads the answer next, and wakes. An ask no
+       * longer open is refused with `ask_closed`. */
+      answer: (id: string, answer: AnswerAgentAsk, options?: RequestOptions) =>
+        t.json<AgentAsk>({
+          method: "POST",
+          path: `/v1/agents/asks/${enc(id)}/answer`,
+          body: answer,
+          ...options,
+        }),
+    },
     triggers: {
       create: (agent: string, input: CreateAgentTrigger, options?: RequestOptions) =>
         t.json<AgentTrigger>({
@@ -508,7 +712,8 @@ export function agents(t: Transport) {
             ...options,
           })
         ).data,
-      /** Its events are refused, saying `why`; nothing else is held. */
+      /** Held: a webhook's calls are kept for you (see `held`), saying
+       * `why`; nothing else is held. */
       pause: (id: string, why: string, options?: RequestOptions) =>
         t.json<AgentTrigger>({
           method: "POST",
@@ -530,6 +735,44 @@ export function agents(t: Transport) {
           ...options,
         });
       },
+      /** Its rules, whole, in place: its secret stays. `{}` is every default. */
+      setRules: (id: string, rules: AgentTriggerRules, options?: RequestOptions) =>
+        t.json<AgentTrigger>({
+          method: "PATCH",
+          path: `/v1/agents/triggers/${enc(id)}`,
+          body: { rules },
+          ...options,
+        }),
+      /** A webhook trigger's call, as its sender makes it: by the trigger's
+       * secret, never your key. A call with the key of an open session joins
+       * it. Pass `idempotencyKey` to make a retry the same call. */
+      call: (id: string, secret: string, call: AgentTriggerCall, options?: RequestOptions) =>
+        t.json<AgentTriggerCallOutcome>({
+          method: "POST",
+          path: `/v1/agents/triggers/${enc(id)}/calls`,
+          body: call,
+          bearer: secret,
+          ...options,
+        }),
+      /** Calls it held for you, newest first. */
+      held: listHeld,
+      /** Start a held call: one session with it and every call held for its
+       * key since, oldest first. */
+      startHeld: (id: string, call: string, options?: RequestOptions) =>
+        t.json<{ session: AgentSession; joined: boolean; calls: number }>({
+          method: "POST",
+          path: `/v1/agents/triggers/${enc(id)}/held/${enc(call)}/start`,
+          body: {},
+          ...options,
+        }),
+      /** Dismiss a held call: nothing runs. */
+      dismissHeld: (id: string, call: string, options?: RequestOptions) =>
+        t.json<AgentHeldCall>({
+          method: "POST",
+          path: `/v1/agents/triggers/${enc(id)}/held/${enc(call)}/dismiss`,
+          body: {},
+          ...options,
+        }),
     },
     /** Its built-in memory: text files kept across sessions, which the
      * agent reads, writes and searches from inside its sessions. A scope is
@@ -591,7 +834,8 @@ export function agents(t: Transport) {
         ).deleted,
     },
     /** The harnesses, as data: claude-code, codex, gemini-cli,
-     * claude-agent-sdk, openai-agents-sdk. */
+     * claude-agent-sdk, openai-agents-sdk, review (a CI/CD agent step's
+     * reviewer) and judge (an agent step held to your instructions alone). */
     templates: AGENT_TEMPLATES,
     /** The uses, as data: support (your customers) and team (your team). */
     uses: AGENT_USES,

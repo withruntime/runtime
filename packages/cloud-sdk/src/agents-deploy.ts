@@ -30,20 +30,23 @@ import {
   type AgentDefinition,
   type AgentTrigger,
   type AgentTriggerKind,
+  type AgentTriggerRules,
   type CreateAgentTrigger,
 } from "./products/agents.js";
 
-/** One trigger as the file writes it. `paused` holds it, saying why. */
+/** One trigger as the file writes it. `paused` holds it, saying why;
+ * `rules` are changed in place, never by making the trigger again. */
 export type AgentsFileTrigger = {
   kind: AgentTriggerKind;
   config: Record<string, unknown>;
+  rules?: AgentTriggerRules;
   paused?: string;
 };
 /** One agent as the file writes it: a harness template and a use fill in
  * what it leaves out, then each definition field it sets. */
 export type AgentsFileAgent = Omit<Partial<AgentDefinition>, "template"> & {
   /** A harness: claude-code, codex, gemini-cli, claude-agent-sdk,
-   * openai-agents-sdk. Fills in `command` and `secrets`. */
+   * openai-agents-sdk, review, judge. Fills in `command` and its model keys. */
   template?: string;
   /** support or team: a size and bounds for that use (`agents.uses`). */
   use?: "support" | "team";
@@ -84,6 +87,7 @@ export type AgentsDeployPort = {
   pauseTrigger(triggerId: string, why: string, key: string): Promise<AgentTrigger>;
   resumeTrigger(triggerId: string, key: string): Promise<AgentTrigger>;
   removeTrigger(triggerId: string, key: string): Promise<void>;
+  setTriggerRules(triggerId: string, rules: AgentTriggerRules, key: string): Promise<AgentTrigger>;
   /** How many memory files the agent holds: deleting it deletes them. */
   memoryFiles(agentId: string): Promise<number>;
 };
@@ -128,6 +132,14 @@ export type AgentsDeployChange =
       text: string;
     }
   | { action: "resume-trigger"; agent: string; triggerId: string; key: string; text: string }
+  | {
+      action: "set-trigger-rules";
+      agent: string;
+      triggerId: string;
+      rules: AgentTriggerRules;
+      key: string;
+      text: string;
+    }
   | { action: "remove-trigger"; agent: string; triggerId: string; key: string; text: string };
 
 export type AgentsDeployResult = {
@@ -179,6 +191,7 @@ const DEFINITION_FIELDS = [
   "instructions",
   "env",
   "secrets",
+  "pool",
   "mcp",
   "volumes",
   "idlePauseSeconds",
@@ -302,9 +315,9 @@ function checkAgent(
   if (use === "support" || use === "team") Object.assign(def, AGENT_USES[use].definition);
   const found = typeof template === "string" ? agentTemplate(template) : undefined;
   if (found) {
-    const t = found.definition;
-    def.command = t.command;
-    def.secrets = [...t.secrets];
+    // A use's size wins over the template's, as the CLI's --use does.
+    for (const [k, v] of Object.entries(found.definition))
+      if (def[k] === undefined) def[k] = Array.isArray(v) ? [...v] : v;
   }
 
   const integer = (field: string, min: number, max: number) => {
@@ -373,10 +386,16 @@ function checkAgent(
       keys.length !== 1 ||
       !(
         (typeof v.image === "string" && /^[A-Za-z0-9][A-Za-z0-9_./:@-]{0,255}$/.test(v.image)) ||
-        (typeof v.snapshot === "string" && UUID.test(v.snapshot))
+        (typeof v.snapshot === "string" && UUID.test(v.snapshot)) ||
+        // The API's own pattern (packages/cloud/src/api/products/agents.ts).
+        (typeof v.repo === "string" &&
+          /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(v.repo))
       )
     )
-      note(at("from"), "takes { image: name[:tag] } or { snapshot: <snapshot id> }.");
+      note(
+        at("from"),
+        "takes { image: name[:tag] }, { snapshot: <snapshot id> } or { repo: owner/name }.",
+      );
     else def.from = { ...v };
   }
   const snapshot = isObject(def.from) && "snapshot" in def.from;
@@ -428,6 +447,18 @@ function checkAgent(
           note(at("secrets", i), "is not a secret's name, such as ANTHROPIC_API_KEY.");
       });
       def.secrets = [...new Set(v)];
+    }
+  }
+  if (entry.pool !== undefined) {
+    const v = entry.pool;
+    if (!Array.isArray(v) || v.length < 1 || v.length > 16)
+      note(at("pool"), "takes a list of 1 to 16 egress secrets' names, one per Claude account.");
+    else {
+      v.forEach((s, i) => {
+        if (typeof s !== "string" || !SHELL_NAME.test(s))
+          note(at("pool", i), "is not a secret's name, such as CLAUDE_1.");
+      });
+      def.pool = [...new Set(v)];
     }
   }
   if (entry.mcp !== undefined) {
@@ -535,8 +566,11 @@ function checkTrigger(
     note(rest, message);
   };
   for (const key of Object.keys(t))
-    if (!["kind", "config", "paused"].includes(key))
-      bad([key], `is not a field a trigger takes${hint(key, ["kind", "config", "paused"])}`);
+    if (!["kind", "config", "rules", "paused"].includes(key))
+      bad(
+        [key],
+        `is not a field a trigger takes${hint(key, ["kind", "config", "rules", "paused"])}`,
+      );
   const kind = t.kind as AgentTriggerKind;
   if (!TRIGGER_KINDS.includes(kind)) {
     bad(["kind"], `takes ${TRIGGER_KINDS.join(", ")}.`);
@@ -587,10 +621,38 @@ function checkTrigger(
     (typeof paused !== "string" || paused.length < 1 || paused.length > 1024)
   )
     bad(["paused"], "takes the words a held trigger says, 1 to 1024 characters.");
+  const rules = t.rules ?? {};
+  if (!isObject(rules)) bad(["rules"], `takes ${RULES}.`);
+  else
+    for (const [k, v] of Object.entries(rules)) {
+      const whole = (lo: number, hi: number) =>
+        typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
+      if (!(
+        (k === "priority" && whole(-100, 100)) ||
+        (k === "maxStartsPerHour" && whole(1, 100000)) ||
+        (k === "onEnded" && ["start", "note", "ask"].includes(v as string)) ||
+        (k === "notify" && ["email", "webhook"].includes(v as string)) ||
+        (k === "key" &&
+          kind === "webhook" &&
+          typeof v === "string" &&
+          v.length <= 256 &&
+          RULE_KEY.test(v))
+      ))
+        bad(["rules", k], `takes ${RULES}.`);
+    }
   if (ok && !within(config, TRIGGER_MAX_BYTES)) bad(["config"], "is over 40 KiB.");
   if (!ok) return null;
-  return { kind, config, ...(typeof paused === "string" ? { paused } : {}) };
+  return {
+    kind,
+    config,
+    ...(isObject(rules) && Object.keys(rules).length ? { rules: rules as AgentTriggerRules } : {}),
+    ...(typeof paused === "string" ? { paused } : {}),
+  };
 }
+const RULES =
+  '{ priority?: -100 to 100, maxStartsPerHour?: 1 to 100000, onEnded?: start | note | ask, notify?: email | webhook, key?: "{field}" (a webhook\'s) }';
+/** A webhook's key template, as the API holds it. */
+const RULE_KEY = /^([A-Za-z0-9._:/@#+=-]|\{[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}\})+$/;
 const TRIGGER_KEYS: Record<AgentTriggerKind, readonly string[]> = {
   slack: ["team", "channel"],
   github: ["installation", "repository", "events"],
@@ -684,6 +746,15 @@ export async function planAgents(
         continue;
       }
       const [match] = open.splice(at, 1);
+      if (canonical(trigger.rules ?? {}) !== canonical(match!.rules ?? {}))
+        changes.push({
+          action: "set-trigger-rules",
+          agent: want.name,
+          triggerId: match!.id,
+          rules: trigger.rules ?? {},
+          key: await keyOf("set-trigger-rules", match!.id, trigger.rules ?? {}, match!.updatedAt),
+          text: `set rules of trigger ${match!.id} (${triggerText(trigger)}) of ${want.name}: ${canonical(trigger.rules ?? {})}`,
+        });
       if (trigger.paused !== undefined && match!.pausedWhy !== trigger.paused)
         changes.push({
           action: "pause-trigger",
@@ -792,7 +863,11 @@ async function apply(port: AgentsDeployPort, change: AgentsDeployChange, ids: Ma
       const key = change.key;
       const made = await port.addTrigger(
         agentId,
-        { kind: change.trigger.kind, config: change.trigger.config } as CreateAgentTrigger,
+        {
+          kind: change.trigger.kind,
+          config: change.trigger.config,
+          ...(change.trigger.rules ? { rules: change.trigger.rules } : {}),
+        } as CreateAgentTrigger,
         key,
       );
       change.triggerId = made.id;
@@ -813,6 +888,9 @@ async function apply(port: AgentsDeployPort, change: AgentsDeployChange, ids: Ma
       return;
     case "remove-trigger":
       await port.removeTrigger(change.triggerId, change.key);
+      return;
+    case "set-trigger-rules":
+      await port.setTriggerRules(change.triggerId, change.rules, change.key);
       return;
   }
 }
@@ -955,6 +1033,8 @@ function clientPort(api: Runtime["agents"]): AgentsDeployPort {
     pauseTrigger: (id, why, idempotencyKey) => api.triggers.pause(id, why, { idempotencyKey }),
     resumeTrigger: (id, idempotencyKey) => api.triggers.resume(id, { idempotencyKey }),
     removeTrigger: (id, idempotencyKey) => api.triggers.delete(id, { idempotencyKey }),
+    setTriggerRules: (id, rules, idempotencyKey) =>
+      api.triggers.setRules(id, rules, { idempotencyKey }),
     memoryFiles: async (agentId) => (await api.memory.list(agentId, { limit: 1 })).usage.files,
   };
 }

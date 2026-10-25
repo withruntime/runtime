@@ -8,16 +8,224 @@ Each day, and each entry, also has a page of its own at
 [withruntime.com/changelog](https://withruntime.com/changelog), and every entry
 arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
+## 25 October 2026
+
+- **A fork's copies start on another server when the source's is full.**
+  A fork used to start its copies only on its source's server, and answered
+  `no_capacity` when that server had no room, even after pausing the source
+  and taking its snapshot. Now its snapshot is copied to a server with room
+  and the copies start there, as a create from a kept snapshot already did.
+  And a time limit (`timeoutSeconds`) set on a sandbox that is still starting
+  or waking is taken at once, rather than answered `busy`.
+- **Secrets list in pages.** `runtime_secrets` action `list` takes `limit`
+  (1 to 100) and `after`, as its MCP schema said it did; so do
+  `GET /v1/egress-secrets` (its answer's `next` is the next page's `after`),
+  every SDK's `secrets.list` and `runtime secrets ls --limit --after`. The
+  `runtime_secrets` tool now names which action takes each field, and a field
+  sent to the wrong action says which one takes it.
+
 ## 24 October 2026
+
+- **Internet off with an allow list reaches the list.** A sandbox created or
+  set with `network: {internet: false, allow: [...]}` was refused every
+  connection (`X-Runtime-Egress: internet-off`), though its rules showed the
+  list. Internet off with an `allow` list is now allow-list only: the sandbox
+  reaches the listed destinations and nothing else, and its rules are stored
+  and shown as `internet: true` with that list, on create and on
+  `network.set` alike, in the API, every SDK, the CLI, MCP and the console.
+  Internet off with no `allow` list still reaches nothing. See
+  [the network](./sandbox-environment#the-network).
+- **Starts from a snapshot taken on another server are up to 1.8 s faster.**
+  A sandbox started from a snapshot taken on another server trusts that
+  server's outbound certificate in about 4 ms. In an image with certificate
+  hooks (Java's keystore, say) it ran Debian's whole `update-ca-certificates`
+  and took 0.7 to 1.8 s of the start. Snapshots taken from now on start this
+  way; an older one does once it is taken again.
+- **A wake its server has no disk for is answered at once.** A paused
+  sandbox whose server had no disk left for it was asked again for about 20
+  seconds before it was refused `no_capacity` ("its host has no disk left").
+  Nothing on that server was going to give the disk back, so the answer now
+  comes at once. A wake short of CPU or memory still waits for room as
+  before.
+- **A fork short of room refuses before it pauses its source.** A fork on a
+  server with no room left for memory images could give up after a fixed
+  minute while its source's image was still being written, and leave the
+  source unable to wake. A fork now books the room its source's wake needs
+  before it pauses anything: a server without it answers `503 no_capacity`
+  at once, naming the room, with the source still running. And a fork waits
+  while its source's image is still being written.
+- **A command's record says how it ended.** A command whose answer was lost
+  on the way back (its connection cut, or its sandbox stopped or paused under
+  it) is kept as "its answer was lost" (outcome `unknown`), where it left no
+  record. One still running when its sandbox is stopped or deleted shows
+  `ended by the sandbox's stop` (or `delete`), not running for ever. A
+  command that timed out keeps the time limit it ran under. And `bwrap`
+  (bubblewrap), which Codex runs its commands under, is in the default image
+  from its next build. See [commands and processes](./api#commands-and-processes).
+- **Volume backups go first, and one that can't start says so.** A volume
+  backup's copy off its server goes ahead of Runtime's own copies there,
+  never behind one, and `copyStartedAt` says when it began. A backup whose
+  copy hasn't begun 15 minutes after you asked fails with `errorCode`
+  `backup_stalled` rather than staying `pending`, unless other backups on its
+  server are moving up the line. The volume is unchanged; back it up again.
+  See [volume backups](./storage#limits-and-price).
+- **An image build is never left queued for good.** A build, a snapshot or a
+  volume placed on a server that had just joined could wait with nothing
+  working on it: a build `queued`, a snapshot `capturing`. Work no server
+  has taken up within six minutes now starts that server's storage work, and
+  goes on.
+- **Pauses, wakes, restarts and stops are in the audit log.** Each pause,
+  wake, restart and stop of a sandbox is an audit log entry
+  (`resource.paused`, `resource.woken`, `resource.restarted`,
+  `resource.stopped`) with who asked; one Runtime did itself says why: it
+  sat idle, it reached its time limit, credit ran out or a spending limit was
+  hit. A volume inside the free 10 GiB, and a job on an account without
+  credit, now read `funding: trial`, not `paid`. See
+  [the audit log](./teams#audit-log).
+- **Support chat asks you to sign in.** The Help chat on withruntime.com is
+  for signed-in accounts: signed out, it asks you to sign in and brings you
+  back to the page, and `POST /api/support/chat` answers `401`. Without an
+  account, write to support@withruntime.com. `runtime_support`,
+  `npx withruntime support` and **Support** in the console are unchanged.
+  See [get support](./feedback-and-support#get-support).
+- **A sandbox's page in the console loads again.** A sandbox's page could
+  fail to load: the server and the browser wrote its chart's and events'
+  dates differently (`Sep 23 at 10:30` against `Sep 23, 10:30`), and the
+  browser threw the page away. Both now write them the same way.
+
+<!-- launch: containers -->
+
+- **Containers answer every key that reaches their sandboxes.** A key that
+  isn't account-wide was refused `403` on `/v1/containers`. A key now
+  reaches the containers a sandbox of its would reach: a compartment's key
+  its compartment's, a key another key made its own, and an account-wide key
+  every one. Another's container answers `not_found`. See
+  [containers](./containers).
+
+<!-- /launch: containers -->
+
+<!-- launch: actions -->
+
+- **JavaScript actions get every input on Runtime's runners.** With the
+  runner's cache on, an input with a dash in its name (`github-token`,
+  `node-version`, `cache-dependency-path`) never reached a JavaScript action,
+  so `actions/github-script` failed "Input required and not supplied". Every
+  input now arrives. See [GitHub Actions](./actions).
+
+<!-- /launch: actions -->
+
+- **Volume backups on your own schedule.** A volume can be backed up every N
+  minutes (15 or more) or on a cron in UTC instead of daily, and keep its
+  backups by counts: the last N, and the newest in each of the newest N hours,
+  days, weeks, months and years. The newest ready backup is always kept.
+  Set it with `schedule` and `keep` on the backup policy, in every SDK, the
+  console, MCP, `/v1/volumes/{id}:backup-policy` and the CLI:
+  `runtime volumes backup-policy <id> --every 60 --keep hourly=24,daily=7`.
+  `schedule: null` goes back to daily, and `daily` and `retentionDays` work
+  as before. See [volume backups](./storage#volume-backups).
+
+<!-- launch: apps -->
+
+- **An App's new version can go live in stages.** Set
+  `releaseStages: "staged"` on an App and each new version starts on one
+  copy beside the live version's, then about 10%, 50% and all of its copies,
+  each stage running `releaseSoakSeconds` (60 to 3600, 300 by default) and
+  judged on its visitors' errors and speed before the next. A stage that does
+  worse goes back: its copies finish their requests and stop, then the deploy
+  fails with `deploy_stage_failed` and the numbers, and the live version
+  never stops serving. In the API, every SDK, the CLI
+  (`--release staged --soak 300`), MCP and the console's App settings;
+  `stagedRelease` on an App follows each stage. See
+  [staged releases](./api#staged-releases).
+
+<!-- /launch: apps -->
+
+- **Sandboxes start from your larger images with no disk to name.** A sandbox
+  created from an image of yours larger than the default 4 GiB disk, with no
+  `diskMiB`, was refused `disk_too_small`. An image of up to 8 GiB now gets
+  an 8 GiB disk, within the {{running-disk-included}} a running sandbox's disk
+  includes, and starts from the image's started copy of that size. A larger
+  image is still refused, now naming the `diskMiB` to ask for; a `diskMiB` you
+  name is kept. See [images](./images).
+
+<!-- launch: agents -->
+
+- **Webhook triggers start and join sessions.** A webhook trigger's calls now
+  reach your agent: `POST /v1/agents/triggers/{id}/calls` with the trigger's
+  secret as a Bearer token, never an API key, and a body of
+  `{text, key?, labels?}`, any JSON or plain text. A call with an open
+  session's key joins it; the answer says `201 started`, `200 joined`,
+  `200 noted` or `202 held`, and `Idempotency-Key` makes a retry the same
+  call. Each trigger has rules (`priority`, `maxStartsPerHour`, `onEnded`,
+  `notify`, and a webhook's `key`, such as `"{alert.id}"`), set in place with
+  `PATCH /v1/agents/triggers/{id}`. A call no session can take is held, never
+  dropped: whoever added the trigger hears of it by email or the
+  `agent.call.held` webhook event, and starts or dismisses it with
+  `runtime agents triggers held`. In every SDK, the CLI and MCP. See
+  [triggers](./agents#triggers).
+- **An account holds up to 100 agent triggers.** A trigger past the
+  account's 100 is refused `quota_exceeded`; remove one you no longer need
+  first. See [limits](./limits#what-an-account-holds-and-runs).
+
+- **Agents ask with options, into one inbox.** An agent's `ask` takes a
+  question, why, options, the one it recommends, a step and an expiry.
+  Asks of one agent's sessions sharing a memory, with the same step are one row, and one
+  answer wakes every session asking; an ask closes by itself when its sessions end,
+  when it is withdrawn, or at its expiry, taking its recommended option.
+  Answer them in the console's Agents › Asks, with `GET /v1/agents/asks`,
+  every SDK's `agents.asks`, `runtime agents asks` and `answer`, or the MCP
+  tools. See [asks and the inbox](./agents#asks-and-the-inbox).
+
+<!-- /launch: agents -->
 
 - **Upload links take the 5 GiB they say.** An upload link (`files:link` with
   `method: "PUT"`) refused a body over 64 MB as too large; it now takes up to
   its `maxBytes`, 5 GiB at most, in one request, streamed into the sandbox,
   with nothing to split. A sandbox can open a file link too, to download or
   upload with no key. See [file links](./api#file-links).
+- **The usage export says how far it is final, in every SDK and the CLI.**
+  `runtime usage export` ends by saying on stderr how far the range is final:
+  no more charges will settle before that time. The Python, Go, Ruby and Java
+  SDKs gain the export (`usage_export`, `UsageExport`, `usageExport`), with
+  `finalThrough` on each page and `final` on each row. See
+  [export settled usage](./api#export-settled-usage).
+- **E2B's client works in the drop-in.** `new E2B({ apiKey }).Sandbox` in
+  JavaScript, and now `E2B(api_key=...).Sandbox` in Python, create and connect
+  with the client's key. The client's `Template`, `Volume` and `Secret` refuse
+  before anything happens, naming what to use instead: a Runtime image, Runtime
+  volumes or a Runtime secret. See [migrating](./migrate).
 
 <!-- launch: ci -->
 
+- **Run a check again from code.** `POST /v1/ci/checks/{id}:rerun`,
+  `runtime ci rerun <checkId>`, the MCP tool's `check_rerun` and
+  `ci.checks.rerun` in every SDK run a check again as GitHub's Re-run does:
+  a new check of the same commit, and for a pull request, of its head as it
+  would land now. The same keys may as cancel. See
+  [read checks, jobs and logs](./ci#read-checks-jobs-and-logs).
+- **A build step keyed by what it compiles.** A step that only compiles (a
+  compiler, its lints, its doc tests) says `compiles: true`, and is keyed by
+  what compiling reads: Rust's sources and manifests, its path dependencies
+  and what it includes, never the scripts its tests import. A change to those
+  scripts no longer builds it again. See [passed before](./ci#passed-before).
+- **A check taken over finishes on its own result.** A check whose runner
+  was replaced while it ran could fail "push again to check it whole" when
+  its new plan reached files no ended job had run. The new runner now adds
+  jobs for what is left and runs them.
+
+- **CI/CD runs any agent as a step, and code review is one agent.** An
+  `agent` step starts a session of one of your Runtime Agents with the
+  change (its diff, and what your repository's members asked for) beside
+  the tests, and waits for pass, or block with each finding's file, line,
+  who is hurt and the fix: a reviewer, an agent that checks the docs were
+  updated, or one holding your own rules: the `review` template (a stock
+  reviewer) or the `judge` template (your instructions alone decide what
+  blocks), both asking Claude with no tools. `review:` stays as its short form,
+  so no file changes. The reviewer is now the `review` agent template anyone
+  can create, and any agent can take a `pool` of Claude accounts, each
+  session on the one with the most usage left. In the API, every SDK, the
+  CLI (`runtime agents create --template review --pool ...`) and the MCP
+  tool. See [agent steps](./ci#agent-steps).
 - **See each step of a release as it is taken.** A repository whose releases
   CI/CD runs keeps every step, one line each: a migration's copy test and
   apply, each deploy ref moved, each server's canary and release, the
@@ -96,7 +304,7 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   the account with the most usage left and moves to the next when one runs
   out; a check waits only when every account is out, and never fails for it.
   The verdict is on the job in the API, the SDKs, `runtime ci logs` and the
-  console. See [Review](./ci#review). Agent session keys starting
+  console. See [agent steps](./ci#agent-steps). Agent session keys starting
   `ci-review:` are now CI/CD's own: starting a session with one is refused
   with `invalid_request`.
 - **A push to the production branch checks first, on as many machines as

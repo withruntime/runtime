@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -198,13 +199,46 @@ func (s *SecretService) Narrow(ctx context.Context, name string, opts NarrowSecr
 	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name) + "/rules", body: opts}, &secret)
 }
 
-// List returns names, hosts and placeholders. Never values.
-func (s *SecretService) List(ctx context.Context) ([]Secret, error) {
-	var body struct {
-		Secrets []Secret `json:"secrets"`
+// SecretListOptions picks one page of List, by name: at most Limit (1 to
+// 100) secrets named after After. The next page's After is this page's last
+// name. Limit 0 is not sent, so the API's default (50) applies; After ""
+// starts from the first name.
+type SecretListOptions struct {
+	Limit int
+	After string
+}
+
+// List returns names, hosts and placeholders. Never values. With options,
+// one page; with nil, every secret.
+func (s *SecretService) List(ctx context.Context, opts ...*SecretListOptions) ([]Secret, error) {
+	var page *SecretListOptions
+	if len(opts) > 0 {
+		page = opts[0]
 	}
-	err := s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/egress-secrets"}, &body)
-	return body.Secrets, err
+	var all []Secret
+	after := ""
+	if page != nil {
+		after = page.After
+	}
+	for {
+		query := url.Values{}
+		if page != nil && page.Limit > 0 {
+			query.Set("limit", strconv.Itoa(page.Limit))
+		}
+		setQuery(query, "after", after)
+		var body struct {
+			Secrets []Secret `json:"secrets"`
+			Next    *string  `json:"next"`
+		}
+		if err := s.c.do(ctx, &call{method: http.MethodGet, path: "/v1/egress-secrets", query: query}, &body); err != nil {
+			return all, err
+		}
+		all = append(all, body.Secrets...)
+		if page != nil || body.Next == nil || *body.Next == "" {
+			return all, nil
+		}
+		after = *body.Next
+	}
 }
 
 // Delete erases a secret's value; its placeholder stops working.

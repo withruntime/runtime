@@ -1,4 +1,4 @@
-"""Agents' templates, as data: five harnesses and the two uses each can serve.
+"""Agents' templates, as data: seven harnesses and the two uses each can serve.
 The same values are in every Runtime SDK and the guide
 (packages/cloud-guide/agent-templates.json; tests/test_agents.py holds this
 file to it).
@@ -19,6 +19,8 @@ from __future__ import annotations
 from typing import Any
 
 _START = "\"$(cat ~/.runtime-agent/start.md)\""
+_REVIEW = "python3 ~/.runtime-agent/runtime-agent review"
+_JUDGE = "python3 ~/.runtime-agent/runtime-agent judge"
 
 
 def _template(key: str, title: str, command: str, secret: str, host: str, subscription: Any) -> dict[str, Any]:
@@ -45,6 +47,19 @@ TEMPLATES: dict[str, dict[str, Any]] = {t["key"]: t for t in (
               "ANTHROPIC_API_KEY", "api.anthropic.com", None),
     _template("openai-agents-sdk", "OpenAI Agents SDK", "python3 ~/agent.py",
               "OPENAI_API_KEY", "api.openai.com", None),
+    # A CI/CD agent step's reviewer: asks Claude with no tools, on a pool of
+    # accounts, the one with the most usage left first.
+    {**_template("review", "Code review", _REVIEW, "ANTHROPIC_API_KEY", "api.anthropic.com",
+                 "a token per account: run `claude setup-token` on your own computer (Pro/Max) for each, "
+                 "store each with `runtime secrets set CLAUDE_1` scoped to api.anthropic.com, then name "
+                 "them all in pool (--pool CLAUDE_1 --pool CLAUDE_2)"),
+     "definition": {"command": _REVIEW, "pool": ["ANTHROPIC_API_KEY"], "vcpu": 2, "memoryMiB": 2048,
+                    "maxSessionSeconds": 1800}},
+    # An agent step held to its owners' instructions alone (a docs check).
+    {**_template("judge", "Your rules", _JUDGE, "ANTHROPIC_API_KEY", "api.anthropic.com",
+                 "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block"),
+     "definition": {"command": _JUDGE, "pool": ["ANTHROPIC_API_KEY"], "vcpu": 2, "memoryMiB": 2048,
+                    "maxSessionSeconds": 1800}},
 )}
 
 USES: dict[str, dict[str, Any]] = {

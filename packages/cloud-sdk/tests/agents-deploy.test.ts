@@ -157,6 +157,7 @@ class FakeApi {
         Object.assign(t, { pausedAt: this.#now(), pausedWhy: body.why, updatedAt: this.#now() });
       if (m[2] === "/resume")
         Object.assign(t, { pausedAt: null, pausedWhy: null, updatedAt: this.#now() });
+      if (method === "PATCH") Object.assign(t, { rules: body.rules, updatedAt: this.#now() });
       if (key) this.answers.set(`${method} ${path} ${key}`, { ...t });
       return json(t);
     }
@@ -176,6 +177,7 @@ class FakeApi {
           agentId: agent.id,
           kind: body.kind,
           config: body.config,
+          rules: body.rules ?? {},
           pausedAt: null,
           pausedWhy: null,
           createdAt: this.#now(),
@@ -252,6 +254,25 @@ test("a file is checked as the API checks it: templates, uses and the repo's ins
   });
   expect(helper!.definition).not.toHaveProperty("template");
   expect(helper!.triggers).toEqual([]);
+  // The review template: its pool replaced by the file's, a use's size over its own.
+  const [reviewer] = checkAgentsFile(
+    parseAgentsFile(
+      "agents:\n  ci-review:\n    template: review\n    use: team\n    pool: [CLAUDE_1, CLAUDE_2]\n",
+      "runtime.yml",
+      dir,
+    ),
+  );
+  expect(reviewer!.definition).toMatchObject({
+    command: "python3 ~/.runtime-agent/runtime-agent review",
+    pool: ["CLAUDE_1", "CLAUDE_2"],
+    vcpu: 4,
+    maxSessionSeconds: 1800,
+  });
+  expect(() =>
+    checkAgentsFile(
+      parseAgentsFile("agents:\n  r:\n    template: review\n    pool: []\n", "runtime.yml", dir),
+    ),
+  ).toThrow("1 to 16");
   // The starter `runtime agents init` writes is a valid file.
   const starter = parseAgentsFile(
     starterAgents({ name: "claude-code", template: "claude-code", instructionsFile: "AGENTS.md" }),
@@ -259,6 +280,19 @@ test("a file is checked as the API checks it: templates, uses and the repo's ins
     dir,
   );
   expect(checkAgentsFile(starter).map((a) => a.name)).toEqual(["claude-code"]);
+});
+
+test("from takes a repository connected to CI/CD, as the API does, and names it when malformed", () => {
+  const file = (from: string) =>
+    parseAgentsFile(
+      `agents:\n  alerts:\n    template: claude-code\n    from: ${from}\n`,
+      "runtime.yml",
+    );
+  const [alerts] = checkAgentsFile(file("{ repo: withruntime/runtime-cloud }"));
+  expect(alerts!.definition.from).toEqual({ repo: "withruntime/runtime-cloud" });
+  expect(() => checkAgentsFile(file("{ repo: runtime-cloud }"))).toThrow(
+    "runtime.yml:4: agents.alerts.from takes { image: name[:tag] }, { snapshot: <snapshot id> } or { repo: owner/name }.",
+  );
 });
 
 test("every mistake is named by file, line, agent and field, all at once", () => {
@@ -290,15 +324,15 @@ test("every mistake is named by file, line, agent and field, all at once", () =>
   expect(error!.code).toBe("invalid_file");
   expect(error!.message.split("\n")).toEqual([
     "runtime.yml:4: agents.fixer.instructons is not a field an agent takes (did you mean instructions?).",
-    "runtime.yml:3: agents.fixer.template takes claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk.",
+    "runtime.yml:3: agents.fixer.template takes claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge.",
     "runtime.yml:5: agents.fixer.vcpu takes 1, 2, 4, 8 or 16.",
     'runtime.yml:6: agents.fixer.env.PORT takes text: quote it, as PORT: "3000".',
     "runtime.yml:7: agents.fixer.maxSessionDollars takes dollars from 0.01 to 10000.",
-    "runtime.yml:2: agents.fixer.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk) or command.",
+    "runtime.yml:2: agents.fixer.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge) or command.",
     "runtime.yml:9: agents.fixer.triggers.0.kind takes slack, github, schedule, webhook.",
     "runtime.yml:13: agents.snap.memoryMiB cannot be set with from.snapshot: a snapshot keeps the size it was taken at.",
     "runtime.yml:14: agents.sessions may not be an agent's name: /v1/agents/sessions is another route.",
-    "runtime.yml:16: agents.lost.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk) or command.",
+    "runtime.yml:16: agents.lost.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge) or command.",
   ]);
   expect(error!.details!.issues).toContainEqual({
     agent: "fixer",
@@ -714,4 +748,27 @@ test("a webhook a deploy adds hands back its secret, this once; a dry run and a 
   // Kept nowhere else: the trigger as listed has none, and a rerun adds nothing.
   expect(hook).not.toHaveProperty("secret");
   expect((await api.client().deploy(loadAgentsFile(path))).changes).toEqual([]);
+});
+
+test("a trigger's rules are added with it, then changed in place: its secret stays", async () => {
+  const api = new FakeApi();
+  const dir = folder({});
+  const path = join(dir, "runtime.yml");
+  const file = (rules: string) =>
+    `agents:\n  alerts:\n    command: ./agent.sh\n    triggers:\n      - kind: webhook\n        rules: ${rules}\n`;
+  writeFileSync(path, file('{ key: "{cause}", maxStartsPerHour: 60, onEnded: ask }'));
+  await api.client().deploy(loadAgentsFile(path));
+  const [hook] = [...api.triggers.values()];
+  expect(hook!.rules).toEqual({ key: "{cause}", maxStartsPerHour: 60, onEnded: "ask" });
+  expect((await api.client().deploy(loadAgentsFile(path))).changes).toEqual([]);
+  writeFileSync(path, file('{ key: "{cause}", priority: 10 }'));
+  const changed = await api.client().deploy(loadAgentsFile(path));
+  expect(changed.changes.map((c) => c.action)).toEqual(["set-trigger-rules"]);
+  expect([...api.triggers.values()]).toEqual([
+    expect.objectContaining({ id: hook!.id, rules: { key: "{cause}", priority: 10 } }),
+  ]);
+  // A rule the API would refuse is named before anything is sent.
+  expect(() => checkAgentsFile(parseAgentsFile(file("{ onEnded: hold, priority: 500 }")))).toThrow(
+    "agents.alerts.triggers.0.rules.onEnded takes",
+  );
 });

@@ -282,10 +282,20 @@ class AsyncSecrets:
             body["rules"] = rules
         return await self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}/rules", body=body)
 
-    async def list(self) -> list[dict[str, Any]]:
+    async def list(self, *, limit: int | None = None, after: str | None = None) -> list[dict[str, Any]]:
         """The sandboxes' secrets: names, hosts, headers and placeholders. Never
-        values. ``all()`` includes the jobs copies."""
-        return (await self._t.json("GET", "/v1/egress-secrets"))["secrets"]
+        values. ``all()`` includes the jobs copies. With ``limit`` (1 to 100)
+        or ``after``, one page by name: the secrets named after ``after``; the
+        next page's ``after`` is this one's last name. Without, every secret."""
+        secrets: list[dict[str, Any]] = []
+        start = after
+        while True:
+            query = {key: value for key, value in (("limit", limit), ("after", start)) if value is not None}
+            page = await self._t.json("GET", "/v1/egress-secrets", query=query)
+            secrets.extend(page["secrets"])
+            if limit is not None or after is not None or not page.get("next"):
+                return secrets
+            start = page["next"]
 
     async def all(self) -> list[dict[str, Any]]:
         """Every secret by name: ``{"name", "sandboxes", "jobs"}``, each copy or None."""

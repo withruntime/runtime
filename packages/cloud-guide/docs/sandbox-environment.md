@@ -19,6 +19,7 @@ The image is Ubuntu 24.04.5 LTS (noble) for amd64, on a 6.18 kernel.
 | Source and fetch  | `git`, `curl`, `wget`, `ssh`, `zip`, `unzip`, `xz`                                                             |
 | Search and data   | `rg` (ripgrep), `fd`, `jq`, `sqlite3`                                                                          |
 | System            | `sudo`, `adduser` and `useradd`, `chronyd`, `sshd` (for [SSH and editors](./editors)), `ip`, `iptables-legacy` |
+| Agent sandboxing  | `bwrap` (bubblewrap), which Codex runs its commands under: in the default image from its next build            |
 
 **Anything else installs the usual way:** `sudo apt-get install -y ...`,
 `pip install ...`, `npm install ...`, `uv pip install ...`. A new sandbox has
@@ -26,6 +27,10 @@ no apt package lists yet, so run `sudo apt-get update` once before the first
 `apt-get install`. To start every
 sandbox with your dependencies already there, build a [custom image](./images).
 
+- **bubblewrap:** until the default image carries `bwrap`,
+  `sudo apt-get update && sudo apt-get install -y bubblewrap` adds it; Codex
+  and other agents that sandbox their own commands with it then work as on any
+  Linux machine.
 - **Java, Go and Rust:** install Ubuntu's packages with `sudo apt-get install`,
   or a newer release with the language's own installer, such as `rustup` for
   Rust. To have one in every sandbox, build a custom image whose recipe installs
@@ -233,7 +238,10 @@ await sbx.network.set({ internet: false });
 console.log(await sbx.network.get());
 ```
 
-- `internet: false` refuses every outbound connection.
+- `internet: false` refuses every outbound connection. With an `allow` list it
+  is allow-list only: the sandbox reaches the listed destinations and nothing
+  else, stored and shown as `internet: true` with that list, at create and on
+  `network.set` alike.
 - `allow` narrows the sandbox to a list, on every port it may use: domains,
   `*.domain` for every name under one, addresses or CIDR ranges.
 - `deny` always wins.
@@ -292,7 +300,7 @@ curl -H "Authorization: Bearer $RUNTIME_API_KEY" http://runtime.internal/v1/me
   Past that, a request gets `429` with `X-Runtime-Egress: api-busy`; retry it.
   API requests count toward the sandbox's new-connection rate, bandwidth and
   daily amount, and are never charged as outbound traffic.
-- The sandbox's own rules apply: with `internet: false`, or an `allow` list
+- The sandbox's own rules apply: with `internet: false` and no `allow` list, or an `allow` list
   that leaves out `api.withruntime.com`, requests are refused with
   `X-Runtime-Egress: internet-off` or `rule-not-allowed`.
 

@@ -96,6 +96,20 @@ module WithRuntime
     # The account's credit, holds, free time and per-resource charges.
     def usage = Record.new(@transport.json("GET", "/v1/usage"))
 
+    # One page of settled usage for every product the key sees: settled at
+    # +since+ or later and before +until+ (UTC, ending in Z). Follow
+    # +next_cursor+ with the same range until it is nil; concatenate each
+    # page's +csv+ (the header is on the first only). Money and quantities are
+    # exact decimal strings. +final_through+: no row settled before it can
+    # still appear or change, so the range is final once it reaches +until+.
+    # A row's +final+ is true once its resource is deleted and can be charged
+    # nothing more.
+    def usage_export(since:, until:, cursor: nil, limit: nil)
+      # until is a Ruby keyword: its argument is read through the binding.
+      query = { "since" => since, "until" => binding.local_variable_get(:until), "cursor" => cursor, "limit" => limit }
+      Record.new(@transport.json("GET", "/v1/usage/export", query: query))
+    end
+
     # Calls any API path with this client's key, retries, idempotency keys and
     # errors, and returns the parsed JSON answer. For an endpoint newer than this SDK.
     def request(method, path, query: nil, body: nil)

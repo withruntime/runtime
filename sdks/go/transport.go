@@ -46,6 +46,9 @@ type call struct {
 	roomed bool
 	// timeout replaces the client's for this call.
 	timeout time.Duration
+	// bearer is sent instead of the client's API key: a webhook trigger's
+	// secret, which is all its calls carry.
+	bearer string
 }
 
 // newKey makes an idempotency key: a random UUID.
@@ -174,7 +177,11 @@ func (c *Client) send(ctx context.Context, cl *call, whole bool) (*http.Response
 		if payload == nil {
 			request.Body = http.NoBody
 		}
-		request.Header.Set("Authorization", "Bearer "+c.apiKey)
+		bearer := c.apiKey
+		if cl.bearer != "" {
+			bearer = cl.bearer
+		}
+		request.Header.Set("Authorization", "Bearer "+bearer)
 		accept := cl.accept
 		if accept == "" {
 			accept = "application/json"

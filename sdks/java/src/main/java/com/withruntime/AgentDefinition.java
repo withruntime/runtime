@@ -145,6 +145,19 @@ public final class AgentDefinition {
     return view().getStrings("secrets");
   }
 
+  /**
+   * Its pool of Claude accounts: 1 to 16 egress secrets' names, each a subscription token or, for a
+   * name holding API_KEY, an API key. Each session takes the one with the most usage left; the review
+   * template moves to the next when one is out of usage.
+   */
+  public AgentDefinition pool(List<String> names) {
+    return set("pool", names == null ? null : List.copyOf(names));
+  }
+
+  public List<String> pool() {
+    return view().getStrings("pool");
+  }
+
   /** Adds an MCP server the harness may call. */
   public AgentDefinition mcp(String name, String url) {
     List<Object> servers = new ArrayList<>(view().getList("mcp"));

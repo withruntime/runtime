@@ -21,6 +21,10 @@ import {
 } from "../../src/e2b/index";
 import { keySource, pickKey, resetClients } from "../../src/e2b/client";
 import { TEMPLATE_LABEL } from "../../src/e2b/sandbox";
+import {
+  E2B as InterpreterE2B,
+  Sandbox as InterpreterSandbox,
+} from "../../src/e2b/code-interpreter";
 import { PublicPreviewNotAllowedError } from "../../src/e2b/index";
 import { commandAs, listedAs, shellAs } from "../../src/e2b/users";
 import { FakeWorld, guestCommand, notFound, type FakeSandbox } from "./fake";
@@ -1165,6 +1169,25 @@ describe("E2B client", () => {
     expect(await e2b.Sandbox.kill(sbx.sandboxId)).toBe(true);
     const paginator = e2b.Sandbox.list();
     expect(await paginator.nextItems()).toEqual([]);
+  });
+
+  test("its Secret, Template and Volume refuse with Runtime's alternative, as the top-level exports do", () => {
+    for (const e2b of [
+      new E2B({ client: world.client() }),
+      new InterpreterE2B({ client: world.client() }),
+    ]) {
+      expect(() => e2b.Template()).toThrow(/images.build/);
+      expect(() => e2b.Volume["create"]?.()).toThrow(/volumes/);
+      expect(() => new e2b.Secret()).toThrow(NotSupportedError);
+    }
+  });
+
+  test("the code interpreter's client binds the interpreter's Sandbox", async () => {
+    const e2b = new InterpreterE2B({ client: world.client() });
+    const sbx = await e2b.Sandbox.create({ timeoutMs: 90_000 });
+    expect(sbx).toBeInstanceOf(InterpreterSandbox);
+    expect(typeof sbx.runCode).toBe("function");
+    expect(lastCreate().timeoutSeconds).toBe(90);
   });
 });
 

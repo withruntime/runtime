@@ -148,6 +148,7 @@ class AsyncApps:
                      cdn: Optional[bool] = None,
                      health_fail_seconds: Optional[int] = None, volume: Optional[dict[str, str]] = None,
                      stop_grace_seconds: Optional[int] = None,
+                     release_stages: Optional[str] = None, release_soak_seconds: Optional[int] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Create one waiting for its first version. ``max_copies`` (1 to 1000)
         bounds the awake copies, each ``vcpu`` (1 to 16) and ``memory_mib`` (128
@@ -173,19 +174,34 @@ class AsyncApps:
         ``min_copies`` defaults to 1 and ``spares`` to 0. Each deploy, rollback
         and restart stops the old copy before the new one boots, giving it
         ``stop_grace_seconds`` (0 to 900, default 30) after SIGTERM. A bad volume
-        is ``volume_invalid`` (400)."""
+        is ``volume_invalid`` (400).
+
+        Apps only: ``release_stages`` says how a new version goes live:
+        ``"at_once"`` (the default) switches every copy together; ``"staged"``
+        starts one copy of it beside the live version's, then about 10%, 50%
+        and all of them, each stage running ``release_soak_seconds`` (60 to
+        3600, default 300) once its copies serve and judged on its visitors'
+        errors and speed before the next. A stage that does worse goes back:
+        its copies finish their requests and stop, then the deploy fails with
+        ``deploy_stage_failed``, and the live version never stops serving.
+        ``app["stagedRelease"]`` follows it."""
         self._stateful(_UNSET if volume is None else volume, stop_grace_seconds)
+        self._releases(release_stages, release_soak_seconds)
         body = _fields(name=name, labels=labels, max_copies=max_copies, vcpu=vcpu, memory_mib=memory_mib,
                        min_copies=self._min_copies(min_copies), concurrency=concurrency, spares=spares,
                        port=port, health_path=health_path, release_watch=release_watch,
                        sleep_after_ms=sleep_after_ms, cdn=cdn, health_fail_seconds=health_fail_seconds,
-                       volume=_volume(volume), stop_grace_seconds=stop_grace_seconds)
+                       volume=_volume(volume), stop_grace_seconds=stop_grace_seconds,
+                       release_stages=release_stages, release_soak_seconds=release_soak_seconds)
         return await self._t.json("POST", self._base, body=body, idempotency_key=idempotency_key)
 
     def _min_copies(self, value: Optional[int]) -> Optional[int]:
         return value
 
     def _stateful(self, volume: Any, stop_grace_seconds: Optional[int]) -> None:
+        pass
+
+    def _releases(self, release_stages: Optional[str], release_soak_seconds: Optional[int]) -> None:
         pass
 
     async def get(self, app_id: str, *, wait_for: Optional[str] = None,
@@ -216,18 +232,23 @@ class AsyncApps:
                      sleep_after_ms: Optional[int] = None, cdn: Optional[bool] = None,
                      health_fail_seconds: Optional[int] = None,
                      volume: Optional[dict[str, str]] = _UNSET, stop_grace_seconds: Optional[int] = None,
+                     release_stages: Optional[str] = None, release_soak_seconds: Optional[int] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Change its settings in place; a field left out stays. ``name=None``
         clears the name; ``volume=None`` takes the volume away, only before the
         App's first deploy (else ``volume_change_refused``, 409). The live
         version keeps serving. ``sleep_after_ms`` is for Functions only (250 to
-        5000)."""
+        5000); ``release_stages`` and ``release_soak_seconds`` for Apps only, and
+        a change of them moves a staged release under way (``"at_once"`` sends
+        it to every copy)."""
         self._stateful(volume, stop_grace_seconds)
+        self._releases(release_stages, release_soak_seconds)
         body = _fields(labels=labels, min_copies=self._min_copies(min_copies), max_copies=max_copies,
                        concurrency=concurrency, spares=spares, vcpu=vcpu, memory_mib=memory_mib, port=port,
                        health_path=health_path, release_watch=release_watch,
                        sleep_after_ms=sleep_after_ms, cdn=cdn, health_fail_seconds=health_fail_seconds,
-                       stop_grace_seconds=stop_grace_seconds)
+                       stop_grace_seconds=stop_grace_seconds, release_stages=release_stages,
+                       release_soak_seconds=release_soak_seconds)
         if name is not _UNSET:
             body["name"] = name
         if volume is not _UNSET:
@@ -484,3 +505,11 @@ class AsyncFunctions(AsyncApps):
                 raise InvalidRequestError(f"A Function takes no volume: leave {field} out.",
                                           code="invalid_request", details={"field": field},
                                           hint="Nothing was sent. Use runtime.apps for a server with a volume.")
+
+    def _releases(self, release_stages: Optional[str], release_soak_seconds: Optional[int]) -> None:
+        for field, given in (("releaseStages", release_stages is not None),
+                             ("releaseSoakSeconds", release_soak_seconds is not None)):
+            if given:
+                raise InvalidRequestError(f"A Function's versions go live at once: leave {field} out.",
+                                          code="invalid_request", details={"field": field},
+                                          hint="Nothing was sent. Use runtime.apps for staged releases.")

@@ -116,6 +116,8 @@ final class Transport {
     boolean roomed;
     Duration timeout;
     Cancellation cancellation;
+    // Sent instead of the API key: a webhook trigger's secret, which is all its calls carry.
+    String bearer;
 
     Call(String method, String path) {
       this.method = method;
@@ -161,6 +163,11 @@ final class Transport {
 
     Call noRetry() {
       this.noRetry = true;
+      return this;
+    }
+
+    Call bearer(String value) {
+      this.bearer = value;
       return this;
     }
 
@@ -363,7 +370,7 @@ final class Transport {
       HttpRequest.Builder request =
           HttpRequest.newBuilder(uri)
               .timeout(bounded ? answerStart : Duration.ofNanos(left))
-              .header("Authorization", "Bearer " + apiKey)
+              .header("Authorization", "Bearer " + (call.bearer != null ? call.bearer : apiKey))
               .header("Accept", call.accept)
               .header("X-Runtime-Client", client)
               .header("User-Agent", "withruntime-java/" + RuntimeClient.VERSION)

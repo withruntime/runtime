@@ -38,6 +38,12 @@ may be two accounts, a warning says so once (`RUNTIME_E2B_TWO_KEYS`; Python: a
 `RuntimeWarning`). A template with no image of its name fails naming the
 account the key belongs to and where the key came from.
 
+E2B's client works the same way: `new E2B({ apiKey }).Sandbox` (Python:
+`E2B(api_key=...).Sandbox` and `.AsyncSandbox`) uses that key unless a call
+names its own, and the code interpreter's `E2B` gives its own `Sandbox`. The
+client's `Template`, `Volume` and `Secret` (Python: and their `Async` forms)
+refuse as the top-level ones do, naming the alternative under "Gaps".
+
 ## What a sandbox gets
 
 - **Machine:** E2B's default, 2 vCPU and 512 MiB. For another, pass
@@ -145,6 +151,7 @@ before anything happens. The error's `feature` names the gap and its
 | `git`                                                         | `commands.run("git ...")`. E2B has deprecated its git module too.                                                    |
 | File `metadata`                                               | Keep it in a file beside the data.                                                                                   |
 | `runCode(code, { envs })`                                     | A context made with them: `sandbox.runtime.interpreter.contexts.create({ env })`.                                    |
+| `new E2B(opts).Template`, `.Secret`, `.Volume`                | As `Template`, `Secret` and `Volume` above: each throws `NotSupportedError` naming the alternative.                  |
 | `domain`, `apiUrl`, `sandboxUrl`, `headers`, `proxy`, `debug` | Remove them. `RUNTIME_API_URL` sets Runtime's origin, and `HTTPS_PROXY` sets a proxy.                                |
 
 Directory watches use Runtime's native watch stream. JavaScript uses

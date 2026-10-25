@@ -29,6 +29,16 @@ public final class AgentTrigger extends JsonObject {
     return getObject("config");
   }
 
+  /**
+   * Its rules, every one optional: priority (-100 to 100, queue order when the agent's
+   * maxConcurrent is full), maxStartsPerHour, onEnded (start, note or ask), notify (email or
+   * webhook) and a webhook's key template ("{cause}"). Empty: every default.
+   */
+  public JsonObject rules() {
+    JsonObject rules = getObject("rules");
+    return rules == null ? new JsonObject(Map.of()) : rules;
+  }
+
   public boolean paused() {
     return has("pausedAt");
   }

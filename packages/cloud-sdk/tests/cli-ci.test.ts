@@ -268,7 +268,6 @@ test("logs prints a review's verdict: each finding at its line with its fix, the
       ],
       notes: [{ file: "README.md", line: 0, what: "Say the limit." }],
       agent: "ci-review",
-      account: "CLAUDE_TOKEN_2",
       model: "opus",
       session: "s-1",
       cut: false,
@@ -283,7 +282,7 @@ test("logs prints a review's verdict: each finding at its line with its fix, the
       expect(said).toContain("Blocked: 1 finding(s). Adds a refund route.");
       expect(said).toContain("money-at-risk at billing.ts:12: Refunds twice.\n    Fix: Key it.");
       expect(said).toContain("note at README.md: Say the limit.");
-      expect(said).toContain("agent ci-review (opus) on CLAUDE_TOKEN_2");
+      expect(said).toContain("Judged by agent ci-review (opus): session s-1");
       expect(said).not.toContain("sandboxes wake");
     },
   );

@@ -11,8 +11,8 @@
 #     async for event in session.events():
 #         print(event["kind"], event["body"].get("text"))
 #
-# Approvals come later, beside sessions and triggers here:
-# ``runtime.agents.approvals.list()`` and ``.answer()``.
+# The account's inbox of what its sessions ask: ``runtime.agents.asks.list()``
+# and ``.answer()``.
 from __future__ import annotations
 
 import copy
@@ -299,6 +299,48 @@ class AsyncAgentSessions:
         return await fetch(cursor)
 
 
+class AsyncAgentAsks:
+    """``runtime.agents.asks``: the account's inbox, the questions its agents'
+    sessions need answered to go on. Each has ``why`` it matters, ``options``
+    ({label, detail}), a recommended ``pick`` and maybe an expiry. Asks of
+    one agent's sessions sharing a memory, with the same ``step``, are one
+    row while it is open, and one answer reaches every session asking. ``state``: open, answered,
+    withdrawn, expired (no pick) or closed (every asking session ended)."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    async def list(self, *, state: Optional[Union[str, list[str]]] = None, agent: Optional[str] = None,
+                   labels: Optional[dict[str, str]] = None, cursor: Optional[str] = None,
+                   limit: Optional[int] = None) -> AsyncPage:
+        """Newest first: the open ones unless ``state`` says otherwise; of one
+        ``agent``; carrying every one of ``labels`` (who sees an ask). ``async
+        for`` walks every page."""
+        from .._async_client import AsyncPage
+        label = [f"{k}:{v}" for k, v in labels.items()] if labels else None
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", "/v1/agents/asks",
+                                      query={"state": state, "agent": agent, "label": label,
+                                             "cursor": at, "limit": limit})
+            return AsyncPage(body["data"], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+    async def get(self, ask_id: str) -> dict[str, Any]:
+        """One ask, with the sessions asking it."""
+        return await self._t.json("GET", f"/v1/agents/asks/{_enc(ask_id)}")
+
+    async def answer(self, ask_id: str, option: Optional[str] = None, *, text: Optional[str] = None,
+                     idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Answer with an ``option``'s label, ``text``, or both: every session
+        asking reads it next and wakes. One no longer open is refused with
+        ConflictError ``ask_closed``. Answers the ask as it is now."""
+        if option is None and text is None:
+            raise InvalidRequestError("An answer is an option's label, text, or both.")
+        return await self._t.json("POST", f"/v1/agents/asks/{_enc(ask_id)}/answer",
+                                  body=_fields(option=option, text=text), idempotency_key=idempotency_key)
+
+
 class AsyncAgentTriggers:
     """``runtime.agents.triggers``: what starts or feeds an agent's sessions
     besides the API. Kinds and their config: ``slack`` {team, channel};
@@ -306,15 +348,70 @@ class AsyncAgentTriggers:
     GitHub App installation, your own; optional ``events``); ``schedule``
     {cron, timezone?, input}; ``webhook`` {}. A Slack
     workspace or GitHub installation that is not this account's own is
-    refused with ConflictError ``not_installed``."""
+    refused with ConflictError ``not_installed``.
+
+    Each trigger has ``rules``, every one optional: ``priority`` (-100 to
+    100: queue order when the agent's maxConcurrent is full, higher first),
+    ``maxStartsPerHour`` (a call past it is held for you), ``onEnded``
+    (``start``, ``note`` or ``ask``: what a call does when its key's session
+    has ended), ``notify`` (``email`` or ``webhook``: where a held call is
+    told) and, a webhook's only, ``key`` (``"{cause}"``: the key of a call
+    that sends none, from its JSON's fields). A call no session can take is
+    held, never dropped: ``held``, ``start_held``, ``dismiss_held``."""
 
     def __init__(self, t: Any) -> None:
         self._t = t
 
-    async def create(self, agent: str, kind: str, config: dict[str, Any]) -> dict[str, Any]:
-        """A trigger of ``agent`` (id or name)."""
-        return await self._t.json("POST", f"/v1/agents/{_enc(agent)}/triggers",
-                                  body={"kind": kind, "config": config})
+    async def create(self, agent: str, kind: str, config: dict[str, Any],
+                     rules: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """A trigger of ``agent`` (id or name). A webhook's answer has its
+        ``secret``, this once: each of its calls carries it."""
+        body: dict[str, Any] = {"kind": kind, "config": config}
+        if rules is not None:
+            body["rules"] = rules
+        return await self._t.json("POST", f"/v1/agents/{_enc(agent)}/triggers", body=body)
+
+    async def set_rules(self, trigger_id: str, rules: dict[str, Any]) -> dict[str, Any]:
+        """Its rules, whole, in place: its secret stays. ``{}`` is every default."""
+        return await self._t.json("PATCH", f"/v1/agents/triggers/{_enc(trigger_id)}", body={"rules": rules})
+
+    async def call(self, trigger_id: str, secret: str, text: str, *, key: Optional[str] = None,
+                   labels: Optional[dict[str, str]] = None,
+                   idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Call a webhook trigger as its sender would, by its ``secret``, never
+        your key: {outcome, sessionId, seq, callId, why, replayed}, outcome
+        ``started``, ``joined`` (the open session with ``key``), ``noted`` or
+        ``held``. The same ``idempotency_key`` is the same call."""
+        body: dict[str, Any] = {"text": text}
+        if key is not None:
+            body["key"] = key
+        if labels is not None:
+            body["labels"] = labels
+        return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/calls", body=body,
+                                  bearer=secret, idempotency_key=idempotency_key)
+
+    async def held(self, trigger_id: str, *, state: Optional[list[str]] = None,
+                   cursor: Optional[str] = None, limit: Optional[int] = None):
+        """Calls it held for you, newest first; ``state`` of held, started,
+        dismissed. ``async for`` walks every page."""
+        from .._async_client import AsyncPage
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", f"/v1/agents/triggers/{_enc(trigger_id)}/held",
+                                      query={"state": state, "cursor": at, "limit": limit})
+            return AsyncPage(body["data"], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+    async def start_held(self, trigger_id: str, call_id: str) -> dict[str, Any]:
+        """Start a held call: {session, joined, calls}, one session with it
+        and every call held for its key since, oldest first."""
+        return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/held/{_enc(call_id)}/start",
+                                  body={})
+
+    async def dismiss_held(self, trigger_id: str, call_id: str) -> dict[str, Any]:
+        """Dismiss a held call: nothing runs."""
+        return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/held/{_enc(call_id)}/dismiss",
+                                  body={})
 
     async def list(self, agent: str) -> list[dict[str, Any]]:
         """The agent's triggers, paused ones included."""
@@ -322,9 +419,8 @@ class AsyncAgentTriggers:
         return body["data"]
 
     async def pause(self, trigger_id: str, why: str) -> dict[str, Any]:
-        """Hold this trigger alone, saying ``why``: its events are refused with
-        ConflictError ``trigger_paused`` and the why, never queued. Other
-        triggers and the API go on."""
+        """Hold this trigger alone, saying ``why``: a webhook's calls are held
+        for you (``held``), never dropped. Other triggers and the API go on."""
         return await self._t.json("POST", f"/v1/agents/triggers/{_enc(trigger_id)}/pause", body={"why": why})
 
     async def resume(self, trigger_id: str) -> dict[str, Any]:
@@ -397,6 +493,7 @@ class AsyncAgents:
         self._t = t
         self.sessions = AsyncAgentSessions(t)
         self.triggers = AsyncAgentTriggers(t)
+        self.asks = AsyncAgentAsks(t)
         self.memory = AsyncAgentMemory(t)
         self.templates = AgentTemplates()
 

@@ -295,7 +295,11 @@ other images have one of on that server (they count among its two), so a
 rebuilt image created at 1 vCPU and 512 MiB starts from a copy from its first
 create there. An image larger than the default 4 GiB disk gets its started copy at
 the default vCPU and memory on the smallest of 8, 16, 32 or 64 GiB of disk
-that holds it, so ask for that `diskMiB` to start fast from the first create.
+that holds it. A create from an image of up to 8 GiB that names no `diskMiB`
+gets the 8 GiB disk, within the {{running-disk-included}} a running sandbox's
+disk includes, and starts from that copy; from a larger image it is refused
+`disk_too_small`, naming the `diskMiB` to ask for. A `diskMiB` you name is
+kept.
 A start that finds no copy boots the image: measured on 8 October 2026, about
 2 s from create to running for a 4.4 GiB image, against 0.3 s from a copy.
 Each server keeps its own copies, so the first create of a size on a server

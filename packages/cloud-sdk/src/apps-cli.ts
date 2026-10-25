@@ -14,6 +14,7 @@ import {
   type AppVolume,
   type CreateApp,
   type DeployApp,
+  type ReleaseSettings,
   type StatefulSettings,
   type UpdateApp,
 } from "./products/apps.js";
@@ -52,11 +53,17 @@ export const APP_HELP = `runtime apps <command>
   create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-1000>
          [--min-copies 0] [--concurrency 100] [--spares 2] [--port 8080]
          [--health-path /healthz] [--health-fail 60] [--stop-grace 30] [--cdn on|off]
-         [--volume <volumeId>:<path>] [--label key=value]...
+         [--release at-once|staged] [--soak 300] [--volume <volumeId>:<path>] [--label key=value]...
                                               Make an App, waiting for its first deploy; prints its id.
                                               --health-fail: seconds a live copy may fail its health
                                               check before it is replaced. --stop-grace: seconds a
-                                              stopped copy has after SIGTERM. --volume mounts one
+                                              stopped copy has after SIGTERM. --release staged: a new
+                                              version goes live on one copy, then about 10%, 50% and
+                                              all of them, each stage running --soak seconds (60 to
+                                              3600) and judged on its visitors' errors and speed
+                                              before the next; a stage that does worse goes back and
+                                              the deploy fails, the live version never stopping.
+                                              --volume mounts one
                                               volume of yours at a path under /data, /mnt, /state,
                                               /storage or /volumes, in the App's one copy: it needs
                                               --max-copies 1 (--min-copies is then 1, --spares 0), and
@@ -66,7 +73,7 @@ export const APP_HELP = `runtime apps <command>
   update <app> [--name <name>] [--vcpu n] [--memory n] [--min-copies n] [--max-copies n]
          [--concurrency n] [--spares n] [--port n] [--health-path /path] [--health-fail n]
          [--stop-grace n] [--volume <volumeId>:<path> | none] [--cdn on|off]
-         [--label key=value]...
+         [--release at-once|staged] [--soak n] [--label key=value]...
                                               Change its settings; --volume none takes the volume
                                               away, only before its first deploy;
                                               --cdn off sends visitors straight to Runtime's routers,
@@ -283,6 +290,20 @@ function onOff(value: string, kit: CliKit): boolean {
   throw kit.usage(`--cdn takes on or off, not ${value}.`);
 }
 
+/** --release at-once|staged and --soak <seconds>: how an App's new version
+ * goes live. */
+function releases(args: Args, kit: CliKit): Partial<ReleaseSettings> {
+  const given = kit.flag(args, "release");
+  const soak = kit.integer(args, "soak");
+  const stages = given?.replace("-", "_");
+  if (stages !== undefined && stages !== "at_once" && stages !== "staged")
+    throw kit.usage(`--release takes at-once or staged, not ${given}.`);
+  return {
+    ...(stages === undefined ? {} : { releaseStages: stages }),
+    ...(soak === undefined ? {} : { releaseSoakSeconds: soak }),
+  };
+}
+
 /** --volume <volumeId>:<path>, or none (an update's: no volume). */
 function volume(args: Args, kit: CliKit): { volume?: AppVolume | null } {
   const given = kit.flag(args, "volume");
@@ -299,9 +320,13 @@ function volume(args: Args, kit: CliKit): { volume?: AppVolume | null } {
 }
 
 /** The flags an App's settings are given with, as the API names them. A
- * Function's leave out --min-copies, --stop-grace and --volume, which its
- * parse does not take. */
-function settings(args: Args, kit: CliKit, kind: Kind): Partial<AppSettings & StatefulSettings> {
+ * Function's leave out --min-copies, --stop-grace, --volume, --release and
+ * --soak, which its parse does not take. */
+function settings(
+  args: Args,
+  kit: CliKit,
+  kind: Kind,
+): Partial<AppSettings & StatefulSettings & ReleaseSettings> {
   const { integer, flag } = kit;
   const number = (name: string, field: keyof (AppSettings & StatefulSettings)) =>
     integer(args, name) === undefined ? {} : { [field]: integer(args, name)! };
@@ -317,7 +342,11 @@ function settings(args: Args, kit: CliKit, kind: Kind): Partial<AppSettings & St
     ...(flag(args, "cdn") === undefined ? {} : { cdn: onOff(flag(args, "cdn")!, kit) }),
     ...number("health-fail", "healthFailSeconds"),
     ...(kind.minCopies
-      ? { ...number("stop-grace", "stopGraceSeconds"), ...volume(args, kit) }
+      ? {
+          ...number("stop-grace", "stopGraceSeconds"),
+          ...volume(args, kit),
+          ...releases(args, kit),
+        }
       : {}),
   };
 }
@@ -334,12 +363,16 @@ const SETTINGS = [
   "health-fail",
   "stop-grace",
   "volume",
+  "release",
+  "soak",
   "label",
 ];
 const settingsOf = (kind: Kind) =>
   kind.minCopies
     ? SETTINGS
-    : SETTINGS.filter((name) => !["min-copies", "stop-grace", "volume"].includes(name));
+    : SETTINGS.filter(
+        (name) => !["min-copies", "stop-grace", "volume", "release", "soak"].includes(name),
+      );
 
 /** A version's copies replaced while live: how many, and why. */
 function replaced(list: AppVersion["replacements"] | undefined) {
@@ -525,8 +558,19 @@ async function copiesCommand(
         ...(healthPath === undefined ? {} : { healthPath }),
         wait,
       } as DeployApp;
-      if (wait && !out.json) out.error(`Deploying ${args.positional[0]}...`);
-      const deploy = await api.deploy(id, input, { timeoutMs: 15 * 60_000 });
+      // A staged App's deploy walks up to four stages, each soaking.
+      const app = wait && kind.minCopies ? await api.get(id) : undefined;
+      const staged =
+        app && "releaseStages" in app && app.releaseStages === "staged" ? app : undefined;
+      if (wait && !out.json)
+        out.error(
+          staged
+            ? `Deploying ${args.positional[0]} in stages, each soaking ${staged.releaseSoakSeconds} s...`
+            : `Deploying ${args.positional[0]}...`,
+        );
+      const deploy = await api.deploy(id, input, {
+        timeoutMs: 15 * 60_000 + (staged ? 4 * staged.releaseSoakSeconds * 1000 : 0),
+      });
       const failed = deployFailure(deploy);
       if (failed && !out.json) throw failed;
       print(

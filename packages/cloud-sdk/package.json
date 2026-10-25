@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.33.3",
+  "version": "0.34.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -65,6 +65,16 @@
       "types": "./dist/containers/index.d.ts",
       "import": "./dist/containers/index.js",
       "default": "./dist/containers/index.js"
+    },
+    "./browsers": {
+      "types": "./dist/browsers/index.d.ts",
+      "import": "./dist/browsers/index.js",
+      "default": "./dist/browsers/index.js"
+    },
+    "./desktops": {
+      "types": "./dist/desktops/index.d.ts",
+      "import": "./dist/desktops/index.js",
+      "default": "./dist/desktops/index.js"
     },
     "./builds": {
       "types": "./dist/builds/index.d.ts",
@@ -220,6 +230,7 @@
     "ai": "7.0.87",
     "groq-sdk": "1.6.0",
     "openai": "7.23.0",
+    "playwright": "1.63.0",
     "together-ai": "0.55.0",
     "typescript": "^5",
     "zod": "^4.1.8"

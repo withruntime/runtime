@@ -80,6 +80,39 @@ public final class Volumes {
                 .body(body)));
   }
 
+  /**
+   * Backs the volume up on a schedule of its own instead of daily: every {@code everyMinutes}
+   * minutes (15 or more, from 1970-01-01 UTC), or on {@code cron}, five fields in UTC such as
+   * {@code "30 2 * * 1-5"}; give one. {@code keep} says which of those backups stay, by
+   * count: last, hourly, daily, weekly, monthly, yearly (null keeps the counts it had, or one a
+   * day for retentionDays). The newest ready backup is always kept.
+   */
+  public Volume setBackupSchedule(
+      String id, Integer everyMinutes, String cron, Map<String, Integer> keep) {
+    if ((everyMinutes == null) == (cron == null))
+      throw new IllegalArgumentException("Give everyMinutes or cron.");
+    Map<String, Object> body = new LinkedHashMap<>();
+    if (everyMinutes != null) body.put("schedule", Map.of("everyMinutes", everyMinutes));
+    else body.put("schedule", Map.of("cron", cron));
+    if (keep != null) body.put("keep", keep);
+    return policy(id, body);
+  }
+
+  /** Takes the volume's own schedule off: back to daily backups, each kept retentionDays. */
+  public Volume clearBackupSchedule(String id, Integer retentionDays) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("schedule", null);
+    if (retentionDays != null) body.put("retentionDays", retentionDays);
+    return policy(id, body);
+  }
+
+  private Volume policy(String id, Map<String, Object> body) {
+    return new Volume(
+        t.object(
+            new Transport.Call("POST", "/v1/volumes/" + Transport.segment(id) + ":backup-policy")
+                .body(body)));
+  }
+
   public JsonObject backup(String id, String name) {
     return new JsonObject(
         t.object(

@@ -257,8 +257,11 @@ class _Transport:
                 raise _missing_key()
         return self._key
 
-    def _headers(self, accept: str, key: Optional[str], content: Optional[str], wait: Optional[int]) -> dict[str, str]:
-        headers = {"Authorization": "Bearer " + self._api_key(), "Accept": accept,
+    def _headers(self, accept: str, key: Optional[str], content: Optional[str], wait: Optional[int],
+                 bearer: Optional[str] = None) -> dict[str, str]:
+        # ``bearer``: sent instead of the API key, as a webhook trigger's
+        # secret is, which is all its calls carry.
+        headers = {"Authorization": "Bearer " + (bearer or self._api_key()), "Accept": accept,
                    "User-Agent": f"runtime-sdk-python/{VERSION}", "X-Runtime-Client": f"sdk-python/{VERSION}"}
         if content:
             headers["Content-Type"] = content
@@ -274,7 +277,7 @@ class _Transport:
                    wait_for_capacity: Optional[float] = None, deadline: Optional[float] = None,
                    on_capacity_wait: Optional[Callable[[RuntimeError, float], None]] = None,
                    read_body: bool = False, unlimited_body: bool = False,
-                   hold: Optional[_Hold] = None) -> Any:
+                   hold: Optional[_Hold] = None, bearer: Optional[str] = None) -> Any:
         """Sends a call and returns the response once it succeeded. Retries
         transport failures, 429, 502, 503 and 504 with backoff, with the same
         Idempotency-Key every time, so a retried write never happens twice.
@@ -285,7 +288,7 @@ class _Transport:
         key = _check_key(idempotency_key) if idempotency_key else (str(uuid.uuid4()) if method != "GET" else None)
         data = raw if raw is not None else (None if body is None else json.dumps(body).encode())
         content = "application/octet-stream" if raw is not None else ("application/json" if body is not None else None)
-        headers = self._headers(accept, key, content, wait)
+        headers = self._headers(accept, key, content, wait, bearer)
         target = path + _query(query or {})
         from ._request_scope import current
         scope = current()
@@ -2187,6 +2190,24 @@ class Runtime:
         Counts are exact decimal strings; errorPercent is None without calls.
         The key needs usage permission. The window ends with the partial hour."""
         return self._t.json("GET", "/v1/usage/requests", query={"range": range})
+
+    def usage_export(
+        self, since: str, until: str, *, cursor: str | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
+        """One page of settled usage for every product the key sees: settled at
+        ``since`` or later and before ``until`` (UTC, ending in Z). Follow
+        ``nextCursor`` with the same range until it is None; concatenate each
+        page's ``csv`` (the header is on the first only). Money and quantities
+        are exact decimal strings. ``finalThrough``: no row settled before it
+        can still appear or change, so the range is final once it reaches
+        ``until``. A row's ``final`` is True once its resource is deleted and
+        can be charged nothing more."""
+        query: dict[str, Any] = {"since": since, "until": until}
+        if cursor is not None:
+            query["cursor"] = cursor
+        if limit is not None:
+            query["limit"] = limit
+        return self._t.json("GET", "/v1/usage/export", query=query)
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
         """Any API route, with the client's auth, retries and errors."""

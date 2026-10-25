@@ -158,13 +158,17 @@ module WithRuntime
   # memory_mib, port, health_path, cdn, live_version, previous_version, error
   # ({code, message} or nil), line (while a copy waits for room: lane,
   # place, ahead by lane and words; nil otherwise), created_at, updated_at,
-  # deleted_at, and release_watch (alert, the default; rollback; or off). A Function
-  # also has sleep_after_ms (250 to 5000).
+  # deleted_at, and release_watch (alert, the default; rollback; or off). An App
+  # also has release_stages (at_once, the default, or staged), release_soak_seconds
+  # (60 to 3600) and staged_release (its staged release under way or its last:
+  # version, from, state rolling/back/done/failed/ended, stage, stages, copies,
+  # of, soak_seconds, detail, started_at, updated_at; nil before its first). A
+  # Function also has sleep_after_ms (250 to 5000).
   #
   # A deploy: id, version, url and state (building, warming, switching, live,
   # failed, superseded); a failed or superseded one has error with code
   # (deploy_build_failed, deploy_health_failed, deploy_stop_failed,
-  # deploy_switch_failed, deploy_superseded), message, hint and last_output. A version: version,
+  # deploy_stage_failed, deploy_switch_failed, deploy_superseded), message, hint and last_output. A version: version,
   # live, previous, saved, deploy (its deploy's id) and build (nil for an
   # image). A copy: id, version,
   # region, state (starting, serving, draining, frozen, parked) and since.
@@ -186,7 +190,13 @@ module WithRuntime
     # nothing cached), +name:+, +labels:+, +release_watch:+ ("alert" by default: tell the
     # owners when a new version gets clearly worse in its first 15 minutes; "rollback" also
     # goes back to the previous version; "off" does neither), and for an App
-    # +min_copies:+ (0). A Function leaves +min_copies+ out, zero included.
+    # +min_copies:+ (0). An App also takes +release_stages:+ ("at_once" by default;
+    # "staged" starts one copy of a new version beside the live version's, then
+    # about 10%, 50% and all of them, each stage judged on its visitors' errors
+    # and speed before the next; a stage that does worse goes back, its copies
+    # drain and the deploy fails with deploy_stage_failed, the live version never
+    # stopping) and +release_soak_seconds:+ (60 to 3600, default 300: how long
+    # each stage runs once its copies serve). A Function leaves +min_copies+ out, zero included.
     # A Function also takes +sleep_after_ms:+ (250 to 5000, default 1000): at
     # most how long a copy stays awake after its last request ends; awake time
     # with no request in flight is not billed. An App is refused it.

@@ -7,6 +7,7 @@
 import type { Runtime } from "../client.js";
 import { clientFor, type ConnectionOpts } from "./client.js";
 import { Sandbox } from "./sandbox.js";
+import { Secret, Template, Volume } from "./unsupported.js";
 
 export {
   Sandbox,
@@ -107,11 +108,17 @@ export {
 } from "./unsupported.js";
 export default Sandbox;
 
-/** E2B's client with bound options: `new E2B({ apiKey }).Sandbox.create()`. */
+/** E2B's client with bound options: `new E2B({ apiKey }).Sandbox.create()`.
+ * Its Secret, Template and Volume refuse, naming Runtime's alternative, as
+ * the top-level exports do. */
 export class E2B {
+  protected static readonly sandboxClass: typeof Sandbox = Sandbox;
   readonly Sandbox: typeof Sandbox;
+  readonly Secret = Secret;
+  readonly Template = Template;
+  readonly Volume = Volume;
   constructor(opts: Omit<ConnectionOpts, "signal"> & { client?: Runtime } = {}) {
-    this.Sandbox = bind(Sandbox, opts);
+    this.Sandbox = bind((new.target as typeof E2B).sandboxClass, opts);
   }
 }
 

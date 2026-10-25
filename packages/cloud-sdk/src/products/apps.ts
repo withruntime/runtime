@@ -50,8 +50,44 @@ export type StatefulSettings = {
   /** Seconds a stopped copy has after SIGTERM to exit. */
   stopGraceSeconds: number;
 };
+/** How an App's new version goes live: every copy together (at_once, the
+ * default), or staged: one copy of it beside the live version's, then about
+ * 10%, 50% and all of them, each stage judged on its visitors' errors and
+ * speed before the next. A stage that does worse goes back: its copies
+ * finish their requests and stop, then the deploy fails (deploy_stage_failed)
+ * and the live version never stops serving. */
+export type ReleaseStages = "at_once" | "staged";
+export type ReleaseSettings = {
+  releaseStages: ReleaseStages;
+  /** 60 to 3600 seconds; defaults to 300. How long each stage runs once its
+   * copies serve before it is judged. */
+  releaseSoakSeconds: number;
+};
+/** An App's staged release under way, or its last. */
+export type StagedRelease = {
+  version: number;
+  /** The version live when it began, serving beside it. */
+  from: number;
+  /** rolling: its stages go live; back: a stage did worse and its copies
+   * leave; done: every copy runs it; failed: it went back (or its copies
+   * failed their health check) and the version failed; ended: another
+   * deploy or a rollback took its place. */
+  state: "rolling" | "back" | "done" | "failed" | "ended";
+  stage: number;
+  stages: number;
+  /** Copies of the new version the stage serves beside the old version's. */
+  copies: number;
+  /** Copies the release walks to. */
+  of: number;
+  soakSeconds: number;
+  /** Its last step, in words. */
+  detail: string;
+  startedAt: number;
+  updatedAt: number;
+};
 export type App = AppSettings &
-  StatefulSettings & {
+  StatefulSettings &
+  ReleaseSettings & {
     id: string;
     name: string | null;
     /** Its address for life, its name then its account's:
@@ -67,6 +103,8 @@ export type App = AppSettings &
     error: { code: string; message: string } | null;
     liveVersion: number | null;
     previousVersion: number | null;
+    /** Its staged release under way, or its last; null before its first. */
+    stagedRelease: StagedRelease | null;
     /** While a copy waits for room in its region: its account's lane, its
      * place in line (1 is next), how many wait ahead by lane, and why.
      * Higher lanes get room first. Absent while nothing of it waits. */
@@ -78,7 +116,10 @@ export type AppLine = {
   ahead: Record<string, number>;
   words: string;
 };
-export type RuntimeFunction = Omit<App, "minCopies" | keyof StatefulSettings> & {
+export type RuntimeFunction = Omit<
+  App,
+  "minCopies" | keyof StatefulSettings | keyof ReleaseSettings | "stagedRelease"
+> & {
   minCopies: 0;
   /** 250 to 5000 ms: at most how long a copy stays awake after its last request ends. */
   sleepAfterMs: number;
@@ -134,8 +175,12 @@ export type CreateApp = Omit<CreateFunction, "minCopies" | "sleepAfterMs"> & {
   volume?: AppVolume;
   /** 0 to 900; defaults to 30. */
   stopGraceSeconds?: number;
+  /** Defaults to "at_once"; see ReleaseStages. */
+  releaseStages?: ReleaseStages;
+  /** 60 to 3600; defaults to 300. */
+  releaseSoakSeconds?: number;
 };
-export type UpdateApp = Partial<AppSettings & StatefulSettings> & {
+export type UpdateApp = Partial<AppSettings & StatefulSettings & ReleaseSettings> & {
   name?: string | null;
   labels?: Record<string, string>;
   /** Only Functions sleep on this rule; an App is refused it. */
@@ -143,7 +188,7 @@ export type UpdateApp = Partial<AppSettings & StatefulSettings> & {
 };
 export type UpdateFunction = Omit<
   UpdateApp,
-  "minCopies" | "sleepAfterMs" | keyof StatefulSettings
+  "minCopies" | "sleepAfterMs" | keyof StatefulSettings | keyof ReleaseSettings
 > & {
   minCopies?: never;
   /** 250 to 5000 ms; see CreateFunction.sleepAfterMs. */
@@ -170,6 +215,7 @@ export type AppDeploy = {
           | "deploy_build_failed"
           | "deploy_health_failed"
           | "deploy_stop_failed"
+          | "deploy_stage_failed"
           | "deploy_switch_failed"
           | "deploy_superseded";
         message: string;
@@ -299,7 +345,7 @@ export type AppWaitOptions = ResourceWaitOptions;
 export type AppDeleteOptions = ResourceDeleteOptions;
 
 function copies<
-  R extends Omit<App, keyof StatefulSettings>,
+  R extends Omit<App, keyof StatefulSettings | keyof ReleaseSettings | "stagedRelease">,
   C extends CreateApp | CreateFunction,
   U extends UpdateApp | UpdateFunction,
 >(t: Transport, plural: "apps" | "functions") {

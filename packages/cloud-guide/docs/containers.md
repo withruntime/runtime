@@ -61,6 +61,10 @@ what it runs never changes. To run something else, create a new container
 and delete the old one. `delete` stops the process and deletes the machine and
 its disk. Lists filter by name, labels and state.
 
+A key reaches the containers a sandbox of its would reach: a key in a
+compartment its compartment's, a key another key made its own, and an
+account-wide key every one. Another's container answers `not_found`.
+
 ## What it costs
 
 A container is billed as a sandbox of its size: active CPU and memory while

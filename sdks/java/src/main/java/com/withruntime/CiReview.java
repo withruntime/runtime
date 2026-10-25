@@ -32,16 +32,17 @@ public final class CiReview extends JsonObject {
     return getObjects("notes", Note::new);
   }
 
-  /** The Runtime Agent that reviewed. */
+  /** The Runtime Agent that judged (an agent step's; {@code review:} is its short form). */
   public String agent() {
     return getString("agent");
   }
 
-  /** The name of the agent's secret it ran on. */
+  /** The Claude account a verdict from before agent steps ran on; null for an agent step's. */
   public String account() {
     return getString("account");
   }
 
+  /** The model the step asked for; null when it named none. */
   public String model() {
     return getString("model");
   }

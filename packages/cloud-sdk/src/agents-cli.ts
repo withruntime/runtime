@@ -9,9 +9,13 @@ import {
   agentTemplate,
   AGENT_USES,
   agents,
+  type AgentAsk,
+  type AgentAskState,
   type AgentDefinition,
   type AgentEvent,
+  type AgentHeldCall,
   type AgentSessionState,
+  type AgentTriggerRules,
   type CreateAgentTrigger,
 } from "./products/agents.js";
 
@@ -39,11 +43,14 @@ export const AGENT_HELP = `runtime agents <command>
                                               with their triggers; one holding memory files only
                                               with --prune-memory too, which deletes them for good
   create <name> (--template <harness> | --command "<cmd>") [--use support|team]
-         [--instructions <text> | --instructions-file <path>] [--secret NAME]...
+         [--instructions <text> | --instructions-file <path>] [--secret NAME]... [--pool NAME]...
          [--env KEY=VALUE]... [--image <image> | --snapshot <id>] [--vcpu n] [--memory n]
          [--max-concurrent n] [--idle-pause n] [--label key=value]...
                                               Make an agent; prints its id. --secret names an egress
-                                              secret it may use: its model key, of any provider
+                                              secret it may use: its model key, of any provider.
+                                              --pool names a Claude account's secret (each one
+                                              given replaces the template's): each session takes
+                                              the one with the most usage left
   ls                                          Your agents
   get <agent>                                 One agent, in full (an id or its name)
   update <agent> [the options of create]      A new version: what you give changes, the rest stays
@@ -59,9 +66,26 @@ export const AGENT_HELP = `runtime agents <command>
   sessions delete <session>                   Delete an ended session and its log; its history is
                                               storage, kept until you delete it
   stop <session>                              Stop a session
+  asks [--state <state>]... [--agent <agent>] [--label key=value]...
+                                              The inbox: what your agents' sessions need answered,
+                                              one row per step however many sessions ask it
+  asks get <ask>                              One ask: its options, pick and the sessions asking
+  answer <ask> [<option>] [--text <words>]    Answer it with an option's label, words, or both:
+                                              every session asking reads it next and wakes
   triggers <agent>                            Its triggers
-  triggers add <agent> --kind <slack|github|schedule|webhook> --config '<json>'
-  triggers pause <triggerId> --why <words>    Refuse its events, saying why; nothing else is held
+  triggers add <agent> --kind <slack|github|schedule|webhook> --config '<json>' [--rules '<json>']
+  triggers rules <triggerId> '<json>'         Set its rules in place: priority, maxStartsPerHour,
+                                              onEnded (start|note|ask), notify (email|webhook)
+                                              and a webhook's key ("{cause}"); its secret stays
+  triggers call <triggerId> <words...> [--key <key>] [--label key=value]... [--secret <secret>]
+                                              Call a webhook as its sender would, by its secret
+                                              (or RUNTIME_TRIGGER_SECRET): starts, joins, notes or
+                                              holds
+  triggers held <triggerId> [--state held|started|dismissed]...
+                                              Calls it held for you; none is dropped
+  triggers held start <triggerId> <callId>    Start one, with every call held for its key since
+  triggers held dismiss <triggerId> <callId>  Dismiss one; nothing runs
+  triggers pause <triggerId> --why <words>    Hold it: a webhook's calls are kept for you, saying why
   triggers resume <triggerId>
   triggers rm <triggerId>
   memory ls <agent> [--scope <key>] [--prefix <path>]
@@ -83,10 +107,26 @@ Examples
   runtime agents create helper --template claude-code --use support --instructions "Answer briefly."
   runtime agents start helper "How do I reset my password?" --key customer:42 --follow
   runtime agents memory put helper faq/refunds.md refunds.md
+  runtime agents asks && runtime agents answer <ask> "Raise to 20 TB"
   runtime agents init --template claude-code && runtime agents deploy --dry-run
+  runtime agents create ci-review --template review --pool CLAUDE_1 --pool CLAUDE_2
 `;
 
 const when = (iso: string | null | undefined) => iso ?? "-";
+/** A trigger's rules as the CLI takes them: one JSON object. */
+function rulesOf(text: string, kit: CliKit): AgentTriggerRules {
+  let rules: unknown;
+  try {
+    rules = JSON.parse(text);
+  } catch {
+    rules = undefined;
+  }
+  if (!rules || typeof rules !== "object" || Array.isArray(rules))
+    throw kit.usage(
+      `Rules are a JSON object, such as '{"key":"{cause}","maxStartsPerHour":60,"onEnded":"ask"}'.`,
+    );
+  return rules as AgentTriggerRules;
+}
 const OPTIONS = [
   "template",
   "use",
@@ -94,6 +134,7 @@ const OPTIONS = [
   "instructions",
   "instructions-file",
   "secret",
+  "pool",
   "env",
   "image",
   "snapshot",
@@ -103,6 +144,20 @@ const OPTIONS = [
   "idle-pause",
   "label",
 ];
+const ASK_STATES: readonly AgentAskState[] = ["open", "answered", "expired", "withdrawn", "closed"];
+const askLine = (a: AgentAsk) => {
+  const options = a.options.map((o) => (o.label === a.pick ? `${o.label} (pick)` : o.label));
+  return [
+    `${a.id} ${a.state}${a.step ? ` step ${a.step}` : ""}, ${a.sessions.length} session${a.sessions.length === 1 ? "" : "s"} asking`,
+    `  ${a.question}`,
+    ...(a.why ? [`  why: ${a.why}`] : []),
+    ...(options.length ? [`  options: ${options.join(" | ")}`] : []),
+    ...(a.expiresAt ? [`  expires ${a.expiresAt}`] : []),
+    ...(a.answer
+      ? [`  answered: ${[a.answer.option, a.answer.text].filter(Boolean).join(": ")}`]
+      : []),
+  ].join("\n");
+};
 const STATES: readonly AgentSessionState[] = [
   "queued",
   "running",
@@ -144,6 +199,8 @@ function definitionOf(args: Args, kit: CliKit, env: NodeJS.ProcessEnv, base?: Ag
   set("instructions", instructions);
   if (secrets)
     set("secrets", [...new Set([...((definition.secrets as string[]) ?? []), ...secrets])]);
+  const pool = args.flags.get("pool");
+  if (pool) set("pool", [...new Set(pool)]);
   if (args.flags.has("env"))
     set("env", {
       ...(definition.env ?? {}),
@@ -358,6 +415,45 @@ export async function agentsCommand(
       );
       return 0;
     }
+    case "asks": {
+      if (rest[0] === "get") {
+        const one = await api.asks.get(need(rest[1], "an ask's id"));
+        print(askLine(one), one);
+        return 0;
+      }
+      const args = parse(rest, [], ["state", "agent", "label"]);
+      const states = args.flags.get("state");
+      for (const state of states ?? [])
+        if (!ASK_STATES.includes(state as AgentAskState))
+          throw usage(`--state takes ${ASK_STATES.join(", ")}.`);
+      const agent = flag(args, "agent");
+      const labels = args.flags.has("label") ? pairs(args, "label") : undefined;
+      const page = await api.asks.list({
+        limit: 100,
+        ...(agent === undefined ? {} : { agent }),
+        ...(states ? { state: states as AgentAskState[] } : {}),
+        ...(labels ? { labels } : {}),
+      });
+      print(page.data.map(askLine).join("\n\n") || "Nothing to answer.", page.data);
+      return 0;
+    }
+    case "answer": {
+      const args = parse(rest, [], ["text"]);
+      const id = need(args.positional[0], "an ask's id");
+      const option = args.positional.slice(1).join(" ") || undefined;
+      const text = flag(args, "text");
+      if (option === undefined && text === undefined)
+        throw usage(`Give an option's label, --text, or both: ${me} agents answer ${id} "Keep it"`);
+      const answered = await api.asks.answer(id, {
+        ...(option === undefined ? {} : { option }),
+        ...(text === undefined ? {} : { text }),
+      });
+      print(
+        `${answered.id} answered; ${answered.sessions.filter((x) => x.state === "answered").length} session(s) woken.`,
+        answered,
+      );
+      return 0;
+    }
     case "stop": {
       const session = await (await api.session(need(rest[0], "a session's id"))).stop();
       print(`${session.id} ${session.state}.`, session);
@@ -366,7 +462,7 @@ export async function agentsCommand(
     case "triggers": {
       const [sub, ...more] = rest;
       if (sub === "add") {
-        const args = parse(more, [], ["kind", "config"]);
+        const args = parse(more, [], ["kind", "config", "rules"]);
         const target = need(args.positional[0], "an agent's id or name");
         let config: unknown;
         try {
@@ -376,9 +472,11 @@ export async function agentsCommand(
             `--config takes JSON, such as --config '{"cron":"0 9 * * 1-5","input":"Triage new issues"}'.`,
           );
         }
+        const rules = flag(args, "rules");
         const trigger = await api.triggers.create(target, {
           kind: need(flag(args, "kind"), "--kind"),
           config,
+          ...(rules === undefined ? {} : { rules: rulesOf(rules, kit) }),
         } as CreateAgentTrigger);
         // A webhook's secret is answered this once.
         print(
@@ -386,6 +484,87 @@ export async function agentsCommand(
             ? `${trigger.id}\nsecret ${trigger.secret} (shown once; each call carries it)`
             : trigger.id,
           trigger,
+        );
+        return 0;
+      }
+      if (sub === "rules") {
+        const id = need(more[0], "a trigger's id");
+        const trigger = await api.triggers.setRules(
+          id,
+          rulesOf(
+            need(more[1], `the rules as JSON: ${me} agents triggers rules ${id} '{"priority":10}'`),
+            kit,
+          ),
+        );
+        print(`${trigger.id} rules ${JSON.stringify(trigger.rules)}`, trigger);
+        return 0;
+      }
+      if (sub === "call") {
+        const args = parse(more, [], ["key", "label", "secret"]);
+        const id = need(args.positional[0], "a trigger's id");
+        const text = args.positional.slice(1).join(" ");
+        if (!text)
+          throw usage(`Give the words: ${me} agents triggers call ${id} "disk full on db-1"`);
+        const secret = flag(args, "secret") ?? env.RUNTIME_TRIGGER_SECRET;
+        if (!secret)
+          throw usage(
+            "Give the trigger's secret: --secret rtat_… or RUNTIME_TRIGGER_SECRET, as answered when the webhook was added.",
+          );
+        const key = flag(args, "key");
+        const done = await api.triggers.call(id, secret, {
+          text,
+          ...(key === undefined ? {} : { key }),
+          ...(args.flags.has("label") ? { labels: pairs(args, "label") } : {}),
+        });
+        print(
+          done.outcome === "held"
+            ? `held ${done.callId}: ${done.why}`
+            : `${done.outcome} ${done.sessionId} seq ${done.seq}`,
+          done,
+        );
+        return 0;
+      }
+      if (sub === "held") {
+        const [action, ...after] = more;
+        if (action === "start" || action === "dismiss") {
+          const id = need(after[0], "a trigger's id");
+          const call = need(after[1], "a held call's id");
+          if (action === "start") {
+            const started = await api.triggers.startHeld(id, call);
+            print(
+              `${started.joined ? "joined" : "started"} ${started.session.id} with ${started.calls} held call${started.calls === 1 ? "" : "s"}`,
+              started,
+            );
+          } else {
+            const dismissed = await api.triggers.dismissHeld(id, call);
+            print(`${dismissed.id} dismissed.`, dismissed);
+          }
+          return 0;
+        }
+        const args = parse(more, [], ["state"]);
+        const states = args.flags.get("state");
+        for (const state of states ?? [])
+          if (!["held", "started", "dismissed"].includes(state))
+            throw usage("--state takes held, started, dismissed.");
+        const page = await api.triggers.held(need(args.positional[0], "a trigger's id"), {
+          limit: 100,
+          ...(states ? { state: states as AgentHeldCall["state"][] } : {}),
+        });
+        print(
+          page.data.length
+            ? table([
+                ["ID", "STATE", "WHY", "KEY", "CREATED", "WORDS"],
+                ...page.data.map((c) => [
+                  c.id,
+                  c.state,
+                  c.why,
+                  c.key ?? "-",
+                  when(c.createdAt),
+                  c.text.replace(/\s+/g, " ").slice(0, 60),
+                ]),
+              ])
+            : "No held calls.",
+          page.data,
         );
         return 0;
       }
@@ -412,8 +591,14 @@ export async function agentsCommand(
       print(
         all.length
           ? table([
-              ["ID", "KIND", "CONFIG", "PAUSED"],
-              ...all.map((t) => [t.id, t.kind, JSON.stringify(t.config), t.pausedWhy ?? "-"]),
+              ["ID", "KIND", "CONFIG", "RULES", "PAUSED"],
+              ...all.map((t) => [
+                t.id,
+                t.kind,
+                JSON.stringify(t.config),
+                Object.keys(t.rules ?? {}).length ? JSON.stringify(t.rules) : "-",
+                t.pausedWhy ?? "-",
+              ]),
             ])
           : "No triggers.",
         all,
@@ -437,6 +622,8 @@ export async function agentsCommand(
         "events",
         "sessions",
         "stop",
+        "asks",
+        "answer",
         "triggers",
         "memory",
       ]);

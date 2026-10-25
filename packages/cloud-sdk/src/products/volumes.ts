@@ -26,8 +26,16 @@ export type Volume = {
   measuredAt: string | null;
   /** True once a backup of it has been copied off its host and checked. */
   backedUp: boolean;
-  /** Daily backups, how long each is kept, and when the newest was taken. */
-  backups: { daily: boolean; retentionDays: number; lastReadyAt: string | null };
+  /** Automatic backups: daily, kept `retentionDays`, or on the volume's own
+   * `schedule` with `keep` counts; `nextAt` is the schedule's next backup. */
+  backups: {
+    daily: boolean;
+    retentionDays: number;
+    schedule?: VolumeBackupSchedule | null;
+    keep?: Required<VolumeBackupKeep> | null;
+    nextAt?: string | null;
+    lastReadyAt: string | null;
+  };
   /** The backup this volume was restored from, if any. */
   restoredFrom: string | null;
   attachments: {
@@ -66,6 +74,21 @@ export type VolumeAttachment = {
   changedAt: string;
 };
 export type VolumeBackupState = "pending" | "ready" | "failed" | "deleting" | "deleted";
+/** Back up every N minutes (15 or more, from 1970-01-01 UTC), or on a
+ * five-field cron in UTC such as `"30 2 * * 1-5"` (02:30 on weekdays). */
+export type VolumeBackupSchedule = { everyMinutes: number } | { cron: string };
+/** Which scheduled backups stay: the last N, and the newest in each of the
+ * newest N hours, days, weeks (from Monday), months and years. Any backup a
+ * count keeps is kept; the newest ready backup always is. Missing counts are 0. */
+export type VolumeBackupKeep = {
+  last?: number;
+  hourly?: number;
+  daily?: number;
+  weekly?: number;
+  monthly?: number;
+  yearly?: number;
+};
+
 /** A point-in-time copy of a volume, kept off its host. */
 export type VolumeBackup = {
   id: string;
@@ -77,28 +100,33 @@ export type VolumeBackup = {
   region: string;
   volumeId: string;
   sizeMiB: number;
-  trigger: "manual" | "daily";
-  retentionDays: number;
+  /** `scheduled`: made on the volume's schedule and kept by its keep counts. */
+  trigger: "manual" | "daily" | "scheduled";
+  /** Null while the volume's keep counts decide. */
+  retentionDays: number | null;
   logicalBytes: number | null;
   storedBytes: number | null;
   meteredBytes: number | null;
   error: string | null;
   /** Why it failed, when a code says it: `backup_stalled` when its copy off
-   * the host never began; back it up again. */
+   * the volume's server had not begun 15 minutes after `createdAt`; back it
+   * up again. */
   errorCode?: string | null;
   createdAt: string;
-  /** When its copy off the volume's server began; null while it waits its
-   * turn behind other copies there. */
+  /** When its copy off the volume's server began; null while it waits,
+   * behind other backups there only (never Runtime's own copies). */
   copyStartedAt?: string | null;
   readyAt: string | null;
-  expiresAt: string;
+  /** Null while the volume's keep counts decide. */
+  expiresAt: string | null;
 };
 
 const enc = encodeURIComponent;
 
 /** Persistent disks: create once, attach when creating a sandbox with
  * `volumes: [{ volumeId: v.id, path: "/data" }]`. Backed up off their host
- * daily unless that is turned off; restore one with `create({ fromBackup })`. */
+ * daily, or on a schedule of their own, unless that is turned off; restore
+ * one with `create({ fromBackup })`. */
 export function volumes(t: Transport) {
   const get = (id: string, options?: RequestOptions) =>
     t.json<Volume>({ method: "GET", path: `/v1/volumes/${enc(id)}`, ...options });
@@ -210,10 +238,18 @@ export function volumes(t: Transport) {
         ...rest,
       });
     },
-    /** Daily backups on or off, and how many days each is kept. */
+    /** Automatic backups on or off, days a daily one is kept, or a schedule
+     * of the volume's own with keep counts:
+     * `setBackupPolicy(id, { schedule: { everyMinutes: 60 }, keep: { hourly: 24, daily: 7 } })`. */
     setBackupPolicy: (
       id: string,
-      input: { daily?: boolean; retentionDays?: number },
+      input: {
+        daily?: boolean;
+        retentionDays?: number;
+        /** Null goes back to daily backups kept `retentionDays`. */
+        schedule?: VolumeBackupSchedule | null;
+        keep?: VolumeBackupKeep;
+      },
       options?: RequestOptions,
     ) =>
       t.json<Volume>({

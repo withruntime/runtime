@@ -32,7 +32,9 @@ type AgentService struct {
 	// Memory is each agent's built-in memory: text files its sessions keep
 	// across sessions and search, shared or one key's alone.
 	Memory *AgentMemoryService
-	// Approvals (Agents.Approvals.List and Answer) come in a later release.
+	// Asks is the account's inbox: what its sessions need answered to go
+	// on, one row per step however many sessions ask it.
+	Asks *AgentAskService
 }
 
 func newAgentService(c *Client) *AgentService {
@@ -42,6 +44,7 @@ func newAgentService(c *Client) *AgentService {
 		Triggers:  &AgentTriggerService{c: c},
 		Templates: &AgentTemplateService{},
 		Memory:    &AgentMemoryService{c: c},
+		Asks:      &AgentAskService{c: c},
 	}
 }
 
@@ -65,7 +68,12 @@ type AgentDefinition struct {
 	Env          map[string]string `json:"env,omitempty"`
 	// Secrets are egress secrets (client.Secrets) the sandbox uses without
 	// seeing them, such as ANTHROPIC_API_KEY.
-	Secrets []string         `json:"secrets,omitempty"`
+	Secrets []string `json:"secrets,omitempty"`
+	// Pool is 1 to 16 Claude accounts, each an egress secret's name: a
+	// subscription token, or an API key for a name holding API_KEY. Each
+	// session takes the one with the most usage left; the review template
+	// moves to the next when one is out of usage.
+	Pool    []string         `json:"pool,omitempty"`
 	MCP     []AgentMCPServer `json:"mcp,omitempty"`
 	Volumes []AgentVolume    `json:"volumes,omitempty"`
 	// IdlePauseSeconds pauses a session's sandbox once it has been idle this
@@ -135,7 +143,7 @@ func (d *AgentDefinition) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &all); err != nil {
 		return err
 	}
-	for _, known := range []string{"command", "from", "vcpu", "memoryMiB", "instructions", "env", "secrets", "mcp",
+	for _, known := range []string{"command", "from", "vcpu", "memoryMiB", "instructions", "env", "secrets", "pool", "mcp",
 		"volumes", "idlePauseSeconds", "maxSessionSeconds", "maxConcurrent", "maxSessionDollars", "maxDayDollars", "template"} {
 		delete(all, known)
 	}
@@ -265,10 +273,82 @@ type AgentTrigger struct {
 	Kind string `json:"kind"`
 	// Config is the kind's settings; see SlackTrigger, GitHubTrigger,
 	// ScheduleTrigger and WebhookTrigger.
-	Config    map[string]any `json:"config"`
-	PausedAt  *time.Time     `json:"pausedAt"`
-	PausedWhy *string        `json:"pausedWhy"`
-	CreatedAt time.Time      `json:"createdAt"`
+	Config map[string]any `json:"config"`
+	// Rules are its rules; the zero value is every default.
+	Rules     AgentTriggerRules `json:"rules"`
+	PausedAt  *time.Time        `json:"pausedAt"`
+	PausedWhy *string           `json:"pausedWhy"`
+	CreatedAt time.Time         `json:"createdAt"`
+}
+
+// AgentTriggerRules are a trigger's rules, every one optional.
+type AgentTriggerRules struct {
+	// Priority, -100 to 100, orders its sessions in the agent's queue when
+	// its maxConcurrent is full: higher first, then oldest. Default 0.
+	Priority *int `json:"priority,omitempty"`
+	// MaxStartsPerHour caps the sessions it starts in an hour; a call past
+	// it is held for you. Joining an open session is never capped.
+	MaxStartsPerHour *int `json:"maxStartsPerHour,omitempty"`
+	// OnEnded is what a call does when its key's last session has ended:
+	// "start" a new one (the default), "note" it in that session's log and
+	// run nothing, or "ask" you (the call is held until you start it).
+	OnEnded string `json:"onEnded,omitempty"`
+	// Notify is where a held call is told: "email" to who added the trigger
+	// (the default), or "webhook", the account's webhooks' agent.call.held.
+	Notify string `json:"notify,omitempty"`
+	// Key, a webhook's only, is the key of a call that sends none, from its
+	// JSON's fields: "{cause}", "{alert.host}:{check}".
+	Key string `json:"key,omitempty"`
+}
+
+// AgentTriggerCall is one call to a webhook trigger.
+type AgentTriggerCall struct {
+	Text string `json:"text"`
+	// Key joins the open session with it, or starts one under it.
+	Key    string            `json:"key,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+	// IdempotencyKey makes a retry the same call; one is made when empty.
+	IdempotencyKey string `json:"-"`
+}
+
+// AgentTriggerCallOutcome is what a call did.
+type AgentTriggerCallOutcome struct {
+	// Outcome is started, joined (its key's open session), noted (in its
+	// key's ended session's log) or held (for you; Why says why).
+	Outcome   string  `json:"outcome"`
+	SessionID *string `json:"sessionId"`
+	Seq       *int64  `json:"seq"`
+	CallID    *string `json:"callId"`
+	Why       *string `json:"why"`
+	Replayed  bool    `json:"replayed"`
+}
+
+// AgentHeldCall is a call a trigger held for you because no session could
+// take it. None is ever dropped.
+type AgentHeldCall struct {
+	ID        string            `json:"id"`
+	TriggerID string            `json:"triggerId"`
+	AgentID   string            `json:"agentId"`
+	Key       *string           `json:"key"`
+	Text      string            `json:"text"`
+	Labels    map[string]string `json:"labels"`
+	// Why is paused, rate (past maxStartsPerHour), ended (its key's session
+	// had ended and onEnded is ask), budget, quota or closed.
+	Why string `json:"why"`
+	// State is held, started or dismissed.
+	State      string     `json:"state"`
+	SessionID  *string    `json:"sessionId"`
+	Notify     string     `json:"notify"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ResolvedAt *time.Time `json:"resolvedAt"`
+}
+
+// HeldCallListOptions: State narrows to held, started or dismissed; Cursor
+// and Limit page.
+type HeldCallListOptions struct {
+	State  string
+	Cursor string
+	Limit  int
 }
 
 // SlackTrigger is a "slack" trigger's config: a channel of a workspace that
@@ -701,13 +781,72 @@ func (s *AgentTriggerService) Create(ctx context.Context, agent, kind string, co
 	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: agentPath(agent) + "/triggers", body: map[string]any{"kind": kind, "config": config}}, &out)
 }
 
+// CreateWithRules adds a trigger with its rules.
+//
+//	trigger, err := client.Agents.Triggers.CreateWithRules(ctx, "alerts", "webhook",
+//		withruntime.WebhookTrigger{}, withruntime.AgentTriggerRules{Key: "{cause}", OnEnded: "ask"})
+func (s *AgentTriggerService) CreateWithRules(ctx context.Context, agent, kind string, config any, rules AgentTriggerRules) (*AgentTrigger, error) {
+	if config == nil {
+		config = map[string]any{}
+	}
+	var out AgentTrigger
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: agentPath(agent) + "/triggers", body: map[string]any{"kind": kind, "config": config, "rules": rules}}, &out)
+}
+
+// SetRules replaces a trigger's rules, whole, in place: its secret stays.
+func (s *AgentTriggerService) SetRules(ctx context.Context, id string, rules AgentTriggerRules) (*AgentTrigger, error) {
+	var out AgentTrigger
+	return &out, s.c.do(ctx, &call{method: http.MethodPatch, path: triggerPath(id), body: map[string]any{"rules": rules}}, &out)
+}
+
+// Call calls a webhook trigger as its sender would, by its secret, never
+// your key. A call with the key of an open session joins it.
+func (s *AgentTriggerService) Call(ctx context.Context, id, secret string, in AgentTriggerCall) (*AgentTriggerCallOutcome, error) {
+	var out AgentTriggerCallOutcome
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: triggerPath(id) + "/calls", body: in, bearer: secret, key: in.IdempotencyKey}, &out)
+}
+
+// Held lists the calls a trigger held for you, newest first (opts may be
+// nil). Page.All walks every one.
+func (s *AgentTriggerService) Held(ctx context.Context, id string, opts *HeldCallListOptions) (*Page[AgentHeldCall], error) {
+	query := url.Values{}
+	cursor := ""
+	if opts != nil {
+		setQuery(query, "state", opts.State, "limit", itoa(opts.Limit))
+		cursor = opts.Cursor
+	}
+	return nextPage[AgentHeldCall](ctx, s.c, triggerPath(id)+"/held", query, cursor)
+}
+
+// StartedHeldCall is what starting a held call made.
+type StartedHeldCall struct {
+	Session AgentSessionInfo `json:"session"`
+	Joined  bool             `json:"joined"`
+	// Calls is how many held calls it took: this one and every one held
+	// for its key since.
+	Calls int `json:"calls"`
+}
+
+// StartHeld starts a held call: one session with it and every call held for
+// its key since, oldest first.
+func (s *AgentTriggerService) StartHeld(ctx context.Context, id, callID string) (*StartedHeldCall, error) {
+	var out StartedHeldCall
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: triggerPath(id) + "/held/" + url.PathEscape(callID) + "/start", body: map[string]any{}}, &out)
+}
+
+// DismissHeld dismisses a held call: nothing runs.
+func (s *AgentTriggerService) DismissHeld(ctx context.Context, id, callID string) (*AgentHeldCall, error) {
+	var out AgentHeldCall
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: triggerPath(id) + "/held/" + url.PathEscape(callID) + "/dismiss", body: map[string]any{}}, &out)
+}
+
 // List returns an agent's triggers.
 func (s *AgentTriggerService) List(ctx context.Context, agent string) ([]AgentTrigger, error) {
 	return productList[AgentTrigger](ctx, s.c, agentPath(agent)+"/triggers", nil)
 }
 
-// Pause holds a trigger: its events are refused, saying why, and never
-// queued. The agent's other triggers and the API go on.
+// Pause holds a trigger, saying why: a webhook's calls are held for you
+// (Held), never dropped. The agent's other triggers and the API go on.
 func (s *AgentTriggerService) Pause(ctx context.Context, id, why string) (*AgentTrigger, error) {
 	var out AgentTrigger
 	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: triggerPath(id) + "/pause", body: map[string]any{"why": why}}, &out)
@@ -796,7 +935,9 @@ type AgentUse struct {
 type AgentTemplateService struct{}
 
 // List returns the harness templates, in order: claude-code, codex,
-// gemini-cli, claude-agent-sdk and openai-agents-sdk.
+// gemini-cli, claude-agent-sdk, openai-agents-sdk, review (a CI/CD agent
+// step's reviewer, on a Pool of Claude accounts) and judge (an agent step
+// held to its instructions alone).
 func (*AgentTemplateService) List() []AgentTemplate { return agentTemplates() }
 
 // Get returns the harness template with this key.
@@ -868,7 +1009,7 @@ func unknownTemplate(what, key string) *Error {
 		Code:    "invalid_request",
 		Status:  400,
 		Message: fmt.Sprintf("No agent %s is named %q.", what, key),
-		Hint:    "Templates are claude-code, codex, gemini-cli, claude-agent-sdk and openai-agents-sdk; uses are support and team.",
+		Hint:    "Templates are claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review and judge; uses are support and team.",
 	}
 }
 
@@ -878,6 +1019,8 @@ func agentTemplates() []AgentTemplate {
 	codex := `npx -y @openai/codex exec --dangerously-bypass-approvals-and-sandbox "$(cat ~/.runtime-agent/start.md)"`
 	gemini := `npx -y @google/gemini-cli --yolo -p "$(cat ~/.runtime-agent/start.md)"`
 	python := "python3 ~/agent.py"
+	review := "python3 ~/.runtime-agent/runtime-agent review"
+	judge := "python3 ~/.runtime-agent/runtime-agent judge"
 	return []AgentTemplate{
 		{
 			Key: "claude-code", Title: "Claude Code", Command: claudeCode,
@@ -906,6 +1049,18 @@ func agentTemplates() []AgentTemplate {
 			Key: "openai-agents-sdk", Title: "OpenAI Agents SDK", Command: python,
 			APIKeySecret: "OPENAI_API_KEY", APIKeyHost: "api.openai.com",
 			Definition: AgentDefinition{Command: python, Secrets: []string{"OPENAI_API_KEY"}},
+		},
+		{
+			Key: "review", Title: "Code review", Command: review,
+			APIKeySecret: "ANTHROPIC_API_KEY", APIKeyHost: "api.anthropic.com",
+			Subscription: text("a token per account: run `claude setup-token` on your own computer (Pro/Max) for each, store each with `runtime secrets set CLAUDE_1` scoped to api.anthropic.com, then name them all in pool (--pool CLAUDE_1 --pool CLAUDE_2)"),
+			Definition:   AgentDefinition{Command: review, Pool: []string{"ANTHROPIC_API_KEY"}, VCPU: 2, MemoryMiB: 2048, MaxSessionSeconds: 1800},
+		},
+		{
+			Key: "judge", Title: "Your rules", Command: judge,
+			APIKeySecret: "ANTHROPIC_API_KEY", APIKeyHost: "api.anthropic.com",
+			Subscription: text("a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block"),
+			Definition:   AgentDefinition{Command: judge, Pool: []string{"ANTHROPIC_API_KEY"}, VCPU: 2, MemoryMiB: 2048, MaxSessionSeconds: 1800},
 		},
 	}
 }

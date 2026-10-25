@@ -13,7 +13,7 @@ from ._core import (AuthenticationException, BuildException, CommandExitExceptio
                     SandboxInfo, SandboxInfoLifecycle, SandboxNotFoundException, SandboxNotRunningException, SandboxUnreachableException, SandboxQuery, SecretException,
                     SecretNotFoundException, ServiceBusyException, SnapshotInfo, TemplateException, TimeoutException,
                     VolumeException, VolumeNotFoundException, VolumePathNotFoundException, WriteInfo, HttpVersion)
-from ._core import unsupported as _unsupported
+from ._core import check_connection as _check_connection, unsupported as _unsupported
 from ._sync_sandbox import CommandHandle, Commands, Filesystem, Pty, Sandbox, SandboxPaginator, SandboxMetrics
 
 __version__ = "0.1.0"
@@ -115,7 +115,30 @@ McpServer = GitHubMcpServer = TemplateClass = _Dict[str, _Any]
 
 _GIT = "Run git with sandbox.commands.run('git ...')."
 _CLIENT = "Use sandbox.runtime, or withruntime.Runtime, for Runtime's own API."
-E2B = _Unsupported("E2B client", _CLIENT)
+
+
+class E2B:
+    """E2B's client with bound options: ``E2B(api_key=...).Sandbox.create()``.
+    Its Sandbox and AsyncSandbox use the client's key unless a call names its
+    own (``client=`` and ``async_client=`` bind Runtime clients instead). Its
+    Template, Volume and Secret refuse, naming Runtime's alternative, as the
+    top-level ones do."""
+
+    _sandbox = Sandbox
+    _async_sandbox = AsyncSandbox
+
+    def __init__(self, **opts: _Any) -> None:
+        async_client = opts.pop("async_client", None)
+        _check_connection(dict(opts))
+        bound = dict(opts)
+        self.Sandbox = type(self._sandbox.__name__, (self._sandbox,), {"_bound": bound})
+        self.AsyncSandbox = type(self._async_sandbox.__name__, (self._async_sandbox,),
+                                 {"_bound": {**bound, "client": async_client}})
+        self.Template, self.AsyncTemplate = Template, AsyncTemplate
+        self.Volume, self.AsyncVolume = Volume, AsyncVolume
+        self.Secret, self.AsyncSecret = Secret, AsyncSecret
+
+
 ApiClient = _Unsupported("ApiClient", _CLIENT)
 client = _Unsupported("client module", _CLIENT)
 ConnectionConfig = _Unsupported("ConnectionConfig", "Pass api_key, or set RUNTIME_API_KEY.")

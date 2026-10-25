@@ -77,6 +77,10 @@ idempotency key, so retries never do anything twice; errors are typed and carry
 errors; the previous `RuntimeError` and `ConnectionError` exports remain aliases.
 `runtime.usage_requests("7d")` reads the account's API call counts and error rates;
 counts are exact decimal strings, and an empty window has `errorPercent: None`.
+`runtime.usage_export(since, until, cursor=...)` reads one page of settled usage
+over a UTC range, with its server CSV; `finalThrough` is the time before which no
+more charges will settle, and each row's `final` is True once its resource is
+deleted and can be charged nothing more.
 
 ## Behind a proxy
 

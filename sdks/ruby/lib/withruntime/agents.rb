@@ -65,7 +65,10 @@ module WithRuntime
   # /workspace/repo), +vcpu+ and +memory_mib+ (4 vCPU and 8 GiB unless set; a
   # definition from a snapshot takes neither, InvalidRequestError, since a
   # snapshot keeps its own size), +instructions+, +env+, +secrets+ (names of
-  # egress secrets: model keys go here), +mcp+ ([{ name:, url: }]), +volumes+
+  # egress secrets: model keys go here), +pool+ (1 to 16 Claude accounts,
+  # each an egress secret's name: each session takes the one with the most
+  # usage left, and the review template moves to the next when one is out
+  # of usage), +mcp+ ([{ name:, url: }]), +volumes+
   # ([{ volume:, path: }]), +idle_pause_seconds+, +max_session_seconds+,
   # +max_concurrent+, +max_session_dollars+ (more than 0, at most 10000, 5
   # unless set: the session and every session under it, the root's covering
@@ -75,7 +78,7 @@ module WithRuntime
   # (402), until the next day) and +template+ ("support" or
   # "team").
   class Agents < Product
-    attr_reader :sessions, :triggers, :templates, :memory
+    attr_reader :sessions, :triggers, :templates, :memory, :asks
 
     def initialize(transport)
       super
@@ -83,7 +86,7 @@ module WithRuntime
       @triggers = AgentTriggers.new(transport)
       @templates = AgentTemplates.new
       @memory = AgentMemory.new(transport)
-      # Approvals come later, here: agents.approvals.list / answer.
+      @asks = AgentAsks.new(transport)
     end
 
     # Makes an agent at version 1. A name already used is a ConflictError
@@ -297,20 +300,105 @@ module WithRuntime
   #
   # A slack or github trigger whose app is not installed for the account is
   # refused +not_installed+ (ConflictError).
+  #
+  # Each trigger has +rules+, every one optional: +priority+ (-100 to 100:
+  # queue order when the agent's maxConcurrent is full, higher first),
+  # +max_starts_per_hour+ (a call past it is held for you), +on_ended+
+  # ("start", "note" or "ask": what a call does when its key's session has
+  # ended), +notify+ ("email" or "webhook": where a held call is told) and,
+  # a webhook's only, +key+ ("{cause}": the key of a call that sends none,
+  # from its JSON's fields). A call no session can take is held, never
+  # dropped: +held+, +start_held+, +dismiss_held+.
   class AgentTriggers < Product
-    def create(agent, kind, config = {})
-      Record.new(@t.json("POST", "/v1/agents/#{seg(agent)}/triggers", body: { "kind" => kind, "config" => Fields.convert(config.to_h) }))
+    def create(agent, kind, config = {}, rules: nil)
+      body = { "kind" => kind, "config" => Fields.convert(config.to_h) }
+      body["rules"] = Fields.convert(rules.to_h) if rules
+      Record.new(@t.json("POST", "/v1/agents/#{seg(agent)}/triggers", body: body))
+    end
+
+    # Its rules, whole, in place: its secret stays. +{}+ is every default.
+    def set_rules(id, rules)
+      Record.new(@t.json("PATCH", "/v1/agents/triggers/#{seg(id)}", body: { "rules" => Fields.convert(rules.to_h) }))
+    end
+
+    # Calls a webhook trigger as its sender would, by its +secret+, never your
+    # key: +outcome+ started, joined (the open session with +key+), noted or
+    # held, with +session_id+, +seq+, +call_id+ and +why+. The same
+    # +idempotency_key+ is the same call.
+    def call(id, secret, text, key: nil, labels: nil, idempotency_key: nil)
+      body = Fields.body(text: text, key: key, labels: labels)
+      Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/calls", body: body, bearer: secret,
+                                                                          key: idempotency_key))
+    end
+
+    # The calls it held for you, newest first; +each+ walks every page.
+    def held(id, state: nil, cursor: nil, limit: nil)
+      held_page(id, { "state" => state, "limit" => limit }, cursor)
+    end
+
+    # Starts a held call: one session with it and every call held for its key
+    # since, oldest first. +session+, +joined+ and +calls+.
+    def start_held(id, call_id)
+      Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/held/#{seg(call_id)}/start", body: {}))
+    end
+
+    # Dismisses a held call: nothing runs.
+    def dismiss_held(id, call_id)
+      Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/held/#{seg(call_id)}/dismiss", body: {}))
     end
 
     def list(agent) = @t.json("GET", "/v1/agents/#{seg(agent)}/triggers")["data"].map { |row| Record.new(row) }
 
-    # Holds this trigger alone; its events are refused +trigger_paused+, with
-    # +why+, where they came from. Nothing else is held.
+    # Holds this trigger alone, saying +why+: a webhook's calls are held for
+    # you (+held+), never dropped. Nothing else is held.
     def pause(id, why) = Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/pause", body: { "why" => why }))
 
     def resume(id) = Record.new(@t.json("POST", "/v1/agents/triggers/#{seg(id)}/resume", body: {}))
 
     def delete(id) = @t.json("DELETE", "/v1/agents/triggers/#{seg(id)}") && nil
+
+    private
+
+    def held_page(id, query, cursor)
+      body = @t.json("GET", "/v1/agents/triggers/#{seg(id)}/held", query: query.merge("cursor" => cursor))
+      Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| held_page(id, query, after) }
+    end
+  end
+
+  # +runtime.agents.asks+: the account's inbox, the questions its agents'
+  # sessions need answered to go on. Each has +why+ it matters, +options+
+  # ({label, detail}), a recommended +pick+ and maybe an expiry. Asks of
+  # one agent's sessions sharing a memory, with the same +step+, are one
+  # row while it is open, and one answer reaches every session asking. +state+: open, answered,
+  # withdrawn, expired (no pick) or closed (every asking session ended).
+  class AgentAsks < Product
+    # The first page, newest first: open asks unless +state+ (one or a list)
+    # says otherwise; of one +agent+; carrying every one of +labels+ (who sees
+    # an ask). +each+ walks every page.
+    def list(state: nil, agent: nil, labels: nil, cursor: nil, limit: nil)
+      label = labels&.map { |k, v| "#{k}:#{v}" }
+      asks_page({ "state" => state, "agent" => agent, "label" => label, "limit" => limit }, cursor)
+    end
+
+    # One ask, with the sessions asking it.
+    def get(id) = Record.new(@t.json("GET", "/v1/agents/asks/#{seg(id)}"))
+
+    # Answers with an +option+'s label, +text+, or both: every session asking
+    # reads it next and wakes. One no longer open is refused +ask_closed+
+    # (ConflictError).
+    def answer(id, option = nil, text: nil, idempotency_key: nil)
+      raise ArgumentError, "an answer is an option's label, text, or both" if option.nil? && text.nil?
+
+      body = Fields.body(option: option, text: text)
+      Record.new(@t.json("POST", "/v1/agents/asks/#{seg(id)}/answer", body: body, key: idempotency_key))
+    end
+
+    private
+
+    def asks_page(query, cursor)
+      body = @t.json("GET", "/v1/agents/asks", query: query.merge("cursor" => cursor))
+      Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| asks_page(query, after) }
+    end
   end
 
   # A page of an agent's memory files; +usage+ is the agent's whole memory,
@@ -376,10 +464,11 @@ module WithRuntime
     end
   end
 
-  # +runtime.agents.templates+: the five harnesses an agent can run, each
-  # usable for either use, and the two uses.
+  # +runtime.agents.templates+: the harnesses an agent can run, each usable
+  # for either use, and the two uses. +review+ is a CI/CD agent step's
+  # reviewer, on a +pool+ of Claude accounts.
   #
-  #   runtime.agents.templates.map(&:key)   # claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk
+  #   runtime.agents.templates.map(&:key)   # claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge
   #   runtime.agents.templates["codex"].api_key_secret
   #   runtime.agents.templates.uses["support"].session_key
   #   runtime.agents.templates.definition("claude-code", use: "support")
@@ -453,6 +542,36 @@ module WithRuntime
           "definition" => {
             "command" => "python3 ~/agent.py",
             "secrets" => ["OPENAI_API_KEY"]
+          }
+        },
+        "review" => {
+          "key" => "review",
+          "title" => "Code review",
+          "command" => "python3 ~/.runtime-agent/runtime-agent review",
+          "apiKeySecret" => "ANTHROPIC_API_KEY",
+          "apiKeyHost" => "api.anthropic.com",
+          "subscription" => "a token per account: run `claude setup-token` on your own computer (Pro/Max) for each, store each with `runtime secrets set CLAUDE_1` scoped to api.anthropic.com, then name them all in pool (--pool CLAUDE_1 --pool CLAUDE_2)",
+          "definition" => {
+            "command" => "python3 ~/.runtime-agent/runtime-agent review",
+            "pool" => ["ANTHROPIC_API_KEY"],
+            "vcpu" => 2,
+            "memoryMiB" => 2048,
+            "maxSessionSeconds" => 1800
+          }
+        },
+        "judge" => {
+          "key" => "judge",
+          "title" => "Your rules",
+          "command" => "python3 ~/.runtime-agent/runtime-agent judge",
+          "apiKeySecret" => "ANTHROPIC_API_KEY",
+          "apiKeyHost" => "api.anthropic.com",
+          "subscription" => "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block",
+          "definition" => {
+            "command" => "python3 ~/.runtime-agent/runtime-agent judge",
+            "pool" => ["ANTHROPIC_API_KEY"],
+            "vcpu" => 2,
+            "memoryMiB" => 2048,
+            "maxSessionSeconds" => 1800
           }
         }
       },

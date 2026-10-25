@@ -170,11 +170,13 @@ type CIReview struct {
 	Findings []CIReviewFinding `json:"findings"`
 	// Notes are worth a look and block nothing.
 	Notes []CIReviewNote `json:"notes"`
-	// Agent is the Runtime Agent that reviewed, Account the name of its
-	// secret it ran on.
-	Agent   string `json:"agent"`
-	Account string `json:"account"`
-	Model   string `json:"model"`
+	// Agent is the Runtime Agent that judged (an agent step's; review: is
+	// its short form), Model the model the step asked for ("" when none).
+	Agent string `json:"agent"`
+	Model string `json:"model"`
+	// Account is the Claude account a verdict from before agent steps ran
+	// on; "" for an agent step's.
+	Account string `json:"account,omitempty"`
 	// Session is the agent session that gave the verdict.
 	Session string `json:"session"`
 	// Cut is true when the diff was too long and its end was not read.
@@ -533,6 +535,14 @@ func (s *CICheckService) Get(ctx context.Context, id string) (*CICheckDetail, er
 func (s *CICheckService) Cancel(ctx context.Context, id string) (*CICheckDetail, error) {
 	var check CICheckDetail
 	return &check, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/ci/checks/" + url.PathEscape(id) + ":cancel"}, &check)
+}
+
+// Rerun runs a check again, as GitHub's Re-run does: a new check of the same
+// commit (a pull request's as it would land now), trusted only as the
+// commit's last check was. A check still going is answered as it is.
+func (s *CICheckService) Rerun(ctx context.Context, id string) (*CICheckDetail, error) {
+	var check CICheckDetail
+	return &check, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/ci/checks/" + url.PathEscape(id) + ":rerun"}, &check)
 }
 
 // Get reads a job with the tail of its output (the last 256 KiB).

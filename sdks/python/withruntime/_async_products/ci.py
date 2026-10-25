@@ -98,6 +98,12 @@ class AsyncCiChecks:
         let go. A check that has ended is answered as it is."""
         return await self._t.json("POST", f"/v1/ci/checks/{_enc(check_id)}:cancel")
 
+    async def rerun(self, check_id: str) -> dict[str, Any]:
+        """Run a check again, as GitHub's Re-run does: a new check of the same
+        commit (a pull request's as it would land now), trusted only as the
+        commit's last check was. A check still going is answered as it is."""
+        return await self._t.json("POST", f"/v1/ci/checks/{_enc(check_id)}:rerun")
+
 
 class AsyncCiJobs:
     """``runtime.ci.jobs``: one command of a check, run in sandboxes."""

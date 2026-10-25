@@ -364,7 +364,12 @@ Owners and admins read the audit log at
   revealed and deleted (never the value), preview ports made public or private
 - **Creations:** every sandbox, volume, image, snapshot, service and job, with
   its name, labels and funding (rules a sandbox is created with are part of
-  its creation; a later change is a network rules entry)
+  its creation; a later change is a network rules entry). Funding is `trial`
+  when the free usage pays for it: a volume inside its 10 GiB, or a job on an
+  account without credit, which runs nothing until the account holds credit
+- **Sandboxes:** every pause, wake, restart and stop, with who asked; one
+  Runtime did itself says why: it sat idle, it reached its time limit, credit
+  ran out or a spending limit was hit
 - **Deletions:** volumes, images, snapshots, services and jobs
 - **The account:** created, renamed, suspended and restored
 - **Single sign-on:** connections added, changed and removed, domains
@@ -375,8 +380,7 @@ Owners and admins read the audit log at
 Each entry has the action, who did it (a person, a key, your directory, or
 Runtime itself for things like a card payment), the time, the client's IP address, the request id
 and whether it came through the website, the API or MCP. A call made by code
-inside one of your sandboxes also names that sandbox. A sandbox's pauses,
-wakes and stops are not in the audit log; each sandbox has its own history.
+inside one of your sandboxes also names that sandbox.
 
 Entries are kept for at least 400 days. Nobody can edit an entry, and none is
 deleted before then. The page downloads the whole log, or one group of it, as

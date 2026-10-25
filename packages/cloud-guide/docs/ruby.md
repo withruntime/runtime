@@ -183,8 +183,8 @@ again.stop
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on the same server; see [JavaScript](./javascript) for what forks
-and snapshots keep and how they are billed. If a copy fails, the error's
+processes, on its server while it has room and on another when it is full; see
+[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the error's
 `details["startedSandboxIds"]` names the copies that did start. Because
 `extend` is Ruby's own, a time limit is moved on with `extend_lease(seconds)`;
 a sandbox with no time limit has nothing to move. `sbx.keep_alive` moves it on
@@ -270,6 +270,8 @@ runtime = WithRuntime::Client.new
 volume = runtime.volumes.create(size_mib: 1024)
 backup = runtime.volumes.backup(volume.id, name: "before-import", retention_days: 7)
 runtime.volumes.set_backup_policy(volume.id, daily: true, retention_days: 7)
+runtime.volumes.set_backup_policy(volume.id, every_minutes: 60, keep: { hourly: 24, daily: 7 })
+runtime.volumes.set_backup_policy(volume.id, no_schedule: true)
 restored = runtime.volumes.restore(backup.id, name: "restored")
 p runtime.volumes.backups(volume_id: volume.id).data
 runtime.volumes.delete_backup(backup.id)
@@ -466,3 +468,8 @@ p runtime.request("GET", "/v1/volumes") # any endpoint, same rules
 - Money is integer microdollars: 1,000,000 is one US dollar.
   `runtime.usage.available` is the account's balance as an exact decimal
   string.
+- `runtime.usage_export(since:, until:, cursor:)` reads one page of settled
+  usage over a UTC range, with its server CSV; follow `next_cursor` until it is
+  nil. `final_through` is the time before which no more charges will settle,
+  and a row's `final` is true once its resource is deleted and can be charged
+  nothing more ([export settled usage](./api#export-settled-usage)).

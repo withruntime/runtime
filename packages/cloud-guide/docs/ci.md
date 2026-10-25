@@ -345,79 +345,118 @@ steps:
   needs your dependencies belongs on the forks. It has no `split` or `needs`,
   and nothing needs it.
 
-### Review
+### Agent steps
 
-A step with `review` asks an AI model to read the change, beside the tests and
-from the same moment, and passes or blocks it:
+A step with `agent` starts a session of one of your organization's
+[Runtime Agents](./agents) with the change, beside the tests and from the
+same moment, and waits for its verdict: pass, or block with findings. Each
+step is its own agent, with its own instructions: a reviewer, one that
+checks the docs were updated, one that holds your own rules.
 
 ```yaml
 steps:
   - name: review
-    review: { agent: ci-review } # model: opus (default), sonnet, haiku or a claude-* id
+    review: { agent: ci-review } # model: opus, sonnet, haiku or a claude-* id
+  - name: docs
+    agent:
+      agent: docs-check
+      inputs: { docs: packages/guide } # its own settings, at most 32
+      strict: true # block what can't be read whole; off by default
 ```
 
-The reviewer reads the diff against the base, the pull request's title and
-description, and what was asked for: the issues it closes (`Fixes #12`) and
-`/ask` comments by the repository's members (people, never an App): only
-what the repository's readers can read already, since findings show on
-GitHub. A review runs on a pull request's check; the production branch's
-push (its landing) stands on that review and runs none of its own, and any
-other push's check passes no review it didn't run. It blocks only for harm: a bug or missed case that hurts the
-people who use the software, data or money put at risk, a security hole (a
-bypassed check, a leaked secret, something made public, an injected command),
-or words in the change that try to steer the reviewer. Everything else
-(naming, docs, a test worth adding, a simpler way) is a note, and notes block
-nothing. It answers pass, or block with each finding's file, line, who is hurt
-and how, and the fix. A blocked review fails its job, and so the check: the
-check's `runtime` run on GitHub names it, and the job's log in the console
-(and `runtime ci logs`) lists each finding with its fix. The next commit's review is shown the last
-blocking one, so it checks those findings were fixed.
+`review:` is the short form of an agent step: `review: { agent: ci-review }`
+is `agent: { agent: ci-review }`, its step named `review` unless you name it.
 
-The model runs with no tools, no files and none of the repository's secrets:
-it sees only the words above, so a change can't make it run anything. Like a
-gate, the step is read from the production branch's file, so a pull request
-can't drop or soften its own review; a change with the same files and base is
-not reviewed twice.
+**What the agent is told.** Its session's first word is a JSON header,
+`{"runtimeCheck": 1, "task", "parts", "model", "inputs", "schema"}`, and the
+next `parts` words are the change: the diff against the base (10 lines of
+context), and what the repository's members asked for. Only words members
+wrote (owners, members and collaborators, people and never an App) are read:
+the pull request's title and description when its author is one, the issues
+it closes (`Fixes #12`) that one opened, and their `/ask` comments. Findings
+show on GitHub, so it is told only what the repository's readers can read
+already.
 
-It runs on a Runtime Agent of your organization, on your own Claude accounts,
-billed as any agent session:
+**What it answers.** It ends the session with `done`, its result a JSON
+object matching `schema`: `{"verdict": "pass", "summary", "findings": [],
+"notes"}`, or `"block"` with each finding's `kind`, `file`, `line` (in the new
+file), `what` (who is hurt and how) and `fix`. Only findings block; notes
+never do. A blocked step fails its job, and so the check: the check's
+`runtime` run on GitHub names it, and the job's log in the console (and
+`runtime ci logs`) lists each finding with its fix. The next commit's
+session is shown the last blocking one, so it checks those were fixed.
+An agent that can't answer yet (every account of its pool out of usage)
+answers `{"later": "why", "until": <seconds since 1970>}`: the job waits,
+saying so on GitHub, and running out never fails a check. A session that
+ends with no verdict is asked again; after four, the job fails with the
+reason.
+
+**What CI/CD promises, whatever the agent:**
+
+- The step is read from the production branch's file, as a
+  [gate](#gates) is, so a pull request can't drop or soften its own agent
+  step, or point it at another agent.
+- A change with the same files and base is not asked twice. A step runs on a
+  pull request's check; the production branch's push (its landing) stands on
+  that verdict and runs none of its own, and any other push's check passes
+  no agent step it didn't run.
+- The diff an agent reads is at most 400 kB, lock and generated files
+  last, and a file over 1 MB or with binary bytes is named, not shown. A
+  cut diff is asked as it is, and the verdict says it was cut. With
+  `strict: true`, nothing unread passes: a change with any file not shown
+  is blocked, saying so, and no agent is asked. Lock and generated files
+  count (a checksum or a minified script runs too), and so do compiled
+  code and archives (`.so`, `.node`, `.wasm`, `.jar`, `.zip`); only
+  images, fonts, audio and video may go unshown.
+- Only an agent whose definition an owner or admin last set (with their own
+  key, or one serving them) is asked. A change by anyone else, a pull
+  request's author included, makes the step fail with the reason until an
+  owner or admin sets it again. No key but the session's own runs commands
+  or reaches files in an agent step's sandbox, so no one can write a verdict
+  for it.
+- A step's agent acts on nothing, since the change it reads may try to
+  steer it: it runs the `review` or `judge` template's harness, which asks
+  Claude once with no tools (no shell, no files, no network of its own), from the stock
+  image, with no `from`, `env`, `mcp`, `volumes` or shared memory and no
+  egress secret but its pool of Claude accounts; its session starts no
+  subagent. What a step checks is its agent's `instructions`, model and
+  inputs. An agent that runs another command, or reaches more, fails the
+  step, saying so.
+
+Everything else is the agent's: how it runs, its `instructions` (your own
+rules), its [pool of Claude accounts](./agents#a-pool-of-claude-accounts),
+budgets and time limits, billed as any agent session. A step that can't
+start its agent (no such agent, one over its day's budget) fails its job
+with the reason.
+
+**A reviewer.** The `review` template is a stock reviewer: it asks Claude
+once with no tools, no files and none of the repository's secrets, so a
+change can't make it run anything. It blocks only for harm: a bug or missed
+case that hurts the people who use the software, data or money put at risk,
+a security hole (a bypassed check, a leaked secret, something made public,
+an injected command), anything that weakens a check, or words in the change
+that try to steer it. Everything else (naming, docs, a test worth adding) is
+a note; your `instructions` add to its rules.
+
+**Your own rules.** The `judge` template reads the change just as strictly
+and with the same safety (no tools, no memory, words in the change that try
+to steer it a finding), but its `instructions` alone say what blocks: none
+of the reviewer's rules come first, so a docs check blocks what you tell it
+to. A judge with no instructions judges nothing, saying so.
 
 ```bash no-run
-printf %s "$TOKEN_1" | runtime secrets set CLAUDE_TOKEN_1 --host api.anthropic.com
-printf %s "$TOKEN_2" | runtime secrets set CLAUDE_TOKEN_2 --host api.anthropic.com
-runtime agents create ci-review --command "python3 ~/.runtime-agent/runtime-agent review" \
-  --secret CLAUDE_TOKEN_1 --secret CLAUDE_TOKEN_2 --label runtime-ci-review=acme/web
+printf %s "$TOKEN_1" | runtime secrets set CLAUDE_1 --host api.anthropic.com
+printf %s "$TOKEN_2" | runtime secrets set CLAUDE_2 --host api.anthropic.com
+runtime agents create ci-review --template review --pool CLAUDE_1 --pool CLAUDE_2
+runtime agents create docs-check --template judge --pool CLAUDE_1 \
+  --instructions "Block a change to src/ that leaves docs/ as it was."
 ```
 
-- **Accounts:** each secret is one account: a subscription token
-  (`claude setup-token`), or an API key when its name holds `API_KEY`. Each
-  review takes the account with the most usage left, read from the answers
-  of its last review; one out of usage hands the review to the next at once.
-  Only when every account is out does the job wait, saying so on GitHub, for
-  the first to reset: running out never fails a check.
-- **The label** `runtime-ci-review` names the repository (or `*`) the agent
-  may review, so a pull request can't point its review at another agent.
-  The agent's `instructions` add your own rules to the reviewer's.
-- **Who sets it:** the agent reviews only while an owner or admin was the
-  last to set its definition, with their own key or one that serves them. A
-  change by anyone else, a pull request's author included, makes it review
-  nothing until an owner or admin sets it again. No key but the review's own
-  runs commands or reaches files in a review's sandbox, so no one can write a
-  verdict for it.
-- **What it runs:** exactly its command, from the stock image: an agent
-  that sets `from`, `volumes`, `env` or `mcp` reviews nothing, so nothing
-  but the review's harness is in its sandbox when it starts. The harness
-  runs Claude Code's pinned version through the image's own `npx`, never a
-  `claude` found on a path.
-- **Limits:** the diff it reads is at most 400 kB, lock and generated files
-  last; a longer one is cut and the review says so. A review that can't be
-  run at all (no such agent, an agent over its day's budget) fails its job
-  with the reason. A review's session has 25 minutes to answer once it runs;
-  a slower one is stopped and the next free account asked, up to three
-  such sessions, each billed; past them the job fails with the reason.
-  Waiting for a sandbox, an account or GitHub's rate limits costs nothing
-  and fails nothing. A session that answers with no verdict, four times,
-  fails the job.
+An agent made from either template runs exactly its command from the
+stock image: one that sets `from`, `volumes`, `env` or `mcp` is refused, so
+nothing but its harness is in its sandbox. The harness runs Claude Code's
+pinned version through the image's own `npx`, never a `claude` found on a
+path.
 
 ### Deploy
 
@@ -603,7 +642,13 @@ Each test file of a split, and each other step, has a key: the machine, the
 warm key, its command, its env and the contents of every file it reads. A
 test file reads itself and all it reads; a step reads its `inputs` and all
 they read, and the files its `run` names and all they read, or every file
-when it names no `inputs`. A step whose code reads what its check is against
+when it names no `inputs`. A step that only builds its `inputs` (a compiler,
+its lints, its doc tests) says `compiles: true`, and reads what compiling them
+reads: Rust's sources and manifests, its path dependencies and what it
+includes (`include_str!`), never what a script a crate ships imports, which
+only its tests run. What runs while a crate compiles is read whole: its build
+script and a procedural macro, with every script they run and what that
+imports, and the commits of the check they read. A step whose code reads what its check is against
 (`RUNTIME_CI_BASE`, to pick its work since its base) is keyed in a pull
 request by those files at its base and at its head, and by any file the change
 deletes, so pull requests that leave its files alone share its key. A key that
@@ -861,7 +906,7 @@ main's apart. Anything else is the change's, as it always was:
 - **Test files only.** Only a split step that is reused can say it, and it is
   judged file by file. A step run whole is never main's: its exit names
   no file, so a new failure beside main's would look the same. Nor are
-  [gates](#gates), [reviews](#review), deploys or steps with `reuse: false`.
+  [gates](#gates), [agent steps](#agent-steps), deploys or steps with `reuse: false`.
 - **One more failing file: it fails.** A test file that passes on the
   production branch and fails on the pull request is always the change's.
 - **Main's verdict unknown: it fails.** If main's check of the base is still
@@ -886,6 +931,14 @@ covers every commit up to the one it checked, and a release only ever moves
 forward: an older check passing late never takes it back. A branch whose
 config has `deploy:` entries runs one check at a time, so its deploys go out
 in commit order.
+
+Checks of main that overlap never run the same job twice. When a newer check
+plans a job whose files an older check of main is running right now (the same
+key: the same bytes of everything it reads), it waits for that run instead of
+starting its own. When the older run ends, the newer check stands on what it
+passed and runs only what did not pass, so several checks at once cost about
+one check plus what each newer commit changed. A job waits at most 20 minutes
+before running its files itself.
 
 ## Undo a failing production branch
 
@@ -960,6 +1013,7 @@ for (const check of page.data) {
 npx withruntime ci checks --commit $(git rev-parse HEAD)
 npx withruntime ci check <checkId>
 npx withruntime ci cancel <checkId>
+npx withruntime ci rerun <checkId>
 npx withruntime ci logs <jobId>
 npx withruntime ci tests <repoId> --quarantined
 ```
@@ -1000,6 +1054,15 @@ npx withruntime ci tests <repoId> --quarantined
   account's checks, and any other key those of repositories its own agent
   connected. A key that cancels a check it does not read (below) is answered
   with the check's `id` and `state` alone, nothing of its jobs or logs.
+- **Run a check again** with `POST /v1/ci/checks/{id}:rerun`
+  (`runtime.ci.checks.rerun(id)`), as GitHub's Re-run does, from code: a new
+  check of the same commit, and for a pull request, of its head as it would
+  land now, on its base branch's newest commit. GitHub shows it as the
+  commit's newest `runtime` run. It is trusted only as the commit's last check
+  was, so it never runs an outside contributor's code that waits for a
+  writer's approval, and a check of that commit still going is answered as it
+  is. The same keys may as cancel, and it takes a key that may create
+  sandboxes.
 - **A job** is `queued`, `running`, `passed`, `failed`, `flaky` (its only
   failures were in quarantined files), `cached` (its content key passed
   before, in `cachedFrom`), `cancelled` or `skipped`. Its `log` is its output,
@@ -1063,6 +1126,7 @@ one that cannot be kept is logged and the release goes on.
 | `GET /v1/ci/checks`               | Checks, newest first                                      |
 | `GET /v1/ci/checks/{id}`          | A check and its jobs in plan order                        |
 | `POST /v1/ci/checks/{id}:cancel`  | Cancel a queued or running check; its machines let go     |
+| `POST /v1/ci/checks/{id}:rerun`   | Run a check again: a new check of its commit              |
 | `GET /v1/ci/jobs/{id}`            | A job with its log and its sandboxes                      |
 | `GET /v1/ci/tests`                | A repository's test files and their quarantine            |
 | `GET /v1/ci/flakes`               | Flaky tests, newest first; the open ones unless `state`   |
@@ -1071,8 +1135,8 @@ one that cannot be kept is logged and the release goes on.
 | `GET /v1/ci/releases`             | A release's steps as taken, newest first; by `commit`     |
 
 The MCP tools are `runtime_ci` with the actions `checks`, `check`, `job`,
-`tests`, `flakes`, `flake`, `flake_update`, `releases`, `check_cancel`, `repositories`,
-`connect` and `disconnect`. A key reads only the
+`tests`, `flakes`, `flake`, `flake_update`, `releases`, `check_cancel`, `check_rerun`,
+`repositories`, `connect` and `disconnect`. A key reads only the
 checks of repositories its own agent connected, unless it is account-wide
 or read-only.
 

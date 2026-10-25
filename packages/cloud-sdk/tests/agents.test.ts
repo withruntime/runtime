@@ -136,6 +136,8 @@ test("the templates and uses are the shared data file's", () => {
     "gemini-cli",
     "claude-agent-sdk",
     "openai-agents-sdk",
+    "review",
+    "judge",
   ]);
   expect(Object.keys(api.uses)).toEqual(["support", "team"]);
 });
@@ -191,4 +193,25 @@ test("memory: list pages with its usage, search, read, write and delete, each sc
       undefined,
     ],
   ]);
+});
+
+test("asks: the inbox lists with labels as label=key:value, gets one and answers it", async () => {
+  const { api, calls } = fake((call) =>
+    call.method === "GET" && call.path === "/v1/agents/asks"
+      ? { data: [], nextCursor: null }
+      : { id: "a 1", state: "answered", sessions: [] },
+  );
+  await api.asks.list({ state: ["open", "expired"], labels: { team: "infra", for: "marc" } });
+  await api.asks.get("a 1");
+  await api.asks.answer("a 1", { option: "Raise to 20 TB", text: "Done." });
+  expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+    "GET /v1/agents/asks",
+    "GET /v1/agents/asks/a%201",
+    "POST /v1/agents/asks/a%201/answer",
+  ]);
+  expect(calls[0]!.query).toEqual({
+    state: ["open", "expired"],
+    label: ["team:infra", "for:marc"],
+  });
+  expect(calls[2]!.body).toEqual({ option: "Raise to 20 TB", text: "Done." });
 });

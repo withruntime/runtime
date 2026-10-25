@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expected } from "./cjs-exports";
 
 /* End to end, on main's check after merge (.runtime/e2e-files.sh): only a
    real build of the package as published, installed by name and required
@@ -34,43 +35,6 @@ const manifest = JSON.parse(readFileSync(join(here, "package.json"), "utf8")) as
   exports: Record<string, unknown>;
 };
 const subpaths = Object.keys(manifest.exports).map((key) => `withruntime${key.slice(1)}`);
-
-/** What each export must hand a CommonJS caller. */
-const expected: Record<string, string> = {
-  withruntime: "Sandbox",
-  "withruntime/tools": "sandboxTools",
-  "withruntime/ai": "runtimeTools",
-  "withruntime/ai-harness": "createRuntimeSandbox",
-  "withruntime/openai-agents": "RuntimeCloudSandboxClient",
-  "withruntime/claude-agent-sdk": "runtimeMcpServer",
-  "withruntime/e2b": "Sandbox",
-  "withruntime/e2b/code-interpreter": "Sandbox",
-  "withruntime/daytona": "Daytona",
-  "withruntime/vercel": "Sandbox",
-  "withruntime/blaxel": "SandboxInstance",
-  "withruntime/runloop": "Runloop",
-  "withruntime/codesandbox": "CodeSandbox",
-  "withruntime/sprites": "SpritesClient",
-  "withruntime/fly": "machinesApi",
-  "withruntime/freestyle": "Freestyle",
-  "withruntime/morph": "MorphCloudClient",
-  "withruntime/modal": "ModalClient",
-  "withruntime/cloudflare": "getSandbox",
-  "withruntime/sandboxes": "sandboxes",
-  "withruntime/snapshots": "snapshots",
-  "withruntime/images": "images",
-  "withruntime/volumes": "volumes",
-  "withruntime/jobs": "jobs",
-  "withruntime/domains": "domains",
-  "withruntime/ports": "ports",
-  "withruntime/ips": "ips",
-  "withruntime/networks": "networks",
-  "withruntime/agents": "agents",
-  "withruntime/containers": "containers",
-  "withruntime/apps": "apps",
-  "withruntime/builds": "builds",
-  "withruntime/ci": "ci",
-};
 
 test(
   "require() loads every export by name on the node in PATH",

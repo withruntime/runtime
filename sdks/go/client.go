@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.18.0"
+const Version = "0.19.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -288,6 +288,68 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 func (c *Client) Usage(ctx context.Context) (*Usage, error) {
 	var usage Usage
 	return &usage, c.do(ctx, &call{method: http.MethodGet, path: "/v1/usage"}, &usage)
+}
+
+// UsageExportOptions select settled usage by when it settled: Since is
+// inclusive and Until exclusive, UTC times ending in Z. Cursor is the last
+// page's NextCursor; Limit is the page size (0 is the server's).
+type UsageExportOptions struct {
+	Since  string
+	Until  string
+	Cursor string
+	Limit  int
+}
+
+// UsageExportRow is one settled interval. Money and quantities are exact
+// decimal strings.
+type UsageExportRow struct {
+	IntervalID string  `json:"intervalId"`
+	ResourceID string  `json:"resourceId"`
+	Name       *string `json:"name"`
+	Kind       string  `json:"kind"`
+	Meter      string  `json:"meter"`
+	// FundedBy is credit, trial or allowance (the month's free usage).
+	FundedBy           string  `json:"fundedBy"`
+	StartsAt           string  `json:"startsAt"`
+	EndsAt             string  `json:"endsAt"`
+	SettledAt          string  `json:"settledAt"`
+	BilledMilliseconds *string `json:"billedMilliseconds"`
+	ChargedMicros      string  `json:"chargedMicros"`
+	QuotedRates        []struct {
+		Component  string `json:"component"`
+		Unit       string `json:"unit"`
+		RateMicros string `json:"rateMicros"`
+	} `json:"quotedRates"`
+	// MeasurementsJSON is exact JSON text, or nil.
+	MeasurementsJSON *string `json:"measurementsJson"`
+	// Evidence is measured, partial or missing, or nil.
+	Evidence *string `json:"evidence"`
+	// Final: the resource is deleted and every charge it will ever have
+	// settled before the page's FinalThrough. A volume's backups bill on
+	// until their retention ends.
+	Final bool `json:"final"`
+}
+
+// UsageExportPage is one page of the export.
+type UsageExportPage struct {
+	Since      string           `json:"since"`
+	Until      string           `json:"until"`
+	Data       []UsageExportRow `json:"data"`
+	NextCursor *string          `json:"nextCursor"`
+	// FinalThrough: no row settled before it can still appear or change;
+	// the range is final once it reaches Until. Nil when it could not be
+	// taken in time: read again.
+	FinalThrough *string `json:"finalThrough"`
+	// CSV: concatenate pages in order; only the first has the header.
+	CSV string `json:"csv"`
+}
+
+// UsageExport reads one page of settled usage for every product the key
+// sees. Follow NextCursor with the same range until it is nil.
+func (c *Client) UsageExport(ctx context.Context, options UsageExportOptions) (*UsageExportPage, error) {
+	var page UsageExportPage
+	query := setQuery(url.Values{}, "since", options.Since, "until", options.Until, "cursor", options.Cursor, "limit", itoa(options.Limit))
+	return &page, c.do(ctx, &call{method: http.MethodGet, path: "/v1/usage/export", query: query}, &page)
 }
 
 // RequestOptions are what Request takes, every field optional.

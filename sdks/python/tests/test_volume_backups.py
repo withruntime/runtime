@@ -38,8 +38,10 @@ class Stub(BaseHTTPRequestHandler):
         if path == f"/v1/volumes/{VOLUME}:backup":
             return self._reply(201, {"id": BACKUP, "kind": "volume-backup", "state": "ready", "volumeId": VOLUME})
         if path == f"/v1/volumes/{VOLUME}:backup-policy":
-            return self._reply(200, {"id": VOLUME, "backups": {"daily": body.get("daily", True),
-                                                               "retentionDays": body.get("retentionDays", 7)}})
+            backups = {"daily": body.get("daily", True), "retentionDays": body.get("retentionDays", 7)}
+            if "schedule" in body:
+                backups.update(schedule=body["schedule"], keep=body.get("keep"))
+            return self._reply(200, {"id": VOLUME, "backups": backups})
         if path == "/v1/volume-backups":
             return self._reply(200, {"data": [{"id": BACKUP}], "nextCursor": None})
         if path == f"/v1/volume-backups/{BACKUP}":
@@ -74,6 +76,15 @@ class VolumeBackups(unittest.TestCase):
         self.assertEqual(Stub.seen[-1][1:], (f"/v1/volumes/{VOLUME}:backup", "", {"retentionDays": 3}, "wait=60"))
         policy = runtime.volumes.set_backup_policy(VOLUME, daily=False, retention_days=14)
         self.assertEqual(policy["backups"], {"daily": False, "retentionDays": 14})
+        clock = runtime.volumes.set_backup_policy(VOLUME, every_minutes=60, keep={"hourly": 24, "daily": 7})
+        self.assertEqual(Stub.seen[-1][3], {"schedule": {"everyMinutes": 60}, "keep": {"hourly": 24, "daily": 7}})
+        self.assertEqual(clock["backups"]["schedule"], {"everyMinutes": 60})
+        runtime.volumes.set_backup_policy(VOLUME, cron="30 2 * * 1-5")
+        self.assertEqual(Stub.seen[-1][3], {"schedule": {"cron": "30 2 * * 1-5"}})
+        runtime.volumes.set_backup_policy(VOLUME, no_schedule=True)
+        self.assertEqual(Stub.seen[-1][3], {"schedule": None})
+        with self.assertRaises(ValueError):
+            runtime.volumes.set_backup_policy(VOLUME, every_minutes=60, cron="0 * * * *")
         self.assertEqual([b["id"] for b in runtime.volumes.backups(VOLUME)], [BACKUP])
         self.assertEqual(Stub.seen[-1][2], f"volumeId={VOLUME}")
         self.assertEqual(runtime.volumes.get_backup(BACKUP)["state"], "ready")

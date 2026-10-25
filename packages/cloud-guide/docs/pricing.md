@@ -71,19 +71,19 @@ them, it is a paid account once it holds credit it bought.
 A plan is a monthly commitment, and its whole fee comes back as usage. Every
 meter keeps the price on this page, so you still pay only for what runs.
 
-|                                         | Free                 | Pro                                    | Pro Max           | Scale                  | Enterprise              |
-| --------------------------------------- | -------------------- | -------------------------------------- | ----------------- | ---------------------- | ----------------------- |
-| Monthly fee                             | none                 | $25                                    | $100              | $500                   | $2,500                  |
-| Usage included each month               | the Free tier, below | $25                                    | $100              | $500                   | $2,500                  |
-| First month                             |                      | usage doubled                          | usage doubled     | usage doubled          | usage doubled           |
-| Yearly                                  |                      | $250, 12 months for 10                 | $1,000            | $5,000                 | $25,000                 |
-| Sandboxes at once                       | 2                    | {{paid-sandboxes}}                     | 250               | 500                    | 2,000                   |
-| vCPUs / memory across running sandboxes | 8 / 16 GiB           | {{account-vcpus}} / {{account-memory}} | 500 / 1,000 GiB   | 1,000 / 2,000 GiB      | 4,000 / 8 TiB           |
-| Traffic out included                    | 10 GB                | from usage                             | from usage        | from usage             | from usage              |
-| Storage kept (of it, snapshots)         | 50 GiB (20 GiB)      | 1 TiB (500 GiB)                        | 2 TiB (1 TiB)     | 4 TiB (2 TiB)          | from 8 TiB (from 4 TiB) |
-| Roles and the support agent             |                      | yes                                    | yes               | yes                    | yes                     |
-| Single sign-on and a year of audit log  |                      | add-ons                                | add-ons           | yes                    | yes                     |
-| Support                                 | docs                 | the support agent                      | the support agent | shared Slack, priority | dedicated Slack         |
+|                                         | Free                 | Pro                                    | Pro Max            | Scale                  | Enterprise              |
+| --------------------------------------- | -------------------- | -------------------------------------- | ------------------ | ---------------------- | ----------------------- |
+| Monthly fee                             | none                 | {{pro-fee}}                            | {{pro-max-fee}}    | {{scale-fee}}          | {{enterprise-fee}}      |
+| Usage included each month               | the Free tier, below | {{pro-fee}}                            | {{pro-max-fee}}    | {{scale-fee}}          | {{enterprise-fee}}      |
+| First month                             |                      | usage doubled                          | usage doubled      | usage doubled          | usage doubled           |
+| Yearly                                  |                      | {{pro-yearly}}, 12 months for 10       | {{pro-max-yearly}} | {{scale-yearly}}       | {{enterprise-yearly}}   |
+| Sandboxes at once                       | 2                    | {{paid-sandboxes}}                     | 250                | 500                    | 2,000                   |
+| vCPUs / memory across running sandboxes | 8 / 16 GiB           | {{account-vcpus}} / {{account-memory}} | 500 / 1,000 GiB    | 1,000 / 2,000 GiB      | 4,000 / 8 TiB           |
+| Traffic out included                    | 10 GB                | from usage                             | from usage         | from usage             | from usage              |
+| Storage kept (of it, snapshots)         | 50 GiB (20 GiB)      | 1 TiB (500 GiB)                        | 2 TiB (1 TiB)      | 4 TiB (2 TiB)          | from 8 TiB (from 4 TiB) |
+| Roles and the support agent             |                      | yes                                    | yes                | yes                    | yes                     |
+| Single sign-on and a year of audit log  |                      | add-ons                                | add-ons            | yes                    | yes                     |
+| Support                                 | docs                 | the support agent                      | the support agent  | shared Slack, priority | dedicated Slack         |
 
 - **Free replaces the free usage above once plans start.** Each month after
   the 14-day trial it gives sandboxes for 5 vCPU-hours,
@@ -242,6 +242,18 @@ GiB-hour of memory**, while it runs. Containers have no price of their own. Cont
 ([Containers](./containers)).
 
 <!-- /launch: containers -->
+
+<!-- launch: browsers -->
+
+## Browsers and Desktops
+
+A browser or a desktop is billed as its sandbox, at the sandbox rates:
+**{{cpu-rate}} per active vCPU-hour** and **{{memory-rate}} per reserved
+GiB-hour of memory**, while it runs, and a paused one as a paused sandbox.
+Browsers and Desktops have no price of their own ([Browsers](./browsers),
+[Desktops](./desktops)).
+
+<!-- /launch: browsers -->
 
 <!-- launch: apps -->
 

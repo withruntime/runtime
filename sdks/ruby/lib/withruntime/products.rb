@@ -81,7 +81,20 @@ module WithRuntime
     def backup(id, name: nil, labels: nil, retention_days: nil, wait: 60, idempotency_key: nil)
       Record.new(@t.json("POST", "/v1/volumes/#{seg(id)}:backup", body: Fields.body(name: name, labels: labels, retention_days: retention_days), wait: wait, key: idempotency_key))
     end
-    def set_backup_policy(id, daily: nil, retention_days: nil) = Record.new(@t.json("POST", "/v1/volumes/#{seg(id)}:backup-policy", body: Fields.body(daily: daily, retention_days: retention_days)))
+    # Automatic backups on or off and the days a daily one is kept; or a
+    # schedule of the volume's own: every_minutes (15 or more) or a five-field
+    # UTC cron, keeping the keep counts (last, hourly, daily, weekly, monthly,
+    # yearly). no_schedule: true goes back to daily backups.
+    def set_backup_policy(id, daily: nil, retention_days: nil, every_minutes: nil, cron: nil, keep: nil, no_schedule: false)
+      raise ArgumentError, "Give one of every_minutes, cron and no_schedule." if [every_minutes, cron, (no_schedule || nil)].compact.size > 1
+
+      body = Fields.body(daily: daily, retention_days: retention_days, keep: keep)
+      if every_minutes then body["schedule"] = { "everyMinutes" => every_minutes }
+      elsif cron then body["schedule"] = { "cron" => cron }
+      elsif no_schedule then body["schedule"] = nil
+      end
+      Record.new(@t.json("POST", "/v1/volumes/#{seg(id)}:backup-policy", body: body))
+    end
     def backups(volume_id: nil, state: nil, limit: nil) = page("/v1/volume-backups", { "volumeId" => volume_id, "state" => state, "limit" => limit })
     def get_backup(id) = Record.new(@t.json("GET", "/v1/volume-backups/#{seg(id)}"))
     def delete_backup(id) = Record.new(@t.json("POST", "/v1/volume-backups/#{seg(id)}:delete", body: {}))
@@ -146,8 +159,20 @@ module WithRuntime
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/rules", body: body))
     end
 
-    # Names, hosts and placeholders. Never values.
-    def list = @t.json("GET", "/v1/egress-secrets")["secrets"].map { |secret| Record.new(secret) }
+    # Names, hosts and placeholders. Never values. With +limit:+ (1 to 100)
+    # or +after:+, one page by name: the secrets named after +after+; the next
+    # page's +after+ is this one's last name. Without, every secret.
+    def list(limit: nil, after: nil)
+      secrets = []
+      start = after
+      loop do
+        page = @t.json("GET", "/v1/egress-secrets", query: { "limit" => limit, "after" => start })
+        secrets.concat(page["secrets"].map { |secret| Record.new(secret) })
+        return secrets if limit || after || !page["next"]
+
+        start = page["next"]
+      end
+    end
 
     # Erases a secret; its placeholder stops working.
     def delete(name)
@@ -377,7 +402,8 @@ module WithRuntime
 
     # Replaces the rules: +internet:+, +allow:+ (example.com, *.example.com, an
     # address or a CIDR range), +deny:+, and +connect:+ (host:port pairs beyond
-    # 80 and 443; paid accounts only).
+    # 80 and 443; paid accounts only). +internet: false+ with +allow:+ is
+    # allow-list only, stored as +internet: true+ with that list.
     def set(internet:, allow: nil, deny: nil, connect: nil)
       body = { "internet" => internet, "allow" => allow, "deny" => deny, "connect" => connect }.compact
       Record.new(@sandbox.transport.json("PUT", @sandbox.path("/network"), body: body))

@@ -6,7 +6,8 @@
 #     sbx.network.off()
 #
 # ``connect`` lists host:port pairs beyond ports 80 and 443 (paid sandboxes of
-# organizations with a paid purchase only).
+# organizations with a paid purchase only). ``internet=False`` with ``allow``
+# is allow-list only, stored as ``internet=True`` with that list.
 from __future__ import annotations
 
 from typing import Any, Optional

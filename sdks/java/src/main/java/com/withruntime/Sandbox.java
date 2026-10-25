@@ -288,7 +288,8 @@ public final class Sandbox implements AutoCloseable {
 
   /**
    * Starts copies of this sandbox as it is now (files, memory, running processes), each its own
-   * sandbox, on the same server, and answers once they run. If a copy fails, the exception's
+   * sandbox, on its server while it has room and on another when it is full, and answers once
+   * they run. If a copy fails, the exception's
    * details name the copies that did start ("startedSandboxIds").
    */
   public List<Sandbox> fork(ForkOptions options) {

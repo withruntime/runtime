@@ -334,5 +334,53 @@ class ShareTest(unittest.TestCase):
         self.assertEqual(ShareStub.seen[-1], ("POST", "/v1/secrets/sec_1:share", {"agents": []}))
 
 
+class PagedStub(BaseHTTPRequestHandler):
+    """Two secrets, a page of one: the list follows next, or keeps to one page."""
+    seen: list = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        PagedStub.seen.append(self.path)
+        page = (
+            {"secrets": [{**SECRET, "name": "B"}], "next": None}
+            if "after=A" in self.path
+            else {"secrets": [{**SECRET, "name": "A"}], "next": "A"}
+        )
+        data = json.dumps(page).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class SecretsPagingTest(unittest.TestCase):
+    def test_list_pages_by_limit_and_after_sync_and_async(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), PagedStub)
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        PagedStub.seen = []
+        try:
+            with Runtime(api_key="rk_test", base_url=url, max_retries=0) as runtime:
+                self.assertEqual([s["name"] for s in runtime.secrets.list()], ["A", "B"])
+                self.assertEqual([s["name"] for s in runtime.secrets.list(limit=1)], ["A"])
+
+            async def go():
+                async with AsyncRuntime(api_key="rk_test", base_url=url, max_retries=0) as runtime:
+                    return await runtime.secrets.list(limit=1, after="A")
+
+            self.assertEqual([s["name"] for s in asyncio.run(go())], ["B"])
+        finally:
+            server.shutdown()
+        self.assertEqual(PagedStub.seen, [
+            "/v1/egress-secrets",
+            "/v1/egress-secrets?after=A",
+            "/v1/egress-secrets?limit=1",
+            "/v1/egress-secrets?limit=1&after=A",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

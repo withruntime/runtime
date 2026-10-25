@@ -48,6 +48,29 @@ export type BrowserInfo = {
   hint?: string;
 };
 
+export type BrowserScreenshot = {
+  /** An http(s) address, opened in a new tab that is closed after. */
+  url?: string;
+  /** The whole page, not only the window. */
+  fullPage?: boolean;
+  format?: "png" | "jpeg";
+  /** 0 to 10000 ms after the page loads, for late scripts. */
+  waitMs?: number;
+};
+export type BrowserScreenshotResult = {
+  /** Where the page ended, after redirects. */
+  url: string;
+  title: string;
+  /** The page's HTTP status; null for the page already shown. */
+  status: number | null;
+  mimeType: "image/png" | "image/jpeg";
+  bytes: number;
+  width: number | null;
+  height: number | null;
+  /** The image. */
+  base64: string;
+};
+
 export type BrowserConnectOptions = {
   playwright: [endpointURL: string, options: { headers: Record<string, string> }];
   puppeteer: { browserWSEndpoint: string; headers: Record<string, string> };
@@ -153,6 +176,17 @@ export function browsers(t: Transport) {
           ...options,
         }),
       );
+    },
+    /** Open `url` in a new tab and shoot it once it loads (without `url`, what
+     * the browser shows now); the image is `base64`, its page's url, title
+     * and HTTP status beside it. Runs inside the browser's own sandbox. */
+    screenshot(id: string, input: BrowserScreenshot = {}, options?: RequestOptions) {
+      return t.json<BrowserScreenshotResult>({
+        method: "POST",
+        path: `${path(id)}:screenshot`,
+        body: input,
+        ...options,
+      });
     },
     /** End a browser by id; pass RequestOptions to bound or deduplicate the request. */
     delete: remove,

@@ -119,7 +119,12 @@ Each command run in a sandbox through the API, an SDK, the CLI or MCP is kept
 14 days as its program's name, its exit code and how long it ran:
 `pytest · exit 1 · 28 s`. A command still running shows as running; a process
 started in the background gets its exit when a read or a list of its processes
-sees it end, and one never read before its sandbox stopped says so. The name
+sees it end; one still running when its sandbox is stopped or deleted shows
+`ended by the sandbox's stop` (or `delete`), which is not a failure. A command
+whose answer was lost on the way back (its connection was cut, or the sandbox
+stopped or paused under it) shows `its answer was lost`: it may or may not
+have run to the end, so check its effects before running it again. A command
+that timed out is kept with the time limit it ran under. The name
 is the program alone (`python3` for `FOO=1 python3 train.py --key …`, `pytest`
 for `bash -c "pytest -q"`); arguments and environment values are never stored
 ([security](./security#keys-and-secrets)). A terminal is kept as its shell
@@ -169,6 +174,7 @@ proxy.
 | `credit.empty`               | No credit is left; `credit` has `availableMicros` and `agentOnly`                                            |
 | `job.run.failed`             | A [job](./jobs#alerts)'s run ended failed, timed out or unknown, with no retry left                          |
 | `job.recovered`              | A job's run succeeded after runs that failed                                                                 |
+| `agent.call.held`            | An agent trigger held a call no session took; `call` says which, its key and why                             |
 
 Each event carries the resource as it was:
 

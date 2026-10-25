@@ -3655,9 +3655,9 @@
   "e2b": {
     "upstream": "npm/e2b@2.56.0/package",
     "counts": {
-      "present": 279,
+      "present": 282,
       "refused": 761,
-      "missing": 146,
+      "missing": 143,
       "total": 1186
     },
     "items": {
@@ -3718,11 +3718,11 @@
       "Commands.supportsStdinClose": "missing",
       "E2B": "present",
       "E2B.Sandbox": "present",
-      "E2B.Secret": "missing",
-      "E2B.Template": "missing",
+      "E2B.Secret": "present",
+      "E2B.Template": "present",
       "E2B.Template(fileContextPath)": "missing",
       "E2B.Template(fileIgnorePatterns)": "missing",
-      "E2B.Volume": "missing",
+      "E2B.Volume": "present",
       "FileNotFoundError": "present",
       "FileNotFoundError.statusCode": "present",
       "FileUploadError": "present",
@@ -4852,17 +4852,17 @@
   "e2b-code-interpreter": {
     "upstream": "npm/%40e2b%2Fcode-interpreter@2.9.0/package",
     "counts": {
-      "present": 59,
+      "present": 62,
       "refused": 1,
-      "missing": 3,
+      "missing": 0,
       "total": 63
     },
     "items": {
       "E2B": "present",
       "E2B.Sandbox": "present",
-      "E2B.Secret": "missing",
-      "E2B.Template": "missing",
-      "E2B.Volume": "missing",
+      "E2B.Secret": "present",
+      "E2B.Template": "present",
+      "E2B.Volume": "present",
       "Execution": "present",
       "Execution.error": "present",
       "Execution.executionCount": "present",
@@ -4926,9 +4926,9 @@
   "e2b-python": {
     "upstream": "pypi/e2b@2.56.0",
     "counts": {
-      "present": 245,
+      "present": 246,
       "refused": 6,
-      "missing": 1126,
+      "missing": 1125,
       "total": 1377
     },
     "items": {
@@ -5222,7 +5222,7 @@
       "CopyItem.resolveSymlinks": "missing",
       "CopyItem.src": "missing",
       "CopyItem.user": "missing",
-      "E2B": "missing",
+      "E2B": "present",
       "E2BClientParams": "missing",
       "E2BClientParams.api_headers": "missing",
       "E2BClientParams.api_key": "missing",
@@ -6314,9 +6314,9 @@
   "e2b-code-interpreter-python": {
     "upstream": "pypi/e2b-code-interpreter@2.11.0",
     "counts": {
-      "present": 63,
+      "present": 64,
       "refused": 8,
-      "missing": 15,
+      "missing": 14,
       "total": 86
     },
     "items": {
@@ -6347,7 +6347,7 @@
       "Context.from_json(data)": "present",
       "Context.id": "present",
       "Context.language": "present",
-      "E2B": "missing",
+      "E2B": "present",
       "Execution": "present",
       "Execution.error": "present",
       "Execution.execution_count": "present",

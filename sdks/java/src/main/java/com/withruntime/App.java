@@ -115,6 +115,29 @@ public final class App extends JsonObject {
     return getString("releaseWatch");
   }
 
+  /**
+   * How an App's new version goes live: at_once (every copy together) or staged (one copy beside the
+   * live version's, then about 10%, 50% and all of them, each stage judged before the next). Null for
+   * a Function.
+   */
+  public String releaseStages() {
+    return getString("releaseStages");
+  }
+
+  /** Seconds each stage of a staged release runs once its copies serve before it is judged; 0 for a Function. */
+  public int releaseSoakSeconds() {
+    return (int) getLong("releaseSoakSeconds", 0);
+  }
+
+  /**
+   * An App's staged release under way, or its last: version, from, state (rolling, back, done, failed
+   * or ended), stage, stages, copies, of, soakSeconds, detail, startedAt and updatedAt. Null before
+   * its first.
+   */
+  public JsonObject stagedRelease() {
+    return has("stagedRelease") && get("stagedRelease") != null ? getObject("stagedRelease") : null;
+  }
+
   /** Unix milliseconds. */
   public long createdAt() {
     return getLong("createdAt", 0);

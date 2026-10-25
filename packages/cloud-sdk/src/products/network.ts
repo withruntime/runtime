@@ -3,9 +3,11 @@ import type { RequestOptions, Transport } from "../transport.js";
 
 /** A sandbox's own network rules. */
 export type NetworkRules = {
-  /** false refuses every outbound connection. */
+  /** false refuses every outbound connection; with `allow`, everything but the
+   * list (allow-list only, stored as `internet: true` with that list). */
   internet: boolean;
-  /** When not empty, only these web destinations are reachable: `example.com`,
+  /** When not empty, only these web destinations are reachable, the internet on
+   * or off: `example.com`,
    * `*.example.com` (subdomains, not the apex), an address or a CIDR range. */
   allow?: string[];
   /** Never reachable. Wins over everything. */

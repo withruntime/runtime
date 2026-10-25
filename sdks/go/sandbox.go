@@ -529,8 +529,8 @@ func someSecrets(names *[]string) *[]string {
 }
 
 // Fork starts copies of this sandbox as it is now (files, memory, running
-// processes), each its own sandbox, on the same server, and answers once they
-// run. A running sandbox is paused for the moment its snapshot takes. If a
+// processes), each its own sandbox, on its server while it has room and on
+// another when it is full, and answers once they run. A running sandbox is paused for the moment its snapshot takes. If a
 // copy fails, the error's Details["startedSandboxIds"] names the copies that
 // did start.
 func (s *Sandbox) Fork(ctx context.Context, opts *ForkOptions) ([]*Sandbox, error) {

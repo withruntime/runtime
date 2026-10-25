@@ -54,7 +54,7 @@ ports, dedicated outbound addresses and WireGuard private networks. See
 
 This compares Runtime with Fly.io's two ways to run agent code: Sprites, its
 sandboxes for agents, and Machines, its general-purpose VMs. Fly.io's figures
-come from its public pricing and documentation, checked 2 October 2026, with
+come from its public pricing and documentation, checked {{checked:fly-sprites}}, with
 Machines at the rates of its Ashburn (`iad`) region.
 
 |                | Runtime                                                          | Fly Sprites                                               | Fly Machines                                                                           |
@@ -178,7 +178,7 @@ are refused, naming Runtime's alternative. The full map is in
 
 ## Sources
 
-Prices checked 2 October 2026; Machine suspend rechecked 25 September 2026.
+Prices checked {{checked:fly-sprites}}; Machine suspend rechecked 25 September 2026.
 
 - [Fly.io pricing](https://fly.io/pricing/) for Machines and Sprites
 - [Sprites](https://fly.io/sprites/) and its pricing questions

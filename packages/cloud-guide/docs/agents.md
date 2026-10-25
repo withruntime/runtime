@@ -122,12 +122,37 @@ whose secrets name `CLAUDE_CODE_OAUTH_TOKEN` and that is set up for your
 customers (the `support` use) carries the warning
 `subscription_for_customers`, in the API and the console.
 
+## A pool of Claude accounts
+
+`pool` names 1 to 16 Claude accounts, each an egress secret: a subscription
+token (`claude setup-token`, for your own team's agents) or, for a name
+holding `API_KEY`, an API key. Each session takes the account with the most
+usage left, read from what the agent's last sessions learned, an account
+already busy with this agent's sessions counting for less; one out of usage
+goes last until it resets. The harness gets that account as
+`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`), and the order in
+`~/.runtime-agent/session.json` as `pool`. The [`review`](./ci#agent-steps)
+template moves to the next account the moment one is out of usage, and
+when every one is out it answers `later` with the soonest reset, so a CI/CD
+check waits instead of failing.
+
+```bash no-run
+printf %s "$TOKEN_1" | runtime secrets set CLAUDE_1 --host api.anthropic.com
+printf %s "$TOKEN_2" | runtime secrets set CLAUDE_2 --host api.anthropic.com
+runtime agents create ci-review --template review --pool CLAUDE_1 --pool CLAUDE_2
+```
+
+A key names a pool's secrets only when it may use them, as with `secrets`.
+A harness that learns what an account has left writes
+`~/.runtime-agent/accounts.json` (`{"CLAUDE_1": {"left": 0.4, "outUntil":
+null}}`), kept for the agent's next sessions when this one ends.
+
 ## Sessions
 
 Start a session with its first words. Words with the same `key` join its open
 session instead: one session per Slack thread, pull request or customer of
 yours, keyed as your app chooses. Keys starting `ci-review:` are CI/CD's own,
-for its [review step](./ci#review): a start with one is refused with
+for its [agent steps](./ci#agent-steps): a start with one is refused with
 `invalid_request`.
 
 ```ts check
@@ -160,6 +185,68 @@ and `note` (words out), each numbered; `events` follows it, woken the moment
 an event is written, and ends with the session. Over HTTP,
 `GET /v1/agents/sessions/{id}/events?after=<seq>&wait=30` long-polls, and
 `Accept: text/event-stream` streams it.
+
+## Asks and the inbox
+
+When an agent needs a person, it asks: a question, why it matters, up to
+eight options (a label and a detail), the one it recommends, and optionally a
+**step** (what it waits on, such as `bucket:assets`) and an expiry, from one
+minute to 30 days. Its session waits, paused, until the answer comes.
+
+The account has one inbox. Asks with the same step from sessions of one agent
+that share a [memory](#memory) are one row while it is open, and one answer
+reaches every session asking: each reads it as its next words and wakes. Six
+sessions of a team's agent (`"memory": {"scope": "agent"}`) asking for the
+same bucket are one question for you, answered once. With memory per key, the
+default, only sessions of one key share an ask, so one customer's session
+never joins another's; a session with no memory shares only with its own
+subagents. Another agent naming the same step asks its own row. A session
+joining an open ask changes nothing of it (its question, labels and expiry
+stay the first asker's), and its answer names the step, not the first
+asker's question. An ask closes by itself when its sessions end, when the
+agent withdraws it, or when it expires; at expiry it takes its recommended
+option as the answer, or tells the sessions nobody answered when it has none.
+
+Labels say who sees an ask: it carries its agent's labels with its own over
+them, and the inbox filters by them, so a team reads only its own.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const open = await runtime.agents.asks.list({ labels: { team: "web" } });
+for (const ask of open.data) {
+  console.log(
+    ask.question,
+    ask.options.map((option) => option.label),
+    ask.pick,
+  );
+  if (ask.pick) await runtime.agents.asks.answer(ask.id, { option: ask.pick });
+}
+```
+
+```bash no-run
+runtime agents asks --label team=web            # open asks, one line each
+runtime agents asks get <ask>
+runtime agents answer <ask> assets-prod         # an option
+runtime agents answer <ask> --text "Use the new one, and tag it."
+```
+
+The console's **Agents › Asks** page is the same inbox, with each option a
+button, and the Agents page says when asks wait on you. Over HTTP it is
+`GET /v1/agents/asks` (`state`, `agent`, `label=key:value`), `GET
+/v1/agents/asks/{id}` and `POST /v1/agents/asks/{id}/answer` with `option`,
+`text` or both (words up to 32 KiB, a quote, backslash or line break counting
+twice); an ask no longer open is refused with `ask_closed`, and the
+same answer sent again with the same `Idempotency-Key` is the same answer.
+The SDKs have `agents.asks.list`, `get` and `answer`, and so does the MCP
+server (`runtime_agents_asks`, `runtime_agents_ask`, `runtime_agents_answer`).
+Answering needs a key that may run the sessions asking.
+
+Inside the sandbox the harness asks with its `ask` tool and takes an ask back
+with `withdraw`; over HTTP, `POST
+$RUNTIME_API/v1/agents/sessions/$RUNTIME_AGENT_SESSION/asks` with the report
+token, then `.../asks/{id}/withdraw`.
 
 ## Subagents
 
@@ -205,66 +292,98 @@ Besides the API, a trigger starts or feeds an agent's sessions:
 | `webhook`  | `{}`                                                                       | call, or its key      |
 
 Adding a webhook answers its `secret` once, and never again: each of its
-calls carries it, and one without it is refused. Pausing a trigger refuses
-its events, saying why, and holds nothing else.
+calls carries it as a Bearer token, never your API key, so whatever sends them
+(an alerting system, a form, your server) holds only that.
 
 ```bash no-run
-runtime agents triggers add helper --kind webhook --config '{}'
+runtime agents triggers add helper --kind webhook --config '{}' --rules '{"key":"{alert.id}"}'
+curl -X POST "$RUNTIME_API/v1/agents/triggers/<triggerId>/calls" \
+  -H "Authorization: Bearer $RUNTIME_TRIGGER_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Checkout errors are up 4x", "key": "incident-981"}'
+```
+
+A call's body is `{text, key?, labels?}`; a call with the key of an open
+session joins it. A sender whose JSON you can't shape still groups: its whole
+body is the words, and the trigger's `key` rule makes its key from its fields
+(`"{alert.id}"`, `"deploy-{service}"`). A `text/plain` body is the words. Send
+`Idempotency-Key` and a retry is the same call. The answer says what the call
+did: `201 started`, `200 joined`, `200 noted`, or `202 held`, with its
+`sessionId` or held `callId`.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const done = await runtime.agents.triggers.call(
+  "<triggerId>",
+  process.env.RUNTIME_TRIGGER_SECRET ?? "",
+  { text: "Checkout errors are up 4x", key: "incident-981" },
+  { idempotencyKey: "alert-4417" },
+);
+console.log(done.outcome, done.sessionId ?? done.callId);
+```
+
+### Rules
+
+Each trigger has rules, every one optional:
+
+| Rule               | What it does                                                                                                                                   | Default |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `priority`         | -100 to 100. When the agent is at `maxConcurrent`, its queued sessions start highest first, then oldest.                                       | `0`     |
+| `maxStartsPerHour` | New sessions it may start in an hour. Calls that join an open session don't count; one past it is held.                                        | none    |
+| `onEnded`          | What a call does when its key's last session has ended: `start` a new one, add a `note` to the ended one's log, or `ask` you (it is held).     | `start` |
+| `notify`           | Where a held call is told: `email` (whoever added the trigger) or `webhook` (your webhooks that take `agent.call.held`; email when none does). | `email` |
+| `key`              | A webhook's only: the key of a call that sends none, from its JSON's fields, such as `"{alert.id}"`. A field that is missing means no key.     | none    |
+
+Set them when adding a trigger (`--rules`, `rules` in `runtime.yml`), or in
+place, keeping its secret:
+
+```bash no-run
+runtime agents triggers rules <triggerId> '{"priority":10,"maxStartsPerHour":60,"onEnded":"ask"}'
+```
+
+Pausing a trigger refuses its events, saying why; a webhook's calls are held
+for you instead.
+
+```bash no-run
 runtime agents triggers pause <triggerId> --why "Moving to the new help center"
 ```
+
+## Held calls
+
+A call no session can take is held, never dropped: its trigger is paused, it
+is past `maxStartsPerHour`, its key's session ended and `onEnded` is `ask`,
+the agent's day budget is spent, or your account's sessions are at their
+limit. Each says which as its `why` (`paused`, `rate`, `ended`, `budget`,
+`quota`, `closed`). Whoever added the trigger gets an email, at most one a
+trigger every 15 minutes with every call held since; or, with `notify:
+webhook`, your webhooks get [`agent.call.held`](./observability#webhooks),
+which carries the call's id, trigger, agent, key and why, never its words.
+
+Start one, and it and every call held for its key since begin one session,
+oldest first; or dismiss it, and nothing runs.
+
+```bash no-run
+runtime agents triggers held <triggerId>
+runtime agents triggers held start <triggerId> <callId>
+runtime agents triggers held dismiss <triggerId> <callId>
+```
+
+Over HTTP: `GET /v1/agents/triggers/{id}/held?state=held`, then
+`POST .../held/{callId}/start` or `.../dismiss`.
 
 ## Inside the sandbox
 
 Each session's harness is given `RUNTIME_AGENT_SESSION`,
 `RUNTIME_AGENT_REPORT_TOKEN` and `RUNTIME_API`, the agent's instructions in
 `~/.runtime-agent/start.md`, and an MCP server, `runtime-agent`
-(`~/.runtime-agent/mcp.json`), with its tools: `reply`, `ask`, `status`,
-`wait` (for the next words) and `done`; `remember`, `recall`, `search`,
+(`~/.runtime-agent/mcp.json`), with its tools: `reply`, `ask` and
+`withdraw` (see [asks](#asks-and-the-inbox)), `status`, `wait` (for the next
+words) and `done`; `remember`, `recall`, `search`,
 `list` and `forget` for its [memory](#memory); and `spawn` to start a
 subagent's session. The report token reaches only that session and its
 memory; no API key enters the sandbox.
-
-## Memory
-
-An agent keeps text files across its sessions and searches them: notes on a
-customer, a runbook, what it learned last time. Memory is part of the agent,
-not a disk you attach, so every session reaches it however many run at once.
-A file holds up to 1 MiB of text; an agent holds up to 1 GiB and 100,000 files.
-A write past either is refused with `memory_full` and nothing is written.
-
-The definition says whose memory a session reads:
-
-- `"memory": {"scope": "key"}`, the default for every template: each
-  session key has its own. When your app keys sessions by customer
-  (`customer:42`), one customer's notes never reach another customer's
-  session. A session without a key has no memory, and a session a trigger
-  started has its own key's memory, apart from the API's.
-- `"memory": {"scope": "agent"}`, set on purpose: all the agent's sessions
-  share one memory, for an agent only your own team talks to. A support
-  agent can't share it, so one end user never reads or plants what the next
-  one sees.
-
-A session reads and writes only its own scope, which Runtime derives from the
-definition; the session never chooses it. A subagent reads the memory of the
-session at the top of its tree, whatever key its parent gives it, so a
-customer's session can't start a subagent into another customer's memory. From inside the sandbox the harness
-reaches it at `$RUNTIME_API/v1/agents/sessions/$RUNTIME_AGENT_SESSION/memory`
-with the session's report token.
-
-Seed what every session should know, and read what the agent kept:
-
-```bash no-run
-runtime agents memory put helper faq/refunds.md refunds.md
-runtime agents memory ls helper --scope customer:42
-runtime agents memory search helper "refund policy"
-runtime agents memory cat helper notes.md --scope customer:42
-runtime agents memory rm helper notes.md --scope customer:42
-```
-
-Without `--scope`, `put`, `cat` and `rm` mean the shared memory; `ls` and
-`search` mean every scope. The SDKs have the same five (`agents.memory.list`,
-`search`, `read`, `write`, `delete`), and so does the MCP server
-(`runtime_agents` action `memory`). Deleting an agent deletes its memory.
 
 ## Memory
 

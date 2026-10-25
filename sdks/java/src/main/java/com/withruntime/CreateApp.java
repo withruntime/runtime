@@ -84,4 +84,20 @@ public final class CreateApp extends Params<CreateApp> {
   public CreateApp releaseWatch(String mode) {
     return set("releaseWatch", mode);
   }
+
+  /**
+   * Apps only: how a new version goes live. "at_once" (the default) switches every copy together;
+   * "staged" starts one copy of it beside the live version's, then about 10%, 50% and all of them,
+   * each stage judged on its visitors' errors and speed before the next. A stage that does worse
+   * goes back: its copies finish their requests and stop, then the deploy fails with
+   * deploy_stage_failed, and the live version never stops serving.
+   */
+  public CreateApp releaseStages(String stages) {
+    return set("releaseStages", stages);
+  }
+
+  /** Apps only: 60 to 3600 seconds each stage runs once its copies serve; default 300. */
+  public CreateApp releaseSoakSeconds(int seconds) {
+    return set("releaseSoakSeconds", seconds);
+  }
 }

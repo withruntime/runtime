@@ -5,10 +5,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code runtime.agents().templates()}: five harnesses, each usable for either of two uses.
+ * {@code runtime.agents().templates()}: seven harnesses, each usable for either of two uses.
  *
  * <p>A harness is what the session's sandbox runs: claude-code, codex, gemini-cli,
- * claude-agent-sdk or openai-agents-sdk. A use is what the agent is for: support (your customers,
+ * claude-agent-sdk, openai-agents-sdk, review (a CI/CD agent step's reviewer, on a pool of
+ * Claude accounts), or judge (an agent step held to its instructions alone). A use is what the agent is for: support (your customers,
  * driven by your own app: one session per end customer under your own key such as customer:42,
  * paused between their messages) or team (your team: from Slack and
  * GitHub, one session per task). {@link #definition(String, String)} merges the two into a
@@ -49,6 +50,40 @@ public final class AgentTemplates {
         "login once in the sandbox's terminal (Sign in with Google), kept at `~/.gemini`");
     harness("claude-agent-sdk", "Claude Agent SDK", "python3 ~/agent.py", "ANTHROPIC_API_KEY", "api.anthropic.com", null);
     harness("openai-agents-sdk", "OpenAI Agents SDK", "python3 ~/agent.py", "OPENAI_API_KEY", "api.openai.com", null);
+    String review = "python3 ~/.runtime-agent/runtime-agent review";
+    Map<String, Object> reviewer = new LinkedHashMap<>();
+    reviewer.put("command", review);
+    reviewer.put("pool", List.of("ANTHROPIC_API_KEY"));
+    reviewer.put("vcpu", 2);
+    reviewer.put("memoryMiB", 2048);
+    reviewer.put("maxSessionSeconds", 1800);
+    templates.put(
+        "review",
+        new Template(
+            "review",
+            "Code review",
+            review,
+            "ANTHROPIC_API_KEY",
+            "api.anthropic.com",
+            "a token per account: run `claude setup-token` on your own computer (Pro/Max) for each, store each with `runtime secrets set CLAUDE_1` scoped to api.anthropic.com, then name them all in pool (--pool CLAUDE_1 --pool CLAUDE_2)",
+            reviewer));
+    String judge = "python3 ~/.runtime-agent/runtime-agent judge";
+    Map<String, Object> judging = new LinkedHashMap<>();
+    judging.put("command", judge);
+    judging.put("pool", List.of("ANTHROPIC_API_KEY"));
+    judging.put("vcpu", 2);
+    judging.put("memoryMiB", 2048);
+    judging.put("maxSessionSeconds", 1800);
+    templates.put(
+        "judge",
+        new Template(
+            "judge",
+            "Your rules",
+            judge,
+            "ANTHROPIC_API_KEY",
+            "api.anthropic.com",
+            "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block",
+            judging));
     Map<String, Object> support = new LinkedHashMap<>();
     support.put("template", "support");
     support.put("vcpu", 1);
@@ -92,7 +127,7 @@ public final class AgentTemplates {
     return template;
   }
 
-  /** The five harnesses, in order. */
+  /** The harnesses, in order. */
   public List<Template> list() {
     return List.copyOf(templates.values());
   }

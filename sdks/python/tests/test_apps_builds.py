@@ -217,6 +217,17 @@ class AppsBuildsTest(unittest.TestCase):
         self.assertEqual(Stub.seen[2][3], {"stopGraceSeconds": 0, "healthFailSeconds": 30})
         self.assertEqual(Stub.seen[3][3], {"maxCopies": 2, "vcpu": 1, "memoryMiB": 256, "healthFailSeconds": 20})
 
+    def test_an_app_chooses_staged_releases_and_their_soak_by_the_apis_names(self):
+        with self.client() as runtime:
+            runtime.apps.create(name="web", max_copies=4, vcpu=1, memory_mib=512,
+                                release_stages="staged", release_soak_seconds=120)
+            runtime.apps.update(APP_ID, release_stages="at_once")
+            runtime.apps.update(APP_ID, release_soak_seconds=3600)
+        self.assertEqual(Stub.seen[0][3], {"name": "web", "maxCopies": 4, "vcpu": 1, "memoryMiB": 512,
+                                           "releaseStages": "staged", "releaseSoakSeconds": 120})
+        self.assertEqual(Stub.seen[1][3], {"releaseStages": "at_once"})
+        self.assertEqual(Stub.seen[2][3], {"releaseSoakSeconds": 3600})
+
     def test_a_wait_past_its_deadline_says_timeout_and_keeps_the_writes_key(self):
         Stub.deploys = ["warming"]
         with self.client() as runtime:
@@ -255,6 +266,10 @@ class AppsBuildsTest(unittest.TestCase):
                 runtime.functions.update(APP_ID, stop_grace_seconds=10)
             with self.assertRaises(InvalidRequestError):
                 runtime.functions.update(APP_ID, volume=None)
+            with self.assertRaises(InvalidRequestError):
+                runtime.functions.create(max_copies=1, vcpu=1, memory_mib=256, release_stages="staged")
+            with self.assertRaises(InvalidRequestError):
+                runtime.functions.update(APP_ID, release_soak_seconds=60)
             with self.assertRaises(InvalidRequestError):
                 runtime.apps.wait(APP_ID, "live", timeout=-1)
             with self.assertRaises(RuntimeAPIError) as caught:

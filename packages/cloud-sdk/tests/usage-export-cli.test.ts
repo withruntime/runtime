@@ -209,3 +209,44 @@ test("repeated cursors fail explicitly instead of exporting duplicated pages for
   expect(result.requests).toHaveLength(2);
   expect(result.lines).toEqual(["one\n"]);
 });
+
+test("CLI says on stderr how far the range is final, from its earliest page, never in the CSV", async () => {
+  const { finalLine } = await import("../src/cli");
+  const range = { until };
+  expect(finalLine({ ...range, finalThrough: "2026-10-01T00:00:00.000000Z" })).toBe(
+    "Final: no more charges will settle in this range.",
+  );
+  expect(finalLine({ ...range, finalThrough: "2026-09-20T10:00:00.123456Z" })).toContain(
+    "Final up to 2026-09-20T10:00:00.123456Z",
+  );
+  expect(finalLine({ ...range, finalThrough: null })).toContain("may still settle");
+  const original = globalThis.fetch;
+  const lines: string[] = [];
+  const errors: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const first = new URL(new Request(input, init).url).searchParams.get("cursor") === null;
+    return Response.json({
+      since,
+      until,
+      data: [],
+      nextCursor: first ? "page-two" : null,
+      finalThrough: first ? "2026-09-20T10:00:00.123456Z" : "2026-09-20T10:00:01.000000Z",
+      csv: first ? "header\r\n" : "",
+    });
+  }) as unknown as typeof fetch;
+  try {
+    expect(
+      await run(command, env, {
+        json: false,
+        write: (text) => lines.push(text),
+        error: (text) => errors.push(text),
+      }),
+    ).toBe(0);
+  } finally {
+    globalThis.fetch = original;
+  }
+  expect(lines.join("")).toBe("header\r\n");
+  expect(errors).toEqual([
+    "Final up to 2026-09-20T10:00:00.123456Z; charges after that may still settle. Export again later for the rest.",
+  ]);
+});

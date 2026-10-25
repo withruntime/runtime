@@ -378,8 +378,10 @@ module WithRuntime
 
     # Sends a call, retrying as the rules say, and returns the response once it
     # succeeded. With a block, the body is streamed to it.
+    # +bearer+ is sent instead of the API key: a webhook trigger's secret,
+    # which is all its calls carry.
     def send_call(http, method, path, query: nil, body: nil, raw: nil, accept: "application/json", wait: nil,
-                  key: nil, no_retry: false, room: nil, timeout: nil, cancel: nil, &stream)
+                  key: nil, no_retry: false, room: nil, timeout: nil, cancel: nil, bearer: nil, &stream)
       write = method != "GET"
       key = write ? (key || SecureRandom.uuid) : nil
       # room: nil for a call with no room wait; 0 for a create, wake, restart
@@ -400,7 +402,7 @@ module WithRuntime
         raise connection_error(true, write, key) if left <= 0
 
         request = Net::HTTPGenericRequest.new(method, !payload.nil?, true, target(path, query))
-        request["Authorization"] = "Bearer #{api_key}"
+        request["Authorization"] = "Bearer #{bearer || api_key}"
         request["Accept"] = accept
         request["X-Runtime-Client"] = @client
         request["User-Agent"] = "withruntime-ruby/#{VERSION}"

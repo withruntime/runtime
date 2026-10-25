@@ -23,13 +23,14 @@ public final class Agents {
   private final Sessions sessions;
   private final Triggers triggers;
   private final AgentMemory memory;
-  // Approvals come next, with their own table: agents().approvals().list() and answer(...).
+  private final Asks asks;
 
   Agents(Transport transport) {
     this.t = transport;
     this.sessions = new Sessions(transport);
     this.triggers = new Triggers(transport);
     this.memory = new AgentMemory(transport);
+    this.asks = new Asks(transport);
   }
 
   static String path(String agent) {
@@ -49,6 +50,11 @@ public final class Agents {
   /** Each agent's built-in memory: files its sessions keep and search, shared or one key's alone. */
   public AgentMemory memory() {
     return memory;
+  }
+
+  /** The account's inbox: what its sessions need answered, one row per step however many ask it. */
+  public Asks asks() {
+    return asks;
   }
 
   /**
@@ -207,6 +213,14 @@ public final class Agents {
    *   <li>{@code schedule}: {@code {cron, timezone?, input}}.
    *   <li>{@code webhook}: {@code {}}.
    * </ul>
+   *
+   * <p>Each trigger has rules, every one optional: {@code priority} (-100 to 100: queue order when
+   * the agent's maxConcurrent is full, higher first), {@code maxStartsPerHour} (a call past it is
+   * held for you), {@code onEnded} ({@code start}, {@code note} or {@code ask}: what a call does
+   * when its key's session has ended), {@code notify} ({@code email} or {@code webhook}: where a
+   * held call is told) and, a webhook's only, {@code key} ({@code "{cause}"}: the key of a call
+   * that sends none, from its JSON's fields). A call no session can take is held, never dropped:
+   * {@link #held}, {@link #startHeld}, {@link #dismissHeld}.
    */
   public static final class Triggers {
     private final Transport t;
@@ -220,10 +234,66 @@ public final class Agents {
     }
 
     public AgentTrigger create(String agent, String kind, Map<String, ?> config) {
+      return create(agent, kind, config, null);
+    }
+
+    /** A trigger with its rules (null: every default). */
+    public AgentTrigger create(String agent, String kind, Map<String, ?> config, Map<String, ?> rules) {
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("kind", kind);
       body.put("config", config == null ? Map.of() : config);
+      if (rules != null) body.put("rules", rules);
       return new AgentTrigger(t.object(new Transport.Call("POST", Agents.path(agent) + "/triggers").body(body)));
+    }
+
+    /** Its rules, whole, in place: its secret stays. An empty map is every default. */
+    public AgentTrigger setRules(String id, Map<String, ?> rules) {
+      return new AgentTrigger(
+          t.object(new Transport.Call("PATCH", path(id, "")).body(Map.of("rules", java.util.Objects.requireNonNull(rules, "rules")))));
+    }
+
+    /**
+     * Calls a webhook trigger as its sender would, by its secret, never your key: {@code outcome}
+     * started, joined (the open session with key), noted or held, with {@code sessionId}, {@code
+     * seq}, {@code callId} and {@code why}. key, labels and idempotencyKey may be null; the same
+     * idempotencyKey is the same call.
+     */
+    public JsonObject call(
+        String id, String secret, String text, String key, Map<String, String> labels, String idempotencyKey) {
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("text", java.util.Objects.requireNonNull(text, "text"));
+      if (key != null) body.put("key", key);
+      if (labels != null) body.put("labels", labels);
+      return new JsonObject(
+          t.object(
+              new Transport.Call("POST", path(id, "/calls"))
+                  .body(body)
+                  .bearer(java.util.Objects.requireNonNull(secret, "secret"))
+                  .key(idempotencyKey)));
+    }
+
+    /** The calls it held for you, newest first; state (held, started or dismissed) may be null. */
+    public Page<JsonObject> held(String id, String state) {
+      return Page.read(t, heldCall(id, state, null), JsonObject::new, next -> heldCall(id, state, next));
+    }
+
+    private static Transport.Call heldCall(String id, String state, String cursor) {
+      return new Transport.Call("GET", path(id, "/held")).query("state", state).query("cursor", cursor);
+    }
+
+    /**
+     * Starts a held call: one session with it and every call held for its key since, oldest first.
+     * {@code session}, {@code joined} and {@code calls}.
+     */
+    public JsonObject startHeld(String id, String callId) {
+      return new JsonObject(
+          t.object(new Transport.Call("POST", path(id, "/held/" + Transport.segment(callId) + "/start")).body(Map.of())));
+    }
+
+    /** Dismisses a held call: nothing runs. */
+    public JsonObject dismissHeld(String id, String callId) {
+      return new JsonObject(
+          t.object(new Transport.Call("POST", path(id, "/held/" + Transport.segment(callId) + "/dismiss")).body(Map.of())));
     }
 
     /** An agent's triggers, every one. */
@@ -232,7 +302,7 @@ public final class Agents {
           .getObjects("data", AgentTrigger::new);
     }
 
-    /** Holds one trigger: what reaches it is refused (trigger_paused, with why) and never queued. */
+    /** Holds one trigger, saying why: a webhook's calls are held for you ({@link #held}), never dropped. */
     public AgentTrigger pause(String id, String why) {
       return new AgentTrigger(t.object(new Transport.Call("POST", path(id, "/pause")).body(Map.of("why", java.util.Objects.requireNonNull(why, "why")))));
     }
@@ -243,6 +313,62 @@ public final class Agents {
 
     public void delete(String id) {
       t.json(new Transport.Call("DELETE", path(id, "")));
+    }
+  }
+
+  /**
+   * {@code runtime.agents().asks()}: the account's inbox. An ask closes by itself when every
+   * session asking it ends, when they withdraw it, or when it expires, its pick taken as the answer
+   * when it has one.
+   */
+  public static final class Asks {
+    private final Transport t;
+
+    Asks(Transport transport) {
+      this.t = transport;
+    }
+
+    private static String path(String id, String verb) {
+      return "/v1/agents/asks/" + Transport.segment(id) + verb;
+    }
+
+    /** The open asks, newest first. */
+    public Page<AgentAsk> list() {
+      return list(null, null, null, null, null);
+    }
+
+    /**
+     * The page at cursor (null: the first), newest first: in these states (null: open), of one
+     * agent (an id or name, or null), carrying every one of labels (who sees an ask; or null), at
+     * most limit (null: the API's default).
+     */
+    public Page<AgentAsk> list(List<String> states, String agent, Map<String, String> labels, String cursor, Integer limit) {
+      return Page.read(t, call(states, agent, labels, cursor, limit), AgentAsk::new, next -> call(states, agent, labels, next, limit));
+    }
+
+    private static Transport.Call call(List<String> states, String agent, Map<String, String> labels, String cursor, Integer limit) {
+      Transport.Call call = new Transport.Call("GET", "/v1/agents/asks");
+      if (states != null) for (String state : states) call.query("state", state);
+      call.query("agent", agent);
+      if (labels != null) for (Map.Entry<String, String> label : labels.entrySet()) call.query("label", label.getKey() + ":" + label.getValue());
+      return call.query("cursor", cursor).query("limit", limit);
+    }
+
+    /** One ask, with the sessions asking it. */
+    public AgentAsk get(String id) {
+      return new AgentAsk(t.object(new Transport.Call("GET", path(id, ""))));
+    }
+
+    /**
+     * Answers with an option's label and/or text (either may be null, not both): every session
+     * asking reads it next and wakes. One no longer open is a Conflict, ask_closed.
+     */
+    public AgentAsk answer(String id, String option, String text) {
+      if (option == null && text == null) throw new IllegalArgumentException("An answer is an option's label, text, or both.");
+      Map<String, Object> body = new LinkedHashMap<>();
+      if (option != null) body.put("option", option);
+      if (text != null) body.put("text", text);
+      return new AgentAsk(t.object(new Transport.Call("POST", path(id, "/answer")).body(body)));
     }
   }
 }

@@ -24,6 +24,9 @@ AGENT = {"id": AGENT_ID, "name": "dev", "version": 1, "definition": {"command": 
 TRIGGER = {"id": TRIGGER_ID, "agentId": AGENT_ID, "kind": "github",
            "config": {"repository": "acme/web", "installation": 42}, "pausedAt": None, "pausedWhy": None,
            "createdAt": "2026-10-18T00:00:00Z"}
+HELD = {"id": "c1", "triggerId": TRIGGER_ID, "agentId": AGENT_ID, "key": "disk", "text": "disk full",
+        "labels": {}, "why": "ended", "state": "held", "sessionId": None, "notify": "email",
+        "createdAt": "2026-10-18T00:00:00Z", "resolvedAt": None}
 MEMORY = {"scope": "", "path": "notes/tea.md", "bytes": 21, "updatedAt": "2026-10-18T00:00:00Z",
           "updatedBy": "key_1"}
 USAGE = {"bytes": 42, "files": 2, "limitBytes": 1073741824, "limitFiles": 100000}
@@ -68,6 +71,8 @@ REFUSALS = {
 
 class Stub(BaseHTTPRequestHandler):
     seen: list = []
+    # Each request's Authorization header, in order.
+    auth: list = []
     mode = "ok"
     # Each read of the log answers the next of these pages; each read of the
     # session the next of these states. The last of each repeats.
@@ -97,6 +102,7 @@ class Stub(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         path, query = url.path, parse_qs(url.query, keep_blank_values=True)
         Stub.seen.append((self.command, path, query, body, self.headers.get("idempotency-key")))
+        Stub.auth.append(self.headers.get("authorization"))
         if Stub.mode in REFUSALS:
             status, code, _ = REFUSALS[Stub.mode]
             return self.answer({"error": {"code": code, "message": f"refused: {code}", "hint": "h"}}, status)
@@ -114,6 +120,10 @@ class Stub(BaseHTTPRequestHandler):
             if method == "DELETE":
                 return self.answer({"deleted": True})
             return self.answer({**MEMORY, "content": "tea, no sugar"})
+        if path == "/v1/agents/asks":
+            return self.answer({"data": [ASK], "nextCursor": None})
+        if path.startswith("/v1/agents/asks/"):
+            return self.answer({**ASK, "state": "answered", "answer": body} if method == "POST" else ASK)
         if path == "/v1/agents" and method == "GET":
             if "cursor" in query:
                 return self.answer({"data": [{**AGENT, "id": "second", "warnings": ["subscription_for_customers"]}],
@@ -142,6 +152,17 @@ class Stub(BaseHTTPRequestHandler):
                                200 if body.get("key") == "customer:42" else 201)
         if path.endswith("/triggers"):
             return self.answer({"data": [TRIGGER]} if method == "GET" else TRIGGER, 200 if method == "GET" else 201)
+        if path.endswith("/calls"):
+            return self.answer({"outcome": "joined", "sessionId": SESSION_ID, "seq": 2, "callId": None,
+                                "why": None, "replayed": False})
+        if path.endswith("/held"):
+            return self.answer({"data": [HELD], "nextCursor": None})
+        if path.endswith("/start") and "/held/" in path:
+            return self.answer({"session": session("queued"), "joined": False, "calls": 2})
+        if path.endswith("/dismiss"):
+            return self.answer({**HELD, "state": "dismissed"})
+        if path.startswith("/v1/agents/triggers/") and method == "PATCH":
+            return self.answer({**TRIGGER, "rules": body["rules"]})
         if path.startswith("/v1/agents/triggers/"):
             if method == "DELETE":
                 return self.answer(None, 204)
@@ -157,6 +178,10 @@ class Stub(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = handle_any
 
 
+ASK = {"id": "ask-1", "step": "bucket-cap", "question": "Raise the cap?", "options": [{"label": "Raise"}],
+       "pick": "Raise", "state": "open", "sessions": [{"sessionId": SESSION_ID, "state": "asking", "seq": 2}]}
+
+
 class AgentsTest(unittest.TestCase):
     # Each test has a stub of its own: a request a test gave up on (a wait past
     # its deadline) that a busy machine handles late reaches its own test's
@@ -166,6 +191,7 @@ class AgentsTest(unittest.TestCase):
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         Stub.seen, Stub.mode, Stub.pages, Stub.states = [], "ok", [{"data": [], "ended": True}], []
+        Stub.auth = []
         Stub.record = None
 
     def tearDown(self):
@@ -337,6 +363,43 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(Stub.seen[0][3], {"kind": "github", "config": {"repository": "acme/web", "installation": 42}})
         self.assertEqual(Stub.seen[2][3], {"why": "release freeze"})
 
+    def test_the_inbox_lists_by_state_and_labels_gets_one_and_answers_it(self):
+        with self.client() as runtime:
+            asks = list(runtime.agents.asks.list(state=["open", "expired"], labels={"team": "infra"}))
+            self.assertEqual([a["step"] for a in asks], ["bucket-cap"])
+            self.assertEqual(runtime.agents.asks.get("ask-1")["pick"], "Raise")
+            answered = runtime.agents.asks.answer("ask-1", "Raise", text="Done.")
+            self.assertEqual(answered["answer"], {"option": "Raise", "text": "Done."})
+            with self.assertRaises(InvalidRequestError):
+                runtime.agents.asks.answer("ask-1")
+        self.assertEqual(self.routes(), [
+            ("GET", "/v1/agents/asks"), ("GET", "/v1/agents/asks/ask-1"), ("POST", "/v1/agents/asks/ask-1/answer")])
+        query = Stub.seen[0][2]
+        self.assertEqual((query["state"], query["label"]), (["open", "expired"], ["team:infra"]))
+
+    def test_trigger_rules_calls_and_held_calls_call_their_routes_and_a_call_carries_the_secret(self):
+        with self.client() as runtime:
+            triggers = runtime.agents.triggers
+            triggers.create("dev", "webhook", {}, rules={"key": "{cause}", "onEnded": "ask"})
+            self.assertEqual(triggers.set_rules(TRIGGER_ID, {"priority": 10})["rules"], {"priority": 10})
+            done = triggers.call(TRIGGER_ID, "rtat_secret_1234567890", "disk full", key="disk",
+                                 labels={"host": "vin-5"}, idempotency_key="alert-7")
+            self.assertEqual((done["outcome"], done["seq"]), ("joined", 2))
+            self.assertEqual([c["id"] for c in triggers.held(TRIGGER_ID, state=["held"])], ["c1"])
+            self.assertEqual(triggers.start_held(TRIGGER_ID, "c1")["calls"], 2)
+            self.assertEqual(triggers.dismiss_held(TRIGGER_ID, "c1")["state"], "dismissed")
+        base = f"/v1/agents/triggers/{TRIGGER_ID}"
+        self.assertEqual(self.routes(), [
+            ("POST", "/v1/agents/dev/triggers"), ("PATCH", base), ("POST", f"{base}/calls"), ("GET", f"{base}/held"),
+            ("POST", f"{base}/held/c1/start"), ("POST", f"{base}/held/c1/dismiss")])
+        self.assertEqual(Stub.seen[0][3], {"kind": "webhook", "config": {},
+                                           "rules": {"key": "{cause}", "onEnded": "ask"}})
+        self.assertEqual(Stub.seen[2][3], {"text": "disk full", "key": "disk", "labels": {"host": "vin-5"}})
+        self.assertEqual(Stub.seen[2][4], "alert-7")
+        self.assertEqual(Stub.seen[3][2], {"state": ["held"]})
+        self.assertEqual(Stub.auth[2], "Bearer rtat_secret_1234567890")
+        self.assertEqual(Stub.auth[1], "Bearer rk_test")
+
     def test_every_memory_verb_calls_its_route_with_the_scope_in_the_query(self):
         with self.client() as runtime:
             page = runtime.agents.memory.list("dev", prefix="notes/", limit=1)
@@ -386,7 +449,10 @@ class AgentsTest(unittest.TestCase):
         with self.client() as runtime:
             templates = runtime.agents.templates
             self.assertEqual(list(templates), ["claude-code", "codex", "gemini-cli", "claude-agent-sdk",
-                                               "openai-agents-sdk"])
+                                               "openai-agents-sdk", "review", "judge"])
+            # The reviewer's model keys are its pool of Claude accounts.
+            self.assertEqual(templates.definition("review")["pool"], ["ANTHROPIC_API_KEY"])
+            self.assertEqual(templates.definition("review", "team")["vcpu"], 4)
             if GUIDE.exists():
                 guide = json.loads(GUIDE.read_text())
                 self.assertEqual({"templates": dict(templates), "uses": templates.uses}, guide)

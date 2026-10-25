@@ -122,6 +122,12 @@ public final class Ci {
       return new CiCheckDetail(
           t.object(new Transport.Call("POST", "/v1/ci/checks/" + Transport.segment(id) + ":cancel")));
     }
+
+    /** Run a check again: a new check of its commit, trusted only as the commit's last check was. */
+    public CiCheckDetail rerun(String id) {
+      return new CiCheckDetail(
+          t.object(new Transport.Call("POST", "/v1/ci/checks/" + Transport.segment(id) + ":rerun")));
+    }
   }
 
   /** {@code ci().jobs()}. */

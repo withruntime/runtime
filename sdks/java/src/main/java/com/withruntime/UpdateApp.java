@@ -64,4 +64,14 @@ public final class UpdateApp extends Params<UpdateApp> {
   public UpdateApp releaseWatch(String mode) {
     return set("releaseWatch", mode);
   }
+
+  /** "at_once" or "staged"; see {@link CreateApp#releaseStages}. Apps only. */
+  public UpdateApp releaseStages(String stages) {
+    return set("releaseStages", stages);
+  }
+
+  /** 60 to 3600; see {@link CreateApp#releaseSoakSeconds}. Apps only. */
+  public UpdateApp releaseSoakSeconds(int seconds) {
+    return set("releaseSoakSeconds", seconds);
+  }
 }
