@@ -10,19 +10,20 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
-- **A fork's copies start on another server when the source's is full.**
-  A fork used to start its copies only on its source's server, and answered
-  `no_capacity` when that server had no room, even after pausing the source
-  and taking its snapshot. Now its snapshot is copied to a server with room
-  and the copies start there, as a create from a kept snapshot already did.
-  And a time limit (`timeoutSeconds`) set on a sandbox that is still starting
-  or waking is taken at once, rather than answered `busy`.
-- **Secrets list in pages.** `runtime_secrets` action `list` takes `limit`
-  (1 to 100) and `after`, as its MCP schema said it did; so do
-  `GET /v1/egress-secrets` (its answer's `next` is the next page's `after`),
-  every SDK's `secrets.list` and `runtime secrets ls --limit --after`. The
-  `runtime_secrets` tool now names which action takes each field, and a field
-  sent to the wrong action says which one takes it.
+- **Forks start on another server when the source server is full.**
+  Previously, a fork could start only on the source sandbox's server and
+  returned `no_capacity` when that server was full, even after pausing the
+  source and taking its snapshot. The snapshot is now copied to a server with
+  available capacity and the forks start there, the same way a sandbox is
+  created from a saved snapshot. Setting `timeoutSeconds` on a sandbox that is
+  starting or waking now takes effect immediately instead of returning `busy`.
+- **Pagination for secrets.** The `list` action of the `runtime_secrets` MCP
+  tool now supports pagination with `limit` (1 to 100) and `after`, as its
+  schema documents. Pagination is also supported by `GET /v1/egress-secrets`
+  (pass the response's `next` value as `after` to get the next page),
+  `secrets.list` in every SDK, and `runtime secrets ls --limit --after`. The
+  `runtime_secrets` schema now states which action accepts each field, and a
+  field sent to the wrong action returns an error that names the correct one.
 
 ## 24 October 2026
 
