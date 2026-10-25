@@ -10,6 +10,12 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Fewer stalled fork and snapshot starts on another server.** When a
+  sandbox created or forked from a snapshot starts on a server other than the
+  snapshot's, the snapshot is copied there first. If another sandbox started
+  from the same snapshot while the copy was in progress, the copy failed at
+  its final check and was not retried on that server for 10 minutes, so the
+  sandbox could stay in `starting`. The copy now completes.
 - **Faster wakes from stored copies.** When a sandbox wakes from its stored
   copy, the copy is now restored immediately, alongside other wakes in
   progress. Previously a wake could wait in `starting` for minutes while
