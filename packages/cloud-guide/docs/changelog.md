@@ -10,6 +10,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Faster restores of stored copies on wake.** A sandbox paused for more
+  than an hour wakes from its stored copy. That restore now downloads the
+  memory, device state and disk in parallel, with up to 32 concurrent reads,
+  instead of one part at a time with 8. Previously a wake of a sandbox with
+  9 GB of memory and disk could stay in `starting` for close to a minute.
 - **Fewer stalled fork and snapshot starts on another server.** When a
   sandbox created or forked from a snapshot starts on a server other than the
   snapshot's, the snapshot is copied there first. If another sandbox started
