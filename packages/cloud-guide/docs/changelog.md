@@ -10,6 +10,13 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Snapshots and forks of long-paused sandboxes.**
+  `POST /v1/sandboxes/{id}:snapshot` and `POST /v1/sandboxes/{id}:fork` no
+  longer return 409 `snapshot_unsupported` for a sandbox paused long enough for
+  its disk to move to cold storage. The sandbox is restored from its stored copy
+  first (up to 120 s) and is paused again afterward, including when the request
+  fails. A paused sandbox's disk now moves to cold storage one hour after its
+  last use, and only once its stored copy is verified.
 - **A sandbox can run as root by default.** Create it with `user: "root"`
   (`--user root` in the CLI, `user=` in Python, `.user("root")` in Java,
   `User: "root"` in Go), or set it later with `:update`, and its commands,
