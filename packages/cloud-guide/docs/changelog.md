@@ -10,6 +10,10 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Faster fork starts on a busy server.** When a fork's copy starts on a
+  server other than its source's, its snapshot is now sent immediately, beside
+  any copies Runtime makes in the background. Previously such a start could
+  wait several minutes in `starting` behind those copies.
 - **Snapshots and forks of long-paused sandboxes.**
   `POST /v1/sandboxes/{id}:snapshot` and `POST /v1/sandboxes/{id}:fork` no
   longer return 409 `snapshot_unsupported` for a sandbox paused long enough for
