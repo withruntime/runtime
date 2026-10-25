@@ -10,6 +10,14 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Paused sandboxes move to another server sooner.** When a paused sandbox's
+  server cannot take its wake (for example, the server is being drained), the
+  sandbox wakes on another server from a stored copy. A sandbox paused within
+  the last 30 minutes had no stored copy yet, and its wake returned 503
+  `no_capacity` until one was made, for up to 30 minutes. Its wake now has the
+  copy made immediately, and returns 503 `no_capacity` with the message "its
+  pause is held in memory on its host and is being written so it can move"
+  while it is made; retry after `retryAfterMs`, as for any 503.
 - **Faster fork starts on a busy server.** When a fork's copy starts on a
   server other than its source's, its snapshot is now sent immediately, beside
   any copies Runtime makes in the background. Previously such a start could
