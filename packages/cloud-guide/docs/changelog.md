@@ -10,6 +10,11 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **Faster wakes from stored copies.** When a sandbox wakes from its stored
+  copy, the copy is now restored immediately, alongside other wakes in
+  progress. Previously a wake could wait in `starting` for minutes while
+  restores for other sandboxes, on any server, completed. Each restore also
+  ends up to 2 seconds sooner.
 - **Paused sandboxes move to another server sooner.** When a paused sandbox's
   server cannot take its wake (for example, the server is being drained), the
   sandbox wakes on another server from a stored copy. A sandbox paused within
