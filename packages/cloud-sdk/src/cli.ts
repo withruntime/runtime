@@ -203,6 +203,8 @@ const SANDBOX_HELP = `runtime sandboxes <command>
          [--image <name:tag|imageId> | --snapshot <snapshotId>] [--volume <volumeId>:/data[:snapshot]]...
          [--spread-from <id>]... [--secret NAME]... [--no-secrets]
          [--idle-pause <seconds>] [--no-auto-wake] [--persistent] [--get-or-create]
+         [--user root|sandbox]                                --user root: its commands, processes and
+                                                              shells run as root unless one says otherwise
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
   get <id>                                                    One sandbox, in full
@@ -237,7 +239,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   resize <id> --disk 20480                    Grow a running sandbox's disk live, programs running
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K[=V]]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
-              [--persistent on|off] [--max-total-cost <usd>|none]
+              [--persistent on|off] [--max-total-cost <usd>|none] [--user root|sandbox]
               [--timeout <60-86400 from now>|0] [--on-timeout pause|stop|delete]
                                               Change its settings; persistent keeps it running until stopped;
                                               --env K alone sends K's value from your own environment,
@@ -729,6 +731,7 @@ function describe(info: SandboxInfo): string {
     ...(info.endedAt ? [["ended", info.endedAt]] : []),
     ...(info.stopReason ? [["stop reason", info.stopReason]] : []),
     ["auto wake", info.autoWake === false ? "off" : "on"],
+    ["runs as", info.user === "root" ? "root" : "sandbox user"],
     [
       "idle pause",
       info.idlePauseSeconds
@@ -2550,6 +2553,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           "max-total-cost",
           "timeout",
           "on-timeout",
+          "user",
         ],
       );
       const sbx = await get(args.positional[0]);
@@ -2578,6 +2582,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           : {}),
         ...(onOff("auto-wake") === undefined ? {} : { autoWake: onOff("auto-wake")! }),
         ...(onOff("persistent") === undefined ? {} : { persistent: onOff("persistent")! }),
+        ...(flag(args, "user") ? { user: oneOf(args, "user", ["sandbox", "root"] as const) } : {}),
         ...(cost === undefined
           ? {}
           : {
@@ -2590,7 +2595,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       };
       if (!Object.keys(settings).length)
         throw usage(
-          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent, --max-total-cost, --timeout or --on-timeout.",
+          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent, --user, --max-total-cost, --timeout or --on-timeout.",
         );
       await sbx.update(settings);
       print(describe(sbx.info), sbx.info);
@@ -5404,6 +5409,7 @@ const CREATE_VALUES = [
   "secret",
   "volume",
   "env",
+  "user",
 ];
 /** Dollars from the command line as integer microdollars: 25, 2.50 or 0.000001. */
 function usdMicros(args: Args, name: string): number | undefined {
@@ -5494,6 +5500,7 @@ function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait
       ? { idlePauseSeconds: integer(args, "idle-pause")! }
       : {}),
     ...(has(args, "no-auto-wake") ? { autoWake: false } : {}),
+    ...(flag(args, "user") ? { user: oneOf(args, "user", ["sandbox", "root"] as const) } : {}),
     ...(has(args, "persistent") ? { persistent: true } : {}),
     ...(has(args, "get-or-create") ? { getOrCreate: true } : {}),
     ...(has(args, "trial")

@@ -83,6 +83,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
   }
 
   /**
+   * "root" runs its commands, processes and terminals as root, through the sandbox's passwordless
+   * sudo, unless one names user "sandbox". Default "sandbox"; a copy of a snapshot runs as its
+   * source did. Files written through the files API stay the sandbox user's.
+   */
+  public CreateSandbox user(String user) {
+    return set("user", user);
+  }
+
+  /**
    * Keep it running until you stop it, while credit lasts, with no idle pause unless
    * idlePauseSeconds asks for one, and keep its disk after a stop, for restart(). Paid only.
    */

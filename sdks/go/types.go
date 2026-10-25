@@ -32,6 +32,10 @@ type SandboxInfo struct {
 	// AutoWake: a request (exec, files, a visit to a shared port) wakes it
 	// when paused.
 	AutoWake bool `json:"autoWake"`
+	// User is who its commands, processes and terminals run as when one
+	// names no user: "sandbox" or "root"; empty from an API before 25
+	// October 2026.
+	User string `json:"user,omitempty"`
 	// Persistent: it runs until stopped while credit lasts, never paused for
 	// idleness or a time limit, and its disk is kept after a stop.
 	Persistent bool `json:"persistent"`
@@ -144,6 +148,11 @@ type CreateOptions struct {
 	IdlePauseSeconds int `json:"idlePauseSeconds,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it. Default true.
 	AutoWake *bool `json:"autoWake,omitempty"`
+	// User "root" runs its commands, processes and terminals as root,
+	// through the sandbox's passwordless sudo, unless one names User
+	// "sandbox". Empty is the sandbox user, or for a copy of a snapshot, its
+	// source's. Files written through the files API stay the sandbox user's.
+	User string `json:"user,omitempty"`
 	// Persistent keeps it running until you stop it, while credit lasts, with
 	// no idle pause unless IdlePauseSeconds asks for one. Its disk is billed
 	// as any sandbox's, and kept after a stop, for Restart, as any sandbox's
@@ -296,6 +305,9 @@ type SandboxSettings struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// AutoWake: a request to a paused sandbox wakes it.
 	AutoWake *bool `json:"autoWake,omitempty"`
+	// User is who later commands, processes and terminals run as when one
+	// names no user: "sandbox" or "root"; running ones keep theirs.
+	User *string `json:"user,omitempty"`
 	// IdlePauseSeconds pauses it after this many idle seconds, counted from
 	// now; 0 never, otherwise 60 to 86400 (a shorter
 	// time is raised to 60).

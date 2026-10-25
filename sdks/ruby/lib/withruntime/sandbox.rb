@@ -151,7 +151,8 @@ module WithRuntime
       lifecycle("restart", {}, wait, idempotency_key, room: room_for(wait_for_capacity))
     end
 
-    # Changes name, labels, auto_wake, idle_pause_seconds, persistent or
+    # Changes name, labels, auto_wake, user ("sandbox" or "root": who later
+    # commands run as when one names no user), idle_pause_seconds, persistent or
     # max_total_cost_micros; fields left out stay as they are, and
     # +max_total_cost_micros: :remove+ removes the cap.
     def update(idempotency_key: nil, **settings)

@@ -28,6 +28,9 @@ export type SandboxInfo = {
   idlePauseUnusedOnly?: boolean;
   /** A request (exec, files, terminal, a visit to a shared port) wakes it when paused. */
   autoWake?: boolean;
+  /** Who its commands, processes and terminals run as when one names no
+   * user: "sandbox" (uid 1000) or "root". Absent from APIs before 25 October 2026. */
+  user?: "sandbox" | "root";
   /** Runs until stopped while credit lasts, never paused for idleness or a
    * time limit, and its disk is kept after a stop. */
   persistent?: boolean;
@@ -140,6 +143,11 @@ export type CreateSandbox = {
   idlePauseSeconds?: number;
   /** A request to a paused sandbox wakes it. Default true. */
   autoWake?: boolean;
+  /** "root": its commands, processes and terminals run as root, through the
+   * sandbox's passwordless sudo, unless one says `user: "sandbox"`. Default
+   * "sandbox"; a sandbox made from a snapshot runs as its source did. Files
+   * written through `files` stay the sandbox user's. */
+  user?: "sandbox" | "root";
   /** Keep it running until you stop it, while credit lasts, with no idle
    * pause unless idlePauseSeconds asks for one. Its disk is billed as any
    * sandbox's, and kept after a stop, for restart(), as any sandbox's is.
@@ -216,9 +224,10 @@ export type CommandResult = {
 
 export type ExecOptions = {
   cwd?: string;
-  /** Who runs it: "sandbox" (the default, uid 1000, HOME=/workspace) or
-   * "root", through the sandbox's passwordless sudo with the same
-   * environment and PATH and HOME=/root: no need to prefix it with sudo. */
+  /** Who runs it: "sandbox" (uid 1000, HOME=/workspace) or "root", through
+   * the sandbox's passwordless sudo with the same environment and PATH and
+   * HOME=/root: no need to prefix it with sudo. Default: the sandbox's own
+   * `user`, the sandbox user unless it was made with "root". */
   user?: "sandbox" | "root";
   /** Merged over the sandbox's environment. Put secrets here, never in the command. */
   env?: Record<string, string>;
@@ -467,6 +476,9 @@ export type SandboxSettings = {
   env?: Record<string, string | null>;
   /** A request to a paused sandbox wakes it. */
   autoWake?: boolean;
+  /** Who later commands, processes and terminals run as when one names no
+   * user; running ones keep theirs. */
+  user?: "sandbox" | "root";
   /** Pause after this many seconds with no activity, counted from now; 0
    * never, otherwise 60 to 86400 (a shorter time is raised to 60). */
   idlePauseSeconds?: number;

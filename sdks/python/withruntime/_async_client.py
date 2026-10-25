@@ -510,7 +510,7 @@ class _Transport:
 #: tests/create-types.test.ts holds this list to the API's own schema.
 _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
-    "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "persistent", "max_total_cost_micros",
+    "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "user", "persistent", "max_total_cost_micros",
     "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "volumes",
     "env", "tailscale", "secrets",
 )
@@ -1465,6 +1465,8 @@ class AsyncMachine:
         """Changes its settings; what you leave out stays as it is: ``name``,
         ``labels``, ``env`` (a value sets a variable, None removes it; commands
         started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
+        ``user`` (``"root"`` or ``"sandbox"``: who later commands, processes
+        and terminals run as when one names no user),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
         from now; 0 never, otherwise 60 to 86400, a shorter time raised to 60;
         a new sandbox has 300),

@@ -211,8 +211,9 @@ public final class Sandbox implements AutoCloseable {
   }
 
   /**
-   * Changes name, labels, autoWake, idlePauseSeconds, persistent or maxTotalCostMicros; fields left
-   * out stay as they are, and a null maxTotalCostMicros removes the cap.
+   * Changes name, labels, autoWake, user ("sandbox" or "root": who later commands run as when
+   * one names no user), idlePauseSeconds, persistent or maxTotalCostMicros; fields left out stay
+   * as they are, and a null maxTotalCostMicros removes the cap.
    */
   public Sandbox update(Map<String, Object> settings) {
     return lifecycle("update", new LinkedHashMap<>(settings), false, null);

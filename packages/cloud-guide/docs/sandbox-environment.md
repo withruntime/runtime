@@ -56,7 +56,12 @@ npx playwright install chromium
   there belong to you.
 - `sudo` works without a password: you are root inside your own sandbox. To run
   a command as root without typing `sudo`, give it `user: "root"` (exec,
-  background processes and terminals; `--root` in the CLI). Root
+  background processes and terminals; `--root` in the CLI). To run every
+  command as root, create the sandbox with `user: "root"` (`--user root` in
+  the CLI), or set it later with `:update`: its commands, background
+  processes and terminals then run as root unless one names
+  `user: "sandbox"`, and a fork or a copy of its snapshot runs as root too.
+  Files written through the files API and SSH logins stay `runtime`'s. Root
   cannot change what the sandbox may reach, how much CPU and memory it has, or
   what it costs; those are enforced on the host, outside the sandbox.
 - `PATH` starts with `/workspace/.local/bin`, then `/usr/local/bin`, `/usr/bin`

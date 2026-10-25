@@ -69,6 +69,14 @@ public final class SandboxInfo extends JsonObject {
     return getBoolean("autoWake");
   }
 
+  /**
+   * Who its commands, processes and terminals run as when one names no user: "sandbox" or
+   * "root"; null from an API before 25 October 2026.
+   */
+  public String user() {
+    return getString("user");
+  }
+
   public Instant createdAt() {
     return getInstant("createdAt");
   }

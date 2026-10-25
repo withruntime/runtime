@@ -176,6 +176,8 @@ sandbox is running (`--no-wait` returns at once). Its options:
   paused one paused until `wake`
 - `--persistent` keeps a paid sandbox running until you stop it, idle or not,
   while credit lasts
+- `--user root` runs its commands, background processes and shells as root,
+  with no `sudo` in front, unless one says otherwise
 - `--get-or-create` with `--name` prints the id of the sandbox that already has
   the name, woken if paused, instead of failing with `name_taken`
 
@@ -297,6 +299,7 @@ stays as it is:
 
 ```bash no-run
 runtime sandboxes update "${id}" --idle-pause 0 --auto-wake off
+runtime sandboxes update "${id}" --user root    # later commands run as root
 runtime sandboxes update "${id}" --persistent on --max-total-cost 50   # dollars
 runtime sandboxes update "${id}" --name dev-2 --label team=search
 runtime sandboxes update "${id}" --env MODE=drain --unset-env QUEUE_URL

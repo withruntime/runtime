@@ -25,6 +25,7 @@ const OPTIONS: Record<string, { flag: string; micros?: true }> = {
   onLeaseEnd: { flag: "--on-timeout" },
   idlePauseSeconds: { flag: "--idle-pause" },
   autoWake: { flag: "--no-auto-wake / --auto-wake" },
+  user: { flag: "--user" },
   persistent: { flag: "--persistent" },
   funding: { flag: "--trial / --paid" },
   image: { flag: "--image" },
