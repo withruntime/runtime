@@ -10,6 +10,16 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
 
 ## 25 October 2026
 
+- **CI/CD checks back off when the region is short of room.** When a create
+  for a check's machine returns `no_capacity`, `host_memory_pressure`, `busy`,
+  `rate_limited` or a 429 `quota_exceeded`, the checks of the same account
+  now send at most 4 creates per second together, and none before the
+  response's `Retry-After`, until a create returns a machine again. The pace
+  then doubles with each machine created and is lifted at 64 creates per
+  second, so checks still get all their machines immediately once room is
+  available. Previously each waiting check retried every 1 to 5 seconds, one
+  create per machine per server, which could add up to hundreds of refused
+  creates per second.
 - **Faster restores of stored copies on wake.** A sandbox paused for more
   than an hour wakes from its stored copy. That restore now downloads the
   memory, device state and disk in parallel, with up to 32 concurrent reads,
