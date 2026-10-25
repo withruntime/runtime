@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -90,6 +90,11 @@
       "types": "./dist/apps/index.d.ts",
       "import": "./dist/apps/index.js",
       "default": "./dist/apps/index.js"
+    },
+    "./functions": {
+      "types": "./dist/functions/index.d.ts",
+      "import": "./dist/functions/index.js",
+      "default": "./dist/functions/index.js"
     },
     "./e2b": {
       "types": "./dist/e2b/index.d.ts",

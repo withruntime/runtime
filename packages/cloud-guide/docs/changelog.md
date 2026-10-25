@@ -45,6 +45,18 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   first (up to 120 s) and is paused again afterward, including when the request
   fails. A paused sandbox's disk now moves to cold storage one hour after its
   last use, and only once its stored copy is verified.
+
+<!-- launch: ci -->
+
+- **CI/CD's build cache keeps any file by its hash.** In a check's step,
+  `runtime-build-cache put <file>...` stores each file in your repository's
+  build cache under its SHA-256 and prints the key.
+  `runtime-build-cache get <sha256> <file>` writes it back, and fails unless
+  the bytes match the key. Build once in a check and deploy that exact output
+  later, with nothing built again. See [Rust build cache](./ci#rust-build-cache).
+
+<!-- /launch: ci -->
+
 - **A sandbox can run as root by default.** Create it with `user: "root"`
   (`--user root` in the CLI, `user=` in Python, `.user("root")` in Java,
   `User: "root"` in Go), or set it later with `:update`, and its commands,
@@ -89,6 +101,18 @@ arrives in the [RSS feed](https://withruntime.com/changelog/feed.xml).
   field sent to the wrong action returns an error that names the correct one.
 
 ## 24 October 2026
+
+<!-- launch: functions -->
+
+- **Functions in the TypeScript SDK, with a guide.** `runtime.functions`
+  creates, deploys, rolls back, lists the copies of, reads the logs of and
+  deletes a Function, as `runtime.apps` does an App. It can also be imported
+  alone, as `functions` from `withruntime/functions`. The
+  [Functions guide](./functions) covers deploys, sleep and wake,
+  `sleepAfterMs` and the other settings, logs, secrets and errors, in the
+  SDKs, the CLI (`runtime functions`), MCP and the API (`/v1/functions`).
+
+<!-- /launch: functions -->
 
 - **Internet off with an allow list reaches the list.** A sandbox created or
   set with `network: {internet: false, allow: [...]}` was refused every

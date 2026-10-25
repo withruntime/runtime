@@ -37,6 +37,7 @@ export const expected: Record<string, string> = {
   "withruntime/agents": "agents",
   "withruntime/containers": "containers",
   "withruntime/apps": "apps",
+  "withruntime/functions": "functions",
   "withruntime/builds": "builds",
   "withruntime/ci": "ci",
   "withruntime/browsers": "browsers",

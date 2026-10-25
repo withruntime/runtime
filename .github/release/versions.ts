@@ -127,6 +127,23 @@ export const VERSION_PATHS: readonly string[] = [
   ...new Set(PKGS.flatMap((p) => VERSION_FILES[p].map((s) => s.path))),
 ];
 
+/** Where each SDK's published code is: a change there ships only in a
+ * release, so it needs a change file. Tests, docs and build files don't. */
+export const SHIPPED: Partial<Record<Pkg, RegExp>> = {
+  js: /^packages\/cloud-sdk\/src\/(?!.*\.test\.ts$)/,
+  python: /^sdks\/python\/withruntime\//,
+  go: /^sdks\/go\/(?!.*_test\.go$)[^/]+\.go$/,
+  java: /^sdks\/java\/src\/main\//,
+  ruby: /^sdks\/ruby\/lib\//,
+};
+
+/** A file whose change a pull request's SDK check reads: a version line, a
+ * change file, or an SDK's published code (which needs a change file). */
+export const sdkCheckReads = (file: string) =>
+  VERSION_PATHS.includes(file) ||
+  file.startsWith(`${CHANGES}/`) ||
+  Object.values(SHIPPED).some((re) => re.test(file));
+
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 type Read = (path: string) => string | undefined;

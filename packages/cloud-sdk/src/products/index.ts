@@ -34,6 +34,7 @@ import { desktops } from "./desktops.js";
 // imports of files the hub loads, so importing them runs nothing in the hub
 // (agents/hub-sdk-products.test.ts parses every product file the hub loads).
 import { apps } from "./apps.js";
+import { functions } from "./functions.js";
 
 /* HOW A LANE ADDS A PRODUCT TO THE SDK
  *
@@ -84,6 +85,8 @@ export const clientExtensions = {
   // A private beta (PRODUCT_BETAS): an account outside it is refused with
   // product_in_beta until Apps launches.
   apps,
+  // The same until Functions launches.
+  functions,
 } satisfies Record<string, (t: Transport) => unknown>;
 
 export const sandboxExtensions = {

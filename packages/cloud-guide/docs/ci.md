@@ -777,6 +777,16 @@ machine is handed its output instead.
   the crate's build script. Name such files with
   `cargo:rerun-if-changed` in a build script (as sqlx asks for its
   migrations), or turn the cache off for that step.
+- **Any file, by its hash:** a step can keep a file it built in the same
+  store, and a later step or check can read it back.
+  `runtime-build-cache put <file>...` stores each file under its own SHA-256
+  and prints `<sha256> <bytes> <file>`.
+  `runtime-build-cache get <sha256> <file>` writes it back and fails unless
+  the bytes hash to that key, so the reader trusts the key it was given, never
+  the store. Each file is 1 GiB at
+  most. Files are written where the check's compiles are: by your production
+  branch and your repository's writers, to the layer every check reads; by a
+  pull request from anyone else, to a layer only it reads.
 
 `runtime-build-cache build` builds a workspace once for every crate's check:
 its test binaries (`cargo test --workspace --no-run`), its lints and the doc
