@@ -1,46 +1,46 @@
 # Runtime vs Cloudflare Sandbox
 
-Runtime bills CPU by use, like Cloudflare's Sandbox SDK, and costs **{{saving:cloudflare}} less** for an agent that mostly waits on a model.
+Runtime bills CPU by use, like Cloudflare's Sandbox SDK. It costs **{{saving:cloudflare}} less** for an agent that mostly waits on a model.
 
 **The saving:** 1,000 one-minute runs of a 2 vCPU sandbox cost **{{cost:runtime}} on Runtime
 and {{cost:cloudflare}} on Cloudflare**. At 100,000 runs a month that is {{cost:runtime:100000}} against
-{{cost:cloudflare:100000}}, **{{=$0 less:cloudflare:100000}} a month saved**, with no Worker to deploy and no {{term:cloudflare:workers-paid}} plan to
+{{cost:cloudflare:100000}}, **{{=$0 less:cloudflare:100000}} a month saved**. You need no Worker to deploy and no {{term:cloudflare:workers-paid}} plan to
 hold.
 
-Weighing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-sandbox-alternatives) ranks the other providers by the cost of the same job.
+Comparing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-sandbox-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
-- **{{=n0 100 * ( 1 - cpu-rate / rate:cloudflare:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} a vCPU-hour on Runtime and {{rate:cloudflare:cpu}} on Cloudflare. Memory is cheaper too, {{memory-rate}} per GiB-hour
+- **{{=n0 100 * ( 1 - cpu-rate / rate:cloudflare:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} a vCPU-hour on Runtime and {{rate:cloudflare:cpu}} on Cloudflare. Memory is cheaper too, at {{memory-rate}} per GiB-hour
   against {{rate:cloudflare:memory}}.
-- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}}
+  pauses by itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
+  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
   Runtime's servers.
 - **Starts in milliseconds.** Cloudflare states container cold starts take
   {{speed:cloudflare:create}}. On Runtime's servers a new sandbox is running
   {{server-create}} after the create request, and {{server-create-template}} for a size with
   no warm spare ([speed](./speed)).
 - **An uptime promise that pays itself.** Paid accounts are promised
-  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
-  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
+  {{uptime-promise}} API uptime each month. A month below it returns {{uptime-credit}} of that
+  month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).
 - **Memory sized to the job.** Cloudflare needs at least 3 GiB per vCPU, so a
   2 vCPU sandbox pays for 6 GiB. On Runtime you choose vCPUs and memory
   separately and pay for no more.
 - **Work survives idle time.** A paused Runtime sandbox wakes with its files,
   memory and running processes, kept while you have credit. A Cloudflare sandbox
-  restores saved files from filesystem-only snapshots in public beta; memory
+  restores saved files from filesystem-only snapshots in public beta. Memory
   and processes restart. Snapshots expire 30 days after creation or last restore.
 - **A desktop built in.** Start a Linux desktop in any sandbox and drive it
   with clicks, keys and screenshots. Cloudflare removed its Sandbox SDK desktop
   in version 0.10.2, in June 2026.
 - **Call it from any backend, with no platform to join.** Runtime is an API
-  with JavaScript, Python, Go, Ruby and Java SDKs, a CLI and an [MCP server](./mcp); prepaid
+  with JavaScript, Python, Go, Ruby and Java SDKs, a CLI and an [MCP server](./mcp). Prepaid
   credit from {{topup-min}} is the whole account. The Sandbox SDK runs inside a Worker on
   the Workers Paid plan, deployed with Wrangler and a local Docker build.
-- **Keys the sandbox never sees.** Store an API key once; the sandbox holds a
-  placeholder and Runtime's proxy adds the value only to HTTPS requests to the
-  hosts you name, so a prompt injection has nothing to leak ([security](./security)).
+- **Keys the sandbox never sees.** Store an API key once. The sandbox holds a
+  placeholder. Runtime's proxy adds the value only to HTTPS requests to the
+  hosts you name. A prompt injection has nothing to leak ([security](./security)).
 - **Your credit matched.** Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
   ([welcome match](./pricing#welcome-match)).
 - **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
@@ -67,7 +67,7 @@ documentation, checked {{checked:cloudflare}}.
 | Memory billing | {{memory-rate}} per reserved GiB-hour                                                     | {{rate:cloudflare:memory}} per provisioned GiB-hour                  |
 | Disk           | Included while running; paused storage {{paused-storage-rate}} per GB (10⁹ bytes) a month | {{rate:cloudflare:disk}} per provisioned GB-hour                     |
 | Plan fee       | None; prepaid credit from {{topup-min}}                                                   | Workers Paid, at least {{term:cloudflare:workers-paid}} a month      |
-| Free start     | {{included-machine}} every month, no card                                                 | No free tier; the plan includes 375 vCPU-minutes a month             |
+| Free start     | {{included-machine}} in the first 30 days, no card                                        | No free tier; the plan includes 375 vCPU-minutes a month             |
 | Sizes          | Up to {{max-vcpu}} vCPUs and {{max-memory}} paid, chosen apart                            | Up to 4 vCPUs, 12 GiB and 20 GB; at least 3 GiB per vCPU             |
 | When idle      | Pause keeps files and memory; kept while you have credit                                  | Filesystem-only snapshots; processes restart                         |
 | Interfaces     | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs                          | A TypeScript SDK called from a Cloudflare Worker                     |
@@ -75,9 +75,9 @@ documentation, checked {{checked:cloudflare}}.
 ## Cost for the same job
 
 Take 1,000 runs of a 2 vCPU sandbox. Each run lasts 60 seconds and keeps the CPU
-busy for 20 CPU-seconds: an agent that spends most of its time waiting for a
+busy for 20 CPU-seconds. This is an agent that spends most of its time waiting for a
 model. Runtime gets 4 GiB. Cloudflare's smallest custom 2 vCPU size has 6 GiB, because
-a custom size needs at least 3 GiB per vCPU; it gets 12 GB of disk, the size in
+a custom size needs at least 3 GiB per vCPU. It gets 12 GB of disk, the size in
 Cloudflare's own example.
 
 ```
@@ -100,11 +100,11 @@ Cloudflare  CPU    1,000 × 20 s × {{=$6 rate:cloudflare:cpu / 3600}}          
   disk) costs $1.03 for the same runs. Runtime's nearest shape, 1 vCPU and
   4 GiB, still costs {{cost:runtime}}, because CPU is billed as measured.
 
-The Cloudflare figure assumes each sandbox is destroyed when its run ends; one
+The Cloudflare figure assumes each sandbox is destroyed when its run ends. One
 left alone keeps billing memory and disk until its inactivity timeout ends.
 Workers requests, Durable Object time, the {{term:cloudflare:workers-paid}} plan minimum, network, taxes and
-free allowances are left out of both. On Runtime, inbound traffic is free, and
-each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See
+free allowances are left out of both. On Runtime, inbound traffic is free. Each
+account's first {{outbound-allowance}} out a month is free. After that, outbound traffic costs {{outbound-rate}} per GB (10⁹ bytes). See
 [pricing](./pricing) for Runtime's terms.
 
 ## How to switch
@@ -118,15 +118,15 @@ merge.
 
 Runtime's SDK runs a Worker written for Cloudflare's 0.x `@cloudflare/sandbox`
 API, as this page describes from SDK version 0.18.0. The switch is the import,
-one config block and one secret, not literally one line. Change the package
-name in both lines that name it:
+one config block and one secret, not literally one line. Change the
+package name in both lines that name it:
 
 ```ts no-run
 import { getSandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
 export { Sandbox } from "withruntime/cloudflare"; // was: from "@cloudflare/sandbox"
 ```
 
-In `wrangler.jsonc` (or `wrangler.toml`), delete the `containers` block: the
+In `wrangler.jsonc` (or `wrangler.toml`), delete the `containers` block. The
 sandbox runs on Runtime, so there is no image to build and no Docker on your
 machine. Keep the `Sandbox` Durable Object binding, its migration and
 `nodejs_compat` as they are.
@@ -145,7 +145,7 @@ npx wrangler secret put RUNTIME_API_KEY
 ```
 
 `getSandbox(env.Sandbox, "my-sandbox")` then reaches a Runtime sandbox kept
-for that name, and `exec`, streaming, files, background processes, the code
+for that name. `exec`, streaming, files, background processes, the code
 interpreter, sessions, `gitCheckout` and `exposePort` with `proxyToSandbox`
 work as Cloudflare documents them. On 18 October 2026 Cloudflare's get-started
 Worker, its `minimal` and `alpine` examples and the runnable 0.x examples from
@@ -155,7 +155,7 @@ those changes.
 What works differently:
 
 - **Calls Runtime has no counterpart for refuse by name**, before anything
-  happens, and the message says what to use instead: backups (Runtime's
+  happens. The message says what to use instead: backups (Runtime's
   snapshots), tunnels and `wsConnect` (the URL `exposePort` returns),
   terminals, outbound interception in a `Sandbox` subclass (the sandbox's
   network rules and secrets), and container settings such as
@@ -164,9 +164,9 @@ What works differently:
   `autoCleanup` refuse, and a process's `pid` is not reported.
 - **At most 4 code contexts per sandbox.** Cloudflare's container has no fixed
   number. A fifth `createCodeContext` throws and says to delete one with
-  `deleteCodeContext()`; `runCode` without a context uses one per language.
-- **Errors keep their message.** Across a Durable Object call an error arrives
-  with its message and without its `code` field, on Cloudflare too, so match
+  `deleteCodeContext()`. `runCode` without a context uses one per language.
+- **Errors keep their message.** Across a Durable Object call, an error arrives
+  with its message and without its `code` field, on Cloudflare too. So match
   on the message.
 
 Version 1.0 of `@cloudflare/sandbox` drops `getSandbox` and the `Sandbox`
@@ -217,7 +217,7 @@ your Wrangler config:
 compatibility_flags = ["nodejs_compat"]
 ```
 
-A Worker has no saved login, so create a key at
+A Worker has no saved login. So create a key at
 https://withruntime.com/account/keys and store it as a Worker secret, never in
 `wrangler.toml` or the source:
 
@@ -251,9 +251,9 @@ export default {
 };
 ```
 
-Earlier SDK versions fail inside a Worker with `connection_error`, and without
-`nodejs_compat` the Worker does not start. This sample is type-checked against
-the SDK, and on 23 September 2026 it ran under `wrangler dev`: it created a
+Earlier SDK versions fail inside a Worker with `connection_error`. Without
+`nodejs_compat`, the Worker does not start. This sample is type-checked against
+the SDK. On 23 September 2026 it ran under `wrangler dev`: it created a
 sandbox, ran the command and stopped it.
 
 What does not carry over:
@@ -263,7 +263,7 @@ What does not carry over:
   entry are not needed for Runtime. Remove them only when nothing uses
   Cloudflare's sandboxes any more.
 - **Sandboxes by name.** `getSandbox(env.Sandbox, "my-sandbox")` becomes
-  `Sandbox.getOrCreate("my-sandbox", { client: runtime })`: it returns the
+  `Sandbox.getOrCreate("my-sandbox", { client: runtime })`. It returns the
   sandbox with that name, woken if it is paused, or creates it. Names are
   unique in your Runtime account, so no KV entry is needed to find it again.
 - **`proxyToSandbox`.** Cloudflare routes a sandbox's preview URLs through your
@@ -277,11 +277,11 @@ What does not carry over:
   that has its image, across Cloudflare's network. Runtime runs in one US
   region.
 - **Your app already lives on Workers.** Sandboxes then share its account,
-  billing and bindings, and filesystem-only snapshots can restore saved files, while R2 bucket data
+  billing and bindings. Filesystem-only snapshots can restore saved files, while R2 bucket data
   outlives individual instances.
 - **Very large fleets.** A Cloudflare account can run 1,500 vCPUs and 6 TiB of
-  memory at once. A paid Runtime account runs {{paid-sandboxes}} sandboxes, {{account-vcpus}} vCPUs and {{account-memory}}
-  at once, raised on request.
+  memory at the same time. A paid Runtime account runs {{paid-sandboxes}} sandboxes, {{account-vcpus}} vCPUs and {{account-memory}}
+  at the same time, raised on request.
 
 ## Sources
 

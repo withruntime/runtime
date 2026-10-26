@@ -4,10 +4,10 @@ launch: desktops
 
 # Desktops
 
-A desktop is a Linux desktop on a sandbox of its own, for agents that use a
-computer the way a person does: watch it through a private live view, take
-screenshots, move the mouse, click, type and open pages in its Chromium. It
-is billed as its sandbox, at the sandbox rates.
+A desktop is a Linux desktop that runs on its own sandbox. It suits agents that
+use a computer the way a person does. The agent can watch it through a private
+live view, take screenshots, move the mouse, click, type and open pages in its
+Chromium. It is billed as its sandbox, at the sandbox rates.
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -39,9 +39,9 @@ npx withruntime desktops rm qa
   where the pointer is;
 - `open` opens a `url` in Chromium; `launch` runs a program (`argv`).
 
-`screenshot` (`POST /v1/desktops/{id}:screenshot`) answers the screen as PNG,
+`screenshot` (`POST /v1/desktops/{id}:screenshot`) returns the screen as PNG,
 or JPEG with `{"format": "jpeg"}`. Like `act` and the live view, it needs a
-key that may run commands: a read-only key reads a desktop's state, never its
+key that may run commands. A read-only key reads a desktop's state, never its
 screen. The MCP tools are `runtime_desktops_act` and
 `runtime_desktops_screenshot`.
 
@@ -51,15 +51,15 @@ screen. The MCP tools are `runtime_desktops_act` and
   default.
 - **memoryMiB**: 1024 to 16384, 2048 by default; **vcpu**: 1 to 16, 2 by
   default.
-- **timeoutSeconds**: 60 to 86400, 3600 by default; at its end the desktop and
+- **timeoutSeconds**: 60 to 86400, 3600 by default. When it ends, the desktop and
   its sandbox are deleted.
-- **idlePauseSeconds**: it pauses after this long with nothing happening,
-  memory kept, and wakes on the next request; 0 never pauses.
+- **idlePauseSeconds**: the desktop pauses after this long with no activity,
+  with memory kept. It wakes on the next request. 0 never pauses.
 
-`liveViewUrl` opens the live desktop in a browser and carries a private token
-that ends at `expiresAt`; `get` the desktop again for a fresh one, which
-never wakes a paused desktop. `sandboxId` is its sandbox's id, and
-`actions.record` records the screen to an MP4 in the sandbox.
+`liveViewUrl` opens the live desktop in a browser. It carries a private token
+that expires at `expiresAt`. Call `get` again for a fresh one. `get` never wakes
+a paused desktop. `sandboxId` is its sandbox's id, and `actions.record` records
+the screen to an MP4 in the sandbox.
 
 ## Change and delete
 
@@ -74,5 +74,5 @@ no price of their own.
 
 ## Limits
 
-A desktop is a sandbox, so it counts toward the account's sandboxes at once
+A desktop is a sandbox, so it counts toward the account's sandboxes immediately
 and their memory ([limits](./limits)).

@@ -202,8 +202,9 @@ class AsyncAgentSession:
         """``async for`` each event of the log after seq ``after`` (0: from the
         start), in order, as it comes: {seq, kind, actor, body, createdAt},
         the words in ``body["text"]``. ``kind`` is input, answer, reply, ask,
-        status, result, error, note, or child (a child session's end, posted
-        into its parent's log). Each read waits up to 30 seconds on the
+        status, result, error, note, child (a child session's end, posted
+        into its parent's log), turn (a model turn) or tool (a tool call):
+        the trace's spans, their fields in ``body`` (see ``trace``). Each read waits up to 30 seconds on the
         server for a new one; the loop ends once the session has ended and
         its whole log has been given."""
         ended = False
@@ -218,6 +219,30 @@ class AsyncAgentSession:
                 if not data:
                     return
                 ended = True
+
+    async def trace(self, *, format: str = "json", after: int = 0, limit: int | None = None) -> dict[str, Any]:
+        """A page of its trace: every model turn and tool call its harness made.
+        ``format="json"``: {sessionId, totals, models, tools, spans,
+        nextAfter}: the whole session's totals, by model and by tool, and up
+        to ``limit`` spans (200 by default, 500 at most) after ``after``;
+        call again with ``after=page["nextAfter"]`` until it is None. Each
+        turn has its model, startedAt, durationMs, firstTokenMs, inputTokens
+        (uncached), outputTokens, cacheReadTokens, cacheWriteTokens, costUsd
+        (at the provider's list price; None for an unpriced model),
+        stopReason, status, error and toolCalls; each tool call its name,
+        turn, startedAt, durationMs, input, output and error.
+        ``format="otlp"``: the same page as OpenTelemetry traces, OTLP/JSON
+        (GenAI semantic conventions) with nextAfter, to POST without
+        nextAfter to any collector's /v1/traces; the first page holds the
+        session's root span."""
+        if format not in ("json", "otlp"):
+            raise InvalidRequestError("format is json or otlp.", code="invalid_request",
+                                      details={"field": "format"},
+                                      hint="Fix the option and call again; nothing was sent.")
+        query: dict[str, Any] = {"format": format, "after": after}
+        if limit is not None:
+            query["limit"] = limit
+        return await self._t.json("GET", self._path("/trace"), query=query)
 
     async def stop(self) -> AgentSessionRecord:
         """Ask it to stop. A queued session ends at once; a running or waiting
@@ -305,7 +330,12 @@ class AsyncAgentAsks:
     ({label, detail}), a recommended ``pick`` and maybe an expiry. Asks of
     one agent's sessions sharing a memory, with the same ``step``, are one
     row while it is open, and one answer reaches every session asking. ``state``: open, answered,
-    withdrawn, expired (no pick) or closed (every asking session ended)."""
+    withdrawn, expired (no pick) or closed (every asking session ended).
+
+    A tool call the agent's ``permissions`` hold is an ask too, with the
+    options Allow and Deny and the call in ``toolCall`` ({tool, input,
+    toolUseId, seq, policy, reasonCode}): ``approve`` lets it run, ``deny``
+    keeps it from running."""
 
     def __init__(self, t: Any) -> None:
         self._t = t
@@ -339,6 +369,16 @@ class AsyncAgentAsks:
             raise InvalidRequestError("An answer is an option's label, text, or both.")
         return await self._t.json("POST", f"/v1/agents/asks/{_enc(ask_id)}/answer",
                                   body=_fields(option=option, text=text), idempotency_key=idempotency_key)
+
+    async def approve(self, ask_id: str, *, idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Lets a tool call the agent's permissions held run (its ask's Allow)."""
+        return await self.answer(ask_id, "Allow", idempotency_key=idempotency_key)
+
+    async def deny(self, ask_id: str, message: Optional[str] = None, *,
+                   idempotency_key: Optional[str] = None) -> dict[str, Any]:
+        """Keeps a held tool call from running (its ask's Deny); ``message`` is
+        told to the agent as the reason."""
+        return await self.answer(ask_id, "Deny", text=message, idempotency_key=idempotency_key)
 
 
 class AsyncAgentTriggers:
@@ -497,6 +537,15 @@ class AsyncAgents:
         self.memory = AsyncAgentMemory(t)
         self.templates = AgentTemplates()
 
+    def anthropic(self) -> dict[str, str]:
+        """Claude Managed Agents' API on Runtime: the options Anthropic's SDK
+        takes, so code written for it runs here unchanged:
+        ``anthropic.Anthropic(**runtime.agents.anthropic())``. Sessions call
+        the model with the account's own Anthropic key, the egress secret
+        ANTHROPIC_API_KEY (``runtime secrets set ANTHROPIC_API_KEY --host
+        api.anthropic.com``)."""
+        return {"base_url": f"{self._t.base_url}/anthropic", "api_key": self._t._api_key()}
+
     async def create(self, name: str, definition: dict[str, Any], *, labels: Optional[dict[str, str]] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Make an agent, version 1. ``definition`` as the API takes it:
@@ -506,14 +555,20 @@ class AsyncAgents:
         ``memoryMiB`` (4 vCPU and 8 GiB unless set; a definition from a
         snapshot takes neither, InvalidRequestError, since a snapshot keeps
         its own size), ``instructions``, ``env``, ``secrets``, ``mcp``,
-        ``volumes``, ``idlePauseSeconds``, ``maxSessionSeconds``,
+        ``volumes``, ``network`` ({internet, allow}: with allow, each
+        session's sandbox reaches only those hosts, held by its network rules
+        from its first packet), ``idlePauseSeconds``, ``maxSessionSeconds``,
         ``maxConcurrent``, ``maxSessionDollars`` (more than 0, at most 10000,
         5 unless set: the session and every session under it, the root's
         covering its tree; a tree at it stops with reason ``budget``),
         ``maxDayDollars`` (more than 0, at most 100000, 100 unless set: the
         agent's sessions started that UTC day; an agent at it starts nothing
         new, ``budget_reached`` (402), until the next day),
-        ``template``;
+        ``template``, ``permissions`` ({default, tools}: which tool calls run,
+        always_allow; wait for a person's Allow or Deny in the inbox,
+        always_ask; or are read by Runtime, auto; by the harness's tool name,
+        an MCP server as mcp:<name>, or a family: shell, edit, read, web,
+        mcp);
         ``templates.definition`` makes one.
         A name in use is refused with ConflictError ``name_taken``; the names
         sessions, triggers, templates and approvals are refused, since they are

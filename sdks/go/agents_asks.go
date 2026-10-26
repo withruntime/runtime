@@ -73,6 +73,22 @@ type AgentAsk struct {
 	CreatedAt  time.Time         `json:"createdAt"`
 	UpdatedAt  time.Time         `json:"updatedAt"`
 	ClosedAt   *time.Time        `json:"closedAt"`
+	// ToolCall is the tool call it holds, answered Allow or Deny; nil for
+	// any other ask.
+	ToolCall *AgentAskToolCall `json:"toolCall"`
+}
+
+// AgentAskToolCall is a call the agent's permissions hold for a person.
+type AgentAskToolCall struct {
+	// Tool is the harness's name for it: Bash, apply_patch, mcp__github__create_issue.
+	Tool      string         `json:"tool"`
+	Input     map[string]any `json:"input"`
+	ToolUseID string         `json:"toolUseId,omitempty"`
+	// Seq is its tool_call event in the session's log.
+	Seq int64 `json:"seq,omitempty"`
+	// Policy is always_ask or auto; ReasonCode says why auto held it.
+	Policy     string `json:"policy"`
+	ReasonCode string `json:"reasonCode,omitempty"`
 }
 
 // AgentAskListOptions filter the inbox, every field optional.
@@ -148,6 +164,17 @@ func (s *AgentAskService) Answer(ctx context.Context, id, option string, opts *A
 	}
 	var out AgentAsk
 	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: askPath(id) + "/answer", body: body, key: opts.IdempotencyKey}, &out)
+}
+
+// Approve lets a tool call the agent's permissions held run (its ask's Allow).
+func (s *AgentAskService) Approve(ctx context.Context, id string) (*AgentAsk, error) {
+	return s.Answer(ctx, id, "Allow", nil)
+}
+
+// Deny keeps a held tool call from running (its ask's Deny); message, when
+// not empty, is told to the agent as the reason.
+func (s *AgentAskService) Deny(ctx context.Context, id, message string) (*AgentAsk, error) {
+	return s.Answer(ctx, id, "Deny", &AgentAnswerOptions{Text: message})
 }
 
 func askPath(id string) string { return "/v1/agents/asks/" + url.PathEscape(id) }

@@ -43,11 +43,11 @@ connected, the server offers one tool, `runtime_connect`:
 
 1. The agent calls it and shows you a link and a code.
 2. You approve **Connect agent** in your browser.
-3. The agent calls it again, and every Runtime tool appears. Its answer
-   carries the server's full instructions (limits, cleanup, safe retries),
-   which the agent read only the short version of before it connected. A
-   client that does not refresh its tools when told shows them once the server
-   or the client restarts: the connection is saved, so it connects at once.
+3. The agent calls it again, and every Runtime tool appears. The response
+   carries the server's full instructions (limits, cleanup, safe retries).
+   Before it connected, the agent had read only the short version. A client
+   that does not refresh its tools when told shows them after the server or
+   the client restarts. The connection is saved, so it connects immediately.
 
 A machine already connected by the CLI (`npx withruntime login`) skips this
 step.
@@ -56,11 +56,11 @@ Approve only a connection you started and whose code matches. It can manage
 resources and spend prepaid credit across your account until you revoke it
 with `npx withruntime logout` or on the API keys page.
 
-The command is a bridge: it forwards MCP messages as they are to the remote
+The command is a bridge. It forwards MCP messages as they are to the remote
 server over the saved connection, so no key sits in the agent's configuration.
-It needs Node 22.12 or later, loads its one dependency, `undici`, only when a proxy
-applies, and does not create an account. For CI, `RUNTIME_API_KEY` from a secret
-manager overrides the saved connection.
+It needs Node 22.12 or later. It loads its one dependency, `undici`, only when a
+proxy applies. It does not create an account. For CI, `RUNTIME_API_KEY` from a
+secret manager overrides the saved connection.
 
 ## Remote connection
 
@@ -103,11 +103,11 @@ names `https://withruntime.com` as the authorization server. It supports OAuth
 
 For ChatGPT, use `https://api.withruntime.com/mcp?profile=chatgpt`. Its tools
 keep persistent credentials out of the conversation. Starting or reading a
-sandbox MCP server returns safe state and scoped preview links; retrieve its
-gateway token or authorization headers through the website or a local CLI
-when another client needs them. It also leaves out what a ChatGPT request does
-not need: the audit log, referrals, single sign-on settings and the price
-comparison are not listed, and `runtime_account` returns usage and limits
+sandbox MCP server returns safe state and scoped preview links. When another
+client needs the server's gateway token or authorization headers, get them
+through the website or a local CLI. This profile also leaves out what a ChatGPT
+request does not need. The audit log, referrals, single sign-on settings and the
+price comparison are not listed. `runtime_account` returns usage and limits
 without names, internal identifiers or card details. The ordinary MCP
 connection keeps its usual credential behavior.
 
@@ -118,7 +118,7 @@ nothing.
 
 ## Tools
 
-The server answers `initialize` with instructions: the quick start, safe retries,
+The server returns instructions in its `initialize` response: the quick start, safe retries,
 and how to report problems. Read them, then inspect tool results rather than
 assuming a completed tool call means the workload succeeded.
 
@@ -155,7 +155,7 @@ capability is enabled. Check the [products page](./products) for availability.
 | `runtime_webhooks_manage`, `runtime_otel_manage`                                                                                                                                   | Webhooks for lifecycle events, and OpenTelemetry export                                                                                                                                                                                                                                                                                                           |
 | `runtime_domains`, `runtime_ports`, `runtime_ips`, `runtime_networks_wireguard`, `runtime_networks_upstream_proxy`, `runtime_networks_private`, `runtime_networks_signed_requests` | Custom domains, public TCP ports, dedicated outbound addresses, the WireGuard tunnel, your own upstream proxy, reaching your sandboxes by name and signing requests as Runtime's; see below                                                                                                                                                                       |
 | `runtime_account`                                                                                                                                                                  | `get` the account, its free usage and credit; `limits` for this key's access and daily spending limit; `referrals` for your link and its credit (you both get up to {{referral-max}}); `sso` for single sign-on and SCIM; `compare` for what your sandboxes would cost at a rival, and what you save a month; `emails` for which optional emails your person gets |
-| `runtime_reservations`                                                                                                                                                             | [Book room](./reservations): `create` holds room for many sandboxes over a window, or standing room for a pool until cancelled, confirmed or declined at once; `update` changes standing room; `list`, `get`, `cancel`                                                                                                                                            |
+| `runtime_reservations`                                                                                                                                                             | [Book room](./reservations): `create` holds room for many sandboxes over a window, or standing room for a pool until cancelled, confirmed or declined immediately; `update` changes standing room; `list`, `get`, `cancel`                                                                                                                                        |
 | `runtime_switching_record`                                                                                                                                                         | Record the provider you are leaving, before you first add credit; credit added within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total                                                                                                                                                                                              |
 | `runtime_audit_list`                                                                                                                                                               | The account's audit log: members, keys, credit and security changes, with who and from where                                                                                                                                                                                                                                                                      |
 | `runtime_secrets`                                                                                                                                                                  | Secrets sandboxes use without seeing, a placeholder inside and the value added by the proxy: `set`, `list`, `delete`; and `jobs_put`, `jobs_list`, `jobs_get`, `jobs_rotate`, `jobs_reveal`, `jobs_delete` for the copy a scheduled job puts in its environment                                                                                                   |
@@ -182,8 +182,8 @@ and a `requestId`.
 
 ## Renamed tools
 
-On 26 September 2026, 52 tools became 16 that take an `action`, which cut what
-the tool list costs an agent's context by nearly a quarter. The old names now
+On 26 September 2026, 52 tools became 16 that take an `action`, which cut the
+tool list's context cost for an agent by nearly a quarter. The old names now
 fail with `not_found`, before any operation runs, and the hint names the grouped
 tool and its `action`. Change any permission rule, prompt or script that names
 one, then refresh the tool list. `runtime_sandboxes_mounts` and

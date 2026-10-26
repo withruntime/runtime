@@ -37,6 +37,25 @@ public final class Agents {
     return "/v1/agents/" + Transport.segment(agent);
   }
 
+  /**
+   * Claude Managed Agents' API on Runtime: the base URL and key Anthropic's Java SDK takes, so code
+   * written for it runs here unchanged.
+   *
+   * <pre>{@code
+   * Agents.AnthropicOptions o = runtime.agents().anthropic();
+   * AnthropicClient client = AnthropicOkHttpClient.builder().baseUrl(o.baseUrl()).apiKey(o.apiKey()).build();
+   * }</pre>
+   *
+   * <p>Sessions call the model with the account's own Anthropic key, the egress secret
+   * ANTHROPIC_API_KEY ({@code runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com}).
+   */
+  public AnthropicOptions anthropic() {
+    return new AnthropicOptions(t.baseUrl + "/anthropic", t.apiKey);
+  }
+
+  /** What {@link #anthropic()} answers. */
+  public record AnthropicOptions(String baseUrl, String apiKey) {}
+
   /** Sessions by id, across agents. */
   public Sessions sessions() {
     return sessions;
@@ -369,6 +388,19 @@ public final class Agents {
       if (option != null) body.put("option", option);
       if (text != null) body.put("text", text);
       return new AgentAsk(t.object(new Transport.Call("POST", path(id, "/answer")).body(body)));
+    }
+
+    /** Lets a tool call the agent's permissions held run (its ask's Allow). */
+    public AgentAsk approve(String id) {
+      return answer(id, "Allow", null);
+    }
+
+    /**
+     * Keeps a held tool call from running (its ask's Deny); {@code message}, which may be null, is
+     * told to the agent as the reason.
+     */
+    public AgentAsk deny(String id, String message) {
+      return answer(id, "Deny", message);
     }
   }
 }

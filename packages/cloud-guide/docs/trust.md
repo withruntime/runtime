@@ -2,11 +2,11 @@
 
 Runtime runs every sandbox in its own Firecracker virtual machine on dedicated
 servers in audited data centers, encrypts every backup to keys the storage
-provider never sees, and publishes how it works: this page is the summary a
+provider never sees, and publishes how it works. This page is the summary a
 security review asks for, with links to the detail.
 
 For a questionnaire, a data processing agreement or anything this page does not
-answer, write to security@withruntime.com.
+cover, write to security@withruntime.com.
 
 ## Where your data lives
 
@@ -32,7 +32,7 @@ The full list, with what each company does and where, is on the
   and memory. CPU, memory, network rules and leases are enforced on the host,
   outside the guest.
 - **Sandboxes reach the public internet only.** Private and internal addresses
-  are refused, and any sandbox's network can be cut at once.
+  are refused, and any sandbox's network can be cut immediately.
 - **Secrets your sandboxes use are never inside them.** A sandbox sees a
   placeholder, and the host puts the real value in on the way out
   ([secrets sandboxes never see](./security#secrets-sandboxes-never-see)).
@@ -49,7 +49,7 @@ The full list, with what each company does and where, is on the
 - **Copies of your volumes and snapshots** are encrypted with a key that
   belongs to your organization alone, before they leave the server. Deleting
   the organization destroys that key first, so those copies become unreadable
-  at once ([storage and backups](./storage#encryption-and-deletion)).
+  immediately ([storage and backups](./storage#encryption-and-deletion)).
 - **Each server's nightly backup** is encrypted with that server's own key
   before it leaves the server. It is kept 30 days, and its pieces leave the
   storage within 44, so what a closed organization had on that server is gone

@@ -32,7 +32,8 @@ class AsyncCiRepositories:
                       idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Connect ``owner/name``, read through Runtime's GitHub App. Pushes and
         pull requests then run the checks written in ``config_path`` (default
-        ``runtime.yml``); ``production_branch`` defaults to ``main``;
+        ``runtime.yml``; a ``cloudbuild.yaml`` or ``buildspec.yml`` runs as Cloud
+        Build or CodeBuild runs it); ``production_branch`` defaults to ``main``;
         ``installation`` is the GitHub App installation to read it through
         (the newest when left out)."""
         body = _fields(repository=repository, production_branch=production_branch, config_path=config_path,
@@ -117,7 +118,12 @@ class AsyncCiJobs:
         ``runtime.sandboxes``. A review step's job has its ``review``: the
         ``verdict`` (pass or block), ``summary``, ``findings`` (``kind``,
         ``file``, ``line``, ``what``, ``fix``), ``notes``, and the ``agent``,
-        ``account``, ``model`` and ``session`` that gave it; None otherwise."""
+        ``account``, ``model`` and ``session`` that gave it; None otherwise.
+        ``annotations`` are the lines of the repository's files its log reports
+        (``path``, ``startLine``, ``endLine``, ``startColumn``, ``level``:
+        notice, warning or failure, ``message``, ``title``), at most 50,
+        failures first, as its own GitHub check run (``githubCheckRun``,
+        ``runtime / <name>``) shows them."""
         return await self._t.json("GET", f"/v1/ci/jobs/{_enc(job_id)}")
 
 

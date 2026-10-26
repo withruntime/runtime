@@ -10,13 +10,13 @@ go get withruntime.com/go
 ```
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
-set, and otherwise the connection this machine saved (any `npx withruntime`
-command connects it, with one browser approval).
+set. Otherwise, it uses the connection this machine saved. Any `npx withruntime`
+command sets up that connection, with one browser approval.
 
-On a server, put a key from https://withruntime.com/account/keys in
-`RUNTIME_API_KEY` from your secret manager. Never put it in source code, a URL
+On a server, store a key from https://withruntime.com/account/keys in
+`RUNTIME_API_KEY`, from your secret manager. Never put it in source code, a URL
 or a command-line argument. With no key anywhere, `withruntime.New` returns an
-error whose code is `missing_api_key` and whose hint says how to get one.
+error. Its code is `missing_api_key`, and its hint says how to get one.
 
 ## Hello, sandbox
 
@@ -54,11 +54,12 @@ func main() {
 }
 ```
 
-`Create` returns once the sandbox is running. `opts` may be `nil`: with no
-options you get the free usage while it lasts, the default region, and 2 vCPU,
-4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
-when idle, with no time limit (`TimeoutSeconds` sets one, 60 to 86,400; `EndsAt`
-is nil while none applies). The free usage is spent first, then prepaid credit; `Funding` is accepted and ignored. Every field is optional:
+`Create` returns once the sandbox is running. `opts` may be `nil`. With no
+options, you get the free usage while it lasts, the default region, and 2 vCPU,
+4 GiB of memory and a 4 GiB disk. The sandbox runs while it works and pauses
+itself when idle, with no time limit. `TimeoutSeconds` sets one, from 60 to
+86,400. `EndsAt` is nil while none applies. The free usage is spent first, then
+prepaid credit. `Funding` is accepted and ignored. Every field is optional:
 
 ```go
 package main
@@ -98,12 +99,12 @@ func main() {
 }
 ```
 
-A field newer than the SDK goes in `Extra`, which is merged into the request.
+A field newer than the SDK goes in `Extra`. The SDK merges `Extra` into the request.
 
 ## Run commands
 
 `Exec` runs a string under `bash -c`. `ExecArgv` runs a program directly, with no
-shell, which is what you want for untrusted arguments.
+shell. Use it for untrusted arguments.
 
 ```go
 package main
@@ -158,10 +159,10 @@ func main() {
   result (`TimedOut` is true, with the output so far), not an error.
 - `Check: true` returns a `*withruntime.CommandError`, with the exit code and
   output, on a non-zero exit or a timeout.
-- A result holds at most 64 KiB of `Stdout` and 64 KiB of `Stderr`, and
-  `StdoutTruncated` or `StderrTruncated` says when more was dropped. With
-  `OnStdout` or `OnStderr` (or a `Timeout` over 60 seconds) the command streams
-  instead, and the result keeps everything it printed.
+- A result holds at most 64 KiB of `Stdout` and 64 KiB of `Stderr`.
+  `StdoutTruncated` or `StderrTruncated` is true when output was dropped. With
+  `OnStdout` or `OnStderr`, or a `Timeout` over 60 seconds, the command streams
+  instead. The result then keeps everything it printed.
 
 Stream output as it happens with callbacks, or range over the events:
 
@@ -209,7 +210,7 @@ func main() {
 ```
 
 A long stream resumes by itself when the server ends it, so no output is
-dropped. The sandbox keeps the latest 1 MiB of a command's output; a reader that
+dropped. The sandbox keeps the latest 1 MiB of a command's output. A reader that
 falls further behind gets a `truncated` event.
 
 ## Background processes
@@ -268,7 +269,7 @@ func main() {
 ```
 
 `process.Output(ctx, 0)` yields every event from the start until the process
-exits. A process outlives your connection; get it back with
+exits. A process outlives your connection. Get it back with
 `sbx.Process(ctx, id)`. `Write` tracks input offsets, so a retried write is never
 typed twice.
 
@@ -327,22 +328,22 @@ func main() {
 }
 ```
 
-`Write` makes parent directories and replaces the file atomically; a file over
-1 MiB goes in parallel chunks checked by SHA-256. `Stat` returns `nil` for a
+`Write` makes parent directories and replaces the file atomically. A file over
+1 MiB goes in parallel chunks, checked by SHA-256. `Stat` returns `nil` for a
 path that does not exist. `Upload` and `Download` move a whole directory as one
-gzipped tar archive through the API's folder routes, which pack and unpack it
-with `tar` inside the sandbox ([files in the API guide](./api#files)); a large
-one uploads in parts. A downloaded folder is unpacked as it arrives and lands
-in place only once it has all arrived: one cut short is `download_incomplete`
-and writes nothing.
+gzipped tar archive. They use the API's folder routes, which pack and unpack it
+with `tar` inside the sandbox ([files in the API guide](./api#files)). A large
+one uploads in parts. A downloaded folder is unpacked as it arrives. It lands
+in place only once it has all arrived. A download cut short fails with
+`download_incomplete` and writes nothing.
 
 ### Links
 
-A link is a secret URL anyone can open with no API key: a GET downloads the
-file (Range works, so videos play and downloads resume), and a PUT with the raw
-body uploads it atomically. A link expires in 1 hour by default, at most 7 days.
-`RevokeLinks` ends every link made for the sandbox, and revoking the key that
-made a link ends its links too.
+A link is a secret URL that anyone can open, with no API key. A GET downloads
+the file. Range works, so videos play and downloads resume. A PUT with the raw
+body uploads the file atomically. A link expires in 1 hour by default, and at
+most 7 days. `RevokeLinks` ends every link made for the sandbox. Revoking the
+key that made a link also ends its links.
 
 ```go
 package main
@@ -449,8 +450,9 @@ func main() {
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on its server while it has room and on another when it is full; see
-[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the error's
+processes. It runs on its server while there is room, and on another server when
+it is full. See [JavaScript](./javascript) for what forks and snapshots keep and
+how they are billed. If a copy fails, the error's
 `Details["startedSandboxIds"]` names the copies that did start.
 
 ## Share a port
@@ -489,18 +491,18 @@ func main() {
 }
 ```
 
-A preview is private by default; `Visibility: "public"` shares it with anyone
+A preview is private by default. `Visibility: "public"` shares it with anyone
 who has the address. Addresses are under `runtimehost.com`.
 
 ## Sandboxes by name, and keeping one running
 
-`Sandboxes.GetOrCreate(ctx, name, opts)` answers the sandbox with that name,
-woken if paused and restarted if stopped and persistent, or creates one with
-`opts`; `Info().Reused` says which. A sandbox with no time limit runs while
-it works with nothing to renew. `Persistent: true` keeps a paid one running
-until you stop it, idle or not, while credit lasts. `KeepAlive` moves a time
-limit on from your process, keeping ten minutes ahead, until `Stop` or
-`StopKeepAlive`; on a sandbox with no limit it only watches.
+`Sandboxes.GetOrCreate(ctx, name, opts)` returns the sandbox with that name. It
+wakes the sandbox if paused, and restarts it if stopped and persistent. Otherwise
+it creates one with `opts`. `Info().Reused` says which. A sandbox with no time
+limit runs while it works, with nothing to renew. `Persistent: true` keeps a paid
+sandbox running until you stop it, idle or not, while credit lasts. `KeepAlive`
+moves a time limit on from your process, keeping ten minutes ahead, until `Stop`
+or `StopKeepAlive`. On a sandbox with no limit, it only watches.
 
 ```go
 package main
@@ -619,14 +621,14 @@ func main() {
 }
 ```
 
-`Images.Build` waits until the image is ready and returns an `*Error` whose
-code is `image_failed` when the build fails; `Images.Create` queues it and
-returns. A Dockerfile build takes `Dockerfile` and `ContextDir`, the folder
-`docker build` would read, with its `.dockerignore`; only the parts of the
-folder the server does not have yet are uploaded. `Images.Resolve`, `Tag`,
-`Untag`, `Versions`, `FollowLogs` and `Images.Registries.Set` for private
-images do the rest; see [custom images](./images). A volume lives on one
-server. Daily backups are enabled by default; `BackedUp` becomes true after
+`Images.Build` waits until the image is ready. If the build fails, it returns
+an `*Error` whose code is `image_failed`. `Images.Create` queues the build and
+returns. A Dockerfile build takes `Dockerfile` and `ContextDir`. `ContextDir` is
+the folder `docker build` would read, with its `.dockerignore`. Only the parts
+of the folder that the server does not have yet are uploaded. `Images.Resolve`,
+`Tag`, `Untag`, `Versions`, `FollowLogs` and `Images.Registries.Set` cover private
+images and other image tasks. See [custom images](./images). A volume lives on
+one server. Daily backups are enabled by default. `BackedUp` becomes true after
 a backup has been copied off the host and checked. A sandbox with volumes
 cannot be snapshotted.
 
@@ -829,37 +831,37 @@ Every error is a `*withruntime.Error` with `Code`, `Message`, `Hint`,
 `RequestID`, `Status` and `Details`. `errors.Is` matches it against
 `ErrAuthentication`, `ErrPermissionDenied`, `ErrNotFound`, `ErrConflict`,
 `ErrInvalidRequest`, `ErrRateLimited`, `ErrServiceUnavailable` and
-`ErrConnection`, the same classes as the JavaScript and Python SDKs. `no_capacity` matches
-`ErrServiceUnavailable`; `no_credit_running_limit` and a `quota_exceeded` on
-what runs at once match `ErrRateLimited`, and a `quota_exceeded` on what is
-kept matches `ErrConflict`.
+`ErrConnection`. These are the same classes as in the JavaScript and Python SDKs.
+`no_capacity` matches `ErrServiceUnavailable`. `no_credit_running_limit`, and a
+`quota_exceeded` on what runs concurrently, match `ErrRateLimited`. A `quota_exceeded`
+on what is kept matches `ErrConflict`.
 
-Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures and every answer that says
-`retryable: true` are retried after its `Retry-After`, up to the maximum number
-of retries, with the same key, so a retry never makes two sandboxes or runs a
-command twice. A wait over 60 seconds is not slept on: the error is returned at
-once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
-`rate_limited`) is sent again until the call's deadline, or for five minutes
-without one, past the maximum. `Retryable()` says whether trying the same call again
-may work.
+Every write carries an idempotency key. The SDK makes it for you and keeps it
+across the client's own retries. Transport failures, and every response that
+says `retryable: true`, are retried after its `Retry-After`. Retries stop at the
+maximum number of retries. They use the same key, so a retry never makes two
+sandboxes or runs a command twice. A wait over 60 seconds is not slept on. The
+error is returned immediately, with `retryAfterMs`. A response that ran nothing
+(`guest_busy`, `busy`, `rate_limited`) is sent again until the call's deadline.
+Without a deadline, it is sent again for five minutes, past the maximum.
+`Retryable()` says whether trying the same call again may work.
 
 **A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
-account is at its limit (`quota_exceeded`) or the region is full
-(`no_capacity`), `Sandboxes.Create` waits and sends the same request again, for
+account is at its limit (`quota_exceeded`), or the region is full
+(`no_capacity`), `Sandboxes.Create` waits. It sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
 Set `withruntime.WithWaitForCapacity` on the client, or `WaitForCapacity` on one
-create, wake or restart; zero fails at once. A sandbox stays on its server, so a
-wake or restart refused with `no_capacity` is sent again with the same
+create, wake or restart. Zero fails immediately. A sandbox stays on its server.
+So a wake or restart refused with `no_capacity` is sent again with the same
 idempotency key until room frees. A fork never waits.
 
 ## Read-only keys and daily limits
 
 An owner, admin or developer can make a read-only key and set a daily spending
-limit on a key at
-[API keys](https://withruntime.com/account/keys). `client.Limits.Get(ctx)`
-reads both; past the limit, a create, wake or extension returns an error whose
-code is `spending_limit_reached`, and it is not retried. See
+limit on a key, on the
+[API keys](https://withruntime.com/account/keys) page. `client.Limits.Get(ctx)`
+reads both. Past the limit, a create, wake or extension returns an error whose
+code is `spending_limit_reached`. It is not retried. See
 [security](./security).
 
 ## Configuration
@@ -907,9 +909,9 @@ func main() {
 - Money is integer microdollars: 1,000,000 is one US dollar. `client.Usage(ctx)`
   returns the account's balance as exact decimal strings.
 - `client.UsageExport(ctx, withruntime.UsageExportOptions{Since: ..., Until: ..., Cursor: ...})`
-  reads one page of settled usage over a UTC range, with its server CSV;
-  follow `NextCursor` until it is nil. `FinalThrough` is the time before which
-  no more charges will settle, and a row's `Final` is true once its resource is
+  reads one page of settled usage over a UTC range, with its server CSV.
+  Follow `NextCursor` until it is nil. `FinalThrough` is the time before which
+  no more charges will settle. A row's `Final` is true once its resource is
   deleted and can be charged nothing more
   ([export settled usage](./api#export-settled-usage)).
 
@@ -920,10 +922,10 @@ Domains and public ports name the sandbox they serve. `Tunnel` manages a
 WireGuard network; `sbx.OpenTunnel` and `sbx.PortForward` open authenticated TCP
 connections from your process into one sandbox.
 
-When using `OpenTunnel` directly, read responses while writing requests. Each
-stream keeps at most 1 MiB of unread response data. If its reader falls behind
-that bound, reads return `tunnel_receive_overflow` after the buffered data;
-other streams keep working. `PortForward` drains both directions for you.
+When you use `OpenTunnel` directly, read responses while you write requests.
+Each stream keeps at most 1 MiB of unread response data. If its reader falls
+behind that limit, reads return `tunnel_receive_overflow` after the buffered
+data. Other streams keep working. `PortForward` drains both directions for you.
 
 ```go
 package main
@@ -968,25 +970,26 @@ func main() {
 ```
 
 `Ports.Open` returns `Connect`, the public address and port. `Networks.WireGuard.Create`
-creates the account's WireGuard network; `AddPeer` and `RotatePeer` return a
-configuration holding a generated private key once. Save `Config` even when
-`ConfigReady` is false: it is a draft whose gateway public key must be filled
-from `Networks.WireGuard.Get` before use. A generated-key request is never automatically
-retried. To keep the private key entirely on your machine, supply `PublicKey`.
+creates the account's WireGuard network. `AddPeer` and `RotatePeer` return a
+configuration that holds a generated private key, shown once. Save `Config` even
+when `ConfigReady` is false. It is a draft. Fill in its gateway public key from
+`Networks.WireGuard.Get` before use. A request for a generated key is never
+retried automatically. To keep the private key entirely on your machine, supply `PublicKey`.
 
 Dedicated addresses and WireGuard networks expose `Funded`, `FundedUntil`,
-`RateMicros` and `RateUnit`. Exhausted credit disables traffic while retaining
-the reservation until you release it. `SSO.Get` reads sign-on and directory
-status and the website address where an owner manages it.
+`RateMicros` and `RateUnit`. When credit runs out, traffic stops. The
+reservation is kept until you release it. `SSO.Get` reads sign-on and directory
+status, and the website address where an owner manages it.
 
 ## Backup and restore volumes
 
-`Volumes.Backup` requests a checked copy off the host. `Backups` lists copies;
+`Volumes.Backup` requests a checked copy off the host. `Backups` lists copies.
 `GetBackup` and `DeleteBackup` read or remove one. `SetBackupPolicy` changes
-daily backups or retention, or backs the volume up on a schedule of its own:
+daily backups or retention. It can also back up the volume on a schedule of its
+own:
 `SetBackupPolicyOptions{Schedule: &withruntime.BackupSchedule{EveryMinutes: 60},
 Keep: &withruntime.BackupKeep{Hourly: 24, Daily: 7}}` (or `Cron: "30 2 * * 1-5"`,
-in UTC); `NoSchedule: true` goes back to daily. Restore makes a new volume from
+in UTC). `NoSchedule: true` goes back to daily. Restore makes a new volume from
 a ready backup.
 
 ```go
@@ -1024,12 +1027,12 @@ func main() {
 
 ## Permissions and file watching
 
-Pass `FileWriteOptions` to write permissions with the content; a pointer keeps
+Pass `FileWriteOptions` to set permissions with the content. A pointer keeps
 mode `000` distinct from the default. Current guest images require only
 `write_file`. Older images require `exec` for the SDK's chmod fallback.
 `Files.Chmod` sets an existing file's permissions through the same exec grant.
-A supplied write key identifies the whole upload: each mutation phase has its
-own stable key, and a repeated completed upload returns without sending its
+A supplied write key identifies the whole upload. Each mutation phase has its
+own stable key. A repeat of a completed upload returns without sending its
 chunks again.
 
 ```go
@@ -1071,20 +1074,19 @@ func main() {
 }
 ```
 
-`Events` reconnects on a continuation and preserves its cursor. A pause ends
-iteration without stopping the guest watch; after waking the sandbox, call
+`Events` reconnects on a continuation and keeps its cursor. A pause ends
+iteration without stopping the guest watch. After waking the sandbox, call
 `Events` again. `overflow` and `lost` notices mean you should rescan. Breaking
 iteration closes its HTTP response. `Stop` also stops the guest watch.
-`Files.Watches.List` and `Read` support finding watches and polling instead.
+`Files.Watches.List` and `Read` let you find watches and poll instead.
 
 ## Bucket mounts, MCP servers and recordings
 
-`sbx.Mounts.Add` mounts a customer bucket using the name of a Runtime secret,
-with `List` and `Remove` for lifecycle management. The sandbox never receives
-the bucket key. `client.MCP.Catalog` lists available servers; `sbx.MCP.Start`,
-`Ready`, `Get` and `Stop` manage servers running in that sandbox.
-`sbx.Desktop.Recordings` has `Start`, `Get`, `List`, `Stop`, `Download` and
-`Delete`; downloaded bytes are MP4.
+`sbx.Mounts.Add` mounts a customer bucket, using the name of a Runtime secret.
+`List` and `Remove` manage mounts. The sandbox never receives the bucket key.
+`client.MCP.Catalog` lists available servers. `sbx.MCP.Start`, `Ready`, `Get`
+and `Stop` manage servers running in that sandbox. `sbx.Desktop.Recordings` has
+`Start`, `Get`, `List`, `Stop`, `Download` and `Delete`. Downloaded bytes are MP4.
 
 ```go
 package main
@@ -1127,12 +1129,13 @@ func main() {
 
 ## CI/CD (beta)
 
-`client.CI` reads CI/CD, which checks every push and pull request of a
-connected GitHub repository in sandboxes. `CI.Repositories` has `Connect`,
-`List` and `Disconnect` (only a full key connects one); `CI.Checks.List` and
-`Get`, `CI.Jobs.Get` (with the tail of the job's log) and `CI.Tests.List`
-read what ran, and `CI.Releases.List` a release's steps as they were taken. Times are milliseconds since the epoch, lists page like the
-others, and an account outside the beta gets `product_in_beta` (403).
+`client.CI` reads CI/CD. It checks every push and pull request of a connected
+GitHub repository in sandboxes. `CI.Repositories` has `Connect`, `List` and
+`Disconnect`. Only a full key can connect one. `CI.Checks.List` and `Get`,
+`CI.Jobs.Get` (with the tail of the job's log), and `CI.Tests.List` read what
+ran. `CI.Releases.List` reads a release's steps as they were taken. Times are
+milliseconds since the epoch. Lists page like the others. An account outside the
+beta gets `product_in_beta` (403).
 
 ```go check
 package main

@@ -538,3 +538,267 @@ test("triggers rules, call, held, held start and dismiss send what the API takes
     },
   );
 });
+
+test("a held tool call shows in asks; approve and deny answer it Allow or Deny, a deny with its message", async () => {
+  const held = (state = "open", option?: string) => ({
+    ...inboxRow(state),
+    step: null,
+    question: "Bash: rm -rf build",
+    why: "The agent's policy for Bash is always_ask.",
+    options: [{ label: "Allow" }, { label: "Deny" }],
+    pick: null,
+    answer: option ? { option } : null,
+    sessions: [inboxRow().sessions[0]],
+    toolCall: { tool: "Bash", input: { command: "rm -rf build" }, seq: 4, policy: "always_ask" },
+  });
+  await withStub(
+    ({ method, path, body }) => {
+      if (method === "GET" && path === "/v1/agents/asks")
+        return { data: [held()], nextCursor: null };
+      if (method === "POST" && path === `/v1/agents/asks/${ASK}/answer`)
+        return held("answered", (body as { option: string }).option);
+    },
+    async (lines, sent) => {
+      expect(await run(["agents", "asks"], env, out(lines))).toBe(0);
+      expect(lines.at(-1)).toContain('tool call: Bash {"command":"rm -rf build"}');
+      expect(lines.at(-1)).toContain("options: Allow | Deny");
+      expect(await run(["agents", "approve", ASK], env, out(lines))).toBe(0);
+      expect(sent.at(-1)!.body).toEqual({ option: "Allow" });
+      expect(lines.at(-1)).toBe(`${ASK}: Bash allowed.`);
+      expect(
+        await run(["agents", "deny", ASK, "--message", "Clean dist/ only."], env, out(lines)),
+      ).toBe(0);
+      expect(sent.at(-1)!.body).toEqual({ option: "Deny", text: "Clean dist/ only." });
+      expect(lines.at(-1)).toBe(`${ASK}: Bash denied.`);
+    },
+  );
+});
+
+test("create takes --permissions as JSON, and says how when it is not", async () => {
+  await withStub(
+    ({ method, path, body }) => {
+      if (method === "POST" && path === "/v1/agents")
+        return {
+          id: AGENT,
+          name: "careful",
+          version: 1,
+          definition: (body as { definition: unknown }).definition,
+          labels: {},
+          warnings: [],
+          createdAt: "2025-10-09T08:53:20.000Z",
+          updatedAt: "2025-10-09T08:53:20.000Z",
+        };
+    },
+    async (lines, sent) => {
+      const permissions = { default: "auto", tools: { shell: "always_ask" } };
+      expect(
+        await run(
+          [
+            "agents",
+            "create",
+            "careful",
+            "--command",
+            "claude",
+            "--permissions",
+            JSON.stringify(permissions),
+          ],
+          env,
+          out(lines),
+        ),
+      ).toBe(0);
+      expect(
+        (sent.at(-1)!.body as { definition: { permissions: unknown } }).definition.permissions,
+      ).toEqual(permissions);
+      await expect(
+        run(
+          ["agents", "create", "careful", "--command", "claude", "--permissions", "shell"],
+          env,
+          out(lines),
+        ),
+      ).rejects.toThrow("--permissions takes JSON");
+    },
+  );
+});
+
+test("switch anthropic says the base URL Anthropic's SDK takes, and whether the model key is set", async () => {
+  for (const secrets of [[{ name: "ANTHROPIC_API_KEY", hosts: ["api.anthropic.com"] }], []])
+    await withStub(
+      ({ method, path }) =>
+        method === "GET" && path === "/v1/egress-secrets" ? { secrets, next: null } : undefined,
+      async (lines) => {
+        expect(await run(["agents", "switch", "anthropic"], env, out(lines))).toBe(0);
+        const said = lines.join("\n");
+        expect(said).toContain('baseURL: "https://api.example.test/anthropic"');
+        expect(said).not.toContain("rk_cli");
+        expect(said).toContain(
+          secrets.length
+            ? "ANTHROPIC_API_KEY is set (api.anthropic.com)"
+            : "runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com",
+        );
+        const json: string[] = [];
+        expect(await run(["agents", "switch", "anthropic"], env, out(json, true))).toBe(0);
+        expect(JSON.parse(json[0]!)).toMatchObject({
+          platform: "anthropic",
+          baseURL: "https://api.example.test/anthropic",
+          modelKey: secrets.length ? { name: "ANTHROPIC_API_KEY" } : null,
+        });
+      },
+    );
+  await expect(run(["agents", "switch", "vertex"], env, out([]))).rejects.toMatchObject({
+    code: "usage",
+    message: expect.stringContaining("takes anthropic"),
+  });
+});
+
+test("trace reads every page: prints totals, models, tools and each span; --otlp prints OpenTelemetry; --export sends each page to a collector", async () => {
+  const trace = {
+    sessionId: SESSION,
+    totals: {
+      turns: 2,
+      toolCalls: 1,
+      inputTokens: 1200,
+      outputTokens: 300,
+      cacheReadTokens: 50_000,
+      cacheWriteTokens: 0,
+      costUsd: 0.0218,
+      unpricedTurns: 0,
+      failedTurns: 0,
+      failedToolCalls: 1,
+      modelMs: 5000,
+      toolMs: 1500,
+    },
+    models: [
+      {
+        model: "claude-opus-5-5",
+        provider: "anthropic",
+        turns: 2,
+        unpricedTurns: 0,
+        inputTokens: 1200,
+        outputTokens: 300,
+        cacheReadTokens: 50_000,
+        cacheWriteTokens: 0,
+        costUsd: 0.0218,
+      },
+    ],
+    tools: [{ name: "Bash", calls: 1, failed: 1, durationMs: 1500 }],
+    spans: [
+      {
+        seq: 2,
+        kind: "turn",
+        id: "0123456789abcdef",
+        provider: "anthropic",
+        model: "claude-opus-5-5",
+        startedAt: "2026-10-26T01:00:00.000Z",
+        durationMs: 2500,
+        firstTokenMs: 400,
+        inputTokens: 600,
+        outputTokens: 150,
+        cacheReadTokens: 25_000,
+        cacheWriteTokens: 0,
+        costUsd: 0.0109,
+        stopReason: "tool_use",
+        status: 200,
+        error: null,
+        toolCalls: [{ id: "toolu_1", name: "Bash" }],
+      },
+      {
+        seq: 3,
+        kind: "tool",
+        id: "toolu_1",
+        name: "Bash",
+        turn: "0123456789abcdef",
+        startedAt: "2026-10-26T01:00:02.500Z",
+        durationMs: 1500,
+        input: '{"command":"bun test"}',
+        output: "1 fail",
+        error: true,
+      },
+    ],
+  };
+  // Two pages of each: the API's spans after `after`, and where to go on.
+  const otlpPage = (spans: unknown[]) => ({
+    resourceSpans: [{ resource: {}, scopeSpans: [{ scope: { name: "runtime.agents" }, spans }] }],
+  });
+  const otlp = [otlpPage([{ name: "root" }, { name: "chat" }]), otlpPage([{ name: "tool" }])];
+  const pages = {
+    json: [
+      { ...trace, spans: trace.spans.slice(0, 1), nextAfter: 2 },
+      { ...trace, spans: trace.spans.slice(1), nextAfter: null },
+    ],
+    otlp: [
+      { ...otlp[0], nextAfter: 2 },
+      { ...otlp[1], nextAfter: null },
+    ],
+  };
+  const collected: { url: string; auth: string | null; body: unknown }[] = [];
+  await withStub(
+    (sent) =>
+      sent.path === `/v1/agents/sessions/${SESSION}/trace`
+        ? pages[sent.query.get("format") as "json" | "otlp"][
+            sent.query.get("after") === "2" ? 1 : 0
+          ]
+        : undefined,
+    async (lines, sent) => {
+      expect(await run(["agents", "trace", SESSION], env, out(lines))).toBe(0);
+      const text = lines.join("\n");
+      expect(text).toContain("2 turns, 1 tool calls, $0.0218");
+      expect(text).toContain("1,200 in, 300 out, 50,000 cache read");
+      expect(text).toMatch(/claude-opus-5-5\s+2\s+1,200\s+300\s+50,000\s+\$0\.0218/);
+      expect(text).toMatch(/Bash\s+1\s+1\s+1\.5 s/);
+      expect(text).toContain(
+        "turn claude-opus-5-5 2.5 s, 600 in, 150 out, 25,000 cached, $0.0109 -> Bash",
+      );
+      expect(text).toContain('tool Bash 1.5 s FAILED {"command":"bun test"}');
+      expect(sent.map((x) => [x.query.get("format"), x.query.get("after") ?? "0"])).toEqual([
+        ["json", "0"],
+        ["json", "2"],
+      ]);
+
+      // Every page's spans in one request a collector takes.
+      lines.length = 0;
+      expect(await run(["agents", "trace", SESSION, "--otlp"], env, out(lines))).toBe(0);
+      expect(JSON.parse(lines[0]!)).toEqual(
+        otlpPage([{ name: "root" }, { name: "chat" }, { name: "tool" }]),
+      );
+
+      // The collector: where the OpenTelemetry SDK's own variables say.
+      lines.length = 0;
+      const original = globalThis.fetch;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (request.url.startsWith("https://otel.example.test")) {
+          collected.push({
+            url: request.url,
+            auth: request.headers.get("authorization"),
+            body: await request.json(),
+          });
+          return new Response("{}");
+        }
+        return original(input, init);
+      }) as typeof fetch;
+      try {
+        const otelEnv = {
+          ...env,
+          OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example.test/",
+          OTEL_EXPORTER_OTLP_HEADERS: "authorization=Bearer%20otel-key",
+        };
+        expect(await run(["agents", "trace", SESSION, "--export"], otelEnv, out(lines))).toBe(0);
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(collected).toEqual(
+        otlp.map((body) => ({
+          url: "https://otel.example.test/v1/traces",
+          auth: "Bearer otel-key",
+          body,
+        })),
+      );
+      expect(lines).toEqual(["Sent 3 spans to https://otel.example.test/v1/traces."]);
+
+      lines.length = 0;
+      await expect(run(["agents", "trace", SESSION, "--export"], env, out(lines))).rejects.toThrow(
+        "Give --endpoint, or set OTEL_EXPORTER_OTLP_ENDPOINT",
+      );
+    },
+  );
+});

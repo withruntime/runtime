@@ -15,7 +15,8 @@ public final class AgentEvent extends JsonObject {
 
   /**
    * input and answer (words to the agent); reply, ask, status, result and note (the agent's); error
-   * (the runner's); child (a child session's end, posted into its parent's log).
+   * (the runner's); child (a child session's end, posted into its parent's log); turn and tool (a
+   * model turn and a tool call of its trace, the span in body; see {@link AgentSession#trace()}).
    */
   public String kind() {
     return getString("kind");

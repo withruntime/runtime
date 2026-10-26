@@ -424,7 +424,7 @@ class Secrets(World):
             with self.assertRaises(CompatibilityError):
                 call()
         with self.assertRaises(CompatibilityError):
-            Secret.from_name.aio("x")
+            asyncio.run(Secret.from_name.aio("x"))
         self.assertIsNone(secret.name)
         self.assertEqual(self.requests(), [])
 
@@ -708,12 +708,14 @@ class Apps(World):
         self.assertEqual(asyncio.run(App.lookup.aio("y")).name, "y")
         calls = [lambda: App.lookup("x", environment_name="e"), lambda: app.deploy(), lambda: app.run(),
                  lambda: app.include(App("b")), lambda: app.set_tags({"a": "b"}), lambda: app.get_tags(),
-                 lambda: app.info(), lambda: app.logs, lambda: app.registered_functions, lambda: app.registered_classes,
+                 lambda: app.info(), lambda: app.logs, lambda: app.registered_classes,
                  lambda: app.registered_entrypoints, lambda: app.registered_web_endpoints,
-                 lambda: app.get_dashboard_url(), lambda: app.run.aio(), lambda: app.deploy.aio()]
+                 lambda: app.get_dashboard_url(), lambda: app.run.aio(), lambda: asyncio.run(app.deploy.aio())]
         for call in calls:
             with self.assertRaises(CompatibilityError):
                 call()
+        # Its functions are listed: a scheduled one deploys as a Runtime job (test_modal_jobs.py).
+        self.assertEqual(app.registered_functions, {})
 
     def test_proxy_is_refused(self):
         proxy = Proxy()

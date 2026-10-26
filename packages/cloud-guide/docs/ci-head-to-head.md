@@ -4,10 +4,10 @@ launch: actions
 
 # CI head to head: GitHub, Runtime, Blacksmith and Namespace
 
-Six public projects' own test jobs, in Node.js, Rust, Python, Go, Java and a
-TypeScript monorepo, timed on GitHub's hosted runners and on Runtime, on 23
-October 2026. Each column says how it was measured; nothing here is
-estimated.
+We timed the test jobs of six public projects on GitHub's hosted runners and
+on Runtime, on 23 October 2026. The projects use Node.js, Rust, Python, Go,
+Java and a TypeScript monorepo. Each column says how it was measured. Nothing
+here is estimated.
 
 ## What we found
 
@@ -35,31 +35,34 @@ GitHub's "warm" rows are jobs whose workflow restores a cache
 (`actions/cache`, `setup-java`'s or `pnpm/setup`'s), so they are set
 against Runtime's warm runs first.
 
-- **Warm, Runtime was ahead on every job.** A warm job starts from a
-  snapshot of the disk a run of an older commit left, three commits back,
-  as a pull request's job starts from what main's last run left: gin's job
+- **Warm, Runtime was ahead on every job.** A warm job starts from a disk
+  snapshot. The snapshot comes from a run of a commit three commits back.
+  A pull request's job starts from what main's last run left: gin's job
   took 7.9 seconds where GitHub's took 69, gson's 41.8 where GitHub's took
   99.5, express's 9.8 where GitHub's took 24.
-- **Cold, Runtime was quicker on five jobs** than GitHub was, even against
-  GitHub's warm runs for requests, gin and gson, and steadier: GitHub's
-  slowest runs took up to nearly eight times its median (777 seconds for gson),
-  while Runtime's slowest cold run was at most 10.3 seconds over its median.
-- **A run cost a quarter or less of GitHub's list price**, a warm express run a
-  twentieth and a warm gin run nearly a fiftieth. Runtime bills by the second, at
-  {{cpu-rate}} a vCPU-hour and {{memory-rate}} a GiB-hour of memory; GitHub
-  bills its 4-core Linux runner {{github-4core-minute}} a minute, each job rounded up to a
-  whole minute. GitHub runs a public repository's jobs on its standard
-  runner free; its price here is what a private repository pays.
-- **requests' job is mostly its tests' own waiting**, about 80 seconds on
-  both, so it gains least. 4 of its 635 tests fail on Runtime and pass on
-  GitHub: they connect to an address that never answers and expect the
-  connection to time out, and a sandbox's network accepts the connection
-  first, then closes it.
+- **Cold, Runtime was quicker on five jobs** than GitHub was. This holds even
+  against GitHub's warm runs for requests, gin and gson. Runtime was also
+  steadier. GitHub's slowest runs took up to nearly eight times its median
+  (777 seconds for gson). Runtime's slowest cold run was at most 10.3 seconds
+  over its median.
+- **A run cost a quarter or less of GitHub's list price.** A warm express run
+  cost a twentieth of it. A warm gin run cost nearly a fiftieth. Runtime bills
+  by the second, at {{cpu-rate}} per vCPU-hour and {{memory-rate}} per GiB-hour
+  of memory. GitHub bills its 4-core Linux runner {{github-4core-minute}} a
+  minute. Each job is rounded up to a whole minute. GitHub runs a public
+  repository's jobs on its standard runner for free. The price here is what a
+  private repository pays.
+- **requests' job is mostly its tests' own waiting.** It takes about 80
+  seconds on both, so it gains least. 4 of its 635 tests fail on Runtime and
+  pass on GitHub. They connect to an address that never responds and expect the
+  connection to time out. A sandbox's network accepts the connection first,
+  then closes it.
 
 ## Blacksmith and Namespace
 
-Neither publishes times for these jobs, so they have no rows above.
-What each publishes for a 4-vCPU, 16 GB Linux runner, read on 23 October 2026:
+Neither publishes times for these jobs, so they have no rows above. The table
+shows what each publishes for a 4-vCPU, 16 GB Linux runner. We read it on
+23 October 2026:
 
 |                | Blacksmith                        | Namespace                                                                                                                                | Runtime                            |
 | -------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -68,13 +71,13 @@ What each publishes for a 4-vCPU, 16 GB Linux runner, read on 23 October 2026:
 | Start          | runners boot in "under 3 seconds" | no figure                                                                                                                                | 0.7 to 1.2 s, the medians above    |
 | Speed claim    | "2x faster than GitHub's runners" | a Rust project's Ubuntu job, runner size not stated: 4 min 24 s on GitHub, 2 min 39 s on Namespace, 34 s with a cache hit (10 July 2026) | the table above                    |
 
-At those prices a job under a minute costs at least $0.008 on Namespace,
-where express's cold run cost {{=$4 cost:runtime:4x16x20x80x1}} on Runtime.
+At those prices, a job under a minute costs at least $0.008 on Namespace.
+express's cold run cost {{=$4 cost:runtime:4x16x20x80x1}} on Runtime.
 
 ## How it was measured
 
-**The jobs.** Each project's own GitHub Actions job, its steps run as they
-are written, at one pinned commit:
+**The jobs.** Each job is the project's own GitHub Actions job. Its steps run
+as written, at one pinned commit:
 
 - [expressjs/express](https://github.com/expressjs/express) `1c6f1b0`, `ci.yml`, job "Node.js 24 - ubuntu-latest":
   `npm install`, then `npm run test-ci`. No cache: every run is cold.
@@ -96,33 +99,34 @@ are written, at one pinned commit:
   a pnpm monorepo. `pnpm install`, Playwright's Chromium, `pnpm run build`,
   then `test-unit`, `test-serve`, `test-serve-bundled` and `test-build`.
   `pnpm/setup` caches pnpm's store and `actions/cache` Playwright's browser,
-  so its runs are warm, and set against Runtime's warm runs.
+  so its runs are warm. They are set against Runtime's warm runs.
 
 **GitHub.** The projects' own recent successful runs of those jobs, read from
 GitHub's API: express 9 to 23 October 2026, ripgrep 20 to 23 October,
 requests 3 August to 28 September (its latest), gin 13 to 23 October, gson
 15 to 23 October, vite 22 to 23 October. Time to start is the job's
-`created_at` to `started_at`, when a runner took it; total is `created_at` to
-`completed_at`. Two re-run requests jobs, whose start comes before their
-creation, are left out. A public repository's `ubuntu-latest` job runs on 4
-vCPUs and 16 GB.
+`created_at` to `started_at`, when a runner took it. Total is `created_at` to
+`completed_at`. Two jobs from re-run requests are left out, because their
+start comes before their creation. A public repository's `ubuntu-latest` job
+runs on 4 vCPUs and 16 GB.
 
-**Runtime.** The same steps, from
-[`bench.sh`](https://github.com/withruntime/runtime/blob/main/packages/cloud-guide/benchmarks/ci-head-to-head/bench.sh),
-in a sandbox the size of `runs-on: runtime-4cpu` (4 whole vCPUs, 16 GiB), on
-23 October 2026, with
+**Runtime.** The same steps run from
+[`bench.sh`](https://github.com/withruntime/runtime/blob/main/packages/cloud-guide/benchmarks/ci-head-to-head/bench.sh)
+in a sandbox the size of `runs-on: runtime-4cpu` (4 whole vCPUs, 16 GiB). The
+runs were made on 23 October 2026 with
 [`runtime.sh`](https://github.com/withruntime/runtime/blob/main/packages/cloud-guide/benchmarks/ci-head-to-head/runtime.sh).
-Time to start is the create call to the sandbox's first command; total is
-the create call to the job's end. A cold run starts from a fresh sandbox. A
-warm run starts from a snapshot of the disk a run of the commit three before
-the pinned one left (`bench.sh <job> base`): its toolchains, downloads and
-build caches in place, but not the pinned commit's own build or test
-results, as a pull request's job starts from what main's last run left. Cost is the sandbox's price
-for its total time, as a `runs-on: runtime-4cpu` runner is billed.
+Time to start runs from the create call to the sandbox's first command. Total
+runs from the create call to the job's end. A cold run starts from a fresh
+sandbox. A warm run starts from a snapshot of the disk a run of the commit
+three before the pinned one left (`bench.sh <job> base`). Its toolchains,
+downloads and build caches are in place. The pinned commit's own build or test
+results are not. This works as a pull request's job does, starting from what
+main's last run left. Cost is the sandbox's price for its total time. It is
+billed the way a `runs-on: runtime-4cpu` runner is billed.
 
-**What this does not measure.** Runtime's time to start is its sandbox's,
-not a GitHub Actions job's: a `runs-on: runtime` job also waits for GitHub to
-send the job and for its runner to register, which these runs do not include,
-so the start columns are not compared. The express job's coverage upload, about
-a second on GitHub, is not run on Runtime.
-Runtime's costs are at each median time rounded up to a whole second.
+**What this does not measure.** Runtime's time to start is the sandbox's time.
+It is not a GitHub Actions job's time. A `runs-on: runtime` job also waits for
+GitHub to send the job and for its runner to register. These runs do not
+include that wait, so the start columns are not compared. The express job's
+coverage upload, about a second on GitHub, is not run on Runtime. Runtime's
+costs are at each median time, rounded up to a whole second.

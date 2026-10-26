@@ -1,36 +1,36 @@
 # Runtime vs Daytona
 
-Runtime gives every agent sandbox its own microVM kernel and costs **{{saving:daytona}} less than Daytona** for an agent that mostly waits on a model.
+Runtime gives every agent sandbox its own microVM kernel. For an agent that mostly waits on a model, it costs **{{saving:daytona}} less than Daytona**.
 
 **The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
-Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month that is {{cost:runtime:100000}} against
-{{cost:daytona:100000}}, **{{=$0 less:daytona:100000}} a month saved**. Your Daytona code keeps working: change one import.
+Runtime and {{cost:daytona}} on Daytona**. At 100,000 runs a month, that is {{cost:runtime:100000}} against
+{{cost:daytona:100000}}, **{{=$0 less:daytona:100000}} a month saved**. Your Daytona code keeps working. Change one import.
 
-Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ranks the other providers by the cost of the same job.
+Comparing more than two providers? [Daytona alternatives](/compare/daytona-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** Daytona bills every vCPU for as long as the
-  sandbox runs. Runtime measures the CPU your code actually uses, so time spent
+  sandbox runs. Runtime measures the CPU your code actually uses. Time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
-  processes still running and its next command done {{server-wake-command}}
+  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
+  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
+  Its processes keep running, and its next command is done {{server-wake-command}}
   after the request reaches Runtime.
 - **Back from a pause in milliseconds.** Daytona states a paused VM resumes in
-  {{speed:daytona:wake}}. On Runtime's servers a wake takes {{server-wake}}, on every sandbox
+  {{speed:daytona:wake}}. On Runtime's servers, a wake takes {{server-wake}}, on every sandbox
   ([speed](./speed)).
-- **An uptime promise that pays itself.** Paid accounts are promised
-  {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
-  month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
-- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against Daytona's
-  {{rate:daytona:cpu}}, and {{memory-rate}} per GiB-hour of memory against {{rate:daytona:memory}}. Even with every
+- **An uptime promise that pays itself.** Paid accounts get
+  {{uptime-promise}} API uptime each month. A month below that returns {{uptime-credit}} of that
+  month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).
+- **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour, against Daytona's
+  {{rate:daytona:cpu}}, and {{memory-rate}} per GiB-hour of memory, against {{rate:daytona:memory}}. Even with every
   CPU busy the whole time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:daytona}} on
   Daytona.
 - **A microVM every time.** Every Runtime sandbox is a Firecracker microVM with
   its own kernel, and every one can pause with its memory. Daytona's default
-  sandbox is a container; pausing with memory needs its VM class.
+  sandbox is a container. Pausing with memory needs its VM class.
 - **Disk included while running.** Daytona charges for disk past 5 GiB whether
   the sandbox runs or not. Runtime's disk is part of a running sandbox.
 - **A one-line switch.** `withruntime/daytona` runs code written for Daytona's
@@ -46,17 +46,17 @@ Weighing more than two? [Daytona alternatives](/compare/daytona-alternatives) ra
   and run yourself.
 - **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
-  into a prompt or a config file, and the [MCP server](./mcp) reuses the same
+  into a prompt or a config file. The [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
-  idempotency key and the SDKs retry with it, so a lost response never creates
+  limit per key. Cap any sandbox's total cost with `maxTotalCostMicros`. Every write takes an
+  idempotency key, and the SDKs retry with it. A lost response never creates
   a second sandbox.
 
 **Also included:** a code interpreter, network allow and deny lists, secrets the
 sandbox never sees, custom images, volumes backed up daily, snapshots and forks
 with memory, private previews, a Linux desktop, metrics, webhooks, OpenTelemetry
-export, S3, R2 and GCS bucket mounts, MCP servers from a catalog and identity
+export, S3, R2 and GCS bucket mounts, MCP servers from a catalog, and identity
 tokens for AWS and Google Cloud. Paid accounts add TCP ports, dedicated outbound
 addresses and WireGuard private networks. See [products](./products).
 
@@ -72,7 +72,7 @@ Daytona's figures come from its public pricing and documentation, checked
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                                     | {{rate:daytona:memory}} per GiB-hour                                      |
 | Disk             | Included while running; paused storage {{paused-storage-rate}} per GB (10⁹ bytes) a month | First 5 GiB free, then {{term:daytona:disk}} per GiB-hour, stopped or not |
 | Plan fee         | None; prepaid credit from {{topup-min}}                                                   | None published                                                            |
-| Free start       | {{included-machine}} every month, no card                                                 | {{term:daytona:credit}} of compute                                        |
+| Free start       | {{included-machine}} in the first 30 days, no card                                        | {{term:daytona:credit}} of compute                                        |
 | Pause and resume | Files and memory, every sandbox                                                           | Files and memory on VM sandboxes                                          |
 | Snapshots, forks | Copies of a running sandbox, with memory and processes                                    | Memory snapshots on VM sandboxes                                          |
 | Agent sign-in    | Browser approval; no key in the agent's config                                            | API key                                                                   |
@@ -80,7 +80,7 @@ Daytona's figures come from its public pricing and documentation, checked
 ## Cost for the same job
 
 Take 1,000 runs of a 2 vCPU, 4 GiB sandbox. Each run lasts 60 seconds and
-keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
+keeps the CPU busy for 20 CPU-seconds. This is an agent that spends most of its time
 waiting for a model.
 
 ```
@@ -99,10 +99,10 @@ Daytona  CPU    1,000 × 60 s / 3,600 × 2 × {{rate:daytona:cpu}} = {{part:dayt
   Runtime against {{cost:daytona:busy}} on Daytona. At this size, Runtime is cheaper however busy the
   sandbox is.
 
-Disk, network, taxes and free credits are left out of both.
-`runtime compare --from daytona` prices your own usage the same way, with
+Disk, network, taxes and free credits are excluded from both.
+`runtime compare --from daytona` prices your own usage the same way. It prices
 sandboxes the free usage paid for at the standard rates, so free usage never
-counts as a saving. On Runtime, inbound traffic is free, and each account's
+counts as a saving. On Runtime, inbound traffic is free. Each account's
 first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
 
@@ -128,12 +128,12 @@ from withruntime.daytona import Daytona  # was: from daytona import Daytona
 
 Sandboxes get Daytona's defaults: 1 vCPU, 1 GiB of memory and a 3 GiB disk,
 pausing after 15 minutes without calls. `stop()` pauses a sandbox with its
-files and its memory, and `start()` carries on. They use the free usage first, then prepaid credit.
+files and its memory, and `start()` carries on. Sandboxes use the free usage first, then prepaid credit.
 
 PTY sessions, computer use, a `user` from your image, an `autoStopInterval`
 over an hour (or `0`), and list filters and sorting work as on Daytona. A call
 Runtime handles differently, such as GPUs or other regions, throws
-`NotSupportedError` before anything happens and names what to use instead.
+`NotSupportedError` before anything happens. It names what to use instead.
 `DAYTONA.md` in the package lists every mapping.
 
 ### Or port the calls

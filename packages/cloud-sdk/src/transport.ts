@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket, untrustedCertificate } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.35.0";
+export const VERSION = "0.37.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -827,6 +827,13 @@ export class Transport {
       reader.releaseLock();
       release();
     }
+  }
+
+  /** The key calls are made with: the one given, RUNTIME_API_KEY, or the
+   * connection `runtime login` saved. For another platform's SDK pointed at
+   * Runtime (`runtime.agents.anthropic()`). */
+  async apiKey(): Promise<string> {
+    return this.#key();
   }
 
   /** A WebSocket to an API path, authenticated with the same key. */

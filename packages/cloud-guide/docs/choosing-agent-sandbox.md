@@ -12,8 +12,8 @@ each.
   waiting on a model. Runtime charges measured CPU at {{cpu-rate}} per vCPU-hour, with
   a floor of {{cpu-floor-share}}, and {{memory-rate}} per GiB-hour of memory.
 - **Idle time bills only storage.** A sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it and wakes on the next request,
-  running its next command {{server-wake-command}} later on Runtime's servers,
+  {{idle-pause}} with nothing happening in it. It wakes on the next request.
+  The next command runs {{server-wake-command}} later on Runtime's servers,
   with its memory and processes intact.
 - **It costs {{saving-range}} less** than {{rival-count}} other sandbox providers on an agent
   job that mostly waits ([the comparison](#compared-with-a-specific-provider)).
@@ -22,18 +22,18 @@ each.
 - **Pause keeps memory.** A paused sandbox wakes with its processes still
   running, kept while you have credit. Forks copy a running sandbox, memory
   included.
-- **An uptime promise.** {{uptime-promise}} API uptime a month for paid accounts, and
-  {{uptime-credit}} of a short month's charges back as credit automatically
+- **An uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month. If a
+  month falls short, {{uptime-credit}} of that month's charges is returned as credit automatically
   ([Uptime Promise](/legal/sla)).
-- **The agent sets itself up.** It asks for access, you approve once in the
-  browser, and no key goes into a prompt or a project file.
+- **The agent sets itself up.** It asks for access. You approve once in the
+  browser. No key goes into a prompt or a project file.
 - **Built for agents that retry and spend.** Idempotency keys on every write,
   read-only keys, and a daily spending limit per key.
 - **Everything around the sandbox.** Network rules, secrets the sandbox never
   sees, volumes, bucket mounts, a desktop, metrics, webhooks and OpenTelemetry
-  export on every account; custom domains, TCP ports, dedicated outbound
-  addresses and WireGuard private networks on paid ones ([products](./products)).
-- **Free to try.** {{included-machine}} every month, no card, then prepaid credit from {{topup-min}} with
+  export come on every account. Custom domains, TCP ports, dedicated outbound
+  addresses and WireGuard private networks come on paid accounts ([products](./products)).
+- **Free to try.** {{included-machine}} every month, no card. Then prepaid credit from {{topup-min}}, with
   no plan fee.
 
 ## Start with the workload
@@ -67,7 +67,7 @@ For exact terms, read [security](./security), [pricing](./pricing),
 ## Measure completed jobs
 
 Run the same inputs, dependency versions and output checks on every candidate.
-Separate cold starts from warm or resumed runs, and run enough repetitions to
+Separate cold starts from warm or resumed runs. Run enough repetitions to
 show slow runs and failures. Record:
 
 - Time from request to an executable environment.
@@ -89,7 +89,7 @@ network destination, a time limit that ran out, and unavailable capacity on wake
 - Retrying the same operation should not create duplicate work or charges.
 - Revoking one agent's credential should stop its access without breaking
   another agent's connection.
-- For a pause test, write a file and keep a small in-memory value, pause,
+- For a pause test, write a file and keep a small in-memory value. Pause,
   restore, then verify both. A clean boot is not proof that memory came back.
 
 ## Where Runtime fits best
@@ -98,16 +98,16 @@ Runtime fits coding agents, test execution, file processing and multi-step jobs
 on Linux. Its measured CPU saves the most on workloads that wait on model or
 network responses.
 
-A running sandbox still pays its CPU floor and reserved memory, and paused
+A running sandbox still pays its CPU floor and reserved memory. Paused
 storage is billed separately. Inbound traffic is free, and each account's first
 {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). Sandboxes run Linux on CPUs, in
-one US region today; see [products](./products) for everything available.
+one US region today. See [products](./products) for everything available.
 
 ## Compared with a specific provider
 
 The same job on each provider: 1,000 runs of a 2 vCPU, 4 GiB sandbox, 60
 seconds each, 20 CPU-seconds of work. Rival rates were checked
-{{rivals-checked}}; each provider's page gives its date.
+{{rivals-checked}}. Each provider's page gives its date.
 
 | Provider                                                 |      Cost for 1,000 runs |              Runtime saves |
 | -------------------------------------------------------- | -----------------------: | -------------------------: |
@@ -129,7 +129,7 @@ seconds each, 20 CPU-seconds of work. Rival rates were checked
 | [Runloop](./runloop-alternative)                         |         {{cost:runloop}} |         {{saving:runloop}} |
 
 Each page has the working, a side-by-side table, and how to switch. The saving
-is largest for agents that wait; for a job that keeps every CPU busy the whole
+is largest for agents that wait. For a job that keeps every CPU busy the whole
 time, Northflank's allocated rate is lower than Runtime's.
 
 ## Switch with one prompt
@@ -138,7 +138,7 @@ Give your coding agent the one instruction in [migration](./migrate). It
 replaces the old provider's calls on a branch, tests them on the free usage, and
 tells you what you save each month. Your old code stays on the main branch until
 you merge. Code written for E2B, Daytona, Vercel Sandbox or Blaxel runs after
-changing one import. Whichever you
+changing one import. Whichever provider you
 are moving from, credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
 ([welcome match](./pricing#welcome-match)). For a new project, start with
 [getting started](./start).

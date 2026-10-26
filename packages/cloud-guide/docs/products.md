@@ -2,9 +2,9 @@
 
 One account owns every Runtime Cloud resource, its agent connections and its prepaid credit.
 
-One key, one API, one SDK and one CLI reach every product, with the same
+One key, one API, one SDK and one CLI reach every product. They share the same
 resource shape, errors, idempotency, pages and labels. The console at
-withruntime.com/account shows what you can use today; an SDK method is not a
+withruntime.com/account shows what you can use today. An SDK method is not a
 promise that another product is available.
 
 ## Products
@@ -34,21 +34,21 @@ promise that another product is available.
 
 **A fork or a snapshot keeps a sandbox's files, memory and running processes.**
 
-- A snapshot stays on the server of the sandbox it came from, and forks and
+- A snapshot stays on the server of the sandbox it came from. Forks and
   sandboxes started from it run there too. It is also copied off that server,
   so it survives losing it ([storage and backups](./storage)).
 - A sandbox with volumes cannot be snapshotted.
 - A snapshot or a fork of a running sandbox usually holds its memory as it was
-  when the request arrived: the sandbox stops at once and stays stopped until
+  when the request arrived. The sandbox stops immediately and stays stopped until
   its memory is written to disk, then runs again. Several snapshots and forks
-  on one server at once take their turns at the disk while their sandboxes are
+  on one server at the same time take their turns at the disk while their sandboxes are
   stopped. A sandbox whose time limit or funded time ends soon, on a busy
-  server, keeps running until its turn at the disk instead, and stops then:
-  its snapshot, or its fork's copies, hold that later moment.
+  server, keeps running until its turn at the disk instead, and stops then.
+  Its snapshot, or its fork's copies, hold that later moment.
 - To install dependencies once and start many sandboxes from them, build a
   [custom image](./javascript#custom-images) and create each sandbox from it.
 
-Start with [getting started](./start), then check
+Start with [getting started](./start). Then check
 [the sandbox environment](./sandbox-environment) and [security](./security)
 against your workload.
 
@@ -58,80 +58,80 @@ and `runtime_<product>_<verb>` in MCP.
 
 ## The console
 
-The sidebar holds everything. At its top is your account: its menu switches
+The sidebar holds everything. At its top is your account. Its menu switches
 account and holds Refer & earn, Support, the documentation, Runtime's status and
 Sign out. Under it are **Search or create**, **Home**, then **Sandboxes**,
-**Images** and **Volumes**, and at its foot **Usage & billing**, with your credit
+**Images** and **Volumes**. At its foot are **Usage & billing**, with your credit
 (or the free usage left) beside it, and **Settings**. New accounts begin with a
 focused connection flow until their first sandbox has started.
 
-- **Home** is today's report. **Needs you** comes first when something does: a
-  sandbox that failed to start or wake, or credit or free usage about to
-  run out (credit five days ahead at this month's pace). Then the few things a
+- **Home** is today's report. **Needs you** comes first when something does. That
+  includes a sandbox that failed to start or wake, or credit or free usage about to
+  run out (credit five days ahead at this month's pace). Next are the few things a
   person still does by hand: connect another agent, open a terminal in a
-  running sandbox, make a key and start a sandbox. Then sandbox
+  running sandbox, make a key and start a sandbox. Then come sandbox
   time today, hour by hour beside the same hour yesterday, counted in your
-  browser's time zone; this month's spend by product and where it is heading;
-  the last five things that happened; and the account in lines: credit and how
+  browser's time zone. Also shown are this month's spend by product and where it is heading.
+  Then the last five things that happened. Last, the account in lines: credit and how
   long it lasts, what runs now and how many started today, your images and
   volumes, and who started today's sandboxes.
 - **Agents & API keys**, the first page of **Settings**, lists every key in two
-  groups: **Agents**, connected
-  from an agent tool such as Claude Code, Cursor or Codex, with the tool and
-  machine it connected from, and **API keys**, made for a script, CI or a
+  groups. **Agents** are connected
+  from an agent tool such as Claude Code, Cursor or Codex. Each shows the tool and
+  machine it connected from. **API keys** are made for a script, CI or a
   dashboard. Each says when it last started something, what it may do and its
-  daily spending limit. Beside the list are today's starts hour by hour by who
-  started them and each key's spend over the last 24 hours against its limit.
+  daily spending limit. Beside the list are today's starts hour by hour, by who
+  started them, and each key's spend over the last 24 hours against its limit.
   **Needs you** names a key whose
   limit is refusing its starts, and a full-access key that has started nothing
-  for 30 days; nothing is revoked for you.
-- **Search or create**, or ⌘K (Ctrl+K), opens one search box that goes to any
+  for 30 days. Nothing is revoked for you.
+- **Search or create**, or ⌘K (Ctrl+K), opens one search box. It goes to any
   page or resource and starts anything. Each start shows the CLI command and SDK call
   that does it, ready to copy.
-- **Sandboxes** describes today's runs as a whole: how many started, how many
-  failed, how long they typically live and what they cost, with starts per hour
+- **Sandboxes** describes today's runs as a whole. It shows how many started, how many
+  failed, how long they typically live and what they cost. It also shows starts per hour
   beside yesterday, how long the runs that ended lived, and tables by who
-  started them and by image. A create Runtime refused (an image that does not
-  exist, a limit, credit run out) leaves no sandbox, and is counted here too,
+  started them and by image. A create Runtime refused leaves no sandbox. That covers an image that does not
+  exist, a limit, or credit run out. Such a refused create is counted here too,
   with the reason and the image asked for. **Needs you** says when failures
   rise above your usual rate, when creates are being refused, or when
   sandboxes run far longer than yours usually do. The list opens on those
-  running now, with today's failures one tab away and their reasons in words;
-  search finds any sandbox by name or ID, from any day.
+  running now. Today's failures are one tab away, with their reasons in words.
+  Search finds any sandbox by name or ID, from any day.
 - A **sandbox's page** says how it ended, how long it lived, who started it and
-  from which image, and for one that did not end by request, why and what to
+  from which image. For a sandbox that did not end by request, it says why and what to
   do. Its life is drawn start to stop. **Copy for my agent** copies what
-  happened, ready to paste; **Start one the same** copies the command that makes
-  an identical one. While it runs its tabs are Overview, Terminal, Files,
+  happened, ready to paste. **Start one the same** copies the command that makes
+  an identical one. While it runs, its tabs are Overview, Terminal, Files,
   Activity and Settings. **Terminal** is a shell in the browser
   ([how it signs in](./security#the-browser-terminal)).
-- **Images** leads with a failed build and the line it broke on, and with a name
-  or tag your agents keep asking for that no image has, then today's
-  starts, the share from your own images and the typical start time; starts a
-  day by image beside the last 14 days of builds; and a row an image with its
+- **Images** leads with a failed build and the line it broke on. It also leads with a name
+  or tag your agents keep asking for that no image has. Then come today's
+  starts, the share from your own images and the typical start time. Next is starts a
+  day by image, beside the last 14 days of builds. Last is a row for each image, with its
   starts today, start time, failures, versions kept and cost. An image nobody
   started in 30 days offers the command that deletes it. An image's page shows
   every version with its tags and the build log, live while it builds.
-- **Volumes** leads with a volume nearly full or behind on its backups, then
-  how many sandboxes used your volumes today; cost a day by volume beside the
-  sandboxes that used each a day, for the last 14 days; and a row a volume
+- **Volumes** leads with a volume nearly full or behind on its backups. Then
+  it shows how many sandboxes used your volumes today. It also shows cost a day by volume beside the
+  sandboxes that used each, for the last 14 days. Last is a row for each volume,
   with how full it is, how many used it today and who, and its last backup. A
   volume's page shows how full it is, where it is attached and its backups.
   Both give the commands that change them.
-- **Usage & billing** opens on your credit, adding credit in place, with the
-  referral offer at its foot. Then the month in a line, with what the same sandboxes would have cost at the provider you came
-  from (E2B when we do not know) over the last 30 days, at its published rates;
-  daily spend by product, with where the month is heading, beside daily spend
-  by who started it; what each meter came to, with its rate, beside each key's
+- **Usage & billing** opens on your credit, with adding credit in place and the
+  referral offer at its foot. Then comes the month in a line. It shows what the same sandboxes would have cost at the provider you came
+  from (E2B when we do not know) over the last 30 days, at its published rates.
+  It also shows daily spend by product, with where the month is heading, beside daily spend
+  by who started it. Last, it shows what each meter came to, with its rate, beside each key's
   spend over the last 24 hours against its daily limit. Its ledger lists
-  purchases, referral credit and the welcome match, refunds and the free usage; a card
+  purchases, referral credit and the welcome match, refunds and the free usage. A card
   purchase links to its Stripe receipt.
 - **Settings** holds Agents & API keys, webhooks, members, single sign-on, the
   audit log and two-step sign-in, in groups in the sidebar.
 
 The website acts on a sandbox with the same rights as your API keys. Owners and
 admins may stop, pause, wake, snapshot, fork and open a terminal in any of the
-account's sandboxes; developers, in the sandboxes their own agents started.
+account's sandboxes. Developers can do so in the sandboxes their own agents started.
 Billing members add credit and act on no sandbox.
 
 What Usage & billing counts:
@@ -144,12 +144,12 @@ What Usage & billing counts:
   meters.
 
 An agent connection has its own identity and revocable credential. Keys cover
-all Cloud products, including products enabled later, and last until revoked.
+all Cloud products, including products enabled later. They last until revoked.
 Browser sign-out does not revoke them. See
 [security and access](./security) before connecting an agent.
 
-An account can have several people, each an owner, admin, developer or billing
-member, and keeps an audit log of changes to members, keys, credit and security
+An account can have several people. Each is an owner, admin, developer or billing
+member. The account keeps an audit log of changes to members, keys, credit and security
 settings. See [teams and the audit log](./teams).
 
 ## Labels and names

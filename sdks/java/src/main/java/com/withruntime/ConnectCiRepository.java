@@ -18,7 +18,10 @@ public final class ConnectCiRepository extends Params<ConnectCiRepository> {
     return set("productionBranch", branch);
   }
 
-  /** Where in the repository its checks are written; runtime.yml by default. */
+  /**
+   * Where in the repository its checks are written; runtime.yml by default. A cloudbuild.yaml or
+   * buildspec.yml runs as Cloud Build or CodeBuild runs it.
+   */
   public ConnectCiRepository configPath(String path) {
     return set("configPath", path);
   }

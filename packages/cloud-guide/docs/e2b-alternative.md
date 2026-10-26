@@ -1,58 +1,58 @@
 # Runtime vs E2B
 
-Runtime runs agent code in Firecracker microVMs, like E2B, **for {{saving:e2b}} less** on an agent that spends most of its time waiting on a model.
+Runtime runs agent code in Firecracker microVMs, like E2B. It costs **{{saving:e2b}} less** for an agent that spends most of its time waiting on a model.
 
 **The saving:** 1,000 one-minute runs of a 2 vCPU, 4 GiB sandbox cost **{{cost:runtime}} on
 Runtime and {{cost:e2b}} on E2B**. At 100,000 runs a month that is {{cost:runtime:100000}} against
-{{cost:e2b:100000}}, **{{=$0 less:e2b:100000}} a month saved**. Your E2B code keeps working: change one import.
+{{cost:e2b:100000}}, **{{=$0 less:e2b:100000}} a month saved**. Your E2B code keeps working. Change one import.
 
-Weighing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the other providers by the cost of the same job.
+Comparing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
 - **You pay for the CPU you use.** E2B bills every vCPU for as long as the
-  sandbox runs. Runtime measures the CPU your code actually uses, so time spent
+  sandbox runs. Runtime measures the CPU your code actually uses. Time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept, then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it; the next command runs {{server-wake-command}} after that, timed on
+- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}}
+  pauses by itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
+  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
   Runtime's servers.
 - **Back from a pause in milliseconds.** E2B states a resume takes {{speed:e2b:wake}} and a
-  pause {{speed:e2b:pause}}. On Runtime's servers a wake takes {{server-wake}} and a pause
-  answers in {{server-pause}}, and a new sandbox is running {{server-create}} after the create
+  pause {{speed:e2b:pause}}. On Runtime's servers, a wake takes {{server-wake}}. A pause
+  returns in {{server-pause}}. A new sandbox is running {{server-create}} after the create
   request, against E2B's {{speed:e2b:create}} ([speed](./speed)).
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
-  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
+  measured from outside. {{uptime-credit}} of a short month's charges comes back as credit
   automatically ([Uptime Promise](/legal/sla)).
 - **Lower rates on both meters.** {{cpu-rate}} per vCPU-hour against E2B's {{rate:e2b:cpu}},
   and {{memory-rate}} per GiB-hour of memory against {{rate:e2b:memory}}. Even with every CPU busy
   the whole time, the example job costs {{cost:runtime:busy}} on Runtime and {{cost:e2b}} on E2B.
 - **No plan fee for long sessions.** E2B caps a session at 1 hour on Hobby and
-  needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox has no time limit:
-  it runs while it works, with no plan at all: prepaid credit from {{topup-min}}.
+  needs the {{term:e2b:pro}}-a-month Pro plan for 24. A Runtime sandbox has no time limit.
+  It runs while it works. It needs no plan. You add prepaid credit from {{topup-min}}.
 - **A one-line switch.** `withruntime/e2b` runs code written for E2B's SDK, in
   JavaScript and Python, including the code interpreter. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)). E2B lists SSO, SCIM and roles as
   planned for its Enterprise plan.
-- **OpenTelemetry export on every account.** Runtime pushes events as logs and
-  CPU and memory as metrics to any OTLP endpoint, at no charge
+- **OpenTelemetry export on every account.** Runtime pushes events as logs, and
+  CPU and memory as metrics, to any OTLP endpoint at no charge
   ([observability](./observability#opentelemetry-export)). E2B sends OTLP
   metrics and logs on its Enterprise plan.
 - **Custom domains built in.** A paid account serves a sandbox port at your own
   hostname, with HTTPS, from one command ([custom domains](./networking#custom-domains)).
   E2B's custom domain guide has you run your own proxy on a virtual machine.
-- **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
+- **Secrets stay outside the sandbox.** Code inside sees a placeholder. The
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
 - **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
-  into a prompt or a config file, and the [MCP server](./mcp) reuses the same
+  into a prompt or a config file. The [MCP server](./mcp) reuses the same
   connection.
 - **Guardrails for agents.** Give an agent a read-only key or a daily spending
-  limit per key, and cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
-  idempotency key and the SDKs retry with it, so a lost response never creates
+  limit per key. Cap any sandbox's whole cost with `maxTotalCostMicros`. Every write takes an
+  idempotency key, and the SDKs retry with it. A lost response never creates
   a second sandbox.
 
 **Also included:** a code interpreter, network allow and deny lists, custom
@@ -73,7 +73,7 @@ E2B's figures come from its public pricing and documentation, checked
 | CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor              | {{rate:e2b:cpu}} per allocated vCPU-hour               |
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:e2b:memory}} per GiB-hour                       |
 | Plan fee         | None; prepaid credit from {{topup-min}}                                     | Hobby {{term:e2b:hobby}}; Pro {{term:e2b:pro}} a month |
-| Free start       | {{included-machine}} every month, no card                                   | {{term:e2b:credit}} of usage credit on Hobby           |
+| Free start       | {{included-machine}} in the first 30 days, no card                          | {{term:e2b:credit}} of usage credit on Hobby           |
 | Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 1 hour on Hobby, 24 hours on Pro                       |
 | Pause and resume | Files, memory and running processes                                         | Files, memory and running processes                    |
 | Interfaces       | API, CLI, MCP server, JavaScript, Python, Go, Ruby and Java SDKs            | API, CLI, MCP server, JavaScript and Python SDKs       |
@@ -82,8 +82,8 @@ E2B's figures come from its public pricing and documentation, checked
 ## Cost for the same job
 
 Take 1,000 runs of a 2 vCPU, 4 GiB sandbox. Each run lasts 60 seconds and
-keeps the CPU busy for 20 CPU-seconds: an agent that spends most of its time
-waiting for a model.
+keeps the CPU busy for 20 CPU-seconds. This is an agent that spends most of its
+time waiting for a model.
 
 ```
 Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
@@ -102,10 +102,11 @@ E2B      CPU    1,000 × 60 s / 3,600 × 2 × {{rate:e2b:cpu}} = {{part:e2b:cpu}
   sandbox is.
 
 Plan fees, storage, network, taxes and free credits are left out of both.
-`runtime compare --from e2b` prices your own usage the same way, with
-sandboxes the free usage paid for at the standard rates, so free usage never
-counts as a saving. On Runtime, inbound traffic is free, and each account's
-first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
+`runtime compare --from e2b` prices your own usage the same way. Sandboxes the
+free usage paid for count at the standard rates, so free usage never
+counts as a saving. On Runtime, inbound traffic is free. Each account's
+first {{outbound-allowance}} out a month is free. After that, outbound traffic costs
+{{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing)
 for Runtime's terms.
 
 ## How to switch
@@ -130,25 +131,25 @@ from withruntime.e2b import Sandbox  # was: from e2b import Sandbox
 
 `withruntime/e2b/code-interpreter` and `withruntime.e2b.code_interpreter`
 replace E2B's code interpreter packages. Sandboxes get E2B's defaults: 2 vCPU
-and 512 MiB. A `timeoutMs` you give, up to 24 hours, is kept by Runtime's
-server, and the sandbox is deleted when it runs out, as E2B kills it; `kill()`
-deletes it too. With no timeout, E2B's 300 seconds ends in a pause instead,
-which keeps memory and files at {{paused-storage-rate}} per GB (10⁹ bytes) a
-month while the account has credit, so call `kill()` when the work is done.
+and 512 MiB. Runtime's server stores the `timeoutMs` you give, up to 24 hours.
+When it runs out, the sandbox is deleted, as E2B kills it. `kill()`
+also deletes it. With no timeout, E2B's 300 seconds ends in a pause instead.
+The pause keeps memory and files at {{paused-storage-rate}} per GB (10⁹ bytes) a
+month while the account has credit. So call `kill()` when the work is done.
 Unlike E2B's, sandboxes pause after {{idle-pause}} with nothing happening and
-wake on the next call, and E2B code still sees them running;
-`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. They use the free usage first, then prepaid credit, with nothing to
-choose.
+wake on the next call. E2B code still sees them running.
+`runtime: { create: { idlePauseSeconds: 0 } }` keeps them running. Sandboxes use the free usage first, then prepaid credit.
+There is nothing to choose.
 
-`commands.run` returns the command's whole output and, as E2B's does, throws
-`CommandExitError` (Python `CommandExitException`) on a non-zero exit and
-`TimeoutError` (Python `TimeoutException`) past its timeout, so your existing
+`commands.run` returns the command's whole output. As E2B's does, it throws
+`CommandExitError` (Python `CommandExitException`) on a non-zero exit. It throws
+`TimeoutError` (Python `TimeoutException`) past its timeout. Your existing
 error handling keeps working. If any output was lost before it was read, the
-result's `truncated` is set and a warning says so.
+result's `truncated` is set, and a warning says so.
 
 A call Runtime handles differently, such as E2B templates, workload identity or
 ending a sandbox earlier than its time limit, throws `NotSupportedError` before
-anything happens and names what to use instead. `E2B.md` in the package lists
+anything happens. It names what to use instead. `E2B.md` in the package lists
 every mapping.
 
 ### Or port the calls
@@ -177,9 +178,9 @@ try {
 }
 ```
 
-E2B's `commands.run` throws `CommandExitError` on a non-zero exit; Runtime's
-`exec` returns the result with `exitCode` (and `timedOut: true` on a timeout),
-and `{ check: true }`, as above, makes it throw `CommandError` instead.
+E2B's `commands.run` throws `CommandExitError` on a non-zero exit. Runtime's
+`exec` returns the result with `exitCode` (and `timedOut: true` on a timeout).
+With `{ check: true }`, as above, it throws `CommandError` instead.
 
 ## When E2B may fit better
 

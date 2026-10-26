@@ -4,7 +4,7 @@ launch: actions
 
 # GitHub Actions
 
-Change one line of a workflow and its job runs on Runtime:
+Change one line of a workflow, and its job runs on Runtime:
 
 ```yaml
 jobs:
@@ -12,9 +12,9 @@ jobs:
     runs-on: runtime # was: ubuntu-latest
 ```
 
-Each job gets its own sandbox of your account running GitHub's own runner,
+Each job gets its own sandbox of your account. The sandbox runs GitHub's own runner,
 registered for that one job and deleted when it ends. Nothing else in the
-workflow changes: `actions/checkout`, `setup-node`, `setup-python`,
+workflow changes. `actions/checkout`, `setup-node`, `setup-python`,
 `actions/cache`, `docker build` and matrices run as they do on GitHub's
 machines, only sooner: each job starts warm.
 [CI head to head](./ci-head-to-head) times six public projects' own jobs,
@@ -23,27 +23,27 @@ hosted runners.
 
 ## Starts warm
 
-A job's sandbox starts as a copy of its repository's runner, already set up
+A job's sandbox starts as a copy of its repository's runner. It is already set up
 at your default branch's latest commit, with nothing to configure:
 
 - GitHub's runner is unpacked, so no download comes before the first step.
 - The Node, Python, Go and Rust versions your workflows name
   (`node-version`, `python-version`, `go-version`, `toolchain`, their
   matrices, `.nvmrc`, `.python-version`, `go.mod`, `rust-toolchain.toml`) are
-  in the runner's tool cache, so `setup-node` and the rest find them and
+  in the runner's tool cache. So `setup-node` and the rest find them and
   download nothing.
-- Docker is running, with the images of your `services:`, `container:` jobs
-  and `docker://` steps already pulled, when a workflow uses them: the first
-  `docker` command answers at once, and a service's pull only asks the
+- Docker is running when a workflow uses it. The images of your `services:`, `container:` jobs
+  and `docker://` steps are already pulled. The first `docker` command
+  returns immediately. A service's pull only asks the
   registry whether its tag moved (about a second) before it starts.
 - Your dependencies' downloads are kept (npm, pnpm, yarn, bun, pip, uv,
-  poetry, Go modules, Cargo's registry), so the job's install reads them
+  poetry, Go modules, Cargo's registry). So the job's install reads them
   locally.
 
-It is set up from your default branch only, with no secret and no job run:
-a pull request's code never runs in what later jobs start from. After a job
+It is set up from your default branch only, with no secret and no job run.
+A pull request's code never runs in what later jobs start from. After a job
 starts, it is set up again in the background when your default branch has
-moved and the last one has paid for itself (see Billing), at most every 10
+moved and the last one has paid for itself (see Billing). This happens at most every 10
 minutes for each repository and size. Until a repository's first one is
 ready, its jobs start from an empty machine.
 
@@ -53,9 +53,8 @@ In the console, open **GitHub Actions** and press **Connect GitHub
 Actions**. It installs Runtime's GitHub App on the repositories you choose
 and turns runners on. Then push a workflow with `runs-on: runtime`.
 
-Or with the API: install the App with the link
-`POST /v1/actions/github:install` answers (open it in a browser within 15
-minutes), then turn runners on with an agent key allowed `create`, `list`,
+Or with the API: install the App with the link that `POST /v1/actions/github:install`
+returns. Open it in a browser within 15 minutes. Then turn runners on with an agent key allowed `create`, `list`,
 `get`, `stop` and `exec`:
 
 ```bash no-run
@@ -65,9 +64,9 @@ curl -X POST https://api.withruntime.com/v1/actions:enable \
   -d '{"maxRunning": 10}'
 ```
 
-Runners act as that key's agent and never with more than that key: its
-grants bound every runner's sandbox, and runners stop starting once it is
-revoked or expires. `POST /v1/actions:disable` stops starting them; a runner
+Runners act as that key's agent and never with more than that key. Its
+grants bound every runner's sandbox. Runners stop starting once the key is
+revoked or expires. `POST /v1/actions:disable` stops starting them. A runner
 already running finishes its job.
 
 ## Sizes
@@ -91,8 +90,8 @@ Docker works in every runner as on GitHub's: `services:` (Postgres, Redis,
 MySQL or any image, with their health checks and ports), `container:` jobs,
 `docker build`, Buildx with `docker/setup-buildx-action`, and `docker
 compose`. A job that starts warm has Docker running and its images pulled
-(see Starts warm). Otherwise Docker Engine, Buildx and Compose install as the runner starts,
-while it downloads and GitHub hands it the job; a `docker` command run
+(see Starts warm). Otherwise, Docker Engine, Buildx and Compose install as the runner starts,
+while it downloads and GitHub hands it the job. A `docker` command run
 before they are ready waits for them. A job that runs no `docker` command
 never starts Docker.
 
@@ -114,15 +113,15 @@ jobs:
 ```
 
 In a `container:` job, services are reached by their names (`postgres`,
-`redis`); in a job on the runner itself, at `localhost` on the ports they
+`redis`). In a job on the runner itself, they are reached at `localhost` on the ports they
 publish (`ports: ["5432:5432"]`). Containers reach the web with no proxy
-settings, and Docker Hub images come through Google's mirror of it,
+settings. Docker Hub images come through Google's mirror of it,
 `mirror.gcr.io`, first.
 
 ## Coming from another runner
 
 A job written for Blacksmith, Namespace, Depot, BuildJet, WarpBuild,
-Ubicloud or RunsOn runs on Runtime with its `runs-on` unchanged: connect the
+Ubicloud or RunsOn runs on Runtime with its `runs-on` unchanged. Connect the
 repository, and its label is taken as the Runtime size below. Change the
 label to a `runtime` size, or keep it.
 
@@ -138,17 +137,17 @@ label to a `runtime` size, or keep it.
 | `runs-on=<id>` with `runner=<n>cpu-linux-x64`, `cpu=<n>` or `ram=<GB>`, in one label or several | `n` vCPU (2 without) |
 | `runs-on` with `run-id=<id>` (RunsOn v2's form), and the same                                   | `n` vCPU (2 without) |
 
-A count between sizes gets the next size up (6 vCPU runs on 8), and above 16
+A count between sizes gets the next size up (6 vCPU runs on 8). A count above 16
 gets 16. RunsOn's settings for buying its machine (`spot`, `family`,
-`region`, `volume` and the like) are taken as they are, and its `s3-cache` extra
-is Runtime's own cache for `actions/cache`; its own AMI, a `pool` or `efs` stay
+`region`, `volume` and the like) are taken as they are. Its `s3-cache` extra
+is Runtime's own cache for `actions/cache`. Its own AMI, a `pool` or `efs` stay
 with RunsOn. Every job runs on Runtime's runner image, whichever Ubuntu its label
 names. Arm, macOS and Windows labels are left for that company's runner, as
 is a label Runtime doesn't know. If the other company's App is still
 installed on the repository, a job goes to whichever runner GitHub gives it
-first; uninstall it to run every job on Runtime.
+first. Uninstall it to run every job on Runtime.
 
-Their own actions keep working, unedited. On a Runtime runner each is run by
+Their own actions keep working, unedited. On a Runtime runner, each is run by
 the action GitHub's own runners use for the same thing, with the same
 inputs:
 
@@ -174,9 +173,9 @@ unused.
 ## Limits
 
 - Jobs of private repositories only. A public repository's job is refused,
-  with the reason in the job's list: anyone can open a pull request on a
+  with the reason in the job's list. Anyone can open a pull request on a
   public repository.
-- At most `maxRunning` runners at once (default 10, up to 100); more jobs
+- At most `maxRunning` runners at the same time (default 10, up to 100). More jobs
   wait their turn, oldest first.
 - A job runs at most 6 hours, as on GitHub's own machines.
 - A runner no job came to within 30 minutes is removed.
@@ -204,18 +203,18 @@ page shows the same list.
 A runner's sandbox is billed by the second, as any sandbox of its size, from
 when it starts until it is deleted.
 
-Setting a repository's runner up warm is billed as its own usage, and it is
-done only when it saves your jobs more time than it takes. Each refresh runs
+Setting a repository's runner up warm is billed as its own usage. It is done
+only when it saves your jobs more time than it takes. Each refresh runs
 in a sandbox of your jobs' size, billed by the second like any sandbox. No
-jobs, no refresh, no charge: the first is made after a repository and
-size's third job, and each one after it only once the jobs that started
+jobs, no refresh, no charge. The first refresh is made after a repository and
+size's third job. Each one after it runs only once the jobs that started
 warm since the last refresh have together saved more seconds than that
 refresh ran. A job's saving is measured, not assumed: its time against the
 middle of the same job's starts from an empty machine. Measured on 2 vCPU on
 22 October 2026: expressjs/express's test job takes 34.3 s from an empty
-machine and 10.7 s warm, 23.6 s saved; its refresh runs 44 s, so it pays for
+machine and 10.7 s warm, 23.6 s saved. Its refresh runs 44 s, so it pays for
 itself by the second job. BurntSushi/ripgrep's build and test job goes from
-55.2 s to 45.7 s, 9.5 s saved; its refresh runs 50 s, paid back by the sixth.
-The warm snapshot is billed as any snapshot of yours: one is kept for each
-repository and size, the one before it deleted once a newer is ready, and
-none is kept past 7 days.
+55.2 s to 45.7 s, 9.5 s saved. Its refresh runs 50 s, paid back by the sixth.
+The warm snapshot is billed as any snapshot of yours. One is kept for each
+repository and size, and the one before it is deleted once a newer is ready.
+None is kept past 7 days.

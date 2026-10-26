@@ -11,7 +11,7 @@ import (
 )
 
 // Version is this SDK's version, sent as X-Runtime-Client.
-const Version = "0.20.0"
+const Version = "0.22.0"
 
 // DefaultBaseURL is Runtime's API.
 const DefaultBaseURL = "https://api.withruntime.com"
@@ -78,6 +78,8 @@ type Client struct {
 	// sandbox (private beta: an account outside it is refused 403
 	// product_in_beta).
 	Agents *AgentService
+	// Jobs reads other platforms' jobs into Runtime jobs (ImportPlan).
+	Jobs *JobService
 	// Apps are servers of one image or build that scale with requests and
 	// can keep copies awake. Private beta.
 	Apps *AppService
@@ -267,6 +269,7 @@ func New(options ...Option) (*Client, error) {
 	c.SSO = &SSOService{c: c}
 	c.MCP = &MCPService{c: c}
 	c.Agents = newAgentService(c)
+	c.Jobs = &JobService{c: c}
 	c.Apps = &AppService{c: c, base: "/v1/apps", apps: true}
 	c.Functions = &AppService{c: c, base: "/v1/functions"}
 	c.Builds = &BuildService{c: c, Repositories: &RepositoryService{c: c}}

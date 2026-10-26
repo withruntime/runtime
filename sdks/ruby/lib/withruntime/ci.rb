@@ -32,7 +32,8 @@ module WithRuntime
   class CIRepositories < Product
     # Connects +repository+ ("owner/name"), read through Runtime's GitHub App.
     # Pushes and pull requests then run the checks written in +config_path:+
-    # (runtime.yml). Optional: production_branch (main), config_path,
+    # (runtime.yml; a cloudbuild.yaml or buildspec.yml runs as Cloud Build or
+    # CodeBuild runs it). Optional: production_branch (main), config_path,
     # installation (the GitHub App installation to read it through; the newest
     # when left out), name and labels.
     def connect(repository, production_branch: nil, config_path: nil, installation: nil, name: nil, labels: nil,
@@ -97,6 +98,10 @@ module WithRuntime
     # has its +review+: the verdict (pass or block), summary, findings (kind,
     # file, line, what, fix), notes, and the agent, the model the step asked
     # for (nil when none) and the session that gave it; nil otherwise.
+    # +annotations+ are the lines of the repository's files its log reports
+    # (path, start_line, end_line, start_column, level: notice, warning or
+    # failure, message, title), at most 50, failures first, as its own GitHub
+    # check run (+github_check_run+, "runtime / <name>") shows them.
     def get(id) = Record.new(@t.json("GET", "/v1/ci/jobs/#{seg(id)}"))
   end
 

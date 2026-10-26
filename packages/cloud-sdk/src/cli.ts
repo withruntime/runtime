@@ -449,7 +449,7 @@ const envPairs = (args: Args, from: NodeJS.ProcessEnv) =>
   );
 
 /** What the commands in cli-extras.ts use of this file. */
-const kit = {
+export const kit = {
   parse: (argv: string[], booleans: readonly string[], values: readonly string[]) =>
     parse(argv, booleans, values),
   flag,
@@ -4608,6 +4608,15 @@ const JOB_HELP = `runtime jobs <command>
          [--alert-webhook <url> [--alert-secret NAME]] [--alert-email] [--alert-after <runs>] [--no-alert]
          [-- <command...>]                    Change it in place: the next run uses it; history stays.
                                               --secret and --volume replace the whole list
+  deploy [<dir>] [--name <project>] [--dry-run]
+                                              Run Trigger.dev tasks and Inngest functions written
+                                              against withruntime/trigger or withruntime/inngest as
+                                              jobs: crons on their schedule, the rest on demand
+  import <file>... [--parameter NAME=VALUE]... [--cron ..] [--dry-run]
+                                              Move jobs from Google Cloud Run (job YAML and its Cloud
+                                              Scheduler job) or AWS Batch (job definition and its
+                                              EventBridge schedule): same image, command, size and
+                                              schedule. \`jobs import help\` says more
   ls                                          Your jobs: state, schedule and next run
   get <id>                                    One job, in full
   runs <id> [--all]                           Its newest 100 runs (--all: every one, oldest first)
@@ -4628,6 +4637,8 @@ Examples
   runtime jobs trigger <jobId> && runtime jobs logs <jobId> -f
   runtime jobs reschedule <jobId> --cron "30 4 * * 1-5" --timezone Europe/Berlin
   runtime jobs update <jobId> --image hub:latest --alert-webhook https://example.com/hook --alert-after 3
+  runtime jobs import job.yaml scheduler.yaml
+  runtime jobs import template.yaml --parameter AWS::Region=us-east-1 --dry-run
 `;
 
 /** The `--alert-*` flags of create and update, as a job's alert; undefined
@@ -4706,6 +4717,10 @@ async function jobCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pro
     print(named(JOB_HELP), { usage: named(JOB_HELP) });
     return 0;
   }
+  if (verb === "import")
+    return (await import("./jobs-import.js")).jobsImportCommand(rest, out, () => client(env), kit);
+  if (verb === "deploy")
+    return (await import("./jobs-deploy.js")).jobsDeployCommand(rest, out, () => client(env), kit);
   const runtime = await client(env);
   const api = runtime.jobs;
   switch (verb) {

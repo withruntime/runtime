@@ -24,6 +24,8 @@ export const expected: Record<string, string> = {
   "withruntime/freestyle": "Freestyle",
   "withruntime/morph": "MorphCloudClient",
   "withruntime/modal": "ModalClient",
+  "withruntime/trigger": "schedules",
+  "withruntime/inngest": "Inngest",
   "withruntime/cloudflare": "getSandbox",
   "withruntime/sandboxes": "sandboxes",
   "withruntime/snapshots": "snapshots",

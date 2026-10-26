@@ -54,6 +54,10 @@ export type AgentDefinition = {
   /** MCP servers the harness may reach. */
   mcp?: { name: string; url: string }[];
   volumes?: { volume: string; path: string }[];
+  /** Where each session's sandbox may connect, enforced by its network
+   * rules from its first packet: with allow, only those hosts. Absent:
+   * anywhere. */
+  network?: { internet: boolean; allow?: string[] };
   /** How long a session's sandbox runs with nothing happening before it
    * pauses; default 60. */
   idlePauseSeconds?: number;
@@ -72,6 +76,24 @@ export type AgentDefinition = {
   /** Whose memory a session reads: `key` (the default), each session key
    * its own; `agent`, one all its sessions share, never a support agent's. */
   memory?: { scope: "key" | "agent" };
+  /** Which tool calls of the harness run, wait for a person, or are
+   * refused. Each call is a `tool_call` event in the session's log; one that
+   * waits is an ask of the inbox with the options Allow and Deny
+   * (`agents.asks.approve`, `agents.asks.deny`), and only that call waits.
+   * Absent: every call runs. */
+  permissions?: AgentPermissions;
+};
+/** always_allow: the call runs. always_ask: it waits for a person's Allow or
+ * Deny. auto: Runtime reads the call and runs it, refuses it (high_risk) or
+ * holds it for a person (indeterminate). */
+export type AgentPermissionPolicy = "always_allow" | "always_ask" | "auto";
+export type AgentPermissions = {
+  /** Default always_allow. */
+  default?: AgentPermissionPolicy;
+  /** By the most particular name that matches: the harness's own tool name
+   * (Bash, Edit, apply_patch, run_shell_command, mcp__github__create_issue),
+   * an MCP server (mcp:github), or a family (shell, edit, read, web, mcp). */
+  tools?: Record<string, AgentPermissionPolicy>;
 };
 export type Agent = {
   id: string;
@@ -112,7 +134,23 @@ export type AgentSession = {
 };
 export type AgentEvent = {
   seq: number;
-  kind: "input" | "answer" | "reply" | "ask" | "status" | "result" | "error" | "note";
+  /** turn and tool: a model turn and a tool call of the session's trace,
+   * the span in body (`AgentTurn`, `AgentToolCall`). tool_call: one call
+   * the harness made under the agent's permissions, body {text, tool,
+   * input, toolUseId, evaluatedPermission, evaluation, askId}. */
+  kind:
+    | "input"
+    | "answer"
+    | "reply"
+    | "ask"
+    | "status"
+    | "result"
+    | "error"
+    | "note"
+    | "child"
+    | "turn"
+    | "tool"
+    | "tool_call";
   /** A key's principal id, slack:<user>, github:<login>, agent (the
    * harness) or runtime. */
   actor: string;
@@ -120,6 +158,82 @@ export type AgentEvent = {
   body: { text?: string } & Record<string, unknown>;
   createdAt: string;
 };
+/** Token counts and their cost at the provider's list price, in USD. */
+export type AgentTokens = {
+  /** Input tokens not read from or written to the prompt cache. */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+};
+/** One model request the session's harness made. */
+export type AgentTurn = Omit<AgentTokens, "costUsd"> & {
+  seq: number;
+  kind: "turn";
+  /** 16 hex digits; a tool call's `turn` names it. */
+  id: string;
+  provider: "anthropic" | "openai" | "google" | "other";
+  model: string;
+  startedAt: string;
+  durationMs: number;
+  /** Until the first bytes of the answer. */
+  firstTokenMs: number | null;
+  /** null for a model with no list price known. */
+  costUsd: number | null;
+  stopReason: string | null;
+  /** The model API's HTTP status. */
+  status: number;
+  error: string | null;
+  toolCalls: { id: string; name: string }[];
+};
+/** One tool call: from the turn that asked for it to the request that
+ * carried its result back. */
+export type AgentToolCall = {
+  seq: number;
+  kind: "tool";
+  id: string;
+  name: string;
+  turn: string | null;
+  startedAt: string;
+  durationMs: number;
+  /** The call's input and output, each at most 2,000 characters. */
+  input: string;
+  output: string;
+  error: boolean;
+};
+/** A page of a session's trace: the whole session's totals, by model and
+ * by tool, and up to `limit` spans after `after`. Read the next page with
+ * `after: nextAfter` until it is null. */
+export type AgentTrace = {
+  sessionId: string;
+  totals: AgentTokens & {
+    turns: number;
+    toolCalls: number;
+    unpricedTurns: number;
+    failedTurns: number;
+    failedToolCalls: number;
+    modelMs: number;
+    toolMs: number;
+  };
+  models: (AgentTokens & {
+    model: string;
+    provider: string;
+    turns: number;
+    unpricedTurns: number;
+  })[];
+  tools: { name: string; calls: number; failed: number; durationMs: number }[];
+  spans: (AgentTurn | AgentToolCall)[];
+  /** The seq to read the next page after; null when the log held no more. */
+  nextAfter: number | null;
+};
+/** OTLP/JSON: an ExportTraceServiceRequest of one page, to POST to a
+ * collector's /v1/traces; the first page holds the session's root span. */
+export type AgentTraceOtlp = { resourceSpans: Record<string, unknown>[]; nextAfter: number | null };
+/** Which page of a trace: spans after `after` (0 by default), at most
+ * `limit` (200 by default, 500 at most). */
+export type AgentTracePage = { after?: number; limit?: number };
+
 export type AgentAskState = "open" | "answered" | "expired" | "withdrawn" | "closed";
 /** One row of the account's inbox: a question a session's harness needs
  * answered to go on. Asks of one agent's sessions sharing a memory, with the same `step` are
@@ -156,6 +270,20 @@ export type AgentAsk = {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  /** The tool call it holds, answered Allow or Deny; null for any other ask. */
+  toolCall: AgentAskToolCall | null;
+};
+/** A tool call the agent's permissions hold for a person. */
+export type AgentAskToolCall = {
+  /** The harness's name for it: Bash, apply_patch, mcp__github__create_issue. */
+  tool: string;
+  input: Record<string, unknown>;
+  toolUseId?: string;
+  /** Its tool_call event in the session's log. */
+  seq?: number;
+  policy: "always_ask" | "auto";
+  /** Why auto held it: indeterminate. */
+  reasonCode?: string;
 };
 export type ListAgentAsks = {
   /** Open by default. */
@@ -477,6 +605,11 @@ export type AgentSessionHandle = {
    * up to 30 seconds a call; ends when the session has ended. */
   events(options?: { after?: number; signal?: AbortSignal }): AsyncGenerator<AgentEvent>;
   stop(options?: RequestOptions): Promise<AgentSession>;
+  /** A page of its trace: every model turn and tool call, with timing,
+   * tokens and cost, and the session's totals; `{ format: "otlp" }` for
+   * OpenTelemetry traces. */
+  trace(options?: RequestOptions & AgentTracePage): Promise<AgentTrace>;
+  trace(options: RequestOptions & AgentTracePage & { format: "otlp" }): Promise<AgentTraceOtlp>;
   /** Until it has ended; answers it then. */
   wait(options?: { signal?: AbortSignal }): Promise<AgentSession>;
   get(options?: RequestOptions): Promise<AgentSession>;
@@ -485,6 +618,27 @@ export type AgentSessionHandle = {
 export function agents(t: Transport) {
   const getSession = (id: string, options?: RequestOptions) =>
     t.json<AgentSession>({ method: "GET", path: `/v1/agents/sessions/${enc(id)}`, ...options });
+  function trace(id: string, options?: RequestOptions & AgentTracePage): Promise<AgentTrace>;
+  function trace(
+    id: string,
+    options: RequestOptions & AgentTracePage & { format: "otlp" },
+  ): Promise<AgentTraceOtlp>;
+  function trace(
+    id: string,
+    options: RequestOptions & AgentTracePage & { format?: "json" | "otlp" } = {},
+  ): Promise<AgentTrace | AgentTraceOtlp> {
+    const { format = "json", after, limit, ...rest } = options;
+    return t.json({
+      method: "GET",
+      path: `/v1/agents/sessions/${enc(id)}/trace`,
+      query: {
+        format,
+        ...(after !== undefined ? { after } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      },
+      ...rest,
+    });
+  }
   async function* events(
     id: string,
     options: { after?: number; signal?: AbortSignal } = {},
@@ -523,6 +677,8 @@ export function agents(t: Transport) {
         ...options,
       }),
     events: (options) => events(session.id, options),
+    trace: ((options?: RequestOptions & AgentTracePage & { format?: "otlp" }) =>
+      trace(session.id, options as RequestOptions)) as AgentSessionHandle["trace"],
     stop: (options) =>
       t.json<AgentSession>({
         method: "POST",
@@ -626,6 +782,13 @@ export function agents(t: Transport) {
     query: { scope, path },
   });
   return {
+    /** Claude Managed Agents' API on Runtime: the options Anthropic's SDK
+     * takes, so code written for it runs here unchanged:
+     * `new Anthropic(await runtime.agents.anthropic())`. */
+    anthropic: async (): Promise<{ baseURL: string; apiKey: string }> => ({
+      baseURL: `${t.baseUrl}/anthropic`,
+      apiKey: await t.apiKey(),
+    }),
     /** An agent: a name and a definition its sessions start from. */
     create: (input: CreateAgent, options?: RequestOptions) =>
       t.json<Agent>({ method: "POST", path: "/v1/agents", body: input, ...options }),
@@ -666,6 +829,10 @@ export function agents(t: Transport) {
     },
     sessions: {
       get: getSession,
+      /** A session's trace: every model turn and tool call with its timing,
+       * tokens and cost, totals by model and tool; `{ format: "otlp" }` for
+       * OpenTelemetry traces in the GenAI semantic conventions. */
+      trace,
       /** Newest first; of one agent, or in some states. */
       list: listSessions,
       /** An ended session and its log go. Its history is storage like any
@@ -693,6 +860,23 @@ export function agents(t: Transport) {
           method: "POST",
           path: `/v1/agents/asks/${enc(id)}/answer`,
           body: answer,
+          ...options,
+        }),
+      /** Lets a tool call the agent's permissions held run (its ask's Allow). */
+      approve: (id: string, options?: RequestOptions) =>
+        t.json<AgentAsk>({
+          method: "POST",
+          path: `/v1/agents/asks/${enc(id)}/answer`,
+          body: { option: "Allow" },
+          ...options,
+        }),
+      /** Keeps a held tool call from running (its ask's Deny); `message` is
+       * told to the agent as the reason. */
+      deny: (id: string, message?: string, options?: RequestOptions) =>
+        t.json<AgentAsk>({
+          method: "POST",
+          path: `/v1/agents/asks/${enc(id)}/answer`,
+          body: { option: "Deny", ...(message ? { text: message } : {}) },
           ...options,
         }),
     },

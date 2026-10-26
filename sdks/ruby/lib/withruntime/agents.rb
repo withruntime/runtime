@@ -10,11 +10,29 @@ module WithRuntime
   end
 
   # One entry of a session's log: +seq+, +kind+ (input, answer, reply, ask,
-  # status, result, error, note, or child: a child session's end, posted into
-  # its parent's log), +actor+, +body+ and +created_at+. +text+ is its words,
-  # +body.text+.
+  # status, result, error, note, child: a child session's end, posted into
+  # its parent's log, turn: a model turn, or tool: a tool call, the trace's
+  # spans with their fields in +body+), +actor+, +body+ and +created_at+.
+  # +text+ is its words, +body.text+.
   class AgentEvent < Record
     def text = self["body"].is_a?(Hash) ? self["body"]["text"] : nil
+  end
+
+  # A session's trace (+AgentSession#trace+): +session_id+; +totals+ (turns,
+  # tool_calls, input_tokens (uncached), output_tokens, cache_read_tokens,
+  # cache_write_tokens, cost_usd at the provider's list price,
+  # unpriced_turns, failed_turns, failed_tool_calls, model_ms, tool_ms);
+  # +models+ and +tools+, the same by model and by tool; and +spans+, each
+  # turn and tool call in order. A turn has its +model+, +started_at+,
+  # +duration_ms+, +first_token_ms+, token counts, +cost_usd+ (nil for an
+  # unpriced model), +stop_reason+, +status+, +error+ and +tool_calls+; a
+  # tool call its +name+, +turn+, +started_at+, +duration_ms+, +input+,
+  # +output+ and +error+.
+  class AgentTrace < Record
+    def totals = Record.new(self["totals"])
+    def models = (self["models"] || []).map { |row| Record.new(row) }
+    def tools = (self["tools"] || []).map { |row| Record.new(row) }
+    def spans = (self["spans"] || []).map { |row| Record.new(row) }
   end
 
   # A session as the API answers it. Times are ISO 8601 strings.
@@ -69,7 +87,9 @@ module WithRuntime
   # each an egress secret's name: each session takes the one with the most
   # usage left, and the review template moves to the next when one is out
   # of usage), +mcp+ ([{ name:, url: }]), +volumes+
-  # ([{ volume:, path: }]), +idle_pause_seconds+, +max_session_seconds+,
+  # ([{ volume:, path: }]), +network+ ({ internet:, allow: }: with allow,
+  # each session's sandbox reaches only those hosts), +idle_pause_seconds+,
+  # +max_session_seconds+,
   # +max_concurrent+, +max_session_dollars+ (more than 0, at most 10000, 5
   # unless set: the session and every session under it, the root's covering
   # its tree; a tree at it stops, reason "budget"), +max_day_dollars+ (more
@@ -88,6 +108,16 @@ module WithRuntime
       @memory = AgentMemory.new(transport)
       @asks = AgentAsks.new(transport)
     end
+
+    # Claude Managed Agents' API on Runtime: the options Anthropic's Ruby SDK
+    # takes, so code written for it runs here unchanged:
+    #
+    #   client = Anthropic::Client.new(**runtime.agents.anthropic)
+    #
+    # Sessions call the model with the account's own Anthropic key, the egress
+    # secret ANTHROPIC_API_KEY (runtime secrets set ANTHROPIC_API_KEY --host
+    # api.anthropic.com).
+    def anthropic = { base_url: "#{@t.base_url}/anthropic", api_key: @t.api_key }
 
     # Makes an agent at version 1. A name already used is a ConflictError
     # (name_taken); the names sessions, triggers, templates and approvals are
@@ -241,6 +271,22 @@ module WithRuntime
       end
     end
 
+    # A page of its trace, an AgentTrace: every model turn and tool call its
+    # harness made, with timing, tokens and cost. Its totals cover the whole
+    # session; its spans are up to +limit+ (200 by default, 500 at most)
+    # after +after+: call again with +after: page.next_after+ until it is nil.
+    # +format: "otlp"+ returns the same page as OpenTelemetry traces instead,
+    # OTLP/JSON (GenAI semantic conventions) as a Hash with "nextAfter", to
+    # POST without it to any collector's /v1/traces.
+    def trace(format: "json", after: 0, limit: nil)
+      raise ArgumentError, "format is json or otlp" unless %w[json otlp].include?(format.to_s)
+
+      query = { "format" => format.to_s, "after" => after }
+      query["limit"] = limit if limit
+      body = @t.json("GET", path("/trace"), query: query)
+      format.to_s == "otlp" ? body : AgentTrace.new(body)
+    end
+
     # Asks the session to stop and keeps the answer. A running session ends
     # once its sandbox is deleted; this does not wait for that (+wait+ does).
     def stop
@@ -371,6 +417,11 @@ module WithRuntime
   # one agent's sessions sharing a memory, with the same +step+, are one
   # row while it is open, and one answer reaches every session asking. +state+: open, answered,
   # withdrawn, expired (no pick) or closed (every asking session ended).
+  #
+  # A tool call the agent's +permissions+ hold is an ask too, with the
+  # options Allow and Deny and the call in +toolCall+ ({tool, input,
+  # toolUseId, seq, policy, reasonCode}): +approve+ lets it run, +deny+ keeps
+  # it from running.
   class AgentAsks < Product
     # The first page, newest first: open asks unless +state+ (one or a list)
     # says otherwise; of one +agent+; carrying every one of +labels+ (who sees
@@ -392,6 +443,13 @@ module WithRuntime
       body = Fields.body(option: option, text: text)
       Record.new(@t.json("POST", "/v1/agents/asks/#{seg(id)}/answer", body: body, key: idempotency_key))
     end
+
+    # Lets a tool call the agent's permissions held run (its ask's Allow).
+    def approve(id, idempotency_key: nil) = answer(id, "Allow", idempotency_key: idempotency_key)
+
+    # Keeps a held tool call from running (its ask's Deny); +message+ is told
+    # to the agent as the reason.
+    def deny(id, message = nil, idempotency_key: nil) = answer(id, "Deny", text: message, idempotency_key: idempotency_key)
 
     private
 

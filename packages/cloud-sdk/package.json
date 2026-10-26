@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "0.35.0",
+  "version": "0.37.0",
   "license": "Apache-2.0",
   "mcpName": "com.withruntime/runtime",
   "type": "module",
@@ -181,6 +181,16 @@
       "import": "./dist/modal/index.js",
       "default": "./dist/modal/index.js"
     },
+    "./trigger": {
+      "types": "./dist/trigger/index.d.ts",
+      "import": "./dist/trigger/index.js",
+      "default": "./dist/trigger/index.js"
+    },
+    "./inngest": {
+      "types": "./dist/inngest/index.d.ts",
+      "import": "./dist/inngest/index.js",
+      "default": "./dist/inngest/index.js"
+    },
     "./cloudflare": {
       "workerd": {
         "types": "./dist/cloudflare/worker.d.ts",
@@ -205,7 +215,8 @@
     "BLAXEL.md",
     "LICENSE",
     "COMPATIBILITY.md",
-    "compatibility-lock.json"
+    "compatibility-lock.json",
+    "agent-platforms-inventory.json"
   ],
   "engines": {
     "node": ">=22.12"
@@ -213,7 +224,7 @@
   "scripts": {
     "build": "node ../typescript-config/tsc5.mjs -p tsconfig.build.json",
     "check-types": "tsgo --noEmit && tsgo -p tests/compat/consumers",
-    "lint": "oxlint -c ../eslint-config/oxlint.json --ignore-pattern 'dist/**' --ignore-pattern 'tests/fixtures/modal/**' --ignore-pattern 'tests/compat/consumers/**'",
+    "lint": "oxlint -c ../eslint-config/oxlint.json --ignore-pattern 'dist/**' --ignore-pattern 'tests/fixtures/modal/**' --ignore-pattern 'tests/fixtures/jobs-dropins/**' --ignore-pattern 'tests/compat/consumers/**'",
     "test": "bun test"
   },
   "devDependencies": {

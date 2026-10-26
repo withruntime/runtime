@@ -23,7 +23,7 @@ module WithRuntime
   RENAME_RETIRES = nil
 
   class Client
-    attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :reservations, :limits, :emails, :referrals, :plans,
+    attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :reservations, :limits, :jobs, :emails, :referrals, :plans,
                 :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp, :agents,
                 :apps, :functions, :builds, :ci, :containers
 
@@ -58,6 +58,7 @@ module WithRuntime
       @secrets = Secrets.new(@transport)
       @reservations = Reservations.new(@transport)
       @limits = Limits.new(@transport)
+      @jobs = Jobs.new(@transport)
       @emails = Emails.new(@transport)
       @referrals = Referrals.new(@transport)
       @plans = Plans.new(@transport)

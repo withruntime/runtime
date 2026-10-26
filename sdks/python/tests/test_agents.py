@@ -133,6 +133,10 @@ class Stub(BaseHTTPRequestHandler):
             if "cursor" in query:
                 return self.answer({"data": [{**session(), "id": "second"}], "nextCursor": None})
             return self.answer({"data": [session()], "nextCursor": "page-2"})
+        if path.endswith("/trace"):
+            if query["format"] == ["otlp"]:
+                return self.answer({"resourceSpans": [{"scopeSpans": [{"spans": [{"name": "invoke_agent dev"}]}]}]})
+            return self.answer(TRACE)
         if path.endswith("/events"):
             page = Stub.pages.pop(0) if len(Stub.pages) > 1 else Stub.pages[0]
             return self.answer(page)
@@ -180,6 +184,10 @@ class Stub(BaseHTTPRequestHandler):
 
 ASK = {"id": "ask-1", "step": "bucket-cap", "question": "Raise the cap?", "options": [{"label": "Raise"}],
        "pick": "Raise", "state": "open", "sessions": [{"sessionId": SESSION_ID, "state": "asking", "seq": 2}]}
+
+TRACE = {"sessionId": SESSION_ID, "totals": {"turns": 1, "toolCalls": 0, "costUsd": 0.084},
+         "models": [], "tools": [],
+         "spans": [{"seq": 2, "kind": "turn", "model": "claude-opus-5-5", "costUsd": 0.084}], "nextAfter": None}
 
 
 class AgentsTest(unittest.TestCase):
@@ -377,6 +385,14 @@ class AgentsTest(unittest.TestCase):
         query = Stub.seen[0][2]
         self.assertEqual((query["state"], query["label"]), (["open", "expired"], ["team:infra"]))
 
+    def test_a_held_tool_call_is_approved_or_denied_with_its_message(self):
+        with self.client() as runtime:
+            self.assertEqual(runtime.agents.asks.approve("ask-1")["answer"], {"option": "Allow"})
+            denied = runtime.agents.asks.deny("ask-1", "Clean dist/ only.")
+            self.assertEqual(denied["answer"], {"option": "Deny", "text": "Clean dist/ only."})
+            self.assertEqual(runtime.agents.asks.deny("ask-1")["answer"], {"option": "Deny"})
+        self.assertEqual(self.routes(), [("POST", "/v1/agents/asks/ask-1/answer")] * 3)
+
     def test_trigger_rules_calls_and_held_calls_call_their_routes_and_a_call_carries_the_secret(self):
         with self.client() as runtime:
             triggers = runtime.agents.triggers
@@ -469,6 +485,26 @@ class AgentsTest(unittest.TestCase):
                     templates.definition(template, use)
         self.assertEqual(Stub.seen, [])
 
+    def test_trace_reads_the_sessions_turns_and_tool_calls_or_opentelemetry(self):
+        with self.client() as runtime:
+            session = runtime.agents.sessions.get(SESSION_ID)
+            trace = session.trace()
+            self.assertEqual((trace["totals"]["costUsd"], trace["spans"][0]["model"]), (0.084, "claude-opus-5-5"))
+            self.assertIsNone(trace["nextAfter"])
+            otlp = session.trace(format="otlp", after=7, limit=500)
+            self.assertEqual(otlp["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"], "invoke_agent dev")
+            with self.assertRaises(InvalidRequestError):
+                session.trace(format="xml")
+        base = f"/v1/agents/sessions/{SESSION_ID}"
+        self.assertEqual(self.routes(), [("GET", base), ("GET", f"{base}/trace"), ("GET", f"{base}/trace")])
+        self.assertEqual([s[2] for s in Stub.seen[1:]], [{"format": ["json"], "after": ["0"]},
+                                                          {"format": ["otlp"], "after": ["7"], "limit": ["500"]}])
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=2) as runtime:
+                return await (await runtime.agents.sessions.get(SESSION_ID)).trace()
+        self.assertEqual(asyncio.run(go())["totals"]["turns"], 1)
+
     def test_async_clients_await_and_iterate_the_same_way(self):
         Stub.pages = [{"data": [event(1), event(2)], "ended": True}, {"data": [], "ended": True}]
         Stub.states = ["done"]
@@ -496,3 +532,11 @@ class AgentsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnthropicOptionsTest(unittest.TestCase):
+    def test_anthropic_is_the_options_anthropics_sdk_takes(self):
+        for client in (Runtime(api_key="rk_test", base_url="https://api.example.test"),
+                       AsyncRuntime(api_key="rk_test", base_url="https://api.example.test")):
+            self.assertEqual(client.agents.anthropic(),
+                             {"base_url": "https://api.example.test/anthropic", "api_key": "rk_test"})

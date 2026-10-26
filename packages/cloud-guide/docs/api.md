@@ -2,18 +2,13 @@
 
 One API for every Runtime Cloud product, at `https://api.withruntime.com`.
 
-The SDKs, the CLI and MCP are thin layers over it. This page is the contract.
-The machine-readable one is the public OpenAPI document at
-`https://api.withruntime.com/v1/openapi.json`, generated from the same route
-definitions the server validates with.
+The SDKs, the CLI and MCP are thin layers over this API. This page is the contract. The machine-readable contract is the public OpenAPI document at `https://api.withruntime.com/v1/openapi.json`. It is generated from the same route definitions that the server validates with.
 
 API version: **0.2.0**.
 
 ## Requests
 
-Send the key as a bearer token. Keys stay in server-side secret storage; never in
-a URL, a browser or a command line others can read. A browser uses a
-[session](#sessions) instead.
+Send the key as a bearer token. Store keys in server-side secret storage. Never put a key in a URL, a browser, or a command line that others can read. A browser uses a [session](#sessions) instead.
 
 ```bash no-run
 curl https://api.withruntime.com/v1/sandboxes \
@@ -23,20 +18,11 @@ curl https://api.withruntime.com/v1/sandboxes \
   -d '{}'
 ```
 
-In a shell, put a variable before a colon in braces: `"${ID}:exec"`. zsh, the
-macOS default, reads `$ID:e` as a modifier and sends `/xec`.
+In a shell, put a variable before a colon in braces: `"${ID}:exec"`. zsh, the macOS default, reads `$ID:e` as a modifier. It then sends `/xec`.
 
-Never use `curl -v` or `--trace` with the key: they print the `Authorization`
-header.
+Never use `curl -v` or `--trace` with the key. They print the `Authorization` header.
 
-A key sees and uses what its own agent made: another key's sandbox answers 404
-`not_found`. An account-wide key, which an owner or admin makes at
-[API keys](https://withruntime.com/account/keys) or approves for
-`runtime keys create --account-wide`, sees and uses everything in the account,
-and `getOrCreate` returns a sandbox another key named. A key in a
-[compartment](./security#compartments) sees what its compartment's keys made,
-and nothing else. A full-access key of an owner or admin can make, list and revoke keys with
-`/v1/keys`; no other key can ([run a swarm](./teams#run-a-swarm)).
+A key sees and uses only what its own agent made. Another key's sandbox returns 404 `not_found`. An account-wide key sees and uses everything in the account. An owner or admin makes one at [API keys](https://withruntime.com/account/keys), or approves one with `runtime keys create --account-wide`. Such a key's `getOrCreate` can return a sandbox that another key named. A key in a [compartment](./security#compartments) sees only what its compartment's keys made. A full-access key of an owner or admin can make, list and revoke keys with `/v1/keys`. No other key can ([run a swarm](./teams#run-a-swarm)).
 
 ```bash no-run
 curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}:exec" \
@@ -45,18 +31,14 @@ curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}:exec" \
   -d '{"command": "python3 -c \"print(sum([125, 250, 375]))\""}'
 ```
 
-- Resources live at `/v1/<plural>/{id}`. A change that is not a plain update is
-  `POST /v1/<plural>/{id}:<verb>`: `:stop`, `:pause`, `:wake`, `:exec`.
-- Field names are camelCase. Times are ISO 8601 in UTC. Money is integer
-  microdollars: 1,000,000 is one US dollar.
-- Unknown fields are refused, and every wrong field is named in one answer.
-- `Prefer: wait=N` (seconds, at most 120) on a change answers once the resource
-  has settled rather than at once. `GET /v1/sandboxes/{id}?waitFor=running&timeoutSeconds=60`
-  waits for a state without polling.
+- Resources live at `/v1/<plural>/{id}`. A change that is not a plain update uses `POST /v1/<plural>/{id}:<verb>`, such as `:stop`, `:pause`, `:wake` or `:exec`.
+- Field names are camelCase. Times are ISO 8601 in UTC. Money is an integer count of microdollars: 1,000,000 is one US dollar.
+- Unknown fields are refused. One response names every wrong field.
+- `Prefer: wait=N` (seconds, at most 120) on a change returns once the resource has settled, not immediately. `GET /v1/sandboxes/{id}?waitFor=running&timeoutSeconds=60` waits for a state without polling.
 
 ## Responses and errors
 
-Every response carries `x-request-id`. Every error has one shape:
+Every response includes an `x-request-id` header. Every error has one shape:
 
 ```json
 {
@@ -80,66 +62,28 @@ Every response carries `x-request-id`. Every error has one shape:
 }
 ```
 
-Follow the `hint`. Quote the `requestId` when you report a problem. A 5xx never
-carries internal detail, only a fixed message and the request id.
+Follow the `hint`. Quote the `requestId` when you report a problem. A 5xx response never includes internal detail. It contains only a fixed message and the request ID.
 
-**`retryable` says whether to send it again.** Every error has it. `true`
-means the same request, sent again unchanged, may succeed: the answer then
-always carries a `Retry-After` header, the seconds to wait first (and
-`retryAfterMs` in the body when the wait is exact). `false` means something
-must change first, and the same request gets the same answer; such an answer
-never carries `Retry-After`. Each code has one status and one `retryable`,
-listed below and in the OpenAPI document's `x-error-codes`; a code is never
-renamed, so code that reads `code` keeps working.
+**`retryable` says whether to send it again.** Every error has it. `true` means the same request, sent again unchanged, may succeed. Such a response always has a `Retry-After` header with the seconds to wait first. The body also has `retryAfterMs` when the wait is exact. `false` means something must change first. The same request gets the same response, and that response never has `Retry-After`. Each code has one status and one `retryable` value. They are listed below and in the OpenAPI document's `x-error-codes`. A code is never renamed, so code that reads `code` keeps working.
 
-**A refusal that adding credit lifts has one shape**, whatever the product, so
-an agent can tell its person plainly what to do. It answers with one of
+**A refusal that adding credit lifts has one shape**, whatever the product. An agent can then tell its person plainly what to do. The code is one of
 `no_credit_size_limit`, `no_credit_running_limit`, `no_credit_total_limit`,
 `no_credit_kept_limit`, `no_credit_daily_limit`, `no_credit_key_limit`, `no_credit_domain_limit`, `no_credit_capacity_full`, `no_credit_build_limit`,
 `included_usage_used_up`, `included_usage_unavailable`, `insufficient_funds`,
 `payment_required`, `public_preview_not_allowed` or `connect_not_allowed`:
 
 - `message`: what was refused, and the limit.
-- `hint`: what you can do now without credit, then the one way past it: the
-  account's owner adds credit at
-  [Usage & billing](https://withruntime.com/account/billing#add-credit).
-  Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total
-  ([welcome match](./pricing#welcome-match)).
-- `details.addCredit`: the same, for code. `givenCreditCounts` is `false` where
-  only credit paid for lifts the refusal (public previews, ports beyond 80 and
-  443, custom domains, public TCP ports and private networks); `welcomeMatch`
-  holds the match's days and dollars.
+- `hint`: what you can do now without credit. Then it gives the one way past the limit. The account's owner adds credit at [Usage & billing](https://withruntime.com/account/billing#add-credit). Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total ([welcome match](./pricing#welcome-match)).
+- `details.addCredit`: the same, for code. `givenCreditCounts` is `false` where only paid credit lifts the refusal. That covers public previews, ports beyond 80 and 443, custom domains, public TCP ports and private networks. `welcomeMatch` holds the match's days and dollars.
 
-An agent never adds or spends credit on its own: it tells the owner which
-limit it met. The one exception is an account the agent opened itself with a
-wallet, that no person pays for ([pay with stablecoins](./pricing)): there the
-`hint` says to add credit yourself, with `npx withruntime billing topup <usd>`
-or `POST /v1/billing/topups` and the account's own key, and
-`details.addCredit` is `{"by": "agent", "command": ..., "api": ...,
-"givenCreditCounts": ...}` with no `url`. `GET /v1/limits` says which kind of
-account a key is on (`credit.addedBy`).
+An agent never adds or spends credit on its own. It tells the owner which limit it met. One exception is an account that the agent opened itself with a wallet. No person pays for that account ([pay with stablecoins](./pricing)). For that account, the `hint` says to add credit yourself. Use `npx withruntime billing topup <usd>` or `POST /v1/billing/topups` with the account's own key. In that case, `details.addCredit` is `{"by": "agent", "command": ..., "api": ...,
+"givenCreditCounts": ...}` and has no `url`. `GET /v1/limits` shows which kind of account a key is on (`credit.addedBy`).
 
-Such an account's claim code is its way back if its key is lost:
-`npx withruntime billing claim <code> --new-key`, or
-`POST https://withruntime.com/api/wallet/rekey` with `{"claimCode": "..."}`,
-answers a new key, shown once, and every other key of the account stops working at once.
-A claim code replaces its key at most three times in 24 hours, each time in
-the account's audit log (`wallet.key_replaced`), and only until a person takes
-the account over; after that, its people make keys on the website. Keep the
-claim code as secret as the key. `connect_not_allowed` for an organization whose port access
-Runtime turned off has no `addCredit`, since credit does not change it.
+A claim code is the way back into such an account if its key is lost. Use `npx withruntime billing claim <code> --new-key`, or `POST https://withruntime.com/api/wallet/rekey` with `{"claimCode": "..."}`. Either returns a new key, shown once. Every other key of the account stops working immediately. A claim code replaces the key at most three times in 24 hours. Each replacement is recorded in the account's audit log (`wallet.key_replaced`). This works only until a person takes the account over. After that, its people make keys on the website. Keep the claim code as secret as the key. `connect_not_allowed` returns no `addCredit` for an organization whose port access Runtime turned off. Credit does not change that refusal.
 
-**A 5xx says whose fault it is.** A message that says the fault is ours, not
-your request's, was reported to us automatically, with its `requestId`. A 500
-is a fault a retry does not fix; a 502, 503 or 504 passes, so retry it with
-the same key; write to us only if it keeps failing. A 501 is a product switched
-off on this deployment.
+**A 5xx says whose fault it is.** A message that says the fault is ours, not your request's, was reported to us automatically, with its `requestId`. A 500 is a fault that a retry does not fix. A 502, 503 or 504 clears on its own, so retry it with the same key. Write to us only if it keeps failing. A 501 means a product is switched off on this deployment.
 
-The status follows HTTP's meaning, so a client or a retry library that reads
-only the status does the right thing: 409 is only a state you change first (a
-sandbox to wake, a name already held) or one that clears by itself; 429 is
-your own limit (a rate, what runs at once, a quota, a daily cap); 503 is the
-service briefly away or out of room.
+The status follows HTTP's meaning. A client or retry library that reads only the status does the right thing. 409 means a state you must change first, such as a sandbox to wake or a name already held. It can also mean a state that clears by itself. 429 means your own limit: a rate, what runs at the same time, a quota, or a daily cap. 503 means the service is briefly away or out of room.
 
 <!-- error-codes:start (bun packages/cloud/src/api/error-codes-write.ts) -->
 
@@ -160,160 +104,52 @@ service briefly away or out of room.
 | 415    | no        | `unsupported_media_type`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Send `Content-Type: application/json`                                                                                                                                                                                                                                                                                                                           |
 | 416    | no        | `range_not_satisfiable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Ask for a range inside the file; the message says its length                                                                                                                                                                                                                                                                                                    |
 | 422    | no        | `archive_failed`, `cwd_not_found`, `disk_too_small`, `idempotency_conflict`, `idempotency_key_reused`, `image_build_failed`, `image_config_invalid`, `image_limit_too_small`, `image_on_another_host`, `image_platform_unsupported`, `image_port_invalid`, `image_registry_unsupported`, `interpreter_failed`, `invalid_volume_attachment`, `keep_env_refused`, `mcp_cleanup_failed`, `mcp_failed`, `no_credit_size_limit`, `passkey_limit`, `passkey_refused`, `recording_failed`, `ref_not_found`, `retention_too_long`, `scale_over_limit`, `second_step_wrong_code`, `subagent_depth`, `tailscale_failed`, `tunnel_overrun`, `tunnel_unavailable`, `unprocessable`, `upload_failed`, `volumes_apart`, `volumes_on_different_hosts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Well formed, but not possible as asked: change what the message names; a program in your sandbox that failed is named in `details`                                                                                                                                                                                                                              |
-| 429    | yes       | `blob_store_full`, `blob_upload_limit`, `build_in_progress`, `context_limit`, `daily_limit`, `guest_busy`, `no_credit_build_limit`, `no_credit_daily_limit`, `no_credit_domain_limit`, `no_credit_running_limit`, `no_credit_total_limit`, `process_limit`, `quota_exceeded`, `rate_limited`, `resource_limit`, `sandbox_busy`, `second_step_locked`, `startup_application_limit`, `startup_cool_down`, `subagent_quota`, `transfer_limit`, `trial_signup_rate`, `watch_limit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `quota_exceeded` for a limit on what runs at once (`details.limit` `sandbox.count`, `sandbox.vcpu`, `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count` or `instance.count`); on what is kept it is a 409. Your own limit: its rate, what runs at once, a quota or a daily cap. Retry after `Retry-After` with the same key, or end something it counts    |
+| 429    | yes       | `account_share_full`, `blob_store_full`, `blob_upload_limit`, `build_in_progress`, `context_limit`, `daily_limit`, `guest_busy`, `no_credit_build_limit`, `no_credit_daily_limit`, `no_credit_domain_limit`, `no_credit_running_limit`, `no_credit_total_limit`, `process_limit`, `quota_exceeded`, `rate_limited`, `resource_limit`, `sandbox_busy`, `second_step_locked`, `startup_application_limit`, `startup_cool_down`, `subagent_quota`, `transfer_limit`, `trial_signup_rate`, `watch_limit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `quota_exceeded` for a limit on what runs at once (`details.limit` `sandbox.count`, `sandbox.vcpu`, `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count` or `instance.count`); on what is kept it is a 409. Your own limit: its rate, what runs at once, a quota or a daily cap. Retry after `Retry-After` with the same key, or end something it counts    |
 | 451    | no        | `taken_down`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Taken down after a report; write to support if it was a mistake                                                                                                                                                                                                                                                                                                 |
 | 499    | no        | `cancelled`, `client_closed`, `request_cancelled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | You closed the connection first; nobody read this                                                                                                                                                                                                                                                                                                               |
-| 500    | no        | `env_unreadable`, `guest_quarantined`, `internal_error`, `job_failed`, `operation_failed`, `price_unavailable`, `secrets_unconfirmed`, `snapshot_busy`, `snapshot_unusable`, `watch_failed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Our fault, reported to us. Safe to send again with the same key, but it may fail the same way until we fix it                                                                                                                                                                                                                                                   |
+| 500    | no        | `env_unreadable`, `guest_quarantined`, `history_unreadable`, `internal_error`, `job_failed`, `operation_failed`, `price_unavailable`, `secrets_unconfirmed`, `snapshot_busy`, `snapshot_unusable`, `watch_failed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Our fault, reported to us. Safe to send again with the same key, but it may fail the same way until we fix it                                                                                                                                                                                                                                                   |
 | 501    | no        | `delete_unavailable`, `env_unavailable`, `feature_unavailable`, `file_links_unavailable`, `fork_unavailable`, `identity_unavailable`, `network_rules_unavailable`, `network_unavailable`, `previews_unavailable`, `resize_unavailable`, `schema_migration_required`, `secrets_unavailable`, `storage_unavailable`, `switch_image_unavailable`, `switching_paused`, `unavailable`, `unsupported`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Switched off on this deployment; sending it again does not help                                                                                                                                                                                                                                                                                                 |
 | 502    | yes       | `billing_unavailable`, `download_incomplete`, `github_unavailable`, `guest_failed`, `image_unavailable`, `keys_unavailable`, `support_unavailable`, `upstream_failed`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | A service behind the API answered badly: retry after `Retry-After` with the same key                                                                                                                                                                                                                                                                            |
-| 503    | yes       | `alert_in_flight`, `alert_unavailable`, `api_unavailable`, `base_image_unverified`, `body_stalled`, `builder_outdated`, `busy`, `capacity_unavailable`, `copies_unread`, `desktop_connection_unavailable`, `drill_unalerted`, `drill_unrecorded`, `email_unavailable`, `guest_not_ready`, `heartbeats_unreadable`, `host_busy`, `host_capacity`, `host_memory_pressure`, `host_not_ready`, `host_start_failed`, `host_unavailable`, `host_unknown`, `monitor_unavailable`, `no_capacity`, `no_credit_capacity_full`, `planned_release`, `resize_not_started`, `signing_unavailable`, `snapshot_restoring`, `switch_undone`, `wake_refused`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Briefly away or out of room: retry after `Retry-After` with the same key (the SDKs do)                                                                                                                                                                                                                                                                          |
+| 503    | yes       | `alert_in_flight`, `alert_unavailable`, `api_unavailable`, `base_image_unverified`, `body_stalled`, `builder_outdated`, `busy`, `capacity_unavailable`, `copies_unread`, `desktop_connection_unavailable`, `drill_unalerted`, `drill_unrecorded`, `email_unavailable`, `guest_not_ready`, `heartbeats_unreadable`, `history_unavailable`, `host_busy`, `host_capacity`, `host_memory_pressure`, `host_not_ready`, `host_start_failed`, `host_unavailable`, `host_unknown`, `monitor_unavailable`, `no_capacity`, `no_credit_capacity_full`, `planned_release`, `resize_not_started`, `signing_unavailable`, `snapshot_restoring`, `switch_undone`, `wake_refused`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Briefly away or out of room: retry after `Retry-After` with the same key (the SDKs do)                                                                                                                                                                                                                                                                          |
 | 504    | yes       | `host_timeout`, `upstream_timeout`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | A service behind the API did not answer in time: retry after `Retry-After` with the same key                                                                                                                                                                                                                                                                    |
 
 <!-- error-codes:end -->
 
-**Retryable answers are safe to send again.** `no_capacity`, `busy`,
-`host_unavailable`, `rate_limited`, `no_credit_running_limit` and every other
-code marked retryable above clear on their own: retry with the same key after
-`Retry-After`, a growing delay and a bounded deadline.
+**Retryable answers are safe to send again.** `no_capacity`, `busy`, `host_unavailable`, `rate_limited`, `no_credit_running_limit`, and every other code marked retryable above clear on their own. Retry with the same key after `Retry-After`, using a growing delay and a bounded deadline.
 
-- The SDKs retry every answer that says `retryable: true` themselves, after
-  its `Retry-After`, up to `maxRetries`, but for `no_capacity`,
-  `quota_exceeded` and `no_credit_running_limit`, which they wait out only
-  where they wait for room (below) and otherwise return at once. A wait over
-  a minute (a daily cap) is not slept on: the error is returned at once, with
-  `retryAfterMs`, for you to schedule.
-- `guest_busy`, `busy` and `rate_limited` mean nothing ran. The SDKs send such
-  a call again, with the same key and a delay that grows from `Retry-After`
-  to eight times it, until the call's own deadline, or for
-  five minutes when it has none, however many retries `maxRetries` allows.
-  Then the refusal itself is returned. A sandbox under heavy load can answer
-  `guest_busy` for tens of seconds; the call is then slow, not failed.
-- A `quota_exceeded` names the limit in its message and in `details`:
-  `limit` (such as `volume.count`), `max` and how to `raise` it. Every limit
-  is listed in [limits](./limits).
-- A create or wake refused `no_capacity` holds a place in its region's line
-  while it is sent again with the same `Idempotency-Key` (the SDKs do), and
-  its message says the place, how many wait ahead and the account's lane: "in
-  line at place 2: the region's room goes to higher lanes first: 1 waiting
-  ahead (pro 1); this account's lane is free", and its `details.line` holds
-  the same as `lane`, `place`, `ahead` (by lane) and `words`. Room that frees
-  goes to the highest lane waiting first; see
-  [waiting in line for room](./limits#waiting-in-line-for-room).
-- An SDK create also waits out `no_credit_running_limit`, `quota_exceeded` and
-  `no_capacity`, for up to two minutes by default, then returns the refusal.
-  The error's `retryable` is `true` for `no_credit_running_limit`, `no_capacity`
-  and a `quota_exceeded` on what runs at once (`sandbox.count`, `sandbox.vcpu`,
-  `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count`, `instance.count`),
-  for a loop of your own. A `quota_exceeded` on what you keep (volumes, images,
-  snapshots, secrets, kept sandboxes) is a 409 that says `retryable: false`
-  and has no `Retry-After`: it clears only when you delete something or raise
-  the limit, and no SDK waits for it.
-- `no_capacity` is a 503 with `Retry-After: 1`, and `no_credit_running_limit`
-  and a retryable `quota_exceeded` are 429s with `Retry-After: 5`: the wait
-  before a first retry, for a client that reads only HTTP. The SDKs keep their
-  own growing delay. Until 17 October 2026 all three were 409s, with the same
-  body.
-- `no_credit_running_limit` clears when one of the {{trial-sandboxes}} running sandboxes without credit stops or pauses. A fork asking for more copies than that never fits.
+- The SDKs retry every response that says `retryable: true` themselves. They wait for its `Retry-After`, up to `maxRetries` times. The exceptions are `no_capacity`, `quota_exceeded` and `no_credit_running_limit`. The SDKs wait those out only where they wait for room (below). Otherwise they return the error immediately. A wait over a minute, such as a daily cap, is not slept on. The error is returned immediately, with `retryAfterMs`, so you can schedule the retry.
+- `guest_busy`, `busy` and `rate_limited` mean nothing ran. The SDKs send such a call again, with the same key. The delay grows from `Retry-After` up to eight times that value. They keep going until the call's own deadline. If the call has none, they keep going for five minutes. This applies however many retries `maxRetries` allows. Then the refusal itself is returned. A sandbox under heavy load can return `guest_busy` for tens of seconds. The call is then slow, not failed.
+- A `quota_exceeded` names the limit in its message and in `details`. `details` has `limit` (such as `volume.count`), `max`, and how to `raise` it. Every limit is listed in [limits](./limits).
+- A create or wake refused with `no_capacity` keeps its place in its region's line. It keeps the place if it is sent again with the same `Idempotency-Key` (the SDKs do this). Its message gives the place, how many wait ahead, and the account's lane. For example: "in line at place 2: the region's room goes to higher lanes first: 1 waiting ahead (pro 1); this account's lane is free". Its `details.line` holds the same as `lane`, `place`, `ahead` (by lane) and `words`. Freed room goes to the highest lane waiting first. See [waiting in line for room](./limits#waiting-in-line-for-room).
+- An SDK create also waits out `no_credit_running_limit`, `quota_exceeded` and `no_capacity`. It waits up to two minutes by default, then returns the refusal. For a loop of your own, the error's `retryable` is `true` for three cases. Those are `no_credit_running_limit`, `no_capacity`, and a `quota_exceeded` on what runs at the same time (`sandbox.count`, `sandbox.vcpu`, `sandbox.memory_mib`, `sandbox.disk_mib`, `tunnel.count`, `instance.count`). A `quota_exceeded` on what you keep (volumes, images, snapshots, secrets, kept sandboxes) is a 409. It says `retryable: false` and has no `Retry-After`. It clears only when you delete something or raise the limit. No SDK waits for it.
+- `no_capacity` is a 503 with `Retry-After: 1`. `no_credit_running_limit` and a retryable `quota_exceeded` are 429s with `Retry-After: 5`. That value is the wait before a first retry, for a client that reads only HTTP. The SDKs keep their own growing delay. Until 17 October 2026, all three were 409s with the same body.
+- `no_credit_running_limit` clears when one of the {{trial-sandboxes}} running sandboxes without credit stops or pauses. A fork that asks for more copies than that never fits.
 
 ## Retries and idempotency
 
-Send `Idempotency-Key: <any unique string>` on a change. The server remembers the
-key for 24 hours:
+Send `Idempotency-Key: <any unique string>` on a change. The server remembers the key for 24 hours.
 
-- The same key with the same body answers the first result again, marked
-  `"replayed": true` and with the header `Idempotency-Replayed: true`. Nothing
-  happens twice.
-- A secret or token shown once (a rotated webhook secret, a preview or MCP
-  token, a WireGuard key Runtime made) is left out of the replay; read the
-  resource for a fresh token. A first answer over 32 KiB is not kept: its
-  replay answers 409 `operation_conflict`, and nothing runs again.
+- The same key with the same body returns the first result again. The result is marked `"replayed": true`, and it has the header `Idempotency-Replayed: true`. Nothing happens twice.
+- A secret or token shown once is left out of the replay. Examples are a rotated webhook secret, a preview or MCP token, and a WireGuard key that Runtime made. Read the resource for a fresh token. A first response over 32 KiB is not kept. Its replay returns 409 `operation_conflict`, and nothing runs again.
 - The same key with a different body is refused with 422 `idempotency_key_reused`.
-- A refusal is not kept. A request refused before anything ran (`no_capacity`,
-  `busy`, a limit) leaves its key unused, so the same key sent again runs the
-  request afresh, and only an answer that did the work is replayed. A create
-  refused `no_capacity` and retried with its key once there is room starts the
-  sandbox; the next retry with that key replays it.
-- `no_capacity` is 503 with `Retry-After` wherever it is answered (a create,
-  a fork, a restart, a wake, a public port or a dedicated address), so a
-  client that retries 5xx retries it, with the same key.
-- A waited pause (`POST /v1/sandboxes/{id}:pause` with `Prefer: wait`)
-  succeeds when its server's snapshot space is full: the server holds the
-  sandbox's memory and saves it once there is room. Only a sandbox too near
-  the end of its time to save it later answers `no_capacity` (503,
-  `Retry-After: 60`): the pause was not taken, and the sandbox is still
-  running with its memory and files. Unlike a create, that request did run,
-  so pause again with a new `Idempotency-Key`; the same key only answers the
-  sandbox as it is now.
+- A refusal is not kept. A request refused before anything ran (`no_capacity`, `busy`, or a limit) leaves its key unused. So the same key sent again runs the request afresh. Only a response that did the work is replayed. A create refused with `no_capacity` starts the sandbox when it is retried with its key once there is room. The next retry with that key replays it.
+- `no_capacity` is a 503 with `Retry-After` wherever it is returned. That covers a create, a fork, a restart, a wake, a public port, and a dedicated address. So a client that retries 5xx retries it, with the same key.
+- A waited pause (`POST /v1/sandboxes/{id}:pause` with `Prefer: wait`) succeeds when its server's snapshot space is full. The server holds the sandbox's memory and saves it once there is room. Only a sandbox too near the end of its time to save later returns `no_capacity` (503, `Retry-After: 60`). The pause was not taken. The sandbox is still running, with its memory and files. Unlike a create, that request did run. So pause again with a new `Idempotency-Key`. The same key only returns the sandbox as it is now.
 - A new key is new work.
 
-The SDKs send a key on every change and retry transport failures and every
-answer marked `retryable: true` with it. A connection refused before the request left is sent again at
-once; anything that may have reached a server waits first. Changing the body
-while reusing a key is not a retry.
+The SDKs send a key on every change. They retry transport failures, and every response marked `retryable: true`, with that key. A connection refused before the request left is sent again immediately. Anything that may have reached a server waits first. Changing the body while reusing a key is not a retry.
 
 ## Limits
 
-These limits are protection, not quotas, and a refusal costs nothing.
+These limits protect the service. They are not quotas. A refusal costs nothing.
 
-- **Per key:** about 50 requests a second, in bursts of up to 200, with 128
-  served at once. Past that, a request waits its turn for up to five seconds
-  before it is refused. A key may have as many served at once as its
-  organization (below) when that is more, and its rate and burst grow by
-  the same share: an organization holding 40 sandboxes has 432 in flight,
-  so each of its keys may send about 170 a second in bursts of 675, and at
-  most 400 a second in bursts of 1,600.
-- **Per address, for keys not yet seen to work:** until a request on a key
-  has been accepted once, requests on it, and on wrong or missing keys, also
-  count against the address they come from: about 50 a second in bursts of
-  200 (`address_rate`). A key that has worked is never refused because of
-  someone else's wrong keys.
-- **Per organization:** 192 requests in flight across all its keys, and six
-  more for each sandbox it holds that is not stopped, up to 1,024; when
-  support has raised its sandbox quota past 138, six more for each running
-  sandbox up to that quota (2,592 for 400 running), so every sandbox can
-  stream four commands and
-  two watches at once; a new sandbox's six come within half a minute. Also
-  16 watch streams, 16 SSH logins and port forwards and 64 terminals open,
-  each with two more for each such sandbox, up to 292 watch streams, 292
-  logins and forwards and 340 terminals, or more as the quota allows (a
-  pilot's agreed count sets more too), and at most 12 terminals in
-  one sandbox. When the service as a whole holds as many as it can, a new one
-  is refused for a moment with a retry delay. Requests beyond what an
-  organization's sandboxes bring share one room: while it is
-  three-quarters taken, an organization holding its fair share of it waits
-  for its own requests to finish (`organization_fair_share`), so a busy
-  account never crowds out the rest.
-- **Per sandbox:** up to 1,024 commands and background processes running at
-  once; the sandbox's memory is usually the closer limit. Past that, a new one
-  is refused with `process_limit` (429), which names the number. A command's
-  output stays readable by its own stream however many others end meanwhile.
-  Processes and threads together: up to 16,384 in a sandbox, and up to 15,360
-  for one command and all it starts, so a fork bomb in one leaves room for the
-  command that ends it. Past that, Linux refuses a new one (`fork` or
-  `pthread_create` fails with `EAGAIN`).
-  A custom image keeps the limits of the day it was built: one built while the
-  command limit was 16 keeps 16 until it is built again.
-- **Per address:** 64 connections open to the API at once, and 50 new ones a
-  second in bursts of 100. Once a request from the address carries a valid
-  key, it may hold its organization's room instead for the next 10 minutes,
-  renewed by each such request: 256 connections and 200 new ones a second, and
-  more for an organization with more requests in flight. Past a limit a new
-  connection is not answered, so the client's own retry brings it in a second
-  or so later, once a connection closes or the address has its room. A streaming
-  answer (a command's output, a download, a watch) holds its connection until
-  it ends. The SDKs hold each client to 48 connections, calls and streams
-  together, keep 8 of them for calls, and queue the rest, so a client waits
-  for a connection rather than fail: a thousand streamed commands at once
-  from one client are read 40 at a time.
+- **Per key:** about 50 requests a second, in bursts of up to 200. Up to 128 are served at the same time. Past that, a request waits its turn for up to five seconds before it is refused. A key may have as many served at the same time as its organization allows (below), when that is more. Its rate and burst grow by the same share. For example, an organization holding 40 sandboxes has 432 in flight. So each of its keys may send about 170 a second in bursts of 675. It may send at most 400 a second in bursts of 1,600.
+- **Per address, for keys not yet seen to work:** until a request on a key is accepted once, requests on that key also count against the address they come from. So do requests with wrong or missing keys. The limit is about 50 a second, in bursts of 200 (`address_rate`). A key that has worked is never refused because of someone else's wrong keys.
+- **Per organization:** 192 requests in flight across all its keys. Add six for each sandbox it holds that is not stopped, up to 1,024. When support has raised its sandbox quota past 138, add six for each running sandbox up to that quota (2,592 for 400 running). That lets every sandbox stream four commands and two watches at the same time. A new sandbox's six come within half a minute. The organization also has 16 watch streams, 16 SSH logins and port forwards, and 64 terminals open. Each adds two more for each such sandbox. That gives up to 292 watch streams, 292 logins and forwards, and 340 terminals, or more as the quota allows. A pilot's agreed count sets more too. A sandbox has at most 12 terminals. When the service as a whole holds as many as it can, a new request is refused for a moment with a retry delay. Requests beyond what an organization's sandboxes bring share one room. While that room is three-quarters taken, an organization holding its fair share waits for its own requests to finish (`organization_fair_share`). So a busy account never crowds out the rest.
+- **Per sandbox:** up to 1,024 commands and background processes can run at the same time. The sandbox's memory is usually the closer limit. Past that, a new one is refused with `process_limit` (429), which names the number. A command's output stays readable through its own stream, however many others end meanwhile. Processes and threads together are limited to 16,384 in a sandbox. One command and all it starts are limited to 15,360. So a fork bomb in one leaves room for the command that ends it. Past that, Linux refuses a new one: `fork` or `pthread_create` fails with `EAGAIN`. A custom image keeps the limits of the day it was built. An image built while the command limit was 16 keeps 16 until it is built again.
+- **Per address:** 64 connections open to the API at the same time, and 50 new ones a second in bursts of 100. Once a request from the address carries a valid key, the address may hold its organization's room instead, for the next 10 minutes. Each such request renews that period. The room is 256 connections and 200 new ones a second. It is larger for an organization with more requests in flight. Past a limit, a new connection gets no response. The client's own retry brings it in a second or so later, once a connection closes or the address has room. A streaming response (a command's output, a download, or a watch) holds its connection until it ends. The SDKs hold each client to 48 connections, for calls and streams together. They keep 8 of them for calls and queue the rest. So a client waits for a connection rather than fail. For example, a thousand streamed commands at the same time from one client are read 40 at a time.
 
-Over a limit you get 429 with `Retry-After`.
-Streaming responses count as requests in flight until their bodies finish or
-you cancel them. Receiving the headers does not release a request slot. A
-request you abandon, or one answered 503 because it ran past its deadline
-(110 seconds from the end of its request body),
-is stopped and counts against its key and organization until its work has
-stopped: a read at once, a change once it is recorded, at most about four
-minutes more. A command it started keeps running in the sandbox.
+Over a limit, you get 429 with `Retry-After`. Streaming responses count as requests in flight until their bodies finish or you cancel them. Receiving the headers does not release a request slot. A request you abandon counts until its work stops. So does a request that returns 503 because it ran past its deadline (110 seconds from the end of its request body). Such a request is stopped. It counts against its key and organization until its work has stopped. A read stops immediately. A change stops once it is recorded. That takes at most about four minutes more. A command it started keeps running in the sandbox.
 
 ## Sandboxes
 
@@ -322,11 +158,11 @@ minutes more. A command it started keeps running in the sandbox.
 | `POST /v1/sandboxes`                   | Create. Every field optional.                                                                                                                                          |
 | `GET /v1/sandboxes`                    | List: `state`, `name`, `label=key:value` (repeat), `includeStopped`, `limit`, `cursor`                                                                                 |
 | `GET /v1/sandboxes/{id}`               | Read; `waitFor` and `timeoutSeconds` wait for a state                                                                                                                  |
-| `POST /v1/sandboxes/{id}:stop`         | Stop. Answers at once, where compute billing ends; a kept disk is written out after                                                                                    |
+| `POST /v1/sandboxes/{id}:stop`         | Stop. Returns immediately, where compute billing ends; a kept disk is written out after                                                                                |
 | `DELETE /v1/sandboxes/{id}`            | Delete for good, in any state (see "Deleting a sandbox" below)                                                                                                         |
-| `POST /v1/sandboxes/{id}:pause`        | Answers once the processors stop, where compute billing ends; memory and files are then saved                                                                          |
+| `POST /v1/sandboxes/{id}:pause`        | Returns once the processors stop, where compute billing ends; memory and files are then saved                                                                          |
 | `POST /v1/sandboxes/{id}:wake`         | Restore a paused sandbox; for one with a time limit, `timeoutSeconds` sets the new one                                                                                 |
-| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before its time limit; a sandbox with none answers at once, unchanged                                                                          |
+| `POST /v1/sandboxes/{id}:extend`       | `{"seconds": 600}` more before its time limit; a sandbox with none returns immediately, unchanged                                                                      |
 | `POST /v1/sandboxes/{id}:retention`    | `{"days": 30}` keeps a paused or stopped sandbox 1 to 365 days; `null`, the default, while you have credit                                                             |
 | `POST /v1/sandboxes/{id}:restart`      | Start a stopped sandbox again from its kept disk                                                                                                                       |
 | `POST /v1/sandboxes/{id}:update`       | Change `name`, `labels`, `env`, `autoWake`, `user`, `idlePauseSeconds`, `persistent`, `maxTotalCostMicros`, `tailscale` (`null` leaves), `timeoutSeconds`, `onTimeout` |
@@ -353,52 +189,37 @@ The create body:
 | `persistent`              | false                                                 | Paid only: it runs until you stop it, while credit lasts, with no idle pause unless you set one. Its disk is billed as any sandbox's                                                                                                                                                                                                                                                                                                                        |
 | `maxTotalCostMicros`      | none                                                  | The most the sandbox may cost over its whole life                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `maxCostMicros`           | none                                                  | Deprecated, still accepted from older clients: use `maxTotalCostMicros`                                                                                                                                                                                                                                                                                                                                                                                     |
-| `pausable`                | ignored                                               | Deprecated, still accepted from older clients and ignored: every sandbox can pause, fork and be snapshotted. One created with `pausable: false` before 5 October 2026 can only be stopped; a pause, fork or snapshot of it answers `not_pausable`                                                                                                                                                                                                           |
-| `getOrCreate`             | false                                                 | With `name`: answer the sandbox that holds the name (see below)                                                                                                                                                                                                                                                                                                                                                                                             |
+| `pausable`                | ignored                                               | Deprecated, still accepted from older clients and ignored: every sandbox can pause, fork and be snapshotted. One created with `pausable: false` before 5 October 2026 can only be stopped; a pause, fork or snapshot of it returns `not_pausable`                                                                                                                                                                                                           |
+| `getOrCreate`             | false                                                 | With `name`: return the sandbox that holds the name (see below)                                                                                                                                                                                                                                                                                                                                                                                             |
 | `network`                 | every public port (paid), 80 and 443 (without credit) | Same shape as `PUT /v1/sandboxes/{id}/network`                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `image`, `volumes`        | none                                                  | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`: `mode` `"rw"` (default) or `"snapshot"`, a read-only copy of the volume for any number of sandboxes, unrelated to sandbox snapshots ([storage](./storage#attaching-a-volume)). An image with a start command answers once its ready check passes, in `start`                                                                                          |
+| `image`, `volumes`        | none                                                  | A ready image (its id, `name`, `name:tag` or `name@version`) and up to four `{volumeId, path, mode}`: `mode` `"rw"` (default) or `"snapshot"`, a read-only copy of the volume for any number of sandboxes, unrelated to sandbox snapshots ([storage](./storage#attaching-a-volume)). An image with a start command returns once its ready check passes, in `start`                                                                                          |
 | `snapshot`                | none                                                  | A ready snapshot id: start as a copy of it. Not with `image`                                                                                                                                                                                                                                                                                                                                                                                                |
 | `spreadFrom`              | none                                                  | One to 16 ids of your own sandboxes or snapshots: it starts on a server none of them is on (see "Keeping copies on several servers" below). Not with an id this key may not read: that is `400 invalid_request`                                                                                                                                                                                                                                             |
-| `secrets`                 | every one that reaches it                             | The egress secrets it may use, by name, at most 64: only those of your secrets that would otherwise reach it, never one a secret's `only` keeps from it. `[]` is none; a name not stored yet takes effect once stored. Fixed for its life; a fork or a copy of a snapshot keeps its source's list and may only narrow it. A read answers it as `secrets` (`null` for none named). See [secrets sandboxes never see](./security#secrets-sandboxes-never-see) |
+| `secrets`                 | every one that reaches it                             | The egress secrets it may use, by name, at most 64: only those of your secrets that would otherwise reach it, never one a secret's `only` keeps from it. `[]` is none; a name not stored yet takes effect once stored. Fixed for its life; a fork or a copy of a snapshot keeps its source's list and may only narrow it. A read returns it as `secrets` (`null` for none named). See [secrets sandboxes never see](./security#secrets-sandboxes-never-see) |
 | `tailscale`               | none                                                  | Paid only: `{authKeySecret, hostname?, tags?}` joins your Tailscale network once it runs (see "On your tailnet" below)                                                                                                                                                                                                                                                                                                                                      |
 
 Sizes are limits you ask for. The server checks their combinations against
 account limits and the host's measured capacity.
 
-**Placement.** Every sandbox and every snapshot answer has `placement`: an
-opaque tag such as `pl_3f9a0c1b2d4e5f60`, or `null` before it is placed. Your
-sandboxes and snapshots with the same tag are on the same server. It is never
-the server's name, and another account's tags are unrelated to yours.
+**Placement.** Every sandbox and snapshot response has `placement`. It is an opaque tag such as `pl_3f9a0c1b2d4e5f60`, or `null` before the sandbox is placed. Your sandboxes and snapshots with the same tag are on the same server. The tag is never the server's name. Another account's tags are unrelated to yours.
 
-**Wake on request.** A paused sandbox with `autoWake` wakes by itself when a
-command, file, process, terminal, desktop or interpreter call reaches it, and
-the call runs once it is running, usually within a second. A visit
-to one of its shared ports wakes it too: an API client's request waits up to
-30 seconds, and a browser is shown a page that reloads itself. The wake is an
-ordinary wake: it runs while it works again, or for a sandbox with a time limit
-gets a fresh one of its own `timeoutSeconds`, or keeps the one it paused with when that ends later, billed from the moment it runs. With `autoWake: false` the call fails with `sandbox_paused`
-until `:wake`. A wake that cannot be paid for fails with the refusal, such as
-`insufficient_funds`, and leaves the sandbox paused.
+**Wake on request.** A paused sandbox with `autoWake` wakes by itself when a command, file, process, terminal, desktop or interpreter call reaches it. The call runs once the sandbox is running, usually within a second. A visit to one of its shared ports also wakes it. An API client's request waits up to 30 seconds. A browser is shown a page that reloads itself. The wake is an ordinary wake. The sandbox runs while it works again. A sandbox with a time limit gets a fresh one of its own `timeoutSeconds`. Or it keeps the time limit it paused with, if that ends later. Billing starts from the moment it runs. With `autoWake: false`, the call fails with `sandbox_paused` until you run `:wake`. A wake that cannot be paid for fails with the refusal, such as `insufficient_funds`. The sandbox stays paused.
 
-**Names.** A name is unique in the account while its sandbox can still run:
-starting, running, paused, or stopped and persistent. A
-[compartment](./security#compartments) is its own namespace: its keys' names
-are unique among its own sandboxes, so two compartments, and the account's
-other keys, can each have a `main`. A create that names a
-held name fails with `name_taken` (409); `details.sandboxId` names the holder
-when your key can reach it. With `getOrCreate: true` the create answers the
-holder instead, woken if paused and restarted if stopped and persistent, with
-`reused: true`; the other fields apply only when it creates one. A sandbox that
-is deleted, or stops without keeping its disk, gives its name up and keeps it
-in its own record.
+**Names.** A name is unique in the account while its sandbox can still run. That covers starting, running, paused, or stopped and persistent. A [compartment](./security#compartments) is its own namespace. Its keys' names are unique among its own sandboxes. So two compartments, and the account's other keys, can each have a `main`. A create that names a name already held fails with `name_taken` (409). `details.sandboxId` names the holder when your key can reach it. With `getOrCreate: true`, the create returns the holder instead. It wakes the holder if paused, and restarts it if stopped and persistent. The response has `reused: true`. The other fields apply only when the create makes a sandbox. A sandbox that is deleted, or that stops without keeping its disk, gives up its name. The name stays in its own record.
 
-**How long it runs.** A sandbox runs while it works and pauses itself when idle;
-there is no time limit unless you set one. Nothing needs extending: it runs on
-credit, or, without credit, on the free usage. It pauses (or stops, with `onTimeout: "stop"`) when it is
-idle for `idlePauseSeconds`, when you stop it, or when credit, free usage, a spending limit or `maxTotalCostMicros` run out. `endsAt` says when it will stop
-or pause by itself, and is `null` when it never will: it has no time limit and
-its funding goes on. It names a time when the sandbox has a time limit, or once
-credit or a limit stops its funding.
+**How long it runs.** A sandbox runs while it works. It pauses itself when idle. There is no time limit unless you set one. Nothing needs extending. It runs on credit or, without credit, on the free usage. It pauses, or stops with `onTimeout: "stop"`, when it is idle for `idlePauseSeconds`. It also does so when you stop it, and when credit, free usage, a spending limit, or `maxTotalCostMicros` runs out. `endsAt` says when the sandbox will stop or pause by itself. It is `null` when it never will. That happens when it has no time limit and its funding continues. `endsAt` gives a time when the sandbox has a time limit. It also gives a time once credit or a limit stops its funding.
+
+**During a Runtime outage.** If Runtime cannot keep a sandbox's funding going
+(it renews the sandbox's lease while it runs), the sandbox pauses, keeping its
+memory and disk, and is never stopped or deleted for it, whatever `onTimeout`
+says. Once Runtime recovers, it wakes the sandbox, with what was left of its
+time limit. Compute is not billed while it was paused, and its paused storage
+only from when Runtime recovered. If the account can no
+longer pay for it by then, it ends as `onTimeout` says. While Runtime cannot
+pause or wake sandboxes, `:pause`, `:wake` and `:restart` return 503
+`api_unavailable` and change nothing; a pause or wake Runtime accepted but did
+not start within 5 minutes is withdrawn, and the sandbox returns to `running`
+or `paused`.
 
 **A time limit.** `timeoutSeconds` from 60 to 86,400 (24 hours) at create sets
 one: the sandbox pauses or stops then, as `onTimeout` says, busy or not.
@@ -415,92 +236,29 @@ names. An extend of a sandbox with no time limit answers at once and changes
 nothing, so older code that extends keeps working. A persistent sandbox has no
 time limit, whatever `timeoutSeconds` says. Without credit, a limit longer than the free usage left is cut to it, and the answer's `timeoutSeconds` says so: the sandbox pauses when it ends either way.
 
-**Keep it running until you stop it.** `persistent: true`, at create or with
-`:update`, keeps it running with no idle pause (unless `idlePauseSeconds` sets
-one) while the account has credit, up to `maxTotalCostMicros`. Its disk is
-billed as any sandbox's, and a stop keeps it as any stop does. `:update` with
-`{"persistent": false}` makes it an ordinary sandbox again.
+**Keep it running until you stop it.** `persistent: true`, at create or with `:update`, keeps it running with no idle pause. An exception is `idlePauseSeconds`, if you set one. This holds while the account has credit, up to `maxTotalCostMicros`. Its disk is billed like any sandbox's disk. A stop keeps the disk, as any stop does. `:update` with `{"persistent": false}` makes it an ordinary sandbox again.
 
-**A stop keeps the disk; only a delete removes it.** A stopped sandbox reads
-`diskKept: true`, is listed with the live ones, and is billed for its disk as
-[paused storage](./pricing#paused-storage) until you delete it. `:restart`
-starts it again from that disk, its memory gone, and runs its image's start
-command again, reported in `start` as at create. A read-write volume stays
-attached to it until it is deleted, so delete it before attaching the volume
-elsewhere. One created with `onTimeout: "delete"` has its disk deleted when
-its time limit ends. One stopped before it ever started has no disk to keep:
-it reads `diskKept: false`, and a restart is refused, so create a new one.
-A raw HTTP client
-says it knows this with `x-runtime-client: http/2026-10-04`; a stop from a
-client that names an older version, or none, keeps the disk as any stop does
-in an account with credit, a card saved or a past purchase (at least 30 days
-from the stop, even if its credit runs out), and in one with none of these
-keeps it free for three days and then deletes it. To end a sandbox for good in any
-state, delete it.
+**A stop keeps the disk; only a delete removes it.** A stopped sandbox reads `diskKept: true`. It is listed with the live sandboxes. Its disk is billed as [paused storage](./pricing#paused-storage) until you delete it. `:restart` starts it again from that disk. Its memory is gone. It runs its image's start command again, which `start` reports as it does at create. A read-write volume stays attached until the sandbox is deleted. So delete the sandbox before you attach the volume elsewhere. A sandbox created with `onTimeout: "delete"` has its disk deleted when its time limit ends. A sandbox stopped before it ever started has no disk to keep. It reads `diskKept: false`, and a restart is refused. Create a new one instead. A raw HTTP client says it knows this with `x-runtime-client: http/2026-10-04`. A stop from a client that names an older version, or none, keeps the disk as any stop does in an account with credit. That means a card saved or a past purchase. The disk is kept at least 30 days from the stop, even if its credit runs out. In an account with none of these, the disk is kept free for three days and then deleted. To end a sandbox for good in any state, delete it.
 
-**Its environment.** `env` at create sets variables that every command,
-background process, terminal, SSH session and the image's start command in the
-sandbox is started with, for its whole life: through pauses, wakes and
-restarts. A command's own `env` is put over them. `:update` with `env` changes
-them: a value sets a variable, `null` removes it, and the rest stay; commands
-started after the change get it, and running ones keep what they started with.
-At most {{sandbox-env-vars}} variables and {{sandbox-env-size}} of names and values; past that the answer is
-`env_too_large` (400), and a name that is not a letter or underscore followed by
-letters, digits and underscores is `invalid_env` (400). A command whose own `env`
-and the sandbox's together pass what one command can carry is refused with
-`env_too_large` (400) before it runs. Values are write-only: answers carry only `envNames`, and no
-list, log or audit entry holds a value. They are stored encrypted, and the
-request fingerprint an `Idempotency-Key` is checked against holds a keyed hash
-of them, never the values. Copies made by `:fork` keep them, because they are
-the same machine and its processes already hold them; a sandbox created from a
-snapshot takes only its own `env`. An SSH session gets every variable whose
-value has no double quote, backslash or line break. A deployment that cannot
-store them answers `env_unavailable` (501) and creates nothing.
+**Its environment.** `env` at create sets variables. Every command, background process, terminal, SSH session, and the image's start command in the sandbox starts with them. They last for the sandbox's whole life, through pauses, wakes and restarts. A command's own `env` is put over them. `:update` with `env` changes them. A value sets a variable. `null` removes it. The rest stay. Commands started after the change get the new values. Running commands keep what they started with. A sandbox has at most {{sandbox-env-vars}} variables, with at most {{sandbox-env-size}} of names and values together. Past that, the response is `env_too_large` (400). A name that is not a letter or underscore followed by letters, digits and underscores is `invalid_env` (400). A command whose own `env` and the sandbox's together pass what one command can carry is refused with `env_too_large` (400) before it runs. Values are write-only. Responses carry only `envNames`. No list, log or audit entry holds a value. Values are stored encrypted. The request fingerprint that an `Idempotency-Key` is checked against holds a keyed hash of them, never the values. Copies made by `:fork` keep them, because they are on the same machine, and its processes already hold them. A sandbox created from a snapshot takes only its own `env`. An SSH session gets every variable whose value has no double quote, backslash or line break. A deployment that cannot store them returns `env_unavailable` (501) and creates nothing.
 
-**Deleting a sandbox.** `DELETE /v1/sandboxes/{id}` works in any state. It
-stops the sandbox if it runs or is paused, deletes its disk and its paused
-memory, revokes its previews and TCP ports, drops its environment, gives up its
-name at once, and removes it from every list. Compute billing ends as a stop's
-does; a disk kept for `:restart` is billed until its host confirms the
-deletion, usually seconds. Its snapshots are separate and stay until you delete
-them, and its usage, charges and audit entries stay. A custom domain pointed at
-it stays yours: point it at another sandbox or remove it. The answer is
-`{id, status: "deleted", state, deletedAt}`; afterwards the sandbox reads
-nowhere, and `GET` answers `not_found`. Deleting it again answers the same, with
-or without the same key. A read-only key cannot delete. A sandbox a job or a
-managed service runs in is ended by that job or service instead.
+**Deleting a sandbox.** `DELETE /v1/sandboxes/{id}` works in any state. It stops the sandbox if it runs or is paused. It deletes the sandbox's disk and its paused memory. It revokes its previews and TCP ports, drops its environment, and releases its name immediately. It also removes the sandbox from every list. Compute billing ends as it does for a stop. A disk kept for `:restart` is billed until its host confirms the deletion, usually within seconds. Its snapshots are separate. They stay until you delete them. Its usage, charges, and audit entries stay too. A custom domain pointed at it stays yours. Point it at another sandbox, or remove it. The response is `{id, status: "deleted", state, deletedAt}`. Afterwards the sandbox reads nowhere, and `GET` returns `not_found`. Deleting it again returns the same response, with or without the same key. A read-only key cannot delete. A sandbox that a job or a managed service runs in is ended by that job or service instead.
 
-**Switching its image.** `POST /v1/sandboxes/{id}:switch-image` with
-`{"image": "web:v2"}` moves a sandbox to another image and
-keeps its id and name, `/workspace` (its home: dotfiles, `pip install` and
-`npm install -g`), volumes, environment, labels, previews and ports. Its
-processes restart, and the new image's start command runs as at create.
-Everything else on its old disk is lost (`sudo` and apt installs, `/etc`).
-`keep: "workspace"`, which older clients send, is accepted and changes nothing;
-any other `keep` is refused with `switch_keeps_workspace_only` (400) and
-nothing changes. Snapshot it first to keep everything. A running sandbox is paused first; a paused one, or a stopped
-persistent one, is switched as it is; a stopped ordinary one kept no disk
-(`switch_needs_disk`, 409). It is charged as a wake. The answer comes once the
-sandbox runs the new image. If anything fails, the switch is undone and the
-answer is `switch_undone` (503): the sandbox is paused or stopped on its old image
-with its files and memory as they were. The image must be ready, on the
-sandbox's server (`image_on_another_host`, 422), different from the one it runs
-(`image_unchanged`, 409) and fit its disk (`disk_too_small`, 422); copying
-`/workspace` may take up to {{switch-copy-time}}.
+**Switching its image.** `POST /v1/sandboxes/{id}:switch-image` with `{"image": "web:v2"}` moves a sandbox to another image. It keeps its id and name, `/workspace` (its home: dotfiles, `pip install` and `npm install -g`), volumes, environment, labels, previews and ports. Its processes restart, and the new image's start command runs as it does at create. Everything else on its old disk is lost, such as `sudo` and apt installs, and `/etc`. `keep: "workspace"`, which older clients send, is accepted and changes nothing. Any other `keep` value is refused with `switch_keeps_workspace_only` (400), and nothing changes. To keep everything, snapshot the sandbox first. A running sandbox is paused first. A paused sandbox, or a stopped persistent one, is switched as it is. A stopped ordinary sandbox kept no disk, so it cannot switch (`switch_needs_disk`, 409). The switch is charged as a wake. The response comes once the sandbox runs the new image. If anything fails, the switch is undone. The response is `switch_undone` (503). The sandbox is then paused or stopped on its old image, with its files and memory as they were. The image must be ready and on the sandbox's server (`image_on_another_host`, 422). It must differ from the image the sandbox runs (`image_unchanged`, 409). It must fit the sandbox's disk (`disk_too_small`, 422). Copying `/workspace` may take up to {{switch-copy-time}}.
 
 **On your tailnet.** A paid sandbox can join your own Tailscale network.
 Store an auth key for jobs (`printf %s "$TS_AUTHKEY" | runtime secrets set TS_AUTHKEY --jobs`),
 then `POST /v1/sandboxes/{id}/tailscale` with `{"authKeySecret": "TS_AUTHKEY"}`,
 and optionally `hostname` and `tags`, or pass the same object as `tailscale` at
-create. The answer gives its tailnet `addresses`, `dnsName` and `mode`; `GET`
-reads them again and `DELETE` logs the machine out. The key is never answered,
+create. The response gives its tailnet `addresses`, `dnsName` and `mode`; `GET`
+reads them again and `DELETE` logs the machine out. The key is never returned,
 logged or written to the sandbox's disk. [Networking](./networking#your-tailscale-network) has the rest.
 
 ## Commands and processes
 
 | Method and path                                        | What it does                                                                   |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `POST /v1/sandboxes/{id}:exec`                         | Run and answer `{exitCode, stdout, stderr, timedOut}`                          |
+| `POST /v1/sandboxes/{id}:exec`                         | Run and return `{exitCode, stdout, stderr, timedOut}`                          |
 | `POST /v1/sandboxes/{id}/processes`                    | Start in the background; add `"pty": {"cols", "rows"}` for a terminal          |
 | `GET /v1/sandboxes/{id}/processes`                     | Running and recent processes                                                   |
 | `GET /v1/sandboxes/{id}/processes/{processId}`         | One process                                                                    |
@@ -510,55 +268,15 @@ logged or written to the sandbox's disk. [Networking](./networking#your-tailscal
 | `POST /v1/sandboxes/{id}/processes/{processId}:resize` | `{"cols", "rows"}` for a pty                                                   |
 | `GET /v1/sandboxes/{id}/processes/{processId}/files`   | What a process started with `traceFiles` read and wrote, once it has ended     |
 
-The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional
-fields are `cwd`, `env`, `stdin`, `user`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage end sooner; at
-most 24 hours),
-`stream` and `traceFiles` (below). A timeout is a result with `timedOut: true`, not an error. `env`
-is put over the sandbox's own environment; its values are never echoed and are
-stored only as hashes. `user` is `"sandbox"` (the default: the user `runtime`,
-uid 1000) or `"root"`, which runs the command as root through the sandbox's
-passwordless `sudo`, with the same environment, `PATH` and working directory
-and `HOME=/root` (unless `env` sets `HOME`), so no command needs a `sudo`
-prefix. Starting a process takes `user` too, and every process answers which
-it runs as in `user`.
+The exec body is `command` (run under `bash -c`) or `argv` (no shell). Optional fields are `cwd`, `env`, `stdin`, `user`, `timeoutMs` (default 60,000, or less when the sandbox's time limit, credit or free usage ends sooner; at most 24 hours), `stream`, and `traceFiles` (below). A timeout is a result with `timedOut: true`, not an error. `env` is put over the sandbox's own environment. Its values are never echoed and are stored only as hashes. `user` is `"sandbox"` by default (the user `runtime`, uid 1000). It can also be `"root"`. That runs the command as root through the sandbox's passwordless `sudo`. The environment, `PATH` and working directory stay the same, and `HOME=/root` is set unless `env` sets `HOME`. So no command needs a `sudo` prefix. Starting a process takes `user` too. Every process reports which user it runs as in `user`.
 
-**Files a command read.** With `"traceFiles": true` the answer, or the stream's
-`exit` event, adds `files`: `read`, every file and directory the command and
-anything it started opened (sorted absolute paths, links resolved, a directory
-ending in `/`), `written`, every file it wrote, and `truncated`, which is `true`
-when some paths are missing (past about 380 KB of paths). Key a cache by the
-contents of `read` and a test reruns only when a file it really read changed. A
-background process takes `traceFiles` too and answers its files at `…/files`
-once it ends. Only the command's own opens count, never another process's on
-the same sandbox. Opens through mounts the command itself makes, and lookups of
-files that do not exist, are not seen. Each file costs 5 to 15 microseconds the
-first time it is opened, and next to nothing after. A sandbox started before tracing
-existed answers `409 unsupported_operation`, and nothing runs; stop and start
-it. A sandbox that cannot trace the command answers 409
-`file_trace_unavailable`, and nothing runs. Its `…/files` answers 409
-`process_running` while the process still runs, and 409
-`file_trace_not_requested` for a process started without `traceFiles`.
+**Files a command read.** With `"traceFiles": true`, the response (or the stream's `exit` event) adds `files`. It has `read`: every file and directory that the command, or anything it started, opened. Paths are sorted, absolute, and resolved through links. A directory ends in `/`. It has `written`: every file the command wrote. It has `truncated`, which is `true` when some paths are missing (past about 380 KB of paths). Key a cache by the contents of `read`. A test then reruns only when a file it really read has changed. A background process also takes `traceFiles`. It returns its files at `…/files` once it ends. Only the command's own opens are counted. Opens by other processes on the same sandbox are not. Opens through mounts that the command itself makes are not seen. Neither are lookups of files that do not exist. Each file costs 5 to 15 microseconds the first time it is opened. After that, the cost is almost nothing. A sandbox started before tracing existed returns `409 unsupported_operation`, and nothing runs. Stop it and start it again. A sandbox that cannot trace the command returns 409 `file_trace_unavailable`, and nothing runs. The `…/files` route returns 409 `process_running` while the process still runs. It returns 409 `file_trace_not_requested` for a process started without `traceFiles`.
 
-**Streaming.** With `"stream": true` the answer is NDJSON, one event a line:
-`start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time
-limit it sends `continue` with a cursor, and `…/output?follow=true&cursor=`
-resumes from it. A stream that fails ends with `error`, which carries the
-`code` and `status` the answer would have had and the `cursor`; after a 429 or
-a 5xx, follow again from that cursor, since the command runs on. The SDKs do,
-for up to five minutes of failures in a row. A streamed command has no output
-limit.
+**Streaming.** With `"stream": true`, the response is NDJSON, with one event per line: `start`, `stdout`, `stderr` and `exit`. When a stream passes the server's time limit, it sends `continue` with a cursor. `…/output?follow=true&cursor=` resumes from that cursor. A stream that fails ends with `error`. That event carries the `code` and `status` the response would have had, and the `cursor`. After a 429 or a 5xx, follow again from that cursor, because the command keeps running. The SDKs do this for up to five minutes of failures in a row. A streamed command has no output limit.
 
-**Output limits.** The JSON answer holds at most 64 KiB (65,536 bytes) of each
-stream for a command with a `timeoutMs` of 60,000 or less, and up to 1 MiB of
-each for a longer one. Past that the rest is dropped, and `stdoutTruncated` or
-`stderrTruncated` is `true`.
+**Output limits.** The JSON response holds at most 64 KiB (65,536 bytes) of each stream. This applies to a command with a `timeoutMs` of 60,000 or less. For a longer command, it holds up to 1 MiB of each stream. Any output past that is dropped. `stdoutTruncated` or `stderrTruncated` is then `true`.
 
-While a stream is being read, its command waits for the reader rather than lose
-output, from its first byte. The sandbox keeps the latest 1 MiB of each
-process's output; a reader away for more than 10 seconds while more than that
-came out gets `{"type":"truncated","droppedBytes","resumeAt"}` before the output
-that remains. For large output, stream it, or write it to a file and read
-it with `GET …/files/content`.
+While a stream is being read, its command waits for the reader. That way no output is lost, from the first byte. The sandbox keeps the latest 1 MiB of each process's output. A reader that is away for more than 10 seconds, while more than that comes out, gets `{"type":"truncated","droppedBytes","resumeAt"}`. That event comes before the output that remains. For large output, stream it. Or write it to a file, and read the file with `GET …/files/content`.
 
 ## Terminals
 
@@ -569,45 +287,20 @@ opens a terminal: `cols`, `rows`, `command` (default `bash -l`), `cwd`,
 bytes both ways. Text frames are JSON: you send `{"type":"resize","cols":120,"rows":40}`;
 the server sends `{"type":"ready","processId":...}` and `{"type":"exit","exitCode":...}`.
 
-A browser's WebSocket cannot send an `Authorization` header, so the terminal on
-a sandbox's page at withruntime.com offers a ticket instead:
-`Sec-WebSocket-Protocol: runtime.terminal.v1, runtime.ticket.<ticket>`. The
-server answers with `runtime.terminal.v1`. A ticket is accepted only from a page
-on withruntime.com, opens one terminal in one sandbox and lasts 60 seconds; a
-refused one answers `unauthorized` (401) or `forbidden` (403) and says why. Your
-own code uses the bearer header. See
-[the browser terminal](./security#the-browser-terminal).
+A browser's WebSocket cannot send an `Authorization` header. So the terminal on a sandbox's page at withruntime.com uses a ticket instead: `Sec-WebSocket-Protocol: runtime.terminal.v1, runtime.ticket.<ticket>`. The server responds with `runtime.terminal.v1`. A ticket is accepted only from a page on withruntime.com. It opens one terminal in one sandbox, and it lasts 60 seconds. A refused ticket returns `unauthorized` (401) or `forbidden` (403), and says why. Your own code uses the bearer header. See [the browser terminal](./security#the-browser-terminal).
 
 ## Tunnels
 
-This is a connection from your code into one sandbox, not the WireGuard tunnel
-that joins your own network to your sandboxes
-([domains, TCP ports, addresses and the tunnel](#domains-tcp-ports-addresses-and-the-tunnel)).
-`GET /v1/sandboxes/{id}/tunnel` with `Upgrade: websocket` and the bearer header
-opens one into the sandbox: TCP connections to any port on its loopback,
-and SSH logins, several at once over the one socket. It needs the key's `exec`
-permission, like a command. The CLI (`runtime sandboxes ssh`, `runtime sandboxes port-forward`)
-and the SDKs (`sbx.tunnel()`, `sbx.forwardPort()`, `forward_port()`) speak it
-for you.
+This is a connection from your code into one sandbox. It is not the WireGuard tunnel that joins your own network to your sandboxes ([domains, TCP ports, addresses and the tunnel](#domains-tcp-ports-addresses-and-the-tunnel)). `GET /v1/sandboxes/{id}/tunnel` with `Upgrade: websocket` and the bearer header opens one into the sandbox. It carries TCP connections to any port on the sandbox's loopback, and SSH logins. Several can run at the same time over one socket. It needs the key's `exec` permission, like a command. The CLI (`runtime sandboxes ssh`, `runtime sandboxes port-forward`) and the SDKs (`sbx.tunnel()`, `sbx.forwardPort()`, `forward_port()`) use it for you.
 
-Binary frames both ways are one kind byte, a 32-bit big-endian stream number
-and a payload. You send `o` to open a stream with `tcp PORT` or `ssh KEYTYPE
-BASE64` (an OpenSSH public key), `d` data, `e` end of your input and `c` to
-close. The server answers `o` opened, `d` data, `e` end of output, `c` closed
-with a reason (`closed` when nothing listens), `l` sshd's error output, and `a`
-on stream 0 with a 64-bit count of the data bytes the sandbox has taken. Keep
-at most 1 MiB of data sent beyond the last `a`; a client that sends more is
-disconnected. Text frames from the server are JSON: `{"type":"ready"}` first,
-`{"type":"error","error":{...}}` before it closes on an error.
-Empty and control frames also share a bounded pending queue. Flooding that
-queue closes the socket even when data bytes remain below the credit limit.
+Binary frames in both directions have one kind byte, then a 32-bit big-endian stream number, then a payload. You send `o` to open a stream with `tcp PORT` or `ssh KEYTYPE BASE64` (an OpenSSH public key). You send `d` for data, `e` for the end of your input, and `c` to close. The server sends `o` when a stream is opened, `d` for data, and `e` for the end of output. It sends `c` when a stream closes, with a reason (`closed` when nothing listens). It sends `l` for sshd's error output. It sends `a` on stream 0, with a 64-bit count of the data bytes the sandbox has taken. Keep at most 1 MiB of data sent beyond the last `a`. A client that sends more is disconnected. Text frames from the server are JSON. `{"type":"ready"}` comes first. `{"type":"error","error":{...}}` comes before the socket closes on an error. Empty and control frames also share a bounded pending queue. If that queue floods, the socket closes, even when data bytes remain below the credit limit.
 
 ## Files
 
 | Method and path                                                 | What it does                                                                                                                                                                                            |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /v1/sandboxes/{id}/files/content?path=`                    | The file's raw bytes, any size; `x-content-length` gives the length first (and `x-content-sha256` a small file's digest), so check it: a body that ends short failed                                    |
-| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body, up to 1 MiB (larger answers 413: use `/uploads`); makes parents; `mode=755` sets its permissions (644 by default)                                           |
+| `PUT /v1/sandboxes/{id}/files/content?path=`                    | Replace the file with the raw request body, up to 1 MiB (larger ones get 413: use `/uploads`); makes parents; `mode=755` sets its permissions (644 by default)                                          |
 | `GET /v1/sandboxes/{id}/files/list?path=`                       | Entries; `depth`, `glob`, `hidden`, `limit`                                                                                                                                                             |
 | `GET /v1/sandboxes/{id}/files/stat?path=`                       | Type, size, mode and times, or `{"exists": false}`                                                                                                                                                      |
 | `POST /v1/sandboxes/{id}/files:mkdir`                           | `{"path", "parents"}`                                                                                                                                                                                   |
@@ -623,57 +316,21 @@ queue closes the socket even when data bytes remain below the credit limit.
 | `POST /v1/sandboxes/{id}/uploads/{uploadId}:abort`              | Give up                                                                                                                                                                                                 |
 | `GET /v1/sandboxes/{id}/files/archive?path=`                    | A folder as tar, streamed; `gzip=true`, `user=sandbox` or `root`, and repeated relative `exclude` paths. A failed folder stream ends as an archive no tar reader accepts                                |
 | `PUT /v1/sandboxes/{id}/files/archive?path=`                    | Unpack a tar (gzipped or not) of up to 1 MiB from the raw body into the folder, making it; merges with what is there                                                                                    |
-| `POST /v1/sandboxes/{id}/files/archive/uploads`                 | Begin a larger one: `{"path", "gzip", "user"}`; `gzip` and `user` are optional; answers `uploadId`                                                                                                      |
+| `POST /v1/sandboxes/{id}/files/archive/uploads`                 | Begin a larger one: `{"path", "gzip", "user"}`; `gzip` and `user` are optional; returns `uploadId`                                                                                                      |
 | `PUT …/files/archive/uploads/{uploadId}?offset=`                | The next part, up to 1 MiB, in order; a part sent twice is not written twice                                                                                                                            |
-| `POST …/files/archive/uploads/{uploadId}:commit`                | Answers once tar has unpacked it all (`:abort` stops it; what was unpacked stays)                                                                                                                       |
-| `POST /v1/sandboxes/{id}/files:link`                            | A link anyone can open with no key: `{"path", "method": "GET" or "PUT", "expiresInSeconds", "filename", "maxBytes", "wake", "archive"}`; answers `{"url", "expiresAt"}` (see [File links](#file-links)) |
+| `POST …/files/archive/uploads/{uploadId}:commit`                | Returns once tar has unpacked it all (`:abort` stops it; what was unpacked stays)                                                                                                                       |
+| `POST /v1/sandboxes/{id}/files:link`                            | A link anyone can open with no key: `{"path", "method": "GET" or "PUT", "expiresInSeconds", "filename", "maxBytes", "wake", "archive"}`; returns `{"url", "expiresAt"}` (see [File links](#file-links)) |
 | `POST /v1/sandboxes/{id}/files:revoke-links`                    | End every link made for the sandbox so far                                                                                                                                                              |
 
-Paths are absolute. File errors name the path: `file_not_found`,
-`is_a_directory`, `not_a_directory`, `permission_denied`.
+Paths are absolute. File errors name the path, such as `file_not_found`, `is_a_directory`, `not_a_directory` or `permission_denied`.
 
-A watch's events are `create`, `write` (repeated writes folded, with a
-`count`), `remove`, `rename` (with `oldPath`) and `chmod`, in batches every
-`batchMs` (100 by default). Notices say when events were missed: `overflow`
-(more than 5,000 a second, or the kernel's own queue) and `lost` (a reader more
-than 1 MiB behind). A stream ends with `continue` and the cursor after 110
-seconds, and with `paused` when the sandbox pauses; reading never wakes a
-sandbox, and a read after it wakes carries on from the cursor with nothing lost.
-At most four watches run in a sandbox, each for `timeoutMs` (one hour by
-default, at most a day, or `0` to run until stopped).
+A watch's events are `create`, `write`, `remove`, `rename` and `chmod`. Repeated writes are folded together, with a `count`. `rename` includes `oldPath`. Events arrive in batches every `batchMs` (100 by default). Notices say when events were missed. `overflow` means more than 5,000 a second, or the kernel's own queue is full. `lost` means a reader more than 1 MiB behind. A stream ends with `continue` and the cursor after 110 seconds. It ends with `paused` when the sandbox pauses. Reading never wakes a sandbox. A read after it wakes carries on from the cursor with nothing lost. At most four watches run in a sandbox. Each runs for `timeoutMs`: one hour by default, at most a day, or `0` to run until stopped.
 
-A watch started with `"webhook": true` also sends its changes to your
-account's webhooks as `sandbox.files.changed` events (see
-[webhooks](./observability#webhooks)), so nothing in the sandbox or on your side
-has to read it. Runtime reads it without waking the sandbox, at most once every
-{{file-hook-window}}, and an account has at most {{file-hook-limit}} such
-watches. A sandbox session cannot start one.
+A watch started with `"webhook": true` also sends its changes to your account's webhooks as `sandbox.files.changed` events (see [webhooks](./observability#webhooks)). Nothing in the sandbox or on your side has to read it. Runtime reads it without waking the sandbox, at most once every {{file-hook-window}}. An account has at most {{file-hook-limit}} such watches. A sandbox session cannot start one.
 
-A folder moves as one tar archive, packed or unpacked by `tar` inside the
-sandbox as the sandbox user by default, so a folder download needs only the
-key's `read_file` permission and an upload `write_file`. `user=root` explicitly
-uses passwordless `sudo` inside that sandbox, with the same file permissions;
-an image without it refuses with `root_unavailable` before sending file bytes.
-Downloads accept repeated `exclude` parameters for plain relative paths, not
-glob patterns. `..`, empty or absolute paths are refused. A multipart upload
-sets `user` when it begins; direct uploads detect gzip from the archive header. The sandbox needs `sh`,
-`tar` and `base64` (and `gzip` for a compressed archive), which every image
-from Runtime's base has. At most four folders move in each direction in a
-sandbox at once. Like every file call, a folder call wakes a paused sandbox.
-A download whose reader takes no bytes for 60 seconds ends with 408
-`download_idle`; ask for it again.
-An upload, chunk or any request whose body sends no bytes for 30 seconds is
-answered 408 `request_timeout`; send it again (a chunk at its same offset).
-A body that keeps arriving, however slowly, may take up to about 280 seconds
-to arrive; the request then still has its own 110 seconds to answer. A body
-still arriving after 280 seconds is answered 408 `request_timeout` too, and
-its answer says how many bytes came. Chunks sent at once share the link, so
-over a slow link send fewer at once. The SDKs and the CLI get 503
-`body_stalled` instead of either 408, which they send again by themselves
-with the same key.
-The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandboxes cp`
-use these routes. The SDKs also expose `files.archive` and `files.unarchive`
-for callers that need the archive bytes themselves.
+A folder moves as one tar archive. By default, `tar` packs or unpacks it inside the sandbox, as the sandbox user. So a folder download needs only the key's `read_file` permission. An upload needs `write_file`. `user=root` explicitly uses passwordless `sudo` inside that sandbox, with the same file permissions. An image without `sudo` refuses with `root_unavailable` before any file bytes are sent. Downloads accept repeated `exclude` parameters for plain relative paths, not glob patterns. `..`, empty, or absolute paths are refused. A multipart upload sets `user` when it begins. Direct uploads detect gzip from the archive header. The sandbox needs `sh`, `tar` and `base64`, plus `gzip` for a compressed archive. Every image from Runtime's base has them. At most four folders move in each direction in a sandbox at the same time. Like every file call, a folder call wakes a paused sandbox. A download whose reader takes no bytes for 60 seconds ends with 408 `download_idle`. Ask for it again. An upload, a chunk, or any request whose body sends no bytes for 30 seconds returns 408 `request_timeout`. Send it again, with a chunk at its same offset. A body that keeps arriving, however slowly, may take up to about 280 seconds to arrive. The request still has its own 110 seconds to respond. A body still arriving after 280 seconds gets 408 `request_timeout` too. The response says how many bytes came. Chunks sent together share the link, so over a slow link, send fewer at the same time. The SDKs and the CLI get 503 `body_stalled` instead of either 408. They send it again by themselves, with the same key.
+
+The SDKs' `files.upload` and `files.download` and the CLI's `runtime sandboxes cp` use these routes. The SDKs also expose `files.archive` and `files.unarchive` for callers that need the archive bytes themselves.
 
 ```bash no-run
 curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?path=/workspace/app&gzip=true" \
@@ -684,44 +341,15 @@ curl -sS -X PUT "https://api.withruntime.com/v1/sandboxes/${ID}/files/archive?pa
 
 ### File links
 
-A file link is an address for one file of a sandbox that works with no API
-key, for a person's browser or another service: a report, a build, a video, a
-dataset. `POST /v1/sandboxes/{id}/files:link` makes one and answers its `url`,
-`https://files.<preview domain>/<token>/<name>`, and when it ends.
+A file link is an address for one file in a sandbox. It works with no API key. A person's browser or another service can use it, for example for a report, a build, a video or a dataset. `POST /v1/sandboxes/{id}/files:link` makes one. It returns its `url`, `https://files.<preview domain>/<token>/<name>`, and the time it ends.
 
-- `method: "GET"` (the default) downloads the file. Range requests work, so a
-  video plays and a download resumes (`ETag` and `If-Range` keep a resume on
-  the same version). A picture, video, sound or plain text shows in the
-  browser; anything else (a PDF, a page, a program) downloads, and with
-  `filename` everything downloads under that name. Nothing a link serves runs
-  as a page, and every answer carries `X-Runtime-Report`, where to report it. `archive: true` links a
-  folder, downloaded as `.tar.gz`. The file must exist when the link is made.
-- `method: "PUT"` makes an upload link: `curl -T report.pdf "$URL"` writes the
-  body to `path`, making its folder, whole or not at all (a reader sees the old
-  file or the new one), and answers 201 with `{"path", "size", "sha256"}`. Up to
-  `maxBytes`, 5 GiB by default and at most, in one request: the body streams
-  into the sandbox as it arrives, so there is nothing to split. It must arrive
-  within 5 minutes.
-- `expiresInSeconds` is 3600 unless given, 60 to 604800 (7 days).
-- A link works from anywhere, another sandbox included: hand one to an agent
-  in a sandbox and it downloads or uploads with `curl`, no key.
-- A paused sandbox wakes for a link as for any file call. `wake: false` never
-  wakes it (the link answers 409 `sandbox_paused`); `wake: true` wakes it even
-  when it was made with `autoWake: false`, and needs a key that may wake the
-  sandbox itself (the `create` permission; otherwise 403).
+- `method: "GET"` (the default) downloads the file. Range requests work. A video plays, and a download resumes. `ETag` and `If-Range` keep a resume on the same version. A picture, video, sound or plain text shows in the browser. Anything else, such as a PDF, a page or a program, downloads. With `filename`, everything downloads under that name. Nothing a link serves runs as a page. Every response carries `X-Runtime-Report`, which says where to report a problem. `archive: true` links a folder. It downloads as `.tar.gz`. The file must exist when the link is made.
+- `method: "PUT"` makes an upload link. `curl -T report.pdf "$URL"` writes the body to `path`. It creates the folder. The write is whole or not at all. A reader sees the old file or the new one. The response is 201 with `{"path", "size", "sha256"}`. The body can be up to `maxBytes` in one request. That is 5 GiB by default, and at most that. The body streams into the sandbox as it arrives, so there is nothing to split. It must arrive within 5 minutes.
+- `expiresInSeconds` defaults to 3600. It can be 60 to 604800 (7 days).
+- A link works from anywhere, including another sandbox. Give one to an agent in a sandbox, and it can download or upload with `curl`. No key is needed.
+- A paused sandbox wakes for a link, as for any file call. `wake: false` never wakes it. The link returns 409 `sandbox_paused` instead. `wake: true` wakes it even when it was made with `autoWake: false`. That needs a key that may wake the sandbox itself, which means the `create` permission. Otherwise the response is 403.
 
-A link needs the key's `read_file` permission to download and `write_file` to
-upload, and acts as that key: revoking the key ends its links, and so does
-`POST /v1/sandboxes/{id}/files:revoke-links` for every link of the sandbox, and
-deleting the sandbox. A link that ended answers 410 (`link_expired`,
-`link_revoked`), a deleted sandbox 404 `sandbox_gone`, a request with the
-other method 405 `wrong_method`, a range past the end of the file 416
-`range_not_satisfiable`, and an upload the sandbox could not write 422
-`upload_failed` (nothing is written), and a sandbox Runtime took down after
-a report 451 `taken_down`; refusals are plain text, or JSON when
-the request accepts `application/json`. Each link made and each
-revocation is in the audit log. The bytes a link serves count as the sandbox's
-served traffic, as a preview's do: the same monthly allowance and price.
+A link needs the key's `read_file` permission to download, and `write_file` to upload. It acts as that key. Revoking the key ends its links. So does `POST /v1/sandboxes/{id}/files:revoke-links`, which ends every link of the sandbox, and deleting the sandbox. A link that has ended returns 410 (`link_expired` or `link_revoked`). A deleted sandbox returns 404 `sandbox_gone`. A request with the other method returns 405 `wrong_method`. A range past the end of the file returns 416 `range_not_satisfiable`. An upload the sandbox cannot write returns 422 `upload_failed`, and nothing is written. A sandbox that Runtime took down after a report returns 451 `taken_down`. Refusals are plain text, or JSON when the request accepts `application/json`. Each link made and each revocation is in the audit log. The bytes a link serves count as the sandbox's served traffic, as a preview's do. They have the same monthly allowance and price.
 
 ```bash no-run
 URL=$(curl -sS -X POST "https://api.withruntime.com/v1/sandboxes/${ID}/files:link" \
@@ -730,66 +358,33 @@ URL=$(curl -sS -X POST "https://api.withruntime.com/v1/sandboxes/${ID}/files:lin
 curl -fLo report.pdf "$URL"  # no key
 ```
 
-Links are for a sandbox's files. A link to a file on a volume with no sandbox
-running is not available yet: mount the volume in a sandbox and link the file
-there.
+Links are for a sandbox's files. A link to a file on a volume is not available while no sandbox is running. Mount the volume in a sandbox, and link the file there.
 
 ## Sessions
 
-A session is a short-lived token a browser uses to reach one sandbox without
-your key. A key that can run commands in the sandbox makes, lists and revokes
-them:
+A session is a short-lived token. A browser uses it to reach one sandbox without your key. A key that can run commands in the sandbox makes, lists and revokes sessions:
 
 | Method and path                                       | What it does                                                                                        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `POST /v1/sandboxes/{id}/sessions`                    | `{"ttlSeconds", "origins", "name"}`; answers the session with its `token`, shown once, and `apiUrl` |
+| `POST /v1/sandboxes/{id}/sessions`                    | `{"ttlSeconds", "origins", "name"}`; returns the session with its `token`, shown once, and `apiUrl` |
 | `GET /v1/sandboxes/{id}/sessions`                     | Its sessions still active, and those that ended in the last day                                     |
 | `POST /v1/sandboxes/{id}/sessions/{sessionId}:revoke` | End one now                                                                                         |
 
-`ttlSeconds` is {{session-default-seconds}} unless given and
-{{session-max-seconds}} at most. `origins` lists up to {{session-origins}}
-exact origins, `https://host[:port]` or `http://localhost[:port]`.
+`ttlSeconds` defaults to {{session-default-seconds}}. It can be {{session-max-seconds}} at most. `origins` lists up to {{session-origins}} exact origins, `https://host[:port]` or `http://localhost[:port]`.
 
-Send the token as the bearer: `Authorization: Bearer rtsess_...`. It is served
-the sandbox's routes under `:exec`, `/processes`, `/files`, `/uploads`,
-`/interpreter`, `GET /v1/sandboxes/{id}` and `GET /v1/sandboxes/{id}/previews`,
-for its own sandbox only; everything else answers `forbidden` (403), and an ended
-session `unauthorized` (401). A preview token it is handed ends when it does.
+Send the token as the bearer: `Authorization: Bearer rtsess_...`. The session can use the sandbox's routes under `:exec`, `/processes`, `/files`, `/uploads`, `/interpreter`, `GET /v1/sandboxes/{id}`, and `GET /v1/sandboxes/{id}/previews`. Those routes work for its own sandbox only. Everything else returns `forbidden` (403). An ended session returns `unauthorized` (401). A preview token that the session is handed ends when the session does.
 
-The API answers CORS only for a session's own origins: a preflight from a page
-some session of that sandbox lists, and the answers to that session's
-requests, errors included. A session request from any other page is refused.
-Requests with a key carry no CORS headers.
+The API sends CORS responses only for a session's own origins. That covers a preflight from a page that a session of that sandbox lists. It also covers the responses to that session's requests, errors included. A session request from any other page is refused. Requests with a key carry no CORS headers.
 
-A replay of a create with the same `Idempotency-Key` answers the session with
-`token: null`; revoke it and make another. The SDKs do that for you.
+A replay of a create with the same `Idempotency-Key` returns the session with `token: null`. Revoke it and make another. The SDKs do that for you.
 
 ## Private preview tokens
 
-`POST /v1/sandboxes/{id}/previews` accepts optional `ttlSeconds` and
-`expiresAt` fields. `GET /v1/sandboxes/{id}/previews/{port}` accepts them as
-query parameters; `runtime_sandboxes_previews_create` accepts the same fields.
-`expiresAt` is an ISO timestamp with a timezone, at least a minute and at most
-a week ahead. Invalid deadlines answer `invalid_request` (400) before changing
-the preview.
+`POST /v1/sandboxes/{id}/previews` accepts optional `ttlSeconds` and `expiresAt` fields. `GET /v1/sandboxes/{id}/previews/{port}` accepts them as query parameters. `runtime_sandboxes_previews_create` accepts the same fields. `expiresAt` is an ISO timestamp with a timezone. It must be at least a minute and at most a week ahead. Invalid deadlines return `invalid_request` (400) before the preview changes.
 
-With `expiresAt` alone, the token ends by that deadline. With both fields, it
-ends by the earlier of the requested lifetime and deadline. Existing relative
-lifetimes keep their rounding; an absolute deadline rounds down to whole seconds
-and is never exceeded. Read `tokenExpiresAt` from the response rather than
-calculating it yourself. A connection the token opened, such as a WebSocket or
-a long download, ends when the token expires; open it again with a fresh token.
-A preview token read through a sandbox session also
-ends by that session's expiry. With less than a minute left, the session receives
-no fresh token. Sessions still cannot create or rotate previews, or use MCP.
+With `expiresAt` alone, the token ends by that deadline. With both fields, it ends by the earlier of the requested lifetime and the deadline. Existing relative lifetimes keep their rounding. An absolute deadline rounds down to whole seconds and is never exceeded. Read `tokenExpiresAt` from the response. Do not calculate it yourself. A connection the token opened, such as a WebSocket or a long download, ends when the token expires. Open it again with a fresh token. A preview token read through a sandbox session also ends when that session expires. With less than a minute left, the session receives no fresh token. Sessions still cannot create or rotate previews, or use MCP.
 
-A token is not stored on the preview, and neither is its expiry. Every create
-and every read signs its own token for that answer: a list, or a read without
-`ttlSeconds` or `expiresAt`, signs one that lasts a day. So a create that asked
-for a week and a list just after it show the same preview id with different
-tokens and different `tokenExpiresAt` values, and both tokens work, each until
-its own `tokenExpiresAt`. A later read never shortens or extends a token you
-already hold; only `:rotate` (or a key's removal) ends it early.
+The token and its expiry are not stored on the preview. Every create and every read signs its own token for that response. A list, or a read without `ttlSeconds` or `expiresAt`, signs a token that lasts a day. So a create that asked for a week, and a list just after it, show the same preview id. They return different tokens and different `tokenExpiresAt` values. Both tokens work, each until its own `tokenExpiresAt`. A later read never shortens or extends a token you already hold. Only `:rotate`, or removal of a key, ends it early.
 
 ## Other products
 
@@ -824,54 +419,17 @@ already hold; only `:rotate` (or a key's removal) ends it early.
 | `POST`, `GET /v1/webhooks`, `GET /v1/webhooks/{id}`, `:update`, `:rotate-secret`, `:test`, `:delete`, `…/deliveries`, `POST /v1/webhook-deliveries/{id}:retry`                                                                         | Webhooks                                                                                       |
 | `POST`, `GET /v1/otel-exports`, `GET /v1/otel-exports/{id}`, `:update`, `:flush`, `:delete`                                                                                                                                            | OpenTelemetry export                                                                           |
 
-Snapshots accept `mode: "memory"` (the default) or `mode: "disk"` in
-`POST /v1/sandboxes/{id}:snapshot`. Memory snapshots keep files and running
-processes. Disk snapshots keep only the root filesystem; a sandbox created
-from one boots fresh with no saved processes, at the `vcpu`, `memoryMiB` and
-`diskMiB` the create asks for (each one left out is the snapshot's), with a
-disk at least the saved size. A copy of a memory snapshot continues the saved
-machine, so it is the snapshot's size; naming a different size is
-`400 invalid_request`. Neither takes a source with attached volumes, and both
-keep the same ownership, retention and storage pricing. A running source is
-paused for the capture and woken after it; a disk snapshot's pause first
-waits for the sandbox to write to its disk what it still holds in memory,
-milliseconds when quiet and up to a few seconds while it writes. The returned snapshot includes its `mode`. Keep the
-source paused until the snapshot's state is `ready` or `failed`; `Prefer: wait`
-can return while capture is still in progress.
+Snapshots accept `mode: "memory"` (the default) or `mode: "disk"` in `POST /v1/sandboxes/{id}:snapshot`. Memory snapshots keep files and running processes. Disk snapshots keep only the root filesystem. A sandbox created from one boots fresh, with no saved processes. It uses the `vcpu`, `memoryMiB` and `diskMiB` that the create asks for. Each one left out is taken from the snapshot. Its disk is at least the saved size. A copy of a memory snapshot continues the saved machine, so it has the snapshot's size. Naming a different size returns `400 invalid_request`. Neither mode takes a source with attached volumes. Both keep the same ownership, retention, and storage pricing. A running source is paused for the capture, and woken after it. A disk snapshot's pause first waits for the sandbox to write to its disk what it still holds in memory. That takes milliseconds when the sandbox is quiet, and up to a few seconds while it writes. The returned snapshot includes its `mode`. Keep the source paused until the snapshot's state is `ready` or `failed`. `Prefer: wait` can return while capture is still in progress.
 
-Where deferred compression has been qualified and enabled, a memory
-snapshot may be `ready` with `compressionPending: true`, startable
-on the same server from its captured raw state. `meteredBytes` is zero until
-Runtime publishes the verified compressed allocation; temporary raw files
-are not charged. While compression is pending, `backedUp` is false and
-`durability.state` is `none`. Its off-server copy is queued after compression.
-See [snapshot storage](./storage#snapshots-survive-their-server).
+Where deferred compression has been qualified and enabled, a memory snapshot may be `ready` with `compressionPending: true`. It can start on the same server from its captured raw state. `meteredBytes` is zero until Runtime publishes the verified compressed allocation. Temporary raw files are not charged. While compression is pending, `backedUp` is false and `durability.state` is `none`. Its off-server copy is queued after compression. See [snapshot storage](./storage#snapshots-survive-their-server).
 
 ### Keeping copies on several servers
 
-A copy of a snapshot starts on a server that holds the snapshot: the server it
-was taken on, or one Runtime keeps a checked copy of it on. When none of those
-has room, Runtime copies the snapshot to another server in the region and the
-sandbox starts there once the copy is checked, usually within half a minute.
-This works as soon as the snapshot is `ready`, even while its compression is
-pending. A server starts at
-most 4 copies a minute of one account's snapshot while that account's
-sandboxes there are busy on CPU. Past that, the start moves to another server
-holding the snapshot that has room, and is refused with `account_busy_here`
-only when none has. To be sure copies start on several servers, keep several
-warm sources on different servers.
+A copy of a snapshot starts on a server that holds the snapshot. That is the server it was taken on, or one that Runtime keeps a checked copy on. When none of those has room, Runtime copies the snapshot to another server in the region. The sandbox starts there once the copy is checked, usually within half a minute. This works as soon as the snapshot is `ready`, even while its compression is pending. A server starts at most 4 copies a minute of one account's snapshot while that account's sandboxes there are busy on CPU. Past that, the start moves to another server that holds the snapshot and has room. It is refused with `account_busy_here` only when no such server exists. To be sure copies start on several servers, keep several warm sources on different servers.
 
-`spreadFrom` lists 1 to 16 ids of your own sandboxes or snapshots. The new
-sandbox starts on a server none of them is on, and stays apart if its start is
-moved. With no other server that has room, the create answers 503
-`no_capacity` (its message names `spreadFrom`), and nothing is made or
-charged. An id that is not a sandbox or snapshot this key may read is
-`400 invalid_request`. A copy of a snapshot whose `spreadFrom` names every
-server holding that snapshot starts on another server, the snapshot copied
-there first, as when those servers are full. Compare `placement` tags to see
-which of yours share a server.
+`spreadFrom` lists 1 to 16 ids of your own sandboxes or snapshots. The new sandbox starts on a server that none of them is on. It stays apart if its start is moved. With no other server that has room, the create returns 503 `no_capacity`. Its message names `spreadFrom`. Nothing is made or charged. An id that is not a sandbox or snapshot this key may read returns `400 invalid_request`. A copy of a snapshot whose `spreadFrom` names every server holding that snapshot starts on another server. The snapshot is copied there first, as when those servers are full. Compare `placement` tags to see which of yours share a server.
 
-Three warm sources apart, then copies round-robin:
+Three warm sources on different servers. Then copies, made round-robin:
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -903,59 +461,27 @@ for i in range(12):
     runtime.sandboxes.create(snapshot=snapshots[i % 3]["id"])
 ```
 
-A wake runs on its sandbox's server. A copy starts on a server holding its
-snapshot while one has room; when none has, on another server once the
-snapshot is copied there, which adds seconds to its start. A fork's copies do
-the same.
+A wake runs on its sandbox's server. A copy starts on a server that holds its snapshot while one has room. When none has room, it starts on another server once the snapshot is copied there. That adds seconds to its start. A fork's copies do the same.
 
-A copy of a snapshot that saved memory, and a wake, load all of that memory
-within seconds, so a server counts each one at all of it from its start. Many
-copies or wakes at once on one server take what memory it has; the ones past
-that wait while it makes room, and if none comes in time they answer
-`503 host_memory_pressure` with `Retry-After`. Send each again after it, with
-the same `Idempotency-Key`, backing off if it is refused again, as the SDKs
-do.
+A copy of a snapshot that saved memory, and a wake, load all of that memory within seconds. So a server counts each one at its full memory size from the start. Many copies or wakes at the same time on one server use up what memory it has. The ones past that wait while it makes room. If none gets room in time, they return `503 host_memory_pressure` with `Retry-After`. Send each one again after that wait, with the same `Idempotency-Key`. Back off if it is refused again, as the SDKs do.
 
 Forks:
 
-- A fork's copies keep the source's size and CPU (`cpu` and `cpuFloorMillis`),
-  and are quoted as a create with them would be.
-- Copies keep the source's `labels` unless the fork names others. They get no
-  name unless the fork gives one (`name`, then `name-1`, `name-2` for several),
-  because names are unique in the account (or in a compartment). A snapshot taken without labels
-  keeps its sandbox's, and a sandbox created from a snapshot keeps the
-  snapshot's unless the create names others. The one exception is
-  `share: made-keys`: copies, sandboxes and snapshots never inherit it. Set
-  it on each snapshot you mean to share (see
-  [Run a swarm](./teams#run-a-swarm)). A `share` label of any other value is
-  yours and is copied as before.
-- The snapshot a fork takes is deleted when the fork ends, whether every copy
-  started or not, and is never billed, unless the request says
-  `keepSnapshot: true`.
-- A fork that fails after its snapshot answers with the failing step's error.
-  Its `details.startedSandboxIds` names the copies that did start; they keep
-  running until stopped. A retry with the same `Idempotency-Key` answers that
-  same error.
-- If a fork stops partway and left its source paused, the source stays paused.
-  `GET /v1/notices` holds a `fork-left-paused` notice naming the sandbox, the
-  fork's key and how to wake it.
+- A fork's copies keep the source's size and CPU (`cpu` and `cpuFloorMillis`). They are quoted as a create with those values would be.
+- Copies keep the source's `labels` unless the fork names others. They get no name unless the fork gives one (`name`, then `name-1`, `name-2` for several). Names are unique in the account, or in a compartment. A snapshot taken without labels keeps its sandbox's labels. A sandbox created from a snapshot keeps the snapshot's labels unless the create names others. The one exception is `share: made-keys`. Copies, sandboxes and snapshots never inherit it. Set it on each snapshot you mean to share (see [Run a swarm](./teams#run-a-swarm)). A `share` label with any other value is yours, and is copied as before.
+- The snapshot a fork takes is deleted when the fork ends, whether every copy started or not. It is never billed, unless the request says `keepSnapshot: true`.
+- A fork that fails after its snapshot returns the failing step's error. `details.startedSandboxIds` names the copies that did start. They keep running until stopped. A retry with the same `Idempotency-Key` returns that same error.
+- If a fork stops partway and left its source paused, the source stays paused. `GET /v1/notices` holds a `fork-left-paused` notice. It names the sandbox, the fork's key, and how to wake it.
 
-Metrics, events, webhooks and OpenTelemetry export are in
-[metrics and webhooks](./observability): what each field means, how deliveries
-are signed and retried, and what an export sends.
+Metrics, events, webhooks and OpenTelemetry export are in [metrics and webhooks](./observability). That page covers what each field means, how deliveries are signed and retried, and what an export sends.
 
-The OpenAPI document has every field of every route.
+The OpenAPI document lists every field of every route.
 
 <!-- launch: apps -->
 
 ### Commands and files in an App's copy (private beta)
 
-Apps are open to organizations in their private beta. Each copy of an App is
-a machine, and the sandbox routes for [commands](#commands-and-processes) and
-[files](#files) reach it by its id: `POST /v1/sandboxes/{copyId}:exec`,
-`…/processes`, and `GET` and `PUT …/files/content`, uploads included. Copy ids
-come from `GET /v1/apps/{id}/copies`. Use one whose `state` is `serving`; the
-copy of the `liveVersion` is the live one.
+Apps are open to organizations in their private beta. Each copy of an App is a machine. The sandbox routes for [commands](#commands-and-processes) and [files](#files) reach it by its id: `POST /v1/sandboxes/{copyId}:exec`, `…/processes`, and `GET` and `PUT …/files/content`, uploads included. Copy ids come from `GET /v1/apps/{id}/copies`. Use a copy whose `state` is `serving`. The copy of the `liveVersion` is the live one.
 
 ```bash no-run
 copy=$(curl -sS "https://api.withruntime.com/v1/apps/${APP}/copies" \
@@ -965,20 +491,14 @@ curl -sS "https://api.withruntime.com/v1/sandboxes/${copy}:exec" \
   -H "Content-Type: application/json" -d '{"command": "tail -n 50 /srv/app.log"}'
 ```
 
-- A copy holds the App's environment, its secrets included. Only a key of an owner or admin may reach into one. Any other key gets
-  `403 forbidden`, even a developer's key that made the App.
-- A copy that is not serving (frozen, starting or draining) answers
-  `409 invalid_state`. A call never wakes it. A request to the App's URL wakes
-  one, and `minCopies: 1` keeps one awake.
-- A file written to a copy lasts only as long as that copy. A deploy replaces
-  every copy with new ones from the version's image.
-- The CLI does the same with `runtime apps exec <app> -- <command>` and
-  `runtime apps cp <file> <app>:/<path>` ([CLI](./cli#apps-private-beta)).
+- A copy holds the App's environment, its secrets included. Only a key of an owner or admin may reach into one. Any other key gets `403 forbidden`, even a developer's key that made the App.
+- A copy that is not serving (frozen, starting or draining) returns `409 invalid_state`. A call never wakes it. A request to the App's URL wakes one. `minCopies: 1` keeps one awake.
+- A file written to a copy lasts only as long as that copy. A deploy replaces every copy with new ones from the version's image.
+- The CLI does the same with `runtime apps exec <app> -- <command>` and `runtime apps cp <file> <app>:/<path>` ([CLI](./cli#apps-private-beta)).
 
 ### What an App's requests carry
 
-Every request reaches an App's copies with headers Runtime's router sets
-itself, replacing any a visitor sent under the same names:
+Runtime's router sets these headers on every request that reaches an App's copies. They replace any header a visitor sent with the same name:
 
 | Header                 | Value                                           |
 | ---------------------- | ----------------------------------------------- |
@@ -987,81 +507,31 @@ itself, replacing any a visitor sent under the same names:
 | `x-runtime-ip-city`    | The visitor's city, percent-encoded, when known |
 | `x-runtime-request-id` | 32 hex characters, new for each request         |
 
-The `x-runtime-` names belong to the router: any other `x-runtime-*` header a
-visitor sends is removed before the request reaches the App, as is every
-`x-vercel-*` header, so an App can trust every `x-runtime-*` header it reads.
-The answer carries the same `x-runtime-request-id`, which finds the request
-in the App's logs.
+The `x-runtime-` names belong to the router. Any other `x-runtime-*` header a visitor sends is removed before the request reaches the App. So is every `x-vercel-*` header. An App can therefore trust every `x-runtime-*` header it reads. The response carries the same `x-runtime-request-id`, which finds the request in the App's logs.
 
 ### App and Function addresses
 
-Every App and Function answers at its own readable address:
-its name, 16 random characters, then your account's handle, one name under
-`runtimehost.com`. The App `shop` of the account Acme is, for example,
-`https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/`. It is the `url` of the App
-(`GET /v1/apps/{id}`) and of each of its deploys. An App made before 20
-October 2026 was given one then. It is kept for life: renaming the App or the account leaves it where it
-is, so no link you shared breaks, and a deleted App's address is never any
-App's again. Your account's handle is made from its name at its first App,
-letters then a number, and is never anyone else's, even after your account
-is closed. An account named from the email it signed up with has the handle
-`acct<number>`, so no part of an email address is ever in an address. An App
-without a name, or whose name holds a word sign-in pages are trusted for or a
-well-known brand's name, is `app-<16 random>-acme1` (`function-…` for a
-Function).
+Every App and Function has its own readable address. It is made of its name, then 16 random characters, then your account's handle, under `runtimehost.com`. The App `shop` of the account Acme is, for example, `https://shop-3f9a1c2e7b04d915-acme1.runtimehost.com/`. That address is the `url` of the App (`GET /v1/apps/{id}`) and of each of its deploys. An App made before 20 October 2026 was given one at that time. The address is kept for life. Renaming the App or the account leaves it where it is, so no link you shared breaks. A deleted App's address is never any App's again. Your account's handle is made from its name at its first App. It has letters, then a number. It is never anyone else's, even after your account is closed. An account named from the email it signed up with has the handle `acct<number>`. So no part of an email address is ever in an address. An App without a name, or whose name holds a word that sign-in pages are trusted for, or a well-known brand's name, gets `app-<16 random>-acme1`. A Function gets `function-…`.
 
-The random part means an address can't be guessed from your App's and
-company's names, but an address is not a secret: anyone you give it to has
-it. Protect an App that must be private with its own sign-in or a firewall.
-Every App also keeps answering at its id's address,
-`https://<id without dashes>.runtimehost.com/`. Your own domains are added beside it (see
-[Networking](./networking)).
+The random part means an address can't be guessed from your App's and company's names. But an address is not a secret. Anyone you give it to has it. Protect an App that must be private with its own sign-in or a firewall. Every App also keeps responding at its id's address, `https://<id without dashes>.runtimehost.com/`. Your own domains are added beside it (see [Networking](./networking)).
 
 ### App and Function CDN
 
-Every App and Function has a `cdn` setting, `true` unless you set it: Cloudflare's
-CDN sits in front of its addresses, the `runtimehost.com` one and its custom
-domains. `false` sends visitors straight to Runtime's routers, with nothing
-cached. Set it when you create the App (`POST /v1/apps`, `POST /v1/functions`)
-or change it later (`POST /v1/apps/{id}:update`); every read answers it. It is
-part of the price of Apps and Functions, with no separate fee. In the SDKs it is
+Every App and Function has a `cdn` setting. It is `true` unless you set it. When it is `true`, Cloudflare's CDN sits in front of its addresses. That covers the `runtimehost.com` address and its custom domains. `false` sends visitors straight to Runtime's routers, with nothing cached. Set it when you create the App (`POST /v1/apps`, `POST /v1/functions`), or change it later (`POST /v1/apps/{id}:update`). Every read returns it. It is part of the price of Apps and Functions, with no separate fee. In the SDKs it is
 `cdn` (`CDN` in Go, `cdn:` in Ruby, `cdn(...)` in Java), in the CLI
 `--cdn on|off`, and the MCP tools take `cdn` as the routes do.
 
 ### Staged releases
 
-An App's `releaseStages` says how a new version goes live. `at_once`, the
-default, starts every copy of it beside the live version's and switches them
-all together once they serve. `staged` releases it a stage at a time:
+An App's `releaseStages` says how a new version goes live. The default, `at_once`, starts every copy of the new version beside the live version's copies. Then it switches them all together, once they serve. `staged` releases the new version one stage at a time:
 
-1. One copy of the new version joins the App's route beside the live
-   version's copies, taking its share of visitors.
-2. Once a stage's copies serve, they run for `releaseSoakSeconds` (60 to
-   3600, 300 by default), and the stage is judged on what its visitors got:
-   5xx answers and time to the first byte, route by route, against the
-   other versions' answers in the hour before the release began, counted
-   only where visitors from many networks saw it.
-3. A stage that passes makes way for the next: about a tenth of the copies,
-   half, then all of them, as many as the live version served when the
-   release began. The last stage is the switch.
+1. One copy of the new version joins the App's route beside the live version's copies. It takes its share of visitors.
+2. Once a stage's copies serve, they run for `releaseSoakSeconds` (60 to 3600, 300 by default). Then the stage is judged on what its visitors got. The judge checks 5xx responses and time to the first byte, route by route. It compares them with the other versions' responses in the hour before the release began. Only visitors from many networks count.
+3. A stage that passes makes way for the next. The stages are about a tenth of the copies, then half, then all of them, as many as the live version served when the release began. The last stage is the switch.
 
-A stage that does worse goes back: its copies leave the route, finish their
-requests and stop, and only then does the deploy fail, with
-`deploy_stage_failed` and the stage's numbers in its `lastOutput`. The live
-version never stops serving. An App's `releaseWatch` set to `off` judges
-only health: a copy that fails its health check fails the deploy the same
-way, drained first, in every mode. A rollback, a restart, an App's first
-version and an App that runs one copy go at once.
+A stage that does worse goes back. Its copies leave the route, finish their requests, and stop. Only then does the deploy fail, with `deploy_stage_failed`. The stage's numbers appear in its `lastOutput`. The live version never stops serving. An App's `releaseWatch` set to `off` judges only health. A copy that fails its health check fails the deploy the same way, drained first, in every mode. A rollback, a restart, an App's first version, and an App that runs one copy all go live immediately.
 
-Set both on create (`POST /v1/apps`) or change them later
-(`POST /v1/apps/{id}:update`); a change to `at_once` moves a staged release
-under way to every copy at once. Every read of an App answers
-`stagedRelease`, its release under way or its last (`null` before its first):
-`version`, `from` (the version live when it began), `state` (`rolling`,
-`back`, `done`, `failed` or `ended`, when another deploy or a rollback took
-its place), `stage` of `stages`, `copies` of `of`, `soakSeconds`, `detail`
-(its last step in words), `startedAt` and `updatedAt`. A Function's versions
-go live at once, and it is refused both settings (`400`). In the SDKs they
+Set both on create (`POST /v1/apps`), or change them later (`POST /v1/apps/{id}:update`). A change to `at_once` moves a staged release under way to every copy at the same time. Every read of an App returns `stagedRelease`. It is the release under way, or the last one, and it is `null` before the first release. It has `version`, and `from` (the version live when it began). It has `state` (`rolling`, `back`, `done`, `failed` or `ended`). `ended` applies when another deploy or a rollback took its place. It has `stage` of `stages`, `copies` of `of`, `soakSeconds`, and `detail` (its last step in words). It also has `startedAt` and `updatedAt`. A Function's versions go live immediately. It is refused both settings (`400`). In the SDKs they
 are `releaseStages` and `releaseSoakSeconds` (`release_stages` and
 `release_soak_seconds` in Python and Ruby, `ReleaseStages` in Go,
 `releaseStages(...)` in Java), in the CLI `--release at-once|staged` and
@@ -1069,119 +539,46 @@ are `releaseStages` and `releaseSoakSeconds` (`release_stages` and
 
 ### App and Function logs
 
-`GET /v1/apps/{id}/logs` (and `GET /v1/functions/{id}/logs`) answers what the
-App's copies printed to standard output and error, as `lines`, oldest first:
-`at` (Unix milliseconds), `stream`, `copy` (the copy's id), `version` and
-`text`. A page is the newest `limit` lines (1 to 500, default 100) of the
-window, with `nextCursor` and `hasMore`; pass `nextCursor` back as `cursor`,
-with the same filters, for the page before it.
+`GET /v1/apps/{id}/logs` (and `GET /v1/functions/{id}/logs`) returns what the App's copies printed to standard output and error. The result is `lines`, oldest first. Each line has `at` (Unix milliseconds), `stream`, `copy` (the copy's id), `version` and `text`. A page holds the newest `limit` lines of the window (1 to 500, default 100). It has `nextCursor` and `hasMore`. Pass `nextCursor` back as `cursor`, with the same filters, to get the page before it.
 
-- `since`: a time (`2026-10-18T20:00:00Z`) or a duration back from now
-  (`30s`, `15m`, `2h`, `7d`); an hour when left out. Lines are kept 14 days.
-- `version`, `copy` (an id from `GET /v1/apps/{id}/copies`) and `stream`
-  (`stdout` or `stderr`) narrow it.
-- `follow=true` answers NDJSON: the page's lines, then each new one as it is
-  printed. Each event is a `line` or a `gap` (lines lost before they could be
-  read), with a `cursor` to resume after it. One call lasts at most two
-  minutes and ends with a `continue` event; call again with its `cursor`. The
-  SDKs do this themselves and give each line once.
+- `since`: a time (`2026-10-18T20:00:00Z`) or a duration back from now (`30s`, `15m`, `2h`, `7d`). The default is one hour. Lines are kept 14 days.
+- `version`, `copy` (an id from `GET /v1/apps/{id}/copies`) and `stream` (`stdout` or `stderr`) narrow the results.
+- `follow=true` returns NDJSON: the page's lines, then each new line as it is printed. Each event is a `line` or a `gap`. A gap means lines were lost before they could be read. Each event has a `cursor` to resume after it. One call lasts at most two minutes and ends with a `continue` event. Call again with its `cursor`. The SDKs do this themselves and give each line once.
 
-Reading logs needs a key that may read files (`read_file`, so a read-only key
-may). Another account's App, or one the key's agent does not act for, is
-`404 not_found`. A `cursor` that does not continue the read is
-`400 invalid_request`; a read the log store cannot answer just now is
-`503 api_unavailable`, safe to retry; on a deployment without the log store
-the read is `501 unavailable`. The MCP tools are `runtime_apps_logs` and
-`runtime_functions_logs` (the `logs` action of `runtime_apps` and
-`runtime_functions`); there a page's size is `lines` and its cursor `before`,
-since `limit` and `cursor` are the list's. In the SDKs: `apps.logs(id, options)`, with
-`follow: true` (JavaScript) or `follow=True` (Python) to stream;
-`Logs` and `FollowLogs` (Go); `logs` and `follow_logs` (Ruby); `logs` and
-`followLogs` (Java). A follow that loses its connection more than three
-times in a row stops with `app_log_interrupted`, and one that reads an event
-it does not understand with `app_log_invalid`; each error's
-`details.cursor` is where to follow again from.
+Reading logs needs a key that may read files (`read_file`, so a read-only key may). Another account's App, or one that the key's agent does not act for, returns `404 not_found`. A `cursor` that does not continue the read returns `400 invalid_request`. A read the log store cannot serve right now returns `503 api_unavailable`. It is safe to retry. On a deployment without the log store, the read returns `501 unavailable`. The MCP tools are `runtime_apps_logs` and `runtime_functions_logs` (the `logs` action of `runtime_apps` and `runtime_functions`). There, a page's size is `lines` and its cursor is `before`, since `limit` and `cursor` belong to the list. In the SDKs: `apps.logs(id, options)`, with `follow: true` (JavaScript) or `follow=True` (Python) to stream. Go uses `Logs` and `FollowLogs`. Ruby uses `logs` and `follow_logs`. Java uses `logs` and `followLogs`. A follow that loses its connection more than three times in a row stops with `app_log_interrupted`. A follow that reads an event it does not understand stops with `app_log_invalid`. Each error's `details.cursor` is where to follow again from.
 <!-- /launch: apps -->
 
 <!-- launch: apps -->
 
 ### Apps with a volume
 
-Give an App `volume: {volumeId, path}` on create or update to mount one of
-your volumes (`POST /v1/volumes`) read-write in its copy. `path` is under
-`/data`, `/mnt`, `/state`, `/storage` or `/volumes`, with no `.` or `..`
-segments. A volume has one writer, so the App runs one copy: `minCopies` 1,
-`maxCopies` 1 and `spares` 0, or `400 volume_invalid`. The copy runs on the
-volume's server. A volume that is another App's, or attached to a sandbox,
-is `409 volume_attached`; while the App holds it, the volume is not deleted,
-resized or attached elsewhere. A volume is added or taken off only before
-the App's first deploy (`409 volume_change_refused`).
+Give an App `volume: {volumeId, path}` on create or update to mount one of your volumes (`POST /v1/volumes`) read-write in its copy. `path` is under `/data`, `/mnt`, `/state`, `/storage` or `/volumes`, with no `.` or `..` segments. A volume has one writer, so the App runs one copy: `minCopies` 1, `maxCopies` 1 and `spares` 0. Otherwise the request returns `400 volume_invalid`. The copy runs on the volume's server. A volume that is another App's, or that is attached to a sandbox, returns `409 volume_attached`. While the App holds it, the volume is not deleted, resized or attached elsewhere. A volume can be added or taken off only before the App's first deploy. Otherwise the request returns `409 volume_change_refused`.
 
-The volume's files reach the App's environment, so once any version of the
-App has a sealed environment or uses account secrets, every write that
-moves its copy needs a key that may reveal them (`secrets_reveal`): setting
-or moving the volume, and each deploy, rollback and restart. Any other key
-is answered `403 forbidden`. What such an App wrote stays as secret: once
-its copy has used the volume, attaching that volume to a sandbox, or a
-volume restored from one of its backups, needs a key that may reveal that
-App's secrets, even after the App is deleted or has moved to another
-volume (else `403 forbidden`).
+The volume's files reach the App's environment. So once any version of the App has a sealed environment or uses account secrets, every write that moves its copy needs a key that may reveal them (`secrets_reveal`). That covers setting or moving the volume, and each deploy, rollback and restart. Any other key returns `403 forbidden`. What such an App wrote stays secret. Once its copy has used the volume, attaching that volume to a sandbox needs a key that may reveal that App's secrets. So does restoring the volume from one of its backups. That holds even after the App is deleted or has moved to another volume. Otherwise the request returns `403 forbidden`.
 
-Every deploy, rollback and restart of such an App stops, then starts:
+Every deploy, rollback and restart of such an App stops the copy first, then starts a new one:
 
-- The live copy leaves the route (requests wait), gets SIGTERM, and has
-  `stopGraceSeconds` (0 to 900, 30 by default) to exit before it is stopped
-  and the volume let go.
-- The new copy boots fresh from the version's image, or a build's files with
-  its start command, with the volume mounted. It never resumes saved memory
-  and never runs beside the old one.
-- Its health check decides. A copy that fails, or does not serve within the
-  start time, fails the version (`deploy_health_failed`), and the version
-  that was live is started again the same way. The failed deploy's
-  `lastOutput` holds the server's last lines only for a key that may reveal
-  the App's secrets, since they ran with its environment; any other key
-  reads a sentence saying they are held.
-- If the old copy never stops and lets the volume go within 30 minutes (its
-  server was lost, and the volume has not yet come back on another server
-  from its replica or its backup), the deploy fails with
-  `deploy_stop_failed` and nothing of it starts. The version that was live
-  starts again on the volume as soon as it is free.
-- If the new copy serves but the switch to it is not recorded within 5
-  minutes, the deploy fails with `deploy_switch_failed` and the version that
-  was live starts again on the volume.
-- It runs one copy, so its versions go live at once whatever its
-  `releaseStages` says.
-- The deploy record says `downtime`: `stopMs`, `bootMs` and `totalMs`.
+- The live copy leaves the route. Requests wait. The copy gets SIGTERM, and has `stopGraceSeconds` (0 to 900, 30 by default) to exit. After that, it is stopped and the volume is released.
+- The new copy boots fresh from the version's image. Or it boots from a build's files with its start command, with the volume mounted. It never resumes saved memory. It never runs beside the old copy.
+- Its health check decides. A copy that fails, or does not serve within the start time, fails the version (`deploy_health_failed`). The version that was live is then started again the same way. The failed deploy's `lastOutput` holds the server's last lines only for a key that may reveal the App's secrets. Those lines ran with its environment. Any other key reads a sentence saying they are held.
+- If the old copy never stops and releases the volume within 30 minutes, the deploy fails with `deploy_stop_failed`. Nothing of it starts. This happens when the volume's server was lost, and the volume has not yet come back on another server from its replica or its backup. The version that was live starts again on the volume as soon as it is free.
+- If the new copy serves, but the switch to it is not recorded within 5 minutes, the deploy fails with `deploy_switch_failed`. The version that was live starts again on the volume.
+- It runs one copy. So its versions go live immediately, whatever its `releaseStages` says.
+- The deploy record has `downtime`: `stopMs`, `bootMs` and `totalMs`.
 
 ### Restart and replaced copies
 
-`POST /v1/apps/{id}:restart` (and `POST /v1/functions/{id}:restart`) starts
-the live version afresh and answers a deploy record of its own, with
-`restartOf` naming that version. It works on any App or Function: one
-without a volume warms the new copies beside the old, as a deploy does.
-Nothing live is `409 restart_unavailable`. A live version that names its
-image by name rather than id resolves the name again, so with a sealed
-environment or account secrets its restart needs a key that may reveal them
-(`403 forbidden`); deploy the image by id to restart it with any key. The MCP tools are
+`POST /v1/apps/{id}:restart` (and `POST /v1/functions/{id}:restart`) starts the live version afresh. It returns a deploy record of its own, with `restartOf` naming that version. It works on any App or Function. One without a volume warms the new copies beside the old, as a deploy does. If nothing is live, it returns `409 restart_unavailable`. A live version that names its image by name rather than id resolves the name again. So with a sealed environment or account secrets, its restart needs a key that may reveal them (`403 forbidden`). Deploy the image by id to restart it with any key. The MCP tools are
 `runtime_apps_restart` and `runtime_functions_restart`. In the SDKs:
 `apps.restart(id)` and `functions.restart(id)`, in JavaScript and Python;
 in the CLI, `runtime apps restart <app>`.
 
-A live copy that every router has had out of rotation for its App's or
-Function's `healthFailSeconds` (10 to 3600, 60 by default; set on create or
-update, as for an App), or whose process ended, is replaced by a copy of the
-same version. The version's `replacements` list
-each one: `at`, `reason` (`health` or `exited`) and, with a volume,
-`downtimeMs`.
+A live copy is replaced by a copy of the same version in two cases. The first is when every router has had it out of rotation for the App's or Function's `healthFailSeconds` (10 to 3600, 60 by default). That value is set on create or update, as for an App. The second is when its process ended. The version's `replacements` list records each one: `at`, `reason` (`health` or `exited`) and, with a volume, `downtimeMs`.
 <!-- /launch: apps -->
 
 ## Account
 
-`GET /v1/me` says who a key is: `orgId`, `principalId`, `credentialId`, the
-account's `orgName`, and the `role` of the member who made the key (`owner`,
-`admin`, `developer` or `billing`), which bounds what the key may do.
-`GET /v1/usage` says what the account has and has used. Money is integer
-microdollars in strings (1,000,000 is one dollar), exact however large:
+`GET /v1/me` says who a key is. It returns `orgId`, `principalId`, `credentialId`, the account's `orgName`, and the `role` of the member who made the key (`owner`, `admin`, `developer` or `billing`). That role limits what the key may do. `GET /v1/usage` shows what the account has and has used. Money is an integer count of microdollars, given as strings (1,000,000 is one dollar). The values are exact, however large:
 
 | Field        | What it is                                                                                          |
 | ------------ | --------------------------------------------------------------------------------------------------- |
@@ -1196,61 +593,23 @@ microdollars in strings (1,000,000 is one dollar), exact however large:
 | `kinds`      | Every resource, however many, a row a kind: `{kind, resources, chargedMicros, heldMicros}`          |
 | `resources`  | The newest hundred resources, with what each used and was charged                                   |
 
-Each resource carries `resourceId`, `name`, `kind`, `state`, `createdAt`,
-`vcpu` and `memoryMiB` (null for a kind with no size), `runningSeconds` (the
-billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates` and
-`chargedMicros`. `chargedMicros` covers every meter, outbound
-traffic included. Divide it by `runningSeconds` for what a run cost a second.
+Each resource has `resourceId`, `name`, `kind`, `state`, `createdAt`, `vcpu` and `memoryMiB` (null for a kind with no size), `runningSeconds` (the billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates` and `chargedMicros`. `chargedMicros` covers every meter, including outbound traffic. Divide it by `runningSeconds` to get the cost of one second of a run.
 
-`outbound` is the account's outbound traffic this calendar month, UTC:
-`month` (`2026-09`), `sentBytes`, `freeBytes` (what the allowance covered),
-`billableBytes`, `allowanceBytes` ({{outbound-allowance}}), and `chargedMicros` and
-`writtenOffMicros` as strings. `writtenOffMicros` is traffic your balance or a
-spending limit could not cover; it is never charged later
-([pricing](./pricing#network-products)).
+`outbound` is the account's outbound traffic for this calendar month, in UTC. It has `month` (`2026-09`), `sentBytes`, `freeBytes` (what the allowance covered), `billableBytes`, and `allowanceBytes` ({{outbound-allowance}}). It also has `chargedMicros` and `writtenOffMicros`, as strings. `writtenOffMicros` is traffic that your balance or a spending limit could not cover. It is never charged later ([pricing](./pricing#network-products)).
 
 ### Export settled usage
 
-`GET /v1/usage/export?since=2026-09-01T00:00:00Z&until=2026-10-01T00:00:00Z`
-reads settled usage for every product visible to the key. `since` is inclusive
-and `until` exclusive, both UTC ISO timestamps ending in `Z`; the filter uses
-when an interval settled, rather than when its resource was created.
+`GET /v1/usage/export?since=2026-09-01T00:00:00Z&until=2026-10-01T00:00:00Z` reads settled usage for every product the key can see. `since` is inclusive and `until` is exclusive. Both are UTC ISO timestamps ending in `Z`. The filter uses when an interval settled, not when its resource was created.
 
-The answer is `{since, until, data, nextCursor, finalThrough, csv}`. Rows name the interval
-and resource, kind, meter, funding, interval start/end, settlement time, billed
-milliseconds, `chargedMicros`, quoted component rates and measurement evidence.
-Money and quantities are exact decimal strings. `billedMilliseconds`,
-measurements and evidence can be null when unavailable.
+The response is `{since, until, data, nextCursor, finalThrough, csv}`. Each row names the interval and resource, the kind, the meter, the funding, the interval start and end, the settlement time, the billed milliseconds, `chargedMicros`, the quoted component rates, and the measurement evidence. Money and quantities are exact decimal strings. `billedMilliseconds`, measurements and evidence can be null when unavailable.
 
-Each interval is one row, written once when it settles; a later read never
-changes or repeats it. Before the first page, a read settles your running
-sandboxes through about a minute ago, so their use is in the export, not just
-what ran up to their last hourly window: up to 100 sandboxes per read, the
-longest unsettled first, and only sandboxes paid from credit (a trial's are
-not). Storage (a paused sandbox's memory and disk, a stopped sandbox's disk,
-images, snapshots, volumes and volume backups) is paid an hour at a time, and
-each hour is in the export within a minute of its end, usually seconds.
-Pending holds, the credit set aside for work still running (`heldMicros` in
-`GET /v1/usage`), are not in the export; a hold becomes a row when it settles.
+Each interval is one row, written once when it settles. A later read never changes or repeats it. Before the first page, a read settles your running sandboxes through about a minute ago. So their use appears in the export, not only what ran up to their last hourly window. A read settles up to 100 sandboxes, the longest unsettled first. Only sandboxes paid from credit are settled. A trial's sandboxes are not. Storage is paid an hour at a time. That covers a paused sandbox's memory and disk, a stopped sandbox's disk, images, snapshots, volumes, and volume backups. Each hour appears in the export within a minute of its end, usually within seconds. Pending holds are not in the export. These are the credit set aside for work still running (`heldMicros` in `GET /v1/usage`). A hold becomes a row when it settles.
 
-`finalThrough` is a UTC timestamp before which nothing can still change: no row
-with `settledAt` earlier than it can still appear, and rows never change once
-written. A range whose `until` is at or before `finalThrough` is complete for
-good; usage that settles later is stamped at or after it. It is null only when
-the marker could not be taken in time; read again. Each row's `final` (and the
-CSV's last column) is true once its resource is deleted, nothing of it is still
-running or open, and every charge it will ever have settled before
-`finalThrough`. A volume's backups are resources of their own and bill until
-their retention ends, so they are not final when the volume is.
+`finalThrough` is a UTC timestamp before which nothing can still change. No row with a `settledAt` earlier than it can still appear, and rows never change once written. A range whose `until` is at or before `finalThrough` is complete for good. Usage that settles later is stamped at or after it. It is null only when the marker could not be taken in time. In that case, read again. Each row's `final` (and the CSV's last column) is true once its resource is deleted. At that point nothing of it is still running or open, and every charge it will ever have is settled before `finalThrough`. A volume's backups are resources of their own. They bill until their retention ends. So they are not final when the volume is.
 
-Follow `nextCursor` with the same range until it is null. Each page rechecks
-the key's `usage` permission and resource visibility. These are live reads;
-usage that settles after an earlier page can appear on a later page. The
-server's `csv` includes a header on its first page only, so concatenate the
-pages unchanged, in order. This range export covers more than the newest
-hundred resources in `GET /v1/usage`.
+Follow `nextCursor` with the same range until it is null. Each page rechecks the key's `usage` permission and resource visibility. These are live reads. Usage that settles after an earlier page can appear on a later page. The server's `csv` includes a header on its first page only. So concatenate the pages unchanged, in order. This range export covers more than the newest hundred resources in `GET /v1/usage`.
 
-`GET /v1/limits` says what this key may do and what its agent may still spend:
+`GET /v1/limits` shows what this key may do, and what its agent may still spend:
 
 ```json
 {
@@ -1281,101 +640,53 @@ hundred resources in `GET /v1/usage`.
   what its running sandboxes are about to use.
 - Past the limit, a create, wake, extension or renewal fails with 402
   `spending_limit_reached` and charges nothing.
-- `trial` is the machine time the account can run without credit, the same figures as `GET /v1/usage`, in milliseconds, or null when the account has none, as here. `availableMs` is what a new sandbox without credit can still use. `offer` is `monthly` for the free usage, or `hours` for an account given free hours before 5 October 2026, which keeps what is left of them; `renewsAt` is when the next month starts, and an account that has never paid has its free machine time once, until `freeUntil` on its `allowances` rows. The field keeps its older name so code that reads it goes on working.
+- `trial` is the machine time the account can run without credit, in milliseconds. It has the same figures as `GET /v1/usage`. It is null when the account has none, as here. `availableMs` is what a new sandbox without credit can still use. `offer` is `monthly` for the free usage. It is `hours` for an account given free hours before 5 October 2026, which keeps what is left of them. `renewsAt` is when the next month starts. An account that has never paid has its free machine time once, until `freeUntil` on its `allowances` rows. The field keeps its older name, so code that reads it keeps working.
 
-- `credit` is the account's credit: `availableMicros` left now (as
-  `GET /v1/usage`'s `available`), `dailyPaceMicros`, a day at this month's
-  pace (last month's while this one is under three days old; null when
-  nothing is spent), and `runwayDays`, the whole days it lasts at that pace,
-  as the console's Home says it. `state` is `low` under `lowBelowDays` days
-  and `empty` at none: running paid sandboxes then pause and new ones are
-  refused. The `credit.low` and `credit.empty` [webhooks](./observability)
-  are sent at the same moments. `addedBy` is `owner` (a person adds credit,
-  on the website) or `agent`: the account was opened with a wallet and no
-  person pays for it, so its own agent adds credit with
-  `npx withruntime billing topup <usd>` before `runwayDays` reaches 0.
+- `credit` is the account's credit. `availableMicros` is what is left now, as `available` in `GET /v1/usage`. `dailyPaceMicros` is a day's spend at this month's pace. Last month's pace is used while this month is under three days old. It is null when nothing is spent. `runwayDays` is the whole days the credit lasts at that pace, as the console's Home shows it. `state` is `low` when credit falls under `lowBelowDays` days. It is `empty` at none. Running paid sandboxes then pause, and new ones are refused. The `credit.low` and `credit.empty` [webhooks](./observability) are sent at the same moments. `addedBy` is `owner` when a person adds credit on the website. It is `agent` when the account was opened with a wallet and no person pays for it. Then its own agent adds credit with `npx withruntime billing topup <usd>` before `runwayDays` reaches 0.
 
-A limit is set, changed or removed only on the website, at
-[API keys](https://withruntime.com/account/keys): by the member who made the key,
-or by an owner or admin. A key can only make keys with a daily limit that fits
-within its own, and cannot change its own.
+A limit is set, changed or removed only on the website, at [API keys](https://withruntime.com/account/keys). That is done by the member who made the key, or by an owner or admin. A key can make only keys with a daily limit that fits within its own. It cannot change its own limit.
 
-`GET /v1/audit` is the account's audit log, newest first: member and role
-changes, keys, connections, limits, credit, network rules, secrets and
-deletions, each with `actor`, `at`, `ip`, `requestId`, `via` and `sandbox`
-(the sandbox the call came from, when code in it called
-`http://runtime.internal`; otherwise null). Filter with
-`action` (`key.created`, or a group such as `member.`), page with
-`before=<next>` and `limit` (1 to 200). It needs a key with full access or a
-read-only key, made by an owner or admin; see [teams](./teams).
+`GET /v1/audit` is the account's audit log, newest first. It records member and role changes, keys, connections, limits, credit, network rules, secrets and deletions. Each entry has `actor`, `at`, `ip`, `requestId`, `via` and `sandbox`. `sandbox` is the sandbox the call came from, when code in it called `http://runtime.internal`. Otherwise it is null. Filter with `action` (`key.created`, or a group such as `member.`). Page with `before=<next>`, and set `limit` (1 to 200). It needs a key with full access, or a read-only key, made by an owner or admin. See [teams](./teams).
 
-`GET /v1/sso` is the account's single sign-on: each identity provider, its
-domain and whether DNS has proven it, the role people join with, whether
-single sign-on is required, and SCIM directory sync. It is read only, with the
-same keys as the audit log; an owner changes it on the website. See
-[single sign-on](./single-sign-on).
+`GET /v1/sso` shows the account's single sign-on. It lists each identity provider, its domain, and whether DNS has proven it. It shows the role people join with, whether single sign-on is required, and SCIM directory sync. It is read only, with the same keys as the audit log. An owner changes it on the website. See [single sign-on](./single-sign-on).
 
-`GET /v1/identity/token?audience=sts.amazonaws.com` is for code inside a
-sandbox. It takes the sandbox's `RUNTIME_ID_TOKEN_REQUEST_TOKEN` as the bearer,
-not an API key, and answers `{"token", "expiresAt", "issuer", "subject",
-"audience"}`: an OIDC token naming that sandbox, for 10 minutes by default
-(`lifetimeSeconds` 60 to 3600). See [identity tokens](./identity-tokens).
+`GET /v1/identity/token?audience=sts.amazonaws.com` is for code inside a sandbox. It takes the sandbox's `RUNTIME_ID_TOKEN_REQUEST_TOKEN` as the bearer, not an API key. It returns `{"token", "expiresAt", "issuer", "subject", "audience"}`. That is an OIDC token that names the sandbox. It lasts 10 minutes by default (`lifetimeSeconds` 60 to 3600). See [identity tokens](./identity-tokens).
 
 ## Domains, TCP ports, addresses and the tunnel
 
-Paid accounts only; see [networking](./networking). Each is its own product,
-not a sandbox's:
+These are for paid accounts only. See [networking](./networking). Each one is its own product, not a sandbox's:
 
 | Route                                           | What it does                                                             |
 | ----------------------------------------------- | ------------------------------------------------------------------------ |
-| `POST /v1/domains`                              | `{hostname, sandboxId, port}`: claim a hostname; answers its DNS records |
+| `POST /v1/domains`                              | `{hostname, sandboxId, port}`: claim a hostname; returns its DNS records |
 | `POST /v1/domains/{hostname}:verify`            | Check the TXT record; `active` when it matches                           |
 | `GET`, `DELETE /v1/domains/{hostname}`          | One domain; stop serving it                                              |
-| `POST /v1/ports`                                | `{sandboxId, port}`: a public TCP port; answers `connect`                |
+| `POST /v1/ports`                                | `{sandboxId, port}`: a public TCP port; returns `connect`                |
 | `GET /v1/ports`, `DELETE /v1/ports/{id}`        | List (`?sandboxId=`); close                                              |
 | `POST /v1/ips`                                  | `{family}`: reserve a dedicated outbound address (4 or 6)                |
 | `GET /v1/ips`, `DELETE /v1/ips/{id}`            | List; release                                                            |
 | `POST`, `GET`, `DELETE /v1/networks/wireguard`  | Create (`{subnet}`), read or delete the WireGuard tunnel                 |
-| `POST /v1/networks/wireguard/peers`             | `{name, publicKey?, routes?}`: add a peer; answers its wg-quick `config` |
+| `POST /v1/networks/wireguard/peers`             | `{name, publicKey?, routes?}`: add a peer; returns its wg-quick `config` |
 | `POST /v1/networks/wireguard/peers/{id}:rotate` | `{publicKey?}`: a new key for the peer                                   |
 | `DELETE /v1/networks/wireguard/peers/{id}`      | Remove a peer                                                            |
 
-A dedicated address needs credit on the account; the rest need a kept top-up. Without it a request gets `payment_required` (402).
+A dedicated address needs credit on the account. The rest need a kept top-up. Without one, a request gets `payment_required` (402).
 
 ## Pages
 
-A list that can grow answers `{"data": [...], "nextCursor": "..."}`. Pass
-`nextCursor` back as `cursor`; `null` ends the list. `limit` is 1 to 100, and
-up to 500 for `GET /v1/feedback`.
+A list that can grow returns `{"data": [...], "nextCursor": "..."}`. Pass `nextCursor` back as `cursor`. A `null` value ends the list. `limit` is 1 to 100, and up to 500 for `GET /v1/feedback`.
 
-Short lists answer `{"data": [...]}` whole, with no cursor: a sandbox's file
-watches, mounts, interpreter contexts and desktop recordings, registry
-credentials and the MCP catalogue. A few are shaped their own way:
+Short lists return `{"data": [...]}` in full, with no cursor. Examples are a sandbox's file watches, mounts, interpreter contexts, desktop recordings, registry credentials and the MCP catalogue. A few lists have their own shape:
 
-- **The audit log,** `GET /v1/audit`, answers `{"events": [...], "next": "..."}`,
-  newest first. Pass `next` back as `before`; `null` ends the log. `limit` is 1
-  to 200.
-- **Secrets,** `GET /v1/egress-secrets`, answers `{"secrets": [...], "next": "..."}`
-  by name. Pass `next` back as `after`; `null` ends the list. `limit` is 1 to
-  100, 50 by default.
-- **Single sign-on,** `GET /v1/sso`, answers `connections`, `scim` and `manage`.
-- **Process output and file-watch events** carry their own `nextCursor` beside
-  the chunks or events, and **build logs** answer `lines` with `nextAfter`.
+- **The audit log,** `GET /v1/audit`, returns `{"events": [...], "next": "..."}`, newest first. Pass `next` back as `before`. A `null` value ends the log. `limit` is 1 to 200.
+- **Secrets,** `GET /v1/egress-secrets`, returns `{"secrets": [...], "next": "..."}`, sorted by name. Pass `next` back as `after`. A `null` value ends the list. `limit` is 1 to 100, and 50 by default.
+- **Single sign-on,** `GET /v1/sso`, returns `connections`, `scim` and `manage`.
+- **Process output and file-watch events** carry their own `nextCursor` beside the chunks or events. **Build logs** return `lines` with `nextAfter`.
 
 ## Versions
 
-This is 0.2.0. The OpenAPI document's `info.version` is the version you are
-talking to.
+This is 0.2.0. The OpenAPI document's `info.version` is the version you are talking to.
 
-The 0.1.0 routes under `/v1/resources` were removed on 22 September 2026. Each
-answers 410 `upgrade_required`, and `details.replacement` names the route that
-replaced it. [The migration guide](./migrate) maps each old call to its new one.
+The 0.1.0 routes under `/v1/resources` were removed on 22 September 2026. Each one returns 410 `upgrade_required`. `details.replacement` names the route that replaced it. [The migration guide](./migrate) maps each old call to its new one.
 
-Each product has one plural name in every path, SDK call, command and MCP tool:
-`/v1/sandboxes`, `runtime.sandboxes`, `runtime sandboxes`, `runtime_sandboxes`.
-When a name changes, the old one keeps working for 30 days. Each answer to it
-carries a `Warning` header with the new name and a `Link` to the new path; the
-SDKs and the CLI print the warning once, and an MCP answer carries it as
-`warning`. Once the day it stops is set, answers also carry `Deprecation` and
-`Sunset` (that day), and the warning names it. From that day the old name
-answers 410 `name_retired`, and its `hint` names the new one.
+Each product has one plural name in every path, SDK call, command and MCP tool: `/v1/sandboxes`, `runtime.sandboxes`, `runtime sandboxes`, `runtime_sandboxes`. When a name changes, the old one keeps working for 30 days. Each response to it carries a `Warning` header with the new name, and a `Link` to the new path. The SDKs and the CLI print the warning once. An MCP response carries it as `warning`. Once the day it stops is set, responses also carry `Deprecation` and `Sunset` (that day), and the warning names it. From that day, the old name returns 410 `name_retired`. Its `hint` names the new one.

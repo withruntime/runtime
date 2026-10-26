@@ -14,8 +14,8 @@ than the CPUs it holds.
 pip install "withruntime[inspect-ai]"
 ```
 
-The key comes from `RUNTIME_API_KEY` or this machine's `npx withruntime login`,
-as for the rest of the SDK. Nothing needs importing: the package's entry point
+The key comes from `RUNTIME_API_KEY`, or from `npx withruntime login` on this
+machine, as in the rest of the SDK. Nothing needs importing: the package's entry point
 tells Inspect about `runtime`.
 
 ## Use it
@@ -91,9 +91,9 @@ set the size, `working_dir`, `environment` and `user` carry over, and
 - **Commands** run as root unless Inspect names a user, as in the Docker
   sandbox. Commands in a Runtime sandbox run as the sandbox user, uid 1000,
   so root and named users go through its passwordless `sudo`, which Runtime's
-  base image has. An image built from a public image needs it too; the sandbox
-  checks when a sample starts and, when it is missing, stops with this line to
-  add to the Dockerfile:
+  base image has. An image built from a public image needs it too. The sandbox
+  checks when a sample starts. If it is missing, the sandbox stops and shows
+  this line to add to the Dockerfile:
 
 ```dockerfile
 RUN apt-get update && apt-get install -y sudo && echo '#1000 ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/runtime
@@ -114,7 +114,7 @@ async backend.
 
 ## Limits to plan for
 
-- An account without credit runs {{trial-sandboxes}} sandboxes at once, so the sandbox asks Inspect for
+- An account without credit runs {{trial-sandboxes}} sandboxes at the same time, so the sandbox asks Inspect for
   {{trial-concurrency}} at a time. On a paid account raise it with `--max-sandboxes`; see
   [pricing](./pricing#how-many-at-once).
 - Builds run one at a time until your account holds credit, then four. An account without credit keeps its first three images free; after that they are billed as

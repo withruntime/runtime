@@ -1,6 +1,6 @@
 # Get started with Runtime Cloud
 
-Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use, and connects them with one browser approval.
+Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use. It connects them with one browser approval.
 
 Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
 One API, one CLI, one MCP server and SDKs for JavaScript, Python, Go, Ruby and Java cover
@@ -10,16 +10,16 @@ every Runtime product. New accounts get [{{included-machine}} every month](./inc
 - **Pay for the CPU you use:** {{cpu-rate}} per active vCPU-hour, measured, and
   {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
 - **Idle time costs almost nothing:** a sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{server-wake-command}} server-side after the request that wakes it.
+  {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
+  It runs its next command {{server-wake-command}} server-side after the request that wakes it.
 - **Fast:** a new sandbox runs its first command {{server-first-command}} server-side after the
   create request ([speed](./speed)).
-- **Pause keeps memory**, and a fork copies a running sandbox with its memory
+- **Pause keeps memory.** A fork copies a running sandbox with its memory
   and processes.
 - **An uptime promise:** paid accounts are promised {{uptime-promise}} API
-  uptime a month, and {{uptime-credit}} of a short month's charges comes back
+  uptime a month. {{uptime-credit}} of a short month's charges comes back
   automatically ([Uptime Promise](/legal/sla)). The [status page](/status)
-  publishes the record it is measured by.
+  publishes the record used to measure it.
 - **Secrets the sandbox never sees,** and single sign-on, SCIM and roles free
   for every team.
 - **Built in:** a desktop, a code interpreter, custom images, volumes, and
@@ -29,9 +29,8 @@ every Runtime product. New accounts get [{{included-machine}} every month](./inc
   as a folder ([storage](./storage#mount-your-own-bucket)).
 - **Connected to the rest of your world:** your own domain with HTTPS, public
   TCP ports and a WireGuard private network once the account has a kept
-  top-up, and a dedicated outbound address once it has credit
-  ([networking](./networking)), and
-  [identity tokens](./identity-tokens) that reach AWS or Google Cloud with no
+  top-up. A dedicated outbound address comes once it has credit
+  ([networking](./networking)). [Identity tokens](./identity-tokens) reach AWS or Google Cloud with no
   stored key.
 - **See what runs:** each sandbox's CPU and memory over time, signed webhooks
   and OpenTelemetry export ([observability](./observability)).
@@ -43,22 +42,22 @@ Paste this into your coding agent:
 > Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
 > follow it.
 
-The agent connects and, if the project uses another sandbox provider, moves
+The agent connects. If the project uses another sandbox provider, the agent moves
 every call to Runtime and keeps going until your real job runs there. It
 reports what passed, what you save each month and what is left for you to go
-live. You approve one link in your browser; there is nothing to copy.
+live. You approve one link in your browser. There is nothing to copy.
 
 ## Run your first sandbox
 
 **In the browser:** [sign in](https://withruntime.com/sign-in) and press
 **Start a sandbox** on Home. It opens with a shell running in the page, on your
-free hours, and pauses itself after {{idle-pause}} with nothing happening in it.
+free hours. It pauses itself after {{idle-pause}} with nothing happening in it.
 
-**From your code:** Home offers the prompt for your coding agent, which does
-the whole setup, and by hand makes your first key in one click, shown once,
-with the install and a first sandbox in Python or JavaScript. If you signed up
-from a page comparing Runtime with E2B, Daytona, Vercel Sandbox or Blaxel, Home
-opens on that switch instead, and by hand it is the key, the install and the
+**From your code:** Home offers a prompt for your coding agent. The prompt does
+the whole setup. Or, by hand, make your first key in one click. The key is shown
+once. The page then shows the install and a first sandbox in Python or JavaScript.
+If you signed up from a page comparing Runtime with E2B, Daytona, Vercel Sandbox or Blaxel, Home
+opens on that switch instead. By hand, the switch is the key, the install and the
 one import that changes.
 
 **Run a file, with Node 22.12 or later:**
@@ -77,10 +76,10 @@ The first time, it connects this machine:
 3. A fresh sandbox runs the command, prints the invoice total, 750, and is
    deleted.
 
-Exit code zero means the command succeeded. Nothing is left behind to pay for:
-`npx withruntime sandboxes ls --json` no longer lists the test sandbox (an
-older CLI only stopped it: if it is still listed, delete it with
-`npx withruntime sandboxes rm <id>`). Later commands reuse the connection.
+Exit code zero means the command succeeded. Nothing is left behind to pay for.
+`npx withruntime sandboxes ls --json` no longer lists the test sandbox. An
+older CLI only stopped it. If it is still listed, delete it with
+`npx withruntime sandboxes rm <id>`. Later commands reuse the connection.
 
 An agent running it shows you the link and code. If you approve after the
 command stopped waiting (50 seconds when no one is at a terminal), the agent
@@ -116,7 +115,7 @@ Cursor: add this to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 ```
 
 If this machine is not connected yet, the agent sees one tool,
-`runtime_connect`, which gives it a link for you to approve. Then every Runtime
+`runtime_connect`. It gives the agent a link for you to approve. Then every Runtime
 tool appears. See [MCP](./mcp) for other clients and the remote endpoint.
 
 ## From code
@@ -146,26 +145,26 @@ finally:
 ```
 
 - Install with `npm install withruntime` or `pip install withruntime`.
-- The SDKs use `RUNTIME_API_KEY` when it is set, and otherwise the key this
-  machine saved when it connected, so after the one line above they need no
+- The SDKs use `RUNTIME_API_KEY` when it is set. Otherwise they use the key this
+  machine saved when it connected. After the one line above, they need no
   setup.
 - On a server, create a key at https://withruntime.com/account/keys and give it
   as `RUNTIME_API_KEY` from your secret manager.
 - `create()` needs no arguments. It waits until the sandbox is ready, and
   raises `start_failed` if it stops first.
 - The examples check the command's result, and delete the sandbox even after
-  an error. A stop would keep its disk, billed until it is deleted. Export
-  anything you need before deleting.
+  an error. A stopped sandbox keeps its disk, which is billed until it is deleted.
+  Export anything you need before deleting.
 
 ## Connect once in your browser
 
 **One approval gives this machine its own key.** It is encrypted for this
-machine alone and saved outside your project: the CLI receives and saves its
-own credential automatically, and you do not copy an API key.
+machine alone and saved outside your project. The CLI receives and saves its
+own credential automatically. You do not copy an API key.
 
 - Each connection can use everything the account can, including its prepaid
-  credit, so approve only connections you started.
-- Browser sign-out does not revoke one; `npx withruntime logout` or the API
+  credit. Approve only connections you started.
+- Browser sign-out does not revoke one. `npx withruntime logout` or the API
   keys page does. See [security](./security).
 - On a machine with no browser, `npx withruntime login --no-browser` prints the
   link to open on another device.
@@ -173,31 +172,30 @@ own credential automatically, and you do not copy an API key.
   from standard input, never from the command line.
 - An agent with no person to approve can open its own account and pay in
   USDC instead: `npx withruntime billing topup 20 --new-account --accept-terms --wait`.
-  No free trial on that path; the key comes once the payment lands. See
+  No free trial on that path. The key comes once the payment lands. See
   [pay with stablecoins](./pricing#pay-with-stablecoins).
 
-There is nothing to choose between free usage and credit: the free usage is spent first, then prepaid credit, and `funding` in a request is ignored.
+There is nothing to choose between free usage and credit. The free usage is spent first, then prepaid credit. `funding` in a request is ignored.
 Once the account holds credit, its sandboxes have paid limits.
 
 ## Switch from another provider
 
 **Most sandbox code moves over call for call.** The [switch guide](./migrate)
 maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
-Runtime's, and shows how to work out your monthly saving from measured usage.
+Runtime's. It shows how to work out your monthly saving from measured usage.
 Code written for E2B, Daytona, Vercel Sandbox, Blaxel or Modal Sandboxes runs
-after changing one import to `withruntime/e2b`, `withruntime/daytona`,
-`withruntime/vercel`, `withruntime/blaxel` or `withruntime/modal`; Morph's
-TypeScript client, to `withruntime/morph`; a Worker written for Cloudflare's
-Sandbox SDK, to `withruntime/cloudflare`, with its `containers` block deleted
-and a `RUNTIME_API_KEY` secret; code that calls Fly's Machines API, after
-pointing it at `npx withruntime fly-api` (`withruntime/fly`).
-`npx withruntime compare --from <provider>` prints what you save, and
-credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
+after you change one import to `withruntime/e2b`, `withruntime/daytona`,
+`withruntime/vercel`, `withruntime/blaxel` or `withruntime/modal`. Morph's
+TypeScript client moves to `withruntime/morph`. A Worker written for Cloudflare's
+Sandbox SDK moves to `withruntime/cloudflare`, with its `containers` block deleted
+and a `RUNTIME_API_KEY` secret. Code that calls Fly's Machines API works after you
+point it at `npx withruntime fly-api` (`withruntime/fly`).
+`npx withruntime compare --from <provider>` prints what you save. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
 
 ## If the first run fails
 
 Keep the error code, request ID and sandbox ID. A lost response is not proof
-that nothing ran: inspect the original resource before trying another create.
+that nothing ran. Inspect the original resource before trying another create.
 
 | Error                                                 | What to do                                                                |
 | ----------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -223,4 +221,4 @@ See [troubleshooting](./troubleshooting) for safe retries and cleanup.
 | Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                                                                                        |
 | Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)                                                                   |
 
-Keep important results outside the sandbox: a sandbox is not a backup.
+Keep important results outside the sandbox. A sandbox is not a backup.

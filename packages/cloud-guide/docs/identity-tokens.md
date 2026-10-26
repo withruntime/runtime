@@ -3,8 +3,8 @@
 Code in a sandbox can prove which sandbox it is, without a stored key. Runtime
 signs a short-lived OpenID Connect token that names the sandbox, its
 organization and its image. Your AWS or Google Cloud account trusts Runtime
-once, then lets a sandbox assume a role with the token. Your own API can accept
-it too. It works like GitHub Actions' OIDC tokens, and it is free.
+once. Then it lets a sandbox assume a role with the token. Your own API can accept
+it too. It works like GitHub Actions' OIDC tokens. It is free.
 
 ## Get a token
 
@@ -28,8 +28,8 @@ token = Sandbox.identity_token("sts.amazonaws.com")
 print(len(token))
 ```
 
-Or with curl, the way GitHub Actions does it. Commands in a running sandbox
-have these two variables, and a [scheduled job](./jobs)'s run has them in its
+Or use curl, the way GitHub Actions does. Commands in a running sandbox
+have these two variables. A [scheduled job](./jobs)'s run has them in its
 command's environment too, so a job can get tokens the same ways:
 
 ```bash no-run
@@ -37,27 +37,27 @@ curl -H "Authorization: Bearer $RUNTIME_ID_TOKEN_REQUEST_TOKEN" \
   "$RUNTIME_ID_TOKEN_REQUEST_URL?audience=sts.amazonaws.com"
 ```
 
-- `audience` is required: who the token is for. Use `sts.amazonaws.com` for
+- `audience` is required. It names who the token is for. Use `sts.amazonaws.com` for
   AWS, your workload identity provider's name for Google Cloud, or your API's
   name.
-- A token lasts 10 minutes. Ask for 60 to 3600 seconds with `lifetimeSeconds`
-  (`--lifetime` in the CLI). Get a fresh one when it runs out.
+- A token lasts 10 minutes. To set a different lifetime, pass 60 to 3600 seconds in `lifetimeSeconds`
+  (`--lifetime` in the CLI). Get a fresh token when it runs out.
 - The options can also go in a JSON body (`Content-Type: application/json`)
-  of at most 4 KiB. A body that has not arrived within 5 seconds is answered
-  408 `request_timeout`; nothing was issued, so send it again.
+  of at most 4 KiB. A body that has not arrived within 5 seconds returns
+  408 `request_timeout`. Nothing was issued, so send it again.
 - `RUNTIME_ID_TOKEN_REQUEST_TOKEN` is the sandbox's own proof of who it is. It
-  can get tokens only for this sandbox, only while it is running, and stops
-  when the sandbox stops or pauses. Treat it like a password anyway: anyone who
+  can get tokens only for this sandbox, and only while it is running. It stops
+  working when the sandbox stops or pauses. Treat it like a password anyway. Anyone who
   copies it can get tokens as this sandbox until then.
-- The request token changes with each renewal of the sandbox's lease, and a
-  fork's programs keep the source's. A program that runs a long time, or was
+- The request token changes with each renewal of the sandbox's lease. A fork's
+  programs keep the source's token. A program that runs a long time, or was
   copied, reads the current one again from
-  `http://runtime.internal/v1/environment` (JSON, with both variables); the
+  `http://runtime.internal/v1/environment` (JSON, with both variables). The
   JavaScript and Python SDKs do this for you when a token they hold is refused,
   or when the process has no variables at all.
-- A program that has neither variable (one started before they were set, or
-  a sandbox kept from older guest software) reads them the same way. The host
-  answers every running sandbox, whatever its image or age, so this needs
+- A program that has neither variable reads them the same way. This applies to a
+  program started before they were set, or to a sandbox kept from older guest software. The host
+  returns a result for every running sandbox, whatever its image or age. This needs
   nothing installed but curl:
 
 ```bash no-run
@@ -100,8 +100,8 @@ A scheduled job's run also says which job it is:
 | `job_made_by_kind` | `agent` or `person`                                          |
 | `job_vouched_by`   | The owner or admin who vouched for it, while it is unchanged |
 
-A copy of an App also says which App it is, since the copy's own id changes
-at every deploy, restart and scale-up:
+A copy of an App also says which App it is. The copy's own id changes
+at every deploy, restart and scale-up, so these claims name the App instead:
 
 | Claim         | What it is                    |
 | ------------- | ----------------------------- |
@@ -110,7 +110,7 @@ at every deploy, restart and scale-up:
 | `app_version` | The id of the version it runs |
 
 An owner or admin vouches for a job on its page in the console, signed in. No
-API key can. Only runs that start after the vouch carry the name. Any change
+API key can vouch. Only runs that start after the vouch carry the name. Any change
 to the job's command, schedule or size clears the vouch, even if the job is
 later put back as it was, until someone vouches again. A job that uses secrets cannot be vouched
 for. If anything other than the job
@@ -120,14 +120,14 @@ all, since what runs there may not be the job's. The next run starts fresh. A to
 job's call only when `job_vouched_by` is there, as Runtime's own billing jobs
 do.
 
-`sub` is built for trust policies: `org:<org-id>:*` matches every sandbox of
-your organization, and `org:<org-id>:image:api-worker:*` only those made from
+`sub` is built for trust policies. `org:<org-id>:*` matches every sandbox of
+your organization. `org:<org-id>:image:api-worker:*` matches only those made from
 the image `api-worker`. No part of it can contain a colon.
 
 Tokens are signed with RS256. The discovery document is at
-`https://withruntime.com/oidc/.well-known/openid-configuration` and the keys at
+`https://withruntime.com/oidc/.well-known/openid-configuration`, and the keys are at
 `https://withruntime.com/oidc/jwks`. Runtime publishes a new key an hour before
-it signs with it and keeps an old one published for two hours after it stops,
+it signs with it. It keeps an old key published for two hours after it stops,
 so a verifier that caches the keys never misses one.
 
 ## AWS
@@ -165,13 +165,12 @@ export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/aws-token
 aws sts get-caller-identity
 ```
 
-Write the file again before the token expires for work that runs longer than
-an hour.
+For work that runs longer than an hour, write the file again before the token expires.
 
 ## Google Cloud
 
-Create a workload identity pool and an OIDC provider that trusts Runtime,
-mapping the subject and the organization:
+Create a workload identity pool and an OIDC provider that trusts Runtime.
+Map the subject and the organization:
 
 ```bash no-run
 gcloud iam workload-identity-pools create runtime --location=global
@@ -182,17 +181,17 @@ gcloud iam workload-identity-pools providers create-oidc runtime \
   --attribute-condition="assertion.org_id == '<your-org-id>'"
 ```
 
-Grant the pool's principals access (for example
-`roles/iam.workloadIdentityUser` on a service account), then in the sandbox ask
+Grant the pool's principals access (for example,
+`roles/iam.workloadIdentityUser` on a service account). Then, in the sandbox, ask
 for a token whose audience is the provider's full name,
-`//iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/runtime/providers/runtime`,
-and exchange it with Google's STS, or point a credential configuration file at
-a file holding the token.
+`//iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/runtime/providers/runtime`.
+Exchange it with Google's STS, or point a credential configuration file at
+a file that holds the token.
 
 ## Your own API
 
-Verify the token with any OIDC library: fetch the keys from
-`https://withruntime.com/oidc/jwks`, and check the signature, that `iss` is
+Verify the token with any OIDC library. Fetch the keys from
+`https://withruntime.com/oidc/jwks`. Check the signature, that `iss` is
 `https://withruntime.com/oidc`, that `aud` is your API's name, and that it has
 not expired. Then trust `org_id`, `sandbox_id` and `image`.
 
@@ -213,7 +212,7 @@ export async function sandboxOf(token) {
 ## Limits
 
 - Tokens are for running sandboxes, a job's runs included. Code outside a
-  sandbox has nothing to ask with, and no API key can get one: a key that
+  sandbox has nothing to ask with. No API key can get one: a key that
   leaked could then pass for any of your sandboxes. A paused sandbox asks once
   something wakes it, such as a command or a request to its preview.
 - Microsoft Entra ID's federated credentials match an exact subject, and every

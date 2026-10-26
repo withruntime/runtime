@@ -165,6 +165,41 @@ public final class Products {
   }
 
   /**
+   * {@code runtime.jobs()}: other platforms' jobs read into Runtime jobs. Create and manage jobs
+   * with the CLI ({@code runtime jobs}), the TypeScript or Python SDK, or the HTTP API.
+   */
+  public static final class Jobs {
+    private final Transport t;
+
+    Jobs(Transport transport) {
+      this.t = transport;
+    }
+
+    /**
+     * Reads a Google Cloud Run job's YAML (with the Cloud Scheduler job that runs it) or an AWS Batch
+     * job definition (API JSON, describe-job-definitions output or a CloudFormation template, with
+     * the EventBridge schedule or rule that submits it) into the Runtime jobs that run the same
+     * container. Changes nothing; {@code runtime jobs import} builds and creates the plan.
+     *
+     * @param files each file's name ({@code path}) and {@code text}
+     * @param from {@code cloud-run} or {@code aws-batch}; null to find it from the files
+     * @param parameters a CloudFormation template's values, such as {@code AWS::Region}; may be
+     *     empty
+     * @return from, read, jobs (name, sourceImage, dockerfile, command, env, secrets, compute,
+     *     timeoutSeconds, retry, schedule, blocked), notes (level, file, key, job, message) and
+     *     importable
+     */
+    public JsonObject importPlan(
+        List<Map<String, String>> files, String from, Map<String, String> parameters) {
+      Map<String, Object> body = new LinkedHashMap<>();
+      body.put("files", files);
+      if (from != null) body.put("from", from);
+      if (parameters != null && !parameters.isEmpty()) body.put("parameters", parameters);
+      return new JsonObject(t.object(new Transport.Call("POST", "/v1/job-imports").body(body)));
+    }
+  }
+
+  /**
    * {@code runtime.referrals()}: the account's referral link and what it earned. Money is integer
    * microdollars in strings.
    */

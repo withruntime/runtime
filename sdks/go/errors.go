@@ -94,7 +94,10 @@ var waitsForRoom = map[string]bool{
 	"no_credit_domain_limit":  true,
 	"no_credit_capacity_full": true,
 	"quota_exceeded":          true,
-	"no_capacity":             true,
+	// The account holds its share of every server that could run it: clears
+	// as its own sandboxes end.
+	"account_share_full": true,
+	"no_capacity":        true,
 	// A volume whose last sandbox is stopping: free within seconds.
 	"volume_releasing": true,
 }

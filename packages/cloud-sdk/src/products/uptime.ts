@@ -2,8 +2,8 @@ import { Page } from "../page.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
 /* Uptime checks (`/v1/uptime`), private until launch: like Apps, this file
- * joins `clientExtensions` (products/index.ts) when uptime launches, with
- * Marc's yes, and the CLI's `runtime uptime` with it. */
+ * joins `clientExtensions` (products/index.ts) when uptime launches, and
+ * the CLI's `runtime uptime` with it. */
 
 export type UptimeRegion = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
 export type UptimeState = "applying" | "active" | "deleted";

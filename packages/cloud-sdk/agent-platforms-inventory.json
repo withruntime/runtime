@@ -1,0 +1,387 @@
+{
+  "claude-managed-agents": {
+    "upstream": "npm/@anthropic-ai/sdk@0.128.0 client.beta (agents, environments, sessions, vaults, deployments, deploymentRuns, memoryStores)",
+    "baseURL": "https://api.withruntime.com/anthropic",
+    "server": "engines/machine/crates/agents-anthropic (the API front's anthropic route group)",
+    "counts": {
+      "present": 19,
+      "refused": 60,
+      "total": 79
+    },
+    "items": {
+      "beta.agents.create": {
+        "status": "present",
+        "route": "POST /v1/agents"
+      },
+      "beta.agents.retrieve": {
+        "status": "present",
+        "route": "GET /v1/agents/{agent}"
+      },
+      "beta.agents.update": {
+        "status": "present",
+        "route": "POST /v1/agents/{agent}"
+      },
+      "beta.agents.list": {
+        "status": "present",
+        "route": "GET /v1/agents"
+      },
+      "beta.agents.archive": {
+        "status": "present",
+        "route": "POST /v1/agents/{agent}/archive"
+      },
+      "beta.agents.versions.list": {
+        "status": "refused",
+        "route": "GET /v1/agents/{agent}/versions: 400, earlier versions are not kept as Anthropic's are; the agent's current version is read by retrieve"
+      },
+      "beta.environments.create": {
+        "status": "present",
+        "route": "POST /v1/environments"
+      },
+      "beta.environments.retrieve": {
+        "status": "present",
+        "route": "GET /v1/environments/{environment}"
+      },
+      "beta.environments.update": {
+        "status": "present",
+        "route": "POST /v1/environments/{environment}"
+      },
+      "beta.environments.list": {
+        "status": "present",
+        "route": "GET /v1/environments"
+      },
+      "beta.environments.delete": {
+        "status": "present",
+        "route": "DELETE /v1/environments/{environment}"
+      },
+      "beta.environments.archive": {
+        "status": "present",
+        "route": "POST /v1/environments/{environment}/archive"
+      },
+      "beta.environments.work.retrieve": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.update": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.list": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.ack": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.heartbeat": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.poll": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.stats": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.stop": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.poller": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.environments.work.worker": {
+        "status": "refused",
+        "path": "/v1/environments/{environment}/work",
+        "what": "Self-hosted environments"
+      },
+      "beta.sessions.create": {
+        "status": "present",
+        "route": "POST /v1/sessions"
+      },
+      "beta.sessions.retrieve": {
+        "status": "present",
+        "route": "GET /v1/sessions/{session}"
+      },
+      "beta.sessions.update": {
+        "status": "refused",
+        "route": "POST /v1/sessions/{session}: 400, a session's title and metadata are set when it is created"
+      },
+      "beta.sessions.list": {
+        "status": "present",
+        "route": "GET /v1/sessions"
+      },
+      "beta.sessions.delete": {
+        "status": "present",
+        "route": "DELETE /v1/sessions/{session}"
+      },
+      "beta.sessions.archive": {
+        "status": "present",
+        "route": "POST /v1/sessions/{session}/archive"
+      },
+      "beta.sessions.events.list": {
+        "status": "present",
+        "route": "GET /v1/sessions/{session}/events"
+      },
+      "beta.sessions.events.send": {
+        "status": "present",
+        "route": "POST /v1/sessions/{session}/events"
+      },
+      "beta.sessions.events.stream": {
+        "status": "present",
+        "route": "GET /v1/sessions/{session}/events/stream"
+      },
+      "beta.sessions.events.toolRunner": {
+        "status": "refused",
+        "why": "A client-side loop answering custom tools with user.custom_tool_result: custom tools are refused at agent create; give the agent the tool as an MCP server"
+      },
+      "beta.sessions.resources.retrieve": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/resources",
+        "what": "Session resources"
+      },
+      "beta.sessions.resources.update": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/resources",
+        "what": "Session resources"
+      },
+      "beta.sessions.resources.list": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/resources",
+        "what": "Session resources"
+      },
+      "beta.sessions.resources.delete": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/resources",
+        "what": "Session resources"
+      },
+      "beta.sessions.resources.add": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/resources",
+        "what": "Session resources"
+      },
+      "beta.sessions.threads.retrieve": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/threads",
+        "what": "Session threads"
+      },
+      "beta.sessions.threads.list": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/threads",
+        "what": "Session threads"
+      },
+      "beta.sessions.threads.archive": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/threads",
+        "what": "Session threads"
+      },
+      "beta.sessions.threads.events.list": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/threads",
+        "what": "Session threads"
+      },
+      "beta.sessions.threads.events.stream": {
+        "status": "refused",
+        "path": "/v1/sessions/{session}/threads",
+        "what": "Session threads"
+      },
+      "beta.vaults.create": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.retrieve": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.update": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.list": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.delete": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.archive": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.create": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.retrieve": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.update": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.list": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.delete": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.archive": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.vaults.credentials.mcpOAuthValidate": {
+        "status": "refused",
+        "path": "/v1/vaults",
+        "what": "Vaults"
+      },
+      "beta.deployments.create": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.retrieve": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.update": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.list": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.archive": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.pause": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.run": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deployments.unpause": {
+        "status": "refused",
+        "path": "/v1/deployments",
+        "what": "Scheduled deployments"
+      },
+      "beta.deploymentRuns.retrieve": {
+        "status": "refused",
+        "path": "/v1/deployment_runs",
+        "what": "Deployment runs"
+      },
+      "beta.deploymentRuns.list": {
+        "status": "refused",
+        "path": "/v1/deployment_runs",
+        "what": "Deployment runs"
+      },
+      "beta.memoryStores.create": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.retrieve": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.update": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.list": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.delete": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.archive": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memories.create": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memories.retrieve": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memories.update": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memories.list": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memories.delete": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memoryVersions.retrieve": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memoryVersions.list": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      },
+      "beta.memoryStores.memoryVersions.redact": {
+        "status": "refused",
+        "path": "/v1/memory_stores",
+        "what": "Memory stores"
+      }
+    }
+  }
+}

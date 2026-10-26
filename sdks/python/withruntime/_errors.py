@@ -25,10 +25,11 @@ NOTHING_RAN = frozenset({"guest_busy", "busy", "rate_limited"})
 _PASSING = frozenset({"no_capacity", "no_credit_running_limit", "no_credit_total_limit"})
 # Refusals of a create that clear when a sandbox stops or pauses, or a host
 # frees room: an account without credit's four at once and its total, an
-# email domain's, the account's quota and the region's capacity. sandboxes.create waits them out, retrying
+# email domain's, the account's quota, its share of the region's servers and the region's capacity. sandboxes.create waits them out, retrying
 # with the same key and input, for up to wait_for_capacity seconds.
 WAITS_FOR_ROOM = frozenset({"no_credit_running_limit", "no_credit_total_limit", "no_credit_domain_limit",
-                            "no_credit_capacity_full", "quota_exceeded", "no_capacity", "volume_releasing"})
+                            "no_credit_capacity_full", "quota_exceeded", "account_share_full", "no_capacity",
+                            "volume_releasing"})
 
 
 class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0.1.0

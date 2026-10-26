@@ -6,7 +6,7 @@ Runtime runs agent code in Firecracker microVMs, like the CodeSandbox SDK, and c
 Runtime and {{cost:codesandbox}} on CodeSandbox**. At 100,000 runs a month that is {{cost:runtime:100000}}
 against {{cost:codesandbox:100000}}, **{{=$0 less:codesandbox:100000}} a month saved**.
 
-Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alternatives) ranks the other providers by the cost of the same job.
+If you are weighing more than two, [CodeSandbox SDK alternatives](/compare/codesandbox-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
@@ -14,10 +14,9 @@ Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alte
   as long as it runs. Runtime measures the CPU your code actually uses, so time
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{server-wake-command}} after the request that
-  wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
+  {{idle-pause}} with no activity, keeps its memory and processes, and runs its
+  next command {{server-wake-command}} after the request that wakes it reaches
+  Runtime. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **Starts in milliseconds.** CodeSandbox's figure for a new VM is
   {{speed:codesandbox:create}}. On Runtime's servers a new sandbox is running
   {{server-create}} after the create request, and {{server-create-p95}} at p95 ([speed](./speed)).
@@ -30,10 +29,10 @@ Weighing more than two? [CodeSandbox SDK alternatives](/compare/codesandbox-alte
   minute. Runtime compute has no one-minute minimum.
 - **Any shape.** CodeSandbox sells fixed VM sizes. On Runtime you choose vCPUs
   and memory for each sandbox and pay for no more.
-- **No plan fee for concurrency.** More than 10 VMs at once on CodeSandbox needs
-  the {{term:codesandbox:scale}}-a-month Scale plan. Runtime has no plan: a paid account runs {{paid-sandboxes}}
-  sandboxes at once, and support raises the limit on
-  request.
+- **No plan fee for concurrency.** More than 10 VMs at the same time on CodeSandbox
+  needs the {{term:codesandbox:scale}}-a-month Scale plan. Runtime has no plan: a
+  paid account runs {{paid-sandboxes}} sandboxes at the same time, and support
+  raises the limit on request.
 - **Secrets stay outside the sandbox.** Code inside sees a placeholder; the
   real key is added at the egress proxy, only on HTTPS to the hosts you allow
   ([security](./security)).
@@ -55,15 +54,15 @@ ports, dedicated outbound addresses and WireGuard private networks. See
 CodeSandbox's figures come from the Together Code Sandbox documentation, which
 covers the CodeSandbox SDK, checked {{checked:codesandbox}}.
 
-|                  | Runtime                                                        | CodeSandbox SDK                                                          |
-| ---------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Isolation        | Firecracker microVM, own kernel                                | Firecracker microVM                                                      |
-| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | By VM size: Nano (2 cores, 4 GB) is {{rate:codesandbox:size}} an hour    |
-| Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the VM size                                                       |
-| Billing unit     | By the second                                                  | By the minute, rounded up                                                |
-| Plan fee         | None; prepaid credit from {{topup-min}}                        | Build free with 10 VMs at once; Scale {{term:codesandbox:scale}} a month |
-| Free start       | {{included-machine}} every month, no card                      | The free Build plan                                                      |
-| Snapshots, forks | Files, memory and running processes                            | Memory snapshot and restore                                              |
+|                  | Runtime                                                        | CodeSandbox SDK                                                                   |
+| ---------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Isolation        | Firecracker microVM, own kernel                                | Firecracker microVM                                                               |
+| CPU billing      | {{cpu-rate}} per vCPU-hour of measured CPU, with a small floor | By VM size: Nano (2 cores, 4 GB) is {{rate:codesandbox:size}} an hour             |
+| Memory billing   | {{memory-rate}} per reserved GiB-hour                          | Inside the VM size                                                                |
+| Billing unit     | By the second                                                  | By the minute, rounded up                                                         |
+| Plan fee         | None; prepaid credit from {{topup-min}}                        | Build free with 10 VMs at the same time; Scale {{term:codesandbox:scale}} a month |
+| Free start       | {{included-machine}} in the first 30 days, no card             | The free Build plan                                                               |
+| Snapshots, forks | Files, memory and running processes                            | Memory snapshot and restore                                                       |
 
 ## Cost for the same job
 
@@ -115,13 +114,13 @@ try {
 ## When CodeSandbox may fit better
 
 - **Very large machines.** CodeSandbox VMs go up to 64 cores and 128 GB.
-- **Many VMs on a plan.** The Scale plan runs 250 VMs at once.
+- **Many VMs on a plan.** The Scale plan runs 250 VMs at the same time.
 
 ## Sources
 
 Checked 23 September 2026. The rates are from Together's documentation of the
 CodeSandbox SDK; CodeSandbox is a Together company.
 
-- [Together Code Sandbox](https://docs.together.ai/docs/together-code-sandbox)
+- [Together: CodeSandbox SDK](https://docs.together.ai/docs/together-code-sandbox-legacy)
 - [CodeSandbox SDK pricing](https://codesandbox.io/docs/sdk/pricing)
 - Runtime [pricing](./pricing), [security](./security) and [products](./products)

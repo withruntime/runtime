@@ -1,11 +1,11 @@
 # Teams and the audit log
 
 One Runtime account can have as many people as you need. They share its
-credit, its sandboxes and other resources, and its keys. Each person has a
-role, and every change to members, keys, money and security settings goes into
-an audit log with who made it, when, and from which address.
+credit, sandboxes, other resources and keys. Each person has a role. Every
+change to members, keys, money and security settings is recorded in an audit
+log, with who made it, when, and from which address.
 
-Every account starts with one person, its owner. Nothing changes until you
+Every account starts with one person: its owner. Nothing changes until you
 invite someone.
 
 ## Roles
@@ -24,36 +24,37 @@ invite someone.
 | Read the audit log                                                |  yes  |  yes  |     —     |    —    |
 | Make someone an owner, or change or remove an owner               |  yes  |   —   |     —     |    —    |
 
-- An account always has at least one owner. To hand an account over, make the
+- An account always has at least one owner. To hand over an account, make the
   new person an owner, then leave or change your own role.
 - Anyone can leave an account, and anyone can revoke a key they made.
 - A key can never do more than the person who made it. Runtime checks that
-  person's role on every request, so changing someone from developer to billing
-  makes their keys read-only at once.
+  person's role on every request. If you change someone from developer to
+  billing, their keys become read-only immediately.
 
 ## Invite people
 
 Owners and admins invite people at
-[Members](https://withruntime.com/account/members): choose **Invite**, enter an email address,
-choose a role and choose **Send invitation**. To change someone's role later,
-pick the new one in their row.
+[Members](https://withruntime.com/account/members). Choose **Invite**, enter an
+email address, choose a role, and choose **Send invitation**. To change someone's
+role later, pick the new one in their row.
 
 - The person gets an email with a link. The page also shows the link, so you can
   send it yourself.
-- The link works once, for seven days, and only for someone who signs in with
-  that email address. A forwarded link is no use to anyone else.
-- Someone new to Runtime signs up through the link and lands in your account.
-  Someone who already has an account keeps it and joins yours as well.
+- The link works once, for seven days. It works only for someone who signs in
+  with that email address. A forwarded link does not work for anyone else.
+- A new Runtime user signs up through the link and joins your account. A person
+  with an existing account keeps it and joins your account too.
 - Sending an invitation again to the same address replaces the first one.
   **Withdraw** cancels an invitation that has not been used.
-- An invitation lasts only while its sender could send it again. When they
-  leave, are removed or lose the role that can invite, their open invitations
-  are withdrawn.
+- An invitation stays valid only while its sender could still send it. When the
+  sender leaves, is removed, or loses the role that can invite, their open
+  invitations are withdrawn.
 - An account can have 50 open invitations and send 25 in any 24 hours.
 
 ## Several accounts
 
-A person can belong to several accounts, such as their own and their company's.
+A person can belong to several accounts, such as their own account and their
+company's account.
 
 - **Website:** choose the account from its name at the top of the sidebar. On a
   phone, the name sits at the left of the top bar. Runtime remembers the choice
@@ -73,35 +74,36 @@ npx withruntime account switch Acme    # use Acme for every command after this
 
 ## Keys in a team
 
-Keys belong to the account, not to the person. Everyone who can see the
-account sees every key, with who made it, at
-[API keys](https://withruntime.com/account/keys).
+Keys belong to the account, not to a person. Everyone who can see the account
+can see every key, and who made it, on the
+[API keys](https://withruntime.com/account/keys) page.
 
-- Each key is its own agent, so the audit log and the bill say which key did
+- Each key is its own agent, so the audit log and the bill show which key did
   what.
-- A key sees and uses the sandboxes and other resources its own agent made. A
-  sandbox made with another key answers 404 to it, while a sandbox's name is
+- A key sees and uses only the sandboxes and other resources its own agent made.
+  A sandbox made with another key returns 404 to it, while a sandbox's name is
   still unique across the whole account.
-- An owner or admin can make a key **account-wide**: it sees and uses every
+- An owner or admin can make a key **account-wide**. It sees and uses every
   sandbox, snapshot, image, volume, service and job in the account, whichever
-  key made it, and `getOrCreate` with a name another key holds returns that
-  sandbox. Choose "Everything in the account" when you make the key, use
+  key made it. `getOrCreate` with a name another key holds returns that sandbox.
+  To make one, choose "Everything in the account" when you create the key, use
   **Make account-wide** on a key's row, or run
-  `runtime keys create --account-wide`, which only an owner or admin can
-  approve. This is how services that share sandboxes work, as a Blaxel
+  `runtime keys create --account-wide`. Only an owner or admin can approve that
+  command. This is how services that share sandboxes work, as a Blaxel
   workspace key does.
-- An account-wide key still acts as its own agent. The audit log names it, and
-  a wake, extension or restart it asks for is billed to it and counts against
-  its own daily limit, even on a sandbox another key made. Job secrets stay
-  with the person who made the key; the secrets sandboxes use are the
-  account's, for every key.
+- An account-wide key still acts as its own agent. The audit log names it. A
+  wake, extension or restart it asks for is billed to it and counts against its
+  own daily limit, even on a sandbox another key made. Job secrets stay with the
+  person who made the key. The secrets that sandboxes use belong to the account,
+  for every key.
 - An account-wide key reaches the account only while the person who made it is
-  an owner or admin. Changed to developer, it sees only what it made again, on
-  the next request. Developers and billing members cannot make or switch one.
-  A read-only key already sees the whole account and is never account-wide.
-- An owner or admin can put a key in a **compartment** when making it: it then
-  sees only what its compartment's keys made, and no other key reaches in
-  except an account-wide one ([compartments](./security#compartments)).
+  an owner or admin. If that person changes to developer, the key sees only what
+  it made again, from the next request. Developers and billing members cannot
+  make or switch one. A read-only key already sees the whole account and is
+  never account-wide.
+- An owner or admin can put a key in a **compartment** when making it. It then
+  sees only what its compartment's keys made. No other key reaches in, except an
+  account-wide one ([compartments](./security#compartments)).
 - A full-access key of an owner or admin can make more keys over the API
   ([run a swarm](#run-a-swarm)).
 - The person who made a key sets or changes its daily spending limit. Owners and
@@ -112,9 +114,9 @@ account sees every key, with who made it, at
 
 ## Run a swarm
 
-One paid account, a coordinator and many workers. The coordinator holds a
-full-access key of an owner or admin (a wallet account's key is one). It makes a key per
-worker, each with its own daily cap.
+One paid account has a coordinator and many workers. The coordinator holds a
+full-access key of an owner or admin (a wallet account's key is one). It makes
+one key per worker, each with its own daily cap.
 
 ```bash no-run
 runtime keys create --name worker-1 --daily-limit 5   # prints the key once
@@ -142,50 +144,53 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
 ```
 
 - `POST /v1/keys` takes `name`, and optionally `access` (`full` or `read`),
-  `reach` (`agent`, the default, or `account`) and `dailyLimitMicros`, or
-  `sandboxes` and `actions` for [a key limited to sandboxes](#a-key-limited-to-sandboxes). It
-  answers the new key once; a retry with the same `Idempotency-Key` answers
-  without it.
+  `reach` (`agent`, the default, or `account`) and `dailyLimitMicros`. It can
+  also take `sandboxes` and `actions` for [a key limited to sandboxes](#a-key-limited-to-sandboxes).
+  It returns the new key once. A retry with the same `Idempotency-Key` returns
+  without the key.
 - Each key is its own agent. A worker with reach `agent` sees only its own
   sandboxes, and its spend and audit rows are its own.
-- A key made by a key with reach `agent` uses what a sandbox needs (sandboxes,
-  files, images, volumes, snapshots, previews and ports), the Apps and
-  Functions its own agent made (create, list, deploy, roll back, delete), its
-  own usage, and `/v1/keys`. Another worker's App answers 404, as an id that
-  does not exist. It deploys an App or Function from an image only: a deploy
-  that names a `build` comes from the account's repositories and is refused
-  with `403 forbidden`, before any build is read. Deploy builds with a key
-  made on the website. It asks an App for at most 2 `minCopies`, 2 `spares`
-  and 20 `maxCopies`; make a larger App with a key made on the website. It
-  may set an App's `releaseWatch` to `alert` or `rollback`, never `off`, which
-  would stop the owners hearing of a release that got worse: that is refused
-  with `403 forbidden`. It
-  cannot give an App or Function a name one of the account's own Apps holds:
-  create or rename answers `409 name_taken`. The account's own settings are
-  refused with `403 forbidden`,
-  whatever its person's role: closing the account, webhooks, telemetry
-  exports, the audit log, credit and billing, secrets, scheduled jobs and their
-  secrets, domains, networks, builds and repositories. Call those with a key made on the website, or
-  make this key account-wide.
+- A key made by a key with reach `agent` can use what a sandbox needs (sandboxes,
+  files, images, volumes, snapshots, previews and ports). It can also use the
+  Apps and Functions its own agent made (create, list, deploy, roll back,
+  delete), its own usage, and `/v1/keys`. Another worker's App returns 404, as
+  for an id that does not exist.
+  It can deploy an App or Function from an image only. A deploy that names a
+  `build` comes from the account's repositories and is refused with
+  `403 forbidden`, before any build is read. Deploy builds with a key made on
+  the website.
+  It can request at most 2 `minCopies`, 2 `spares` and 20 `maxCopies` for an App.
+  To make a larger App, use a key made on the website.
+  It may set an App's `releaseWatch` to `alert` or `rollback`, never `off`.
+  Turning it off would stop the owners hearing of a release that got worse, so
+  that is refused with `403 forbidden`.
+  It cannot give an App or Function a name that one of the account's own Apps
+  holds. Creating or renaming with such a name returns `409 name_taken`.
+  The account's own settings are refused with `403 forbidden`, whatever its
+  person's role: closing the account, webhooks, telemetry exports, the audit
+  log, credit and billing, secrets, scheduled jobs and their secrets, domains,
+  networks, builds and repositories. For those, use a key made on the website,
+  or make this key account-wide.
 - The coordinator sees each worker's spend with `runtime keys ls` or
-  `GET /v1/usage?key=<keyId>`, for itself, the keys it made at any depth, and
-  any key its reads already reach.
+  `GET /v1/usage?key=<keyId>`. It sees its own spend, the keys it made at any
+  depth, and any key its reads already reach.
 - Workers start from the coordinator's snapshots that carry the label
-  `share: made-keys` (set it when taking the snapshot, or later with
-  `POST /v1/snapshots/{id}:update`). Only snapshots the coordinator's key took
-  itself count, not those of other keys it can reach. The label is set on
-  each snapshot itself and never copied: a sandbox started from a shared
-  snapshot, a fork's copies and kept snapshot, and a snapshot taken without
-  labels of its own all leave `share: made-keys` out, so a copy you change and snapshot
-  again is not shared unless you label it. A worker key made before this
-  feature was released (see the [changelog](./changelog)) does not reach
-  shared snapshots: make it again. Every key under the
-  coordinator, at any depth, can create a sandbox from such a snapshot, memory or disk, and do nothing
-  else with it: it does not list, read, change or delete it. A snapshot
-  without the label stays `404 snapshot_not_found` to them. So does a
-  labelled snapshot of a sandbox that named its egress secrets (`secrets` on
-  create): a copy would keep that list, and those secrets are the
-  coordinator's to reach, not the worker's. The coordinator still starts it.
+  `share: made-keys`. Set the label when you take the snapshot, or later with
+  `POST /v1/snapshots/{id}:update`. Only snapshots the coordinator's key took
+  itself count. Snapshots of other keys it can reach do not.
+  The label is set on each snapshot itself and is never copied. A sandbox
+  started from a shared snapshot, a fork's copies and kept snapshot, and a
+  snapshot taken without labels of its own all leave out `share: made-keys`. So
+  a copy you change and snapshot again is not shared unless you label it.
+  A worker key made before this feature was released (see the
+  [changelog](./changelog)) does not reach shared snapshots. Make it again.
+  Every key under the coordinator, at any depth, can create a sandbox from such
+  a snapshot, memory or disk. It can do nothing else with it: it cannot list,
+  read, change or delete it. A snapshot without the label returns
+  `404 snapshot_not_found` to them. So does a labelled snapshot of a sandbox
+  that named its egress secrets (`secrets` on create). A copy would keep that
+  list, and those secrets belong to the coordinator, not the worker. The
+  coordinator can still start it.
   Sharing never crosses a [compartment](./security#compartments). Revoking the
   coordinator's key ends the sharing.
 
@@ -202,12 +207,12 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
 - Only a full-access key made by an owner or admin can do this. A read-only
   key, a selected-actions key, a developer's key or a key in a compartment
   cannot make, list or revoke keys.
-- A new key never has more than the key that made it: account-wide only from
-  an account-wide key, and it keeps the maker's expiry and per-request cap. When the maker has a daily limit, every key it makes needs
-  one, and the daily limits of every live key under it, at any depth, add up to
-  at most the maker's: a worker's own workers share its limit, never add to
-  it. Keys are made at most 8 deep. A read-only key cannot spend, so takes no
-  limit.
+- A new key never has more than the key that made it. It can be account-wide
+  only if the maker is account-wide. It keeps the maker's expiry and per-request
+  cap. When the maker has a daily limit, every key it makes needs one. The daily
+  limits of every live key under it, at any depth, add up to at most the maker's
+  limit. A worker's own workers share its limit and never add to it. Keys can be
+  made at most 8 deep. A read-only key cannot spend, so it takes no limit.
 - At most 100 live keys made this way per account, and 1,000 made in any 24
   hours (`quota_exceeded`). Revoke workers' keys when done.
 - Each is in the [audit log](#audit-log) as `key.created`, by the making key's
@@ -217,7 +222,7 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
 
 A key can be limited to a few sandboxes and to what it may do to them. Give it
 to something that needs one sandbox and should hold no key to the rest of the
-account, such as a watcher that restarts a server when it stops answering.
+account. An example is a watcher that restarts a server when it stops responding.
 
 ```bash no-run
 runtime keys create --name watcher --sandbox <sandboxId> --actions get,create --daily-limit 2
@@ -241,23 +246,23 @@ const watcher = await runtime.keys.create({
   metrics), `create` (start, wake and restart it; it never makes a sandbox),
   `stop` (stop and pause it), `exec` (commands, processes and the
   interpreter), `read_file` and `write_file`.
-- It is served only those sandboxes' own routes, called by id, and only for
-  the actions it was given. Everything else answers `403 forbidden`: other
-  sandboxes, lists, deleting, resizing, forking, networks, sessions, secrets,
-  jobs, keys, the account's settings and MCP.
-- It sees its sandboxes whichever key made them. The making key names only
+- It can call only those sandboxes' own routes, by id, and only for the actions
+  it was given. Everything else returns `403 forbidden`: other sandboxes, lists,
+  deleting, resizing, forking, networks, sessions, secrets, jobs, keys, the
+  account's settings and MCP.
+- It sees its sandboxes whichever key made them. The making key can name only
   sandboxes it acts on itself, outside every compartment.
-- Only `create` spends, so only a key with it takes a daily limit, and it needs
-  one when the making key has one.
+- Only `create` spends, so only a key with it takes a daily limit. It needs one
+  when the making key has one.
 - `runtime keys ls` and `GET /v1/keys` show it with reach `sandboxes`, its
   `sandboxes` and its `actions`. It makes no keys.
 
 #### Asked for in the browser
 
-With no key on the machine, or with `--browser`, the same command asks an
-owner or admin to approve the key in the browser, as `runtime keys create`
-does for any key. Use it when the sandboxes were made by a connector such as
-ChatGPT or Claude and nobody holds a key to make one with, or to give an agent
+With no key on the machine, or with `--browser`, the same command asks an owner
+or admin to approve the key in the browser. `runtime keys create` does this for
+any key. Use it when a connector such as ChatGPT or Claude made the sandboxes
+and nobody holds a key to make one with. You can also use it to give an agent
 somewhere else a few sandboxes and nothing more:
 
 ```bash no-run
@@ -265,15 +270,15 @@ runtime keys create --name helper --sandbox <id>,<id> --actions get,exec,read_fi
 ```
 
 - It prints a link and a code. The approval page names each sandbox, what the
-  key can do to it, and whether it can spend; the key reaches the terminal
-  that asked, sealed to it, and is never shown anywhere else.
+  key can do to it, and whether it can spend. The key goes to the terminal that
+  asked, sealed to it, and is never shown anywhere else.
 - Only an owner or admin approves it, for any sandbox in the account outside
   every compartment, whichever key made it.
-- Without `create` it cannot start, wake or restart its sandboxes, and takes
-  no daily limit: the key places no hold of its own. A running sandbox it
-  reaches is billed to its owner as usual, and commands the key runs count as
-  activity, so they keep it from pausing when idle. To bound that, give the
-  sandbox a time limit (`timeoutSeconds`) or stop it when done.
+- Without `create`, the key cannot start, wake or restart its sandboxes. It takes
+  no daily limit, and it places no hold of its own. A running sandbox it reaches
+  is billed to its owner as usual. Commands the key runs count as activity, so
+  they keep the sandbox from pausing when idle. To limit that, give the sandbox a
+  time limit (`timeoutSeconds`) or stop it when done.
 
 ## Leaving and removing
 
@@ -284,20 +289,20 @@ and confirm:
   there is another owner.
 - **Remove** takes someone else out. Admins remove developers, billing members
   and other admins; only an owner removes an owner.
-- Either way, the person loses access at once and their keys stop working. They
-  can be invited back, with a new role if you like.
-- What they made stays in the account: their stopped and paused sandboxes'
-  disks, snapshots, volumes and images are kept on the account's credit, as
-  anyone's are, until someone deletes them. The same holds when your
-  directory suspends someone.
+- Either way, the person loses access immediately, and their keys stop working.
+  They can be invited back, with a new role if you like.
+- What they made stays in the account. Their stopped and paused sandboxes' disks,
+  snapshots, volumes and images are kept on the account's credit, as anyone's
+  are, until someone deletes them. The same holds when your directory suspends
+  someone.
 
 ## Emails
 
 Each person chooses which of Runtime's optional emails they get, for each
 account they are in, at Settings, Emails
 ([withruntime.com/account/emails](https://withruntime.com/account/emails)).
-Turning one off stops it for you only: other owners still get theirs, and the
-account's notices (`GET /v1/notices`, Usage & billing) and webhooks still have
+Turning one off stops it for you only. Other owners still get theirs. The
+account's notices (`GET /v1/notices`, Usage & billing) and webhooks still include
 every one. Each of these emails also ends with a link that stops that kind
 for you, after asking.
 
@@ -312,31 +317,31 @@ Always sent, with no switch: sign-in links and invitations, a revoked key,
 replies in a support conversation, credit about to expire, service credits,
 and a warning before Runtime deletes something nothing pays for.
 
-From code, a key reads and sets its own person's, never anyone else's:
+From code, a key reads and sets only its own person's emails, never anyone else's:
 `GET /v1/account/emails`, and `POST /v1/account/emails:update` with
-`{"category": "own-deletions", "enabled": false}`; in the CLI,
-`runtime account emails` and `runtime account emails own-deletions off`; in
+`{"category": "own-deletions", "enabled": false}`. In the CLI, use
+`runtime account emails` and `runtime account emails own-deletions off`. In
 MCP, `runtime_account` action `emails` reads them. Reading them needs a key
-that reads usage, and changing them a key for every action: a read-only or
-limited key is answered 403 `forbidden` and changes nothing. A key with no
-person (a wallet account's) has none, and is answered 403 `no_person`.
+that reads usage. Changing them needs a key with every action. A read-only or
+limited key returns 403 `forbidden` and changes nothing. A key with no
+person (a wallet account's) has none, and returns 403 `no_person`.
 
 ## Closing the account
 
-An owner closes the account for good at
-[Close account](https://withruntime.com/account/close), linked at the foot of
-Members, or from the terminal with `withruntime` 0.7.0 or later:
+An owner closes the account for good on the
+[Close account](https://withruntime.com/account/close) page, linked at the foot of
+Members. It can also be done from the terminal with `withruntime` 0.7.0 or later:
 
 ```bash no-run
 runtime account close --confirm "Acme Inc"
 ```
 
-Type the account's name exactly; `runtime whoami` shows it. From the CLI or the
-API (`POST /v1/account:close` with `{"confirm": "<name>"}`, or
-`runtime.account.close({ confirm })` in either SDK, from `withruntime` 0.7.0) it needs a key for every product made by an owner. No MCP tool
-closes an account.
+Type the account's name exactly. `runtime whoami` shows it. The CLI and the API
+(`POST /v1/account:close` with `{"confirm": "<name>"}`, or
+`runtime.account.close({ confirm })` in either SDK, from `withruntime` 0.7.0)
+need a key for every product made by an owner. No MCP tool closes an account.
 
-Closing cannot be undone. At once:
+Closing cannot be undone. Immediately:
 
 - every sandbox stops, and every snapshot, image, volume, volume backup,
   secret, egress secret and saved registry password is deleted;
@@ -345,8 +350,8 @@ Closing cannot be undone. At once:
 - every key and CLI connection stops working, open invitations are withdrawn,
   and every member loses access.
 
-What is unspent of a purchase made in the last 15 days is refunded on request:
-write to support@withruntime.com. Other credit, including granted and referral
+Unspent credit from a purchase made in the last 15 days is refunded on request.
+Write to support@withruntime.com. Other credit, including granted and referral
 credit, is forfeited. Signing in again later starts a new, empty account.
 
 ## Audit log
@@ -356,20 +361,21 @@ Owners and admins read the audit log at
 
 - **Members:** joined, added, removed, left, and role changes; invitations sent
   and withdrawn
-- **Keys:** created and revoked, with the reason when Runtime revoked one; CLI connections and key requests approved or
-  denied; spending limits set and removed
+- **Keys:** created and revoked, with the reason when Runtime revoked one; CLI
+  connections and key requests approved or denied; spending limits set and removed
 - **Credit:** top-ups started, credit bought, granted, earned by referral,
   refunded, disputed, taken back or expired
 - **Security settings:** network rules, secrets created, updated, rotated,
   revealed and deleted (never the value), preview ports made public or private
 - **Creations:** every sandbox, volume, image, snapshot, service and job, with
-  its name, labels and funding (rules a sandbox is created with are part of
-  its creation; a later change is a network rules entry). Funding is `trial`
-  when the free usage pays for it: a volume inside its 10 GiB, or a job on an
-  account without credit, which runs nothing until the account holds credit
-- **Sandboxes:** every pause, wake, restart and stop, with who asked; one
-  Runtime did itself says why: it sat idle, it reached its time limit, credit
-  ran out or a spending limit was hit
+  its name, labels and funding. Rules a sandbox is created with are part of its
+  creation. A later change is recorded as a network rules entry. Funding is
+  `trial` when the free usage pays for it. That covers a volume inside its
+  10 GiB, and a job on an account without credit. Such a job runs nothing until
+  the account holds credit.
+- **Sandboxes:** every pause, wake, restart and stop, with who asked. For each
+  one Runtime did itself, the entry says why: the sandbox sat idle, it reached
+  its time limit, credit ran out, or a spending limit was hit.
 - **Deletions:** volumes, images, snapshots, services and jobs
 - **The account:** created, renamed, suspended and restored
 - **Single sign-on:** connections added, changed and removed, domains
@@ -377,10 +383,10 @@ Owners and admins read the audit log at
 - **Directory sync:** SCIM tokens made and revoked, people your directory
   added, deactivated, reactivated or deleted, and the role each group gives
 
-Each entry has the action, who did it (a person, a key, your directory, or
-Runtime itself for things like a card payment), the time, the client's IP address, the request id
-and whether it came through the website, the API or MCP. A call made by code
-inside one of your sandboxes also names that sandbox.
+Each entry has the action; who did it (a person, a key, your directory, or
+Runtime itself, for things like a card payment); the time; the client's IP
+address; the request id; and whether it came through the website, the API or
+MCP. A call made by code inside one of your sandboxes also names that sandbox.
 
 Entries are kept for at least 400 days. Nobody can edit an entry, and none is
 deleted before then. The page downloads the whole log, or one group of it, as
@@ -388,8 +394,8 @@ a CSV file.
 
 ### Read it from code
 
-A key made by an owner or admin reads the log, if it has full access or is
-read-only. Newest first, 50 at a time by default, up to 200.
+A key made by an owner or admin can read the log, if it has full access or is
+read-only. Entries are listed newest first, 50 at a time by default, up to 200.
 
 ```bash no-run
 curl -H "Authorization: Bearer $RUNTIME_API_KEY" \
@@ -425,17 +431,17 @@ with Runtime() as runtime:
 
 People sign in with an email link, with Google, or with your company's
 identity provider. Single sign-on works over SAML or OIDC with Okta, Microsoft
-Entra ID, Google Workspace and any other standard provider, and SCIM directory
+Entra ID, Google Workspace and any other standard provider. SCIM directory
 sync adds, updates and removes people for you. Both are free on every account.
 See [single sign-on](./single-sign-on) for the setup.
 
-- An owner connects your identity provider for your email domain and proves the
-  domain with a DNS record. Only an owner changes single sign-on.
+- An owner connects your identity provider for your email domain. The owner
+  proves the domain with a DNS record. Only an owner can change single sign-on.
 - Anyone on that domain who signs in through your provider joins your account
   with the role you choose. Someone you removed does not come back that way.
 - **Require single sign-on** makes your provider the only way in for members.
   Owners can still use Google or an email link, so a broken provider cannot
   lock you out, and API keys keep working.
 - With SCIM, deactivating someone in your directory removes them from the
-  account and revokes every key they made, at once. Groups in your directory
+  account and revokes every key they made, immediately. Groups in your directory
   decide roles: admin, developer or billing, never owner.

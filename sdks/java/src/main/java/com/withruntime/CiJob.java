@@ -75,8 +75,20 @@ public class CiJob extends JsonObject {
     return getStrings("sandboxIds");
   }
 
+  /**
+   * The ID of the job's own GitHub check run, {@code runtime / <name>}, created completed when the
+   * job ends; null while it runs, for a reused pass, or when GitHub did not accept the run.
+   */
   public Long githubCheckRun() {
     return getLong("githubCheckRun");
+  }
+
+  /**
+   * Lines of the repository's files that the job's log reports as failing, or as warnings and
+   * notices, as its GitHub check run shows them. At most 50, failures first; empty while it runs.
+   */
+  public List<CiAnnotation> annotations() {
+    return getObjects("annotations", CiAnnotation::new);
   }
 
   /** A review step's verdict on the commit; null for a command's job. */

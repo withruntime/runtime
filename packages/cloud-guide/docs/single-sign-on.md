@@ -4,8 +4,8 @@ People in your company sign in to Runtime with your identity provider, over
 SAML or OIDC. Your directory adds them, gives them roles through groups, and
 removes them the moment they leave, over SCIM. Both are free on every account.
 
-Okta, Microsoft Entra ID and Google Workspace are supported from day one, and
-any provider that speaks SAML 2.0 or OpenID Connect works the same way.
+Okta, Microsoft Entra ID and Google Workspace are supported from day one. Any
+provider that speaks SAML 2.0 or OpenID Connect works the same way.
 
 An owner sets it up at
 [Single sign-on](https://withruntime.com/account/single-sign-on). It takes
@@ -34,8 +34,8 @@ domain with a DNS record, and choose who joins and how.
 
 ## Set up SAML
 
-On the Single sign-on page, choose **Connect your identity provider**, pick
-your provider, choose **SAML** and enter your email domain. The page shows the
+On the Single sign-on page, choose **Connect your identity provider**. Pick
+your provider, choose **SAML**, and enter your email domain. The page shows the
 values to give your provider before you save anything.
 
 ### Okta
@@ -56,7 +56,7 @@ values to give your provider before you save anything.
    own application** (non-gallery), then **Single sign-on > SAML**.
 2. **Identifier (Entity ID):** the page's audience URI. **Reply URL (Assertion
    Consumer Service URL):** the page's single sign-on URL.
-3. Keep the default claims: they include the email address, given name and
+3. Keep the default claims. They include the email address, given name and
    surname Runtime reads. Signing option: **Sign SAML assertion** (the default).
 4. Copy the **App Federation Metadata Url** into Runtime and save.
 5. Assign the users or groups who should have access.
@@ -66,7 +66,7 @@ values to give your provider before you save anything.
 1. In the Admin console, go to **Apps > Web and mobile apps > Add app > Add
    custom SAML app**.
 2. Copy Google's **SSO URL**, **Entity ID** and **Certificate** into Runtime,
-   using **Enter by hand**, or download the IdP metadata and paste it.
+   using **Enter by hand**. Or download the IdP metadata and paste it.
 3. **ACS URL:** the page's single sign-on URL. **Entity ID:** the page's
    audience URI. **Name ID format:** EMAIL, **Name ID:** Basic Information >
    Primary email.
@@ -85,9 +85,9 @@ Runtime reads the provider's discovery document to find the rest.
 | Microsoft Entra  | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Register an app; add the **email** optional claim to the ID token |
 | Google Workspace | `https://accounts.google.com`                        | Create an OAuth client (Web application), user type Internal      |
 
-Runtime asks for the `openid`, `email` and `profile` scopes, uses PKCE, and
+Runtime asks for the `openid`, `email` and `profile` scopes. It uses PKCE and
 checks the ID token's signature, issuer, audience and expiry. The client
-secret is stored for the sign-in service only and is never shown again; leave
+secret is stored for the sign-in service only, and it is never shown again. Leave
 it empty when you change other settings to keep it.
 
 ## Prove your domain
@@ -99,20 +99,20 @@ Add the TXT record the page shows at your DNS provider:
 | TXT  | `_runtime-verify.company.com` | `runtime-verify=<token>` |
 
 Then choose **Check DNS**. A new record can take a few minutes to appear. Once
-it is verified, the record can stay or go; the domain stays verified. If
+it is verified, the record can stay or go. The domain stays verified. If
 another Runtime account already verified the domain, contact support.
 
 ## Sign in
 
 - People choose **Use single sign-on (SSO)** on the sign-in page and enter their
-  work email, or open the page's **initiate login URI**, which starts sign-in
-  with your provider straight away.
-- Runtime answers only sign-ins it started, so a SAML tile that posts straight
+  work email. Or they open the page's **initiate login URI**, which starts sign-in
+  with your provider immediately.
+- Runtime accepts only sign-ins it started. A SAML tile that posts straight
   to Runtime (IdP-initiated sign-in) is refused. For an app-list tile, point a
-  bookmark app at the initiate login URI (OIDC apps take it as their initiate
-  login URI directly).
+  bookmark app at the initiate login URI. OIDC apps take it as their initiate
+  login URI directly.
 - For SAML, Runtime checks the assertion's signature, audience, recipient and
-  validity window, takes each assertion once, and refuses a response with more
+  validity window. It takes each assertion once, and refuses a response with more
   than one assertion.
 
 ## Require single sign-on
@@ -132,37 +132,37 @@ Tick **Require single sign-on** on a connection once its domain is verified.
 
 Your directory creates, updates and deactivates people in Runtime.
 
-1. On the Single sign-on page, choose **Make a SCIM token**. Copy it; it is
+1. On the Single sign-on page, choose **Make a SCIM token**. Copy it. It is
    shown once.
 2. In your provider, turn on provisioning with:
    - **Base URL:** `https://withruntime.com/scim/v2`
    - **Authentication:** HTTP header, bearer token: the SCIM token
    - **Unique identifier:** `userName` (the email address)
-3. Push the groups whose roles you want Runtime to follow, then choose on the
+3. Push the groups whose roles you want Runtime to follow. Then choose on the
    Single sign-on page which role each group gives.
 
 In **Okta**: the app's **Provisioning** tab, SCIM 2.0, with Push New Users,
 Push Profile Updates, Push Groups and Deactivate Users. In **Entra ID**: the
 enterprise app's **Provisioning**, mode Automatic, **Tenant URL** the base URL
 and **Secret Token** the SCIM token. Google Workspace does not offer SCIM to
-custom apps; with Google, people join on first sign-in.
+custom apps. With Google, people join on first sign-in.
 
 What each change does:
 
-- **A person deactivated or deleted** loses their membership at once, and
+- **A person deactivated or deleted** loses their membership immediately, and
   every API key they made is revoked in the same step. What they created stays
   with the account.
 - **Reactivated**, they come back with the role their groups give. Their old
   keys stay revoked.
 - **Groups decide roles.** A person gets the highest role any of their groups
   gives: admin, then developer, then billing. With no mapped group, they get
-  the connection's default role. A group never makes anyone an owner, and
-  owners' roles are never changed by the directory.
+  the connection's default role. A group never makes anyone an owner. The
+  directory never changes owners' roles.
 - **Somebody your directory adds who has never signed in** joins at their first
   single sign-on, with their groups' role. If the directory has deactivated
   them first, they are refused.
 
-A SCIM token acts with the authority of the owner who made it and stops if
+A SCIM token acts with the authority of the owner who made it, and it stops if
 they stop being an owner. An account has at most two live tokens, so you can
 replace one without a gap. Runtime supports the filters and PATCH operations
 Okta and Entra ID send: `eq` filters on `userName`, `externalId`, `emails` and

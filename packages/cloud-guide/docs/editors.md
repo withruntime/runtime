@@ -15,7 +15,7 @@ runtime sandboxes ssh <id> -- make test     # one command; exits with its code
 ```
 
 `<id>` is the sandbox's id or its name. The first time, the CLI makes an SSH key
-for this machine in `~/.config/runtime-cloud/ssh` and sends only its public
+for this machine in `~/.config/runtime-cloud/ssh`. It sends only the public
 half, into the one login it opens. You log in as `runtime`, the user commands
 run as, with the same environment, the proxy settings and `sudo`.
 
@@ -60,8 +60,8 @@ uses OpenSSH:
   `runtime`, authenticating with the OpenSSH config and agent.
 
 `runtime sandboxes ssh config` without `--install` prints the entry to paste yourself.
-The entry skips host key checks on purpose: each login gets a fresh host key,
-and the connection already goes to the sandbox you named, through Runtime's
+The entry skips host key checks on purpose. Each login gets a fresh host key.
+The connection already goes to the sandbox you named, through Runtime's
 authenticated API.
 
 ## Forward ports
@@ -74,7 +74,7 @@ runtime sandboxes port-forward <id> 3000 15432:5432   # several at once, local:r
 Any TCP port works, not only HTTP: a database, Redis, a debugger, a dev server
 that uses WebSockets. The server in the sandbox can listen on `127.0.0.1`, `::1`
 or every address. Start it with `runtime sandboxes spawn <id> -- <command>` (or
-`sbx.spawn()`), which keeps it running; a process started by `exec` ends with
+`sbx.spawn()`), which keeps it running. A process started by `exec` ends with
 its command. The forward listens on `127.0.0.1` unless you pass `--address`,
 runs until Ctrl-C, and says so when nothing listens on the port.
 
@@ -101,18 +101,19 @@ with Sandbox.create() as sbx:
 
 `sbx.tunnel()` in JavaScript opens one connection at a time instead:
 `tunnel.connect(5432)` and `tunnel.ssh(publicKey)` each give a stream. It
-reaches this one sandbox from your code, and is not the WireGuard tunnel that
+reaches this one sandbox from your code. It is not the WireGuard tunnel that
 joins your own network to your sandboxes
 ([private networks](./networking#private-networks)).
 
 ## Limits
 
 - Connecting to a paused sandbox wakes it, as any command does. An open
-  connection keeps it running: a sandbox is never idle while one is open, and
-  with no time limit it runs as long as the session does, while credit lasts.
-  A sandbox created with `timeoutSeconds` still ends the connection at its
-  limit; extend it for a long session.
-- An organization has at most 16 SSH logins and port forwards open at once,
-  and two more for each sandbox it holds that is not stopped, up to 292; one port forward carries at most 64 connections at once. Each lasts at
-  most 24 hours; open it again to go on.
+  connection keeps it running. A sandbox is never idle while one is open. With
+  no time limit, it runs as long as the session does, while credit lasts. A
+  sandbox created with `timeoutSeconds` still ends the connection at its limit.
+  Extend it for a long session.
+- An organization has at most 16 SSH logins and port forwards open at the same time. It
+  gets two more for each sandbox it holds that is not stopped, up to 292. One
+  port forward carries at most 64 connections at the same time. Each lasts at most 24
+  hours. Open it again to go on.
 - Port 10800 is the sandbox's own outbound proxy and is not forwarded.

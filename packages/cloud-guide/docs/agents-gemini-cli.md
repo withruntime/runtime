@@ -4,8 +4,8 @@ launch: agents
 
 # Gemini CLI as an agent
 
-Google's Gemini CLI runs in a sandbox of its own for each session, with
-Runtime's `runtime-agent` MCP server to read words, reply and finish
+Google's Gemini CLI runs in its own sandbox for each session. It uses Runtime's
+`runtime-agent` MCP server to read input, reply and finish
 ([Agents](./agents)). Three steps.
 
 ## 1. Store a key, or log in once
@@ -17,7 +17,7 @@ printf %s "$GEMINI_API_KEY" | runtime secrets set GEMINI_API_KEY --host generati
 ```
 
 For your own team's agents you may sign in with your Google account instead.
-Sign in once inside a sandbox, then save it; every session starts from that
+Sign in once inside a sandbox, then save it. Every session starts from that
 snapshot, signed in:
 
 ```bash no-run
@@ -62,4 +62,4 @@ runtime agents start docs-writer "Bring the README up to date." --follow
 
 A subscription is for your own team's agents. An agent that serves your
 customers uses an API key: that is Google's terms. Runtime has no "connect
-your subscription" button; signing in is yours to do, by hand, as above.
+your subscription" button. You sign in by hand, as above.

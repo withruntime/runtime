@@ -50,6 +50,7 @@ public class RuntimeCloudException extends RuntimeException {
           "no_credit_domain_limit",
           "no_credit_capacity_full",
           "quota_exceeded",
+          "account_share_full",
           "no_capacity",
           "volume_releasing");
 

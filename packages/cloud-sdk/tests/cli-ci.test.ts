@@ -65,6 +65,7 @@ const job = {
   reason: null,
   sandboxIds: [SANDBOX],
   githubCheckRun: null,
+  annotations: [],
   review: null,
   ms: 4100,
   createdAt: 1,
@@ -206,6 +207,38 @@ test("get shows a check's jobs in plan order; logs prints a job's log and where 
       expect(lines[0]).toBe("1 failed: tests/a.test.ts\n");
       expect(lines[1]).toBe("ERR [test 2/2 failed, exit code 1]");
       expect(lines[2]).toContain(`sandboxes wake ${SANDBOX}`);
+    },
+  );
+});
+
+test("a job's failing lines print after its log, as compilers print them, and an older API's job prints none", async () => {
+  const annotations = [
+    {
+      path: "src/a.test.ts",
+      startLine: 8,
+      endLine: 8,
+      startColumn: 23,
+      level: "failure",
+      message: "expect(received).toBe(expected)\nExpected: 3",
+      title: "math > adds",
+    },
+    { path: "README.md", startLine: 1, endLine: 1, level: "warning", message: "spelling" },
+  ];
+  await withStub(
+    ({ method, path }) =>
+      method === "GET" && path === `/v1/ci/jobs/${JOB}`
+        ? { ...job, githubCheckRun: 99, annotations, log: "1 failed" }
+        : method === "GET" && path === `/v1/ci/jobs/old`
+          ? { ...job, id: "old", annotations: undefined, log: "1 failed" }
+          : undefined,
+    async (lines) => {
+      expect(await run(["ci", "job", JOB], env, out(lines))).toBe(0);
+      expect(lines[1]).toBe(
+        "\n2 lines of the repository's files, 1 failing:\n  src/a.test.ts:8:23: failure: math > adds: expect(received).toBe(expected)\n  README.md:1: warning: spelling\n",
+      );
+      lines.length = 0;
+      expect(await run(["ci", "job", "old"], env, out(lines))).toBe(0);
+      expect(lines.join("\n")).not.toContain("lines of the repository");
     },
   );
 });

@@ -2,31 +2,31 @@
 
 One Python client for every Runtime Cloud product, sync and async, method for method.
 
-`withruntime` needs Python 3.9 or later (the `python3` a Mac comes with is
-enough) and uses only the standard library. It
-imports in about 30 ms and keeps its connections open between calls.
+`withruntime` needs Python 3.9 or later. The `python3` that comes with a Mac is
+enough. It uses only the standard library. It imports in about 30 ms and keeps
+its connections open between calls.
 
 ```bash no-run
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.33.0. `pip show withruntime` shows the
-version you have; a method named here that yours lacks means an older one, and
-`pip install -U withruntime` updates it.
+This guide describes `withruntime` 0.35.0. `pip show withruntime` shows the
+version you have. A method named here that yours lacks means an older version.
+Run `pip install -U withruntime` to update it.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
-set, and otherwise the connection this machine saved (any `npx withruntime`
-command connects it, with one browser approval).
+set. Otherwise, it uses the connection this machine saved. Any `npx withruntime`
+command sets up that connection, with one browser approval.
 
-On a server, put a key from https://withruntime.com/account/keys in
-`RUNTIME_API_KEY` from your secret manager. Never put it in source code, a URL
+On a server, store a key from https://withruntime.com/account/keys in
+`RUNTIME_API_KEY`, from your secret manager. Never put it in source code, a URL
 or a command-line argument. With no key anywhere, the first call fails with
-`missing_api_key` and says how to get one.
+`missing_api_key`, and the error says how to get one.
 
-One plural word names each product, as in the CLI, the API and MCP. A
-name renamed on 6 October 2026 keeps working for 30 days after the rename
-ships, each use raising a `FutureWarning` with the new name, and then fails
-with `name_retired` and a hint naming the new one.
+One plural word names each product, as in the CLI, the API and MCP. A name
+renamed on 6 October 2026 keeps working for 30 days after the rename ships. Each
+use raises a `FutureWarning` with the new name. After that, it fails with
+`name_retired`, and a hint names the new one.
 
 | Product                      | Old name                               |
 | ---------------------------- | -------------------------------------- |
@@ -64,8 +64,8 @@ itself when idle, with no time limit. A paid sandbox
 can have up to {{max-vcpu}} vCPUs and {{max-memory}}; one without credit, 2 vCPU and
 4 GiB.
 
-The free usage is spent first, then prepaid credit, with nothing to
-choose; `funding` is accepted and ignored.
+The free usage is spent first, then prepaid credit, with nothing for you to
+choose. `funding` is accepted and ignored.
 Every field is optional and takes snake_case names:
 
 ```python
@@ -88,17 +88,17 @@ sbx.stop()
 
 A sandbox needs no time limit: it runs while it works and pauses itself when
 idle, until you stop it or credit or the [free usage](./included-usage) runs out.
-`timeout_seconds` (60 to 86,400, 24 hours) sets a limit when you want one, as here: then it
-pauses or stops, as `on_lease_end` says, busy or not. `sbx.info["endsAt"]` is
+`timeout_seconds` (60 to 86,400, 24 hours) sets a limit when you want one. In that
+case, it pauses or stops, as `on_lease_end` says, busy or not. `sbx.info["endsAt"]` is
 when it will stop or pause by itself, or `None` when it never will.
 
 `env` sets variables for every command, background process, terminal, SSH
-session and image start command in the sandbox, for its whole life; a
-command's own `env` goes over them. Values are never shown again: `sbx.info`
-and every later answer carry only `envNames`. `update(env=...)` changes them, a
-value setting a variable and `None` removing one, for commands started after
-it. At most {{sandbox-env-vars}} variables and {{sandbox-env-size}}; forks keep them
-([API](./api#sandboxes)).
+session and image start command in the sandbox, for its whole life. A command's
+own `env` takes precedence over them. Values are never shown again. `sbx.info`
+and every later response carry only `envNames`. `update(env=...)` changes them.
+A value sets a variable, and `None` removes one. The change applies to commands
+started after it. At most {{sandbox-env-vars}} variables and {{sandbox-env-size}}.
+Forks keep them ([API](./api#sandboxes)).
 
 ```python check
 from withruntime import Runtime
@@ -129,13 +129,13 @@ asyncio.run(main())
 
 ## Run commands
 
-A string runs under `bash -c`. A list runs the program directly, with no shell,
-which is what you want for untrusted arguments.
+A string runs under `bash -c`. A list runs the program directly, with no shell.
+Use a list for untrusted arguments.
 
 **A server, a watcher or anything that should keep running goes in
 [`spawn`](#background-processes), not `exec`.** Everything an `exec` starts,
-`nohup … &` and `setsid` included, ends when its command returns, and a result
-holds at most 64 KiB of each stream (see below).
+`nohup … &` and `setsid` included, ends when its command returns. A result holds
+at most 64 KiB of each stream (see below).
 
 ```python
 import os
@@ -161,23 +161,22 @@ with Sandbox.create() as sbx:
   default, `"sandbox"`, is the user `runtime`. `spawn` and `terminal` take it
   too, and a process's `user` says which it runs as.
 - The default timeout is 60 seconds, or what the sandbox's time limit has left
-  when that is less, and 24 hours when the output streams (`on_stdout`,
-  `on_stderr` or `exec_stream`); the maximum is 24 hours. A command with no
-  `timeout_ms` is never refused for the time limit. A
-  timeout is a result (`timed_out=True`, with the output so far), not an
-  exception.
+  when that is less. When the output streams (`on_stdout`, `on_stderr` or
+  `exec_stream`), the default is 24 hours. The maximum is 24 hours. A command
+  with no `timeout_ms` is never refused for the time limit. A timeout is a
+  result (`timed_out=True`, with the output so far), not an exception.
 - `check=True` raises `CommandError` on a non-zero exit.
-- A command the sandbox's out-of-memory killer ended has `out_of_memory` set on
-  its result and its process (code, processes killed, the sandbox's size, a
-  message and a hint), and `check=True` raises `CommandError` with the code
-  `out_of_memory`; `None` means it was not ended for memory
+- A command that the sandbox's out-of-memory killer ended has `out_of_memory` set
+  on its result and its process. The value holds the code, processes killed, the
+  sandbox's size, a message and a hint. With `check=True`, `CommandError` is
+  raised with the code `out_of_memory`. `None` means it was not ended for memory
   ([when a program runs out of memory](./sandbox-environment#when-a-program-runs-out-of-memory)).
 - A result holds at most 64 KiB (65,536 bytes) of `stdout` and 64 KiB of
-  `stderr`. The rest is dropped, and `stdout_truncated` or `stderr_truncated` is
-  `True`; when nothing was dropped, both are `False`. For more output, pass
-  `on_stdout` or `on_stderr` (a `timeout_ms` over 60 seconds does the same): the
+  `stderr`. The rest is dropped. `stdout_truncated` or `stderr_truncated` is
+  `True`. When nothing was dropped, both are `False`. For more output, pass
+  `on_stdout` or `on_stderr`. A `timeout_ms` over 60 seconds does the same. The
   command then streams, and the result keeps everything it printed. Or send the
-  output to a file (`cmd > /workspace/out.log`) and read it with
+  output to a file (`cmd > /workspace/out.log`), and read it with
   `sbx.files.read_text`.
 
 Stream output as it happens with callbacks, or iterate the events:
@@ -198,16 +197,17 @@ with Sandbox.create() as sbx:
 `exec_stream` events expose snake_case fields, including `process_id`,
 `exit_code`, `timed_out`, `duration_ms`, `stdout_truncated`,
 `stderr_truncated`, `dropped_bytes` and `resume_at`, when the event carries
-that value. The previous camelCase keys remain available with the same values.
+that value. The earlier camelCase keys still work, with the same values.
 
-While you read a command's stream, the command waits for you rather than lose
-output, from its first byte. The sandbox keeps the latest 1 MiB; a reader away
-for more than 10 seconds while more than that came out loses the oldest part,
-gets a `truncated` event, and the result has both truncation flags `True`. From withruntime 0.7.0, a stream
-whose connection drops after the command started picks up again from the right
-byte; one that cannot raises `ConnectionError` with `details["processId"]`, and
-the command may still be running. Ctrl-C, or cancelling the task, during a
-streamed `exec` sends the command SIGTERM.
+While you read a command's stream, the command waits for you instead of losing
+output, from its first byte. The sandbox keeps the latest 1 MiB. A reader that is
+away for more than 10 seconds, while more than that came out, loses the oldest
+part. That reader gets a `truncated` event, and the result has both truncation
+flags set to `True`. From withruntime 0.7.0, a stream whose connection drops
+after the command started picks up again from the right byte. If it cannot, it
+raises `ConnectionError` with `details["processId"]`, and the command may still
+be running. Ctrl-C, or cancelling the task, during a streamed `exec` sends the
+command SIGTERM.
 
 ## Background processes
 
@@ -234,8 +234,8 @@ capacity; when its input pipe is full, the SDK waits briefly before retrying
 without advancing the offset. An empty EOF write closes input after earlier queued writes finish.
 
 `process.output(cursor=0)` yields every event from the start until the process
-exits. A process outlives your connection; get it back with `sbx.process(id)`.
-The sandbox keeps each process's latest 1 MiB of output: a reader that was away
+exits. A process outlives your connection. Get it back with `sbx.process(id)`.
+The sandbox keeps each process's latest 1 MiB of output. A reader that was away
 while more than that came out gets a `truncated` event saying how many bytes are
 gone, and `wait()` sets both truncation flags. A process that prints more than
 1 MiB should write to a file.
@@ -271,11 +271,11 @@ with Sandbox.create() as sbx:
     sbx.files.remove("/workspace/data", recursive=True)
 ```
 
-`write` makes parent directories and replaces the file atomically; large files go
-in parallel chunks checked by SHA-256. Under `/workspace` there is no size limit
-beyond the disk. Elsewhere a file is written with the sandbox user's own rights
-and can be at most 1 MiB; write a larger one to `/workspace` and move it with a
-command. Whole directories travel as one archive:
+`write` makes parent directories and replaces the file atomically. Large files go
+in parallel chunks, checked by SHA-256. Under `/workspace`, there is no size limit
+beyond the disk. Elsewhere, a file is written with the sandbox user's own rights,
+and can be at most 1 MiB. For a larger file, write it to `/workspace`, and move
+it with a command. Whole directories travel as one archive:
 
 ```python
 import pathlib
@@ -311,21 +311,21 @@ with Sandbox.create() as sbx:
     print(sbx.files.read_text("/workspace/restored/report.txt"))
 ```
 
-A directory download keeps the links inside the directory and raises
-`unsafe_archive` for any entry or link that would reach outside it, so
-nothing in a sandbox can write elsewhere on your machine.
-The download also checks links against files already in the destination before
-publishing. Invalid checksums, malformed path metadata and incomplete tar
-end markers are refused. Compressed archives are unpacked in bounded pieces;
-this adds no limit on the total downloaded directory size.
+A directory download keeps the links inside the directory. It raises
+`unsafe_archive` for any entry or link that would reach outside it. So nothing
+in a sandbox can write elsewhere on your machine. The download also checks links
+against files already in the destination, before publishing. Invalid checksums,
+malformed path metadata and incomplete tar end markers are refused. Compressed
+archives are unpacked in bounded pieces. This adds no limit on the total
+downloaded directory size.
 
-From `withruntime` 0.7.0, reads are checked. The API sends
-every file's length before its bytes, and a small file's SHA-256; `read` reads
-a file that arrives short again, then raises
-`download_incomplete` rather than return part of it. `read` has no size limit.
-For a file too big to hold in memory, `read_stream` yields the bytes as they
-arrive and raises if they end short, and `download` streams to disk through a
-partial file that is renamed into place only once it is whole:
+From `withruntime` 0.7.0, reads are checked. The API sends every file's length
+before its bytes, and a small file's SHA-256. If a file arrives short, `read`
+reads it again. If it is still short, `read` raises `download_incomplete` rather
+than return part of it. `read` has no size limit. For a file too big to hold in
+memory, `read_stream` yields the bytes as they arrive, and raises if they end
+short. `download` streams to disk through a partial file. That file is renamed
+into place only once it is whole:
 
 ```python no-run
 with open("dataset.tar", "wb") as out:
@@ -334,14 +334,14 @@ with open("dataset.tar", "wb") as out:
 ```
 
 `upload` and `download` of a directory move one tar archive through the API's
-folder routes, which pack and unpack it with `tar` inside the sandbox; any
-language can call them with a plain PUT or GET ([files in the API guide](./api#files)).
-A downloaded folder is unpacked as it arrives, so its size is bounded only by
-your disk, and it lands in place only once it has all arrived.
+folder routes. Those routes pack and unpack it with `tar` inside the sandbox.
+Any language can call them with a plain PUT or GET ([files in the API guide](./api#files)).
+A downloaded folder is unpacked as it arrives. Its size is limited only by your
+disk. It lands in place only once it has all arrived.
 
-A sandbox holds at most 4 uploads and 4 downloads at once; more wait for
-`transfer_limit` to clear. Each frees its slot when it ends, and a download
-left unread for a minute gives its slot to the next one.
+A sandbox holds at most 4 uploads and 4 downloads at a time. More wait for
+`transfer_limit` to clear. Each frees its slot when it ends. A download left
+unread for a minute gives its slot to the next one.
 
 ### Watch files
 
@@ -362,9 +362,9 @@ with Sandbox.create() as sbx:
     watch.stop()
 ```
 
-A sandbox runs at most four watches; each ends after `timeout_ms` (one hour by
-default). A flood of changes is capped at 5,000 events a second and reported
-as an `overflow` notice in `watch.notices`, never dropped silently.
+A sandbox runs at most four watches. Each ends after `timeout_ms` (one hour by
+default). A flood of changes is capped at 5,000 events a second. Such a flood is
+reported as an `overflow` notice in `watch.notices`, and is never dropped silently.
 
 `webhook=True` has Runtime read the watch and send its changes to your
 account's [webhooks](./observability#events) as `sandbox.files.changed`
@@ -394,7 +394,7 @@ again.stop()
 ```
 
 A sandbox created without `timeout_seconds` has no limit, so `wake()` needs no
-argument and `extend()` answers at once and changes nothing.
+argument. `extend()` returns immediately and changes nothing.
 
 `pause()` returns once the sandbox's processors have stopped, which is where
 compute billing ends; the host then writes its memory to disk, and a wake or
@@ -403,11 +403,11 @@ snapshot asked for meanwhile waits for that write.
 A paused sandbox also wakes by itself when a request needs it: an `exec`, a
 file, process, terminal, desktop or code-interpreter call, or a visit to one of
 its shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers.
-The wake is billed like any wake, from the moment it runs again, and it runs
-while it works again; one with a time limit gets a fresh one of its own
-`timeout_seconds`, or keeps the one it paused with when that ends later. Turn it off with `auto_wake=False` at create
-or `sbx.update(auto_wake=False)`; a call to a paused sandbox then fails with
-`sandbox_paused` until you call `wake()`.
+The wake is billed like any wake, from the moment it runs again, and it again
+runs while it works. A sandbox with a time limit gets a fresh one of its own
+`timeout_seconds`, or keeps the one it paused with when that ends later. Turn
+it off with `auto_wake=False` at create or `sbx.update(auto_wake=False)`. A call
+to a paused sandbox then fails with `sandbox_paused` until you call `wake()`.
 
 A sandbox pauses itself after **{{idle-pause}}** in which nothing happens in it: no
 request, no command or terminal still running, no open preview, port, SSH or
@@ -429,7 +429,7 @@ sbx.stop()
 A sandbox with no time limit keeps running while it works, with nothing to
 renew. `persistent=True` goes further: it keeps a paid sandbox running until
 you stop it, idle or not, for as long as the account has credit. Its disk is
-billed and kept as any sandbox's, so after a stop `sbx.restart()` starts it
+billed and kept, as for any sandbox, so after a stop `sbx.restart()` starts it
 again. `update(persistent=False)` makes it an ordinary sandbox again;
 `delete()` removes it. `keep_alive()` moves a time limit on from your process, for a
 sandbox created with `timeout_seconds`, keeping ten minutes ahead, until
@@ -451,10 +451,11 @@ worker.stop()
 
 A name is unique in the account while its sandbox can still run: running,
 paused, or stopped and persistent. A key in a
-[compartment](./security#compartments) has its compartment's own names. `Sandbox.get_or_create(name)` answers that
-sandbox, woken if paused and restarted if stopped and persistent, or creates
-one with the fields you pass; `sbx.info.get("reused")` is `True` when it found
-one. A create with a name another sandbox holds fails with `name_taken`.
+[compartment](./security#compartments) has its compartment's own names. `Sandbox.get_or_create(name)` returns that
+sandbox. It wakes the sandbox if paused, and restarts it if stopped and persistent.
+Otherwise, it creates one with the fields you pass. `sbx.info.get("reused")` is
+`True` when it found one. A create with a name another sandbox holds fails with
+`name_taken`.
 
 ```python check
 from withruntime import Sandbox
@@ -489,7 +490,7 @@ same way, and returns `{"deleted": [...], "failed": [...]}`.
 first, removes a sandbox for good in any state: it stops it, deletes its disk
 and paused memory, revokes its previews and ports, frees its name and takes it
 out of every list. Its snapshots, usage and audit entries stay. Deleting it
-again answers the same `{"id", "status": "deleted", "deletedAt"}`; any other
+again returns the same `{"id", "status": "deleted", "deletedAt"}`; any other
 call to it then raises `NotFoundError`. `stop()` is the one to use when you may
 want a persistent sandbox's disk back.
 
@@ -507,7 +508,7 @@ except RuntimeAPIError as error:
 ```
 
 The classes match the JavaScript SDK (`no_capacity` is a `ServiceUnavailableError`;
-`no_credit_running_limit` and a `quota_exceeded` on what runs at once are a
+`no_credit_running_limit` and a `quota_exceeded` on what runs concurrently are a
 `RateLimitError`, and a `quota_exceeded` on what is kept a `ConflictError`): `AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `ConflictError`,
 `InvalidRequestError`, `RateLimitError`, `ServiceUnavailableError`,
@@ -516,20 +517,20 @@ subclasses of `withruntime.RuntimeAPIError`. `RuntimeAPIError` and
 `RuntimeConnectionError` name the SDK errors without hiding Python's built-in
 `RuntimeError` and `ConnectionError`. The old exports remain aliases of the
 same classes, so existing catches keep working. Every write carries an idempotency
-key, made for you; transport failures and every answer that says `retryable: true`
-are retried after its `Retry-After`, with the same key, so a retry never makes
-two sandboxes or runs a command twice. A wait over 60 seconds is not slept on:
-the error is returned at once, with `retry_after_ms`. An answer
-that ran nothing (`guest_busy`, `busy`, `rate_limited`) is sent again until the
-call's deadline, or for five minutes without one, past `max_retries`.
+key, made for you. Transport failures, and every response that says `retryable: true`,
+are retried after its `Retry-After`, with the same key. So a retry never makes
+two sandboxes or runs a command twice. A wait over 60 seconds is not slept on.
+The error is returned immediately, with `retry_after_ms`. A response that ran
+nothing (`guest_busy`, `busy`, `rate_limited`) is sent again until the call's
+deadline. Without a deadline, it is sent again for five minutes, past `max_retries`.
 Interrupted complete response bodies are retried with the same key too;
 streamed output is never replayed after it reaches your code. A failed body
 read or retry delay carries the original `error.idempotency_key`.
 
 Pass your own `idempotency_key` to make a retry safe across process restarts.
 For 24 hours, a create or a command sent again with the same key and the same
-input answers with the first one's result instead of doing it twice; the same
-key with different input is refused with `idempotency_key_reused`.
+input returns the first one's result instead of doing it twice. The same key
+with different input is refused with `idempotency_key_reused`.
 
 ```python
 from uuid import uuid4
@@ -544,16 +545,16 @@ with Runtime() as runtime:
 ```
 
 **A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
-account is at its limit (`quota_exceeded`) or the region is full
-(`no_capacity`), `sandboxes.create` waits and sends the same request again, for
+account is at its limit (`quota_exceeded`), or the region is full
+(`no_capacity`), `sandboxes.create` waits. It sends the same request again, for
 up to two minutes. A burst of CI jobs past the limit queues instead of failing.
 A sandbox's `wake` and `restart` wait the same way when their own server is
-full (`no_capacity`): a sandbox stays on its server, so the wake is sent again
+full (`no_capacity`). A sandbox stays on its server, so the wake is sent again
 with the same idempotency key until room frees. A fork never waits.
 
 - When the wait runs out, the refusal is raised as it came.
 - Set `wait_for_capacity` (seconds) on the client or on one create, wake or
-  restart. `0` fails at once, as in `sbx.wake(wait_for_capacity=0)`.
+  restart. `0` fails immediately, as in `sbx.wake(wait_for_capacity=0)`.
 - From withruntime 0.7.0, `on_capacity_wait(refusal, seconds)` on one create is
   called before each wait,
   to tell a person why nothing has happened yet.
@@ -576,9 +577,9 @@ with Runtime(wait_for_capacity=600) as runtime:
 ## Read-only keys and daily limits
 
 An owner, admin or developer can make a read-only key and set a daily spending
-limit on a key at
-[API keys](https://withruntime.com/account/keys). A key reads both and can
-change neither. `runtime.limits` needs withruntime 0.3.1 or later:
+limit on a key, on the
+[API keys](https://withruntime.com/account/keys) page. A key reads both, and it
+can change neither. `runtime.limits` needs withruntime 0.3.1 or later:
 
 ```python check
 from withruntime import Runtime
@@ -597,7 +598,7 @@ not retried. A read-only key asking to change anything gets
 `PermissionDeniedError`. See [security](./security).
 
 Cap one sandbox's whole life with `max_total_cost_micros`, in millionths of a
-dollar. When it has cost that much it stops, and `stopReason` reads
+dollar. When it has cost that much, it stops, and `stopReason` reads
 `lifetime_cap`:
 
 ```python check
@@ -613,8 +614,8 @@ with Runtime() as runtime:
 
 Store an API key once with `runtime.secrets`, naming the hosts it may go to.
 Every sandbox of the account then has an environment variable of that name
-(or `env`) holding a placeholder, and the host's proxy swaps in the real value on HTTPS
-requests to those hosts. The value is sealed and never returned:
+(or `env`) that holds a placeholder. The host's proxy swaps in the real value on
+HTTPS requests to those hosts. The value is sealed and never returned:
 
 ```python check
 import os
@@ -677,7 +678,7 @@ returns. A Dockerfile build takes `dockerfile` and `context_dir`, the folder
 `COPY --from`, `ARG` and heredocs work. Each build of a `name` is its next
 version and takes the tag `latest`, or the `tags` you give, and `image=` on a
 create takes an id, `name`, `name:tag` or `name@version`. `start` sets what a
-sandbox from the image runs and when its create answers
+sandbox from the image runs and when its create returns
 (`{"command": ..., "ready_port": 8000}`). `images.versions(name)`,
 `images.resolve(ref)`, `images.tag(ref, tag)`, `images.untag(ref, tag)`,
 `images.follow_logs(id, on_log)` and `images.registries.set(registry,
@@ -703,7 +704,7 @@ Forks and snapshots:
   started or not, and is not billed, unless `keep_snapshot=True`.
 - If a copy fails, the error's `details["startedSandboxIds"]` names the copies
   that did start; they keep running until stopped. A retry with the same
-  idempotency key answers the same error.
+  idempotency key returns the same error.
 - If a fork stops partway and left its source paused, the source stays paused,
   and an account notice says so and how to wake it.
 - Copies start on the source's server while it has room, and on another server
@@ -745,8 +746,8 @@ functions, types and imports and runs each cell as a program. R plots and
 matplotlib charts come back as PNG images; pandas and R data frames as tables.
 R, Java and Go are installed in the sandbox the first time you use them
 (30 to 90 seconds, once), or bake them into an image with `apt`.
-A package `pip install` adds, from a cell or from `sbx.exec`, imports in a
-context that is already running, even in the cell that installed it.
+A package `pip install` run from a cell or from `sbx.exec` makes its imports
+available in a context that is already running, even in the cell that installed it.
 
 ```python check
 from withruntime import Runtime
@@ -823,10 +824,11 @@ with Sandbox.create(vcpu=1, memory_mib=2048) as sbx:
     # playwright: browser = p.chromium.connect_over_cdp(cdp_url)
 ```
 
-For a page in well under a second, keep spare browsers paused: a paused
-sandbox is charged only for its storage and wakes in about 0.1 s with
-Chromium running. `spare.pause()` after `browser.start()`, then per page
-`spare.wake()`, a new browser context, the page, and `spare.pause()` again.
+For a page in well under a second, keep spare browsers paused. A paused
+sandbox is charged only for its storage, and wakes in about 0.1 s with
+Chromium running. Run `spare.pause()` after `browser.start()`. Then, for each
+page, run `spare.wake()`, open a new browser context and the page, and run
+`spare.pause()` again.
 Open each page in its own context so nothing passes between pages. Heavy apps
 need 2 GiB; 1 GiB suits light pages and scraping at half the memory charge.
 [JavaScript](./javascript#a-page-in-under-a-second) has the measured times.
@@ -845,7 +847,7 @@ token, sandbox_id = session["token"], session["sandboxId"]
 
 A session runs commands, uses files and reaches previews of that one sandbox,
 and nothing else. It lasts {{session-default}} unless asked and
-{{session-max}} at most; `sbx.sessions.revoke(session_id)` ends it at once, and
+{{session-max}} at most; `sbx.sessions.revoke(session_id)` ends it immediately, and
 revoking the key that made it ends all of them. Python code can use one too:
 `Sandbox.from_session(token, sandbox_id)`. [A sandbox from a
 browser](./javascript#a-sandbox-from-a-browser) has the rest.
@@ -1050,7 +1052,7 @@ with Runtime(max_retries=4, timeout=120) as runtime:
 `RUNTIME_API_URL` points the client at another API origin. Code inside a
 Runtime sandbox calls Runtime's API at `http://runtime.internal`
 ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
-A client holds at most 48 connections at once (`max_connections`), calls and
+A client holds at most 48 connections at a time (`max_connections`), calls and
 streams such as a command's output together, and keeps 8 of them for calls;
 past that, calls and streams wait their turn instead of failing. One address
 may hold 64 connections to the API until it has used a valid key, and more

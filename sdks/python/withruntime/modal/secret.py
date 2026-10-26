@@ -91,7 +91,18 @@ class Secret(_Object):
 
     @staticmethod
     def from_name(name, *, environment_name=None, required_keys=[], client=None):
-        raise CompatibilityError(NAMED)
+        """In a scheduled function's job: each of ``required_keys`` is bound
+        from the Runtime jobs secret of that name. A sandbox has no named
+        secrets to read."""
+        if not required_keys:
+            raise CompatibilityError(NAMED + ". For a scheduled function run as a job, name its variables with "
+                                     "required_keys=[...]: each is the Runtime jobs secret of that name")
+
+        def load():
+            raise CompatibilityError(NAMED)
+        secret = Secret(load=load, client=client)
+        secret._job_keys = list(required_keys)
+        return secret
 
     def info(self):
         raise CompatibilityError(NAMED)
@@ -100,4 +111,5 @@ class Secret(_Object):
         raise CompatibilityError(NAMED)
 
 
-install(Secret, ("info", "update", "from_name"), static=("from_name",), refused=True)
+install(Secret, ("info", "update"), refused=True)
+install(Secret, ("from_name",), static=("from_name",))

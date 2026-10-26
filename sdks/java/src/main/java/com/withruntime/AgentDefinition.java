@@ -182,6 +182,19 @@ public final class AgentDefinition {
     return view().getObjects("volumes");
   }
 
+  /**
+   * Where each session's sandbox may connect, enforced by its network rules from its first packet:
+   * only the hosts in allow. Unset: anywhere.
+   */
+  public AgentDefinition network(List<String> allow) {
+    return set("network", Map.of("internet", true, "allow", List.copyOf(allow)));
+  }
+
+  /** internet, and allow when set. */
+  public JsonObject network() {
+    return view().getObject("network");
+  }
+
   /** Seconds with nothing happening before a session's sandbox pauses between words. */
   public AgentDefinition idlePauseSeconds(int seconds) {
     return set("idlePauseSeconds", seconds);

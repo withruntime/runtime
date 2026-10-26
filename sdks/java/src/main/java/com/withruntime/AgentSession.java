@@ -155,6 +155,40 @@ public final class AgentSession {
     return new JsonObject(JsonObject.map(t.poll(call)));
   }
 
+  /** The first page of its trace, up to 200 spans: {@link #trace(long, int)}. */
+  public AgentTrace trace() {
+    return trace(0, 0);
+  }
+
+  /**
+   * A page of its trace: every model turn and tool call its harness made, with timing, tokens and
+   * cost at the provider's list price. It holds the whole session's totals and up to {@code
+   * limit} spans after {@code after} (0: 200; 500 at most); read on with {@code after} set to
+   * {@link AgentTrace#nextAfter()} until it is null.
+   */
+  public AgentTrace trace(long after, int limit) {
+    return new AgentTrace(t.object(tracePage("json", after, limit)));
+  }
+
+  /** The first page of its trace as OpenTelemetry traces: {@link #traceOtlp(long, int)}. */
+  public Map<String, Object> traceOtlp() {
+    return traceOtlp(0, 0);
+  }
+
+  /**
+   * A page of its trace as OpenTelemetry traces: OTLP/JSON (an ExportTraceServiceRequest) in the
+   * GenAI semantic conventions, with "nextAfter" as {@link AgentTrace#nextAfter()}; POST it
+   * without "nextAfter" to any collector's /v1/traces. The first page holds the session's root.
+   */
+  public Map<String, Object> traceOtlp(long after, int limit) {
+    return t.object(tracePage("otlp", after, limit));
+  }
+
+  private Transport.Call tracePage(String format, long after, int limit) {
+    Transport.Call call = new Transport.Call("GET", path(id, "/trace")).query("format", format).query("after", after);
+    return limit > 0 ? call.query("limit", limit) : call;
+  }
+
   /**
    * Asks the session to stop and returns it as the API answered; it does not wait. A running
    * session ends once its sandbox is gone.

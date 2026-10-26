@@ -258,6 +258,24 @@ class AsyncJobs:
     async def get(self, job_id: str) -> dict[str, Any]:
         return await self._json("GET", f"/v1/jobs/{_enc(job_id)}")
 
+    async def import_plan(self, files: list[dict[str, str]], *, from_: Optional[str] = None,
+                          parameters: Optional[dict[str, str]] = None) -> dict[str, Any]:
+        """Read a Google Cloud Run job's YAML (with the Cloud Scheduler job
+        that runs it) or an AWS Batch job definition (with the EventBridge
+        schedule or rule that submits it) into the Runtime jobs that run the
+        same container, and what could not be carried over. ``files`` is
+        ``[{"path": "job.yaml", "text": ...}]``; ``from_`` is ``"cloud-run"`` or
+        ``"aws-batch"`` (found from the files when omitted); ``parameters``
+        are a CloudFormation template's values, such as
+        ``{"AWS::Region": "us-east-1"}``. Changes nothing: ``runtime jobs
+        import`` builds and creates the plan."""
+        body: dict[str, Any] = {"files": files}
+        if from_ is not None:
+            body["from"] = from_
+        if parameters:
+            body["parameters"] = parameters
+        return await self._json("POST", "/v1/job-imports", body=body)
+
     async def runs(self, job_id: str, *, limit: Optional[int] = None,
                    order: Optional[Literal["oldest", "newest"]] = None) -> AsyncPage:
         """A job's runs, oldest first: each attempt of each occurrence.

@@ -25,11 +25,11 @@ Each server's sandboxes send from that server's shared addresses, an account
 always from the same one of them. A service that limits callers by address
 when they bring no key counts every account on that address together.
 
-GitHub's API is the common case: calls without a token are capped at 60 an
-hour per address, so `gh` without login, installers and release downloads
-through `api.github.com`, and package resolvers that read GitHub answer
-`API rate limit exceeded for <address>` once anyone on that address has used
-the hour's 60. A token gives your account its own limit (5,000 an hour).
+GitHub's API is the common case. Calls without a token are capped at 60 an
+hour per address. This affects `gh` without login, installers and release
+downloads through `api.github.com`, and package resolvers that read GitHub.
+They return `API rate limit exceeded for <address>` once anyone on that address
+has used the hour's 60. A token gives your account its own limit (5,000 an hour).
 Store it as a secret that the network adds to every request to GitHub's API,
 so tools need no change:
 
@@ -38,15 +38,15 @@ printf %s "$GITHUB_TOKEN" | runtime secrets set GITHUB_TOKEN --host api.github.c
 ```
 
 A fine-grained token with read access to public repositories is enough. For
-`gh`, the placeholder in `GITHUB_TOKEN` works as it is
+`gh`, the placeholder in `GITHUB_TOKEN` works unchanged
 ([secrets](/docs/security#secrets-sandboxes-never-see)). An account that needs an address no
 other account shares can hold a
 [dedicated outbound address](/docs/networking#dedicated-outbound-addresses).
 
 An account whose sandboxes reach sites the way a scraper does sends from
 addresses kept for scrapers instead of the shared ones, so a site that blocks
-scrapers does not block the other accounts on the same server. Those addresses are in the same
-list, and a sandbox keeps its internet whichever it sends from.
+scrapers does not block the other accounts on the same server. Those addresses
+are in the same list, and a sandbox keeps its internet whichever it sends from.
 
 ## Connections to one site
 
@@ -63,8 +63,8 @@ stream over a connection already open is never slowed.
 Package registries, code hosts, container registries, storage APIs (S3, R2,
 Google Cloud Storage), model hubs, AI APIs and Runtime's own sites have their
 own far higher figures: 200 a second for a sandbox and 2,000 for an account on
-one server. An install, a clone or a download from many sandboxes at once
-never meets them. A site hosted on a provider's servers (an S3 website,
+one server. An install, a clone or a download from many sandboxes at the same time
+never reaches them. A site hosted on a provider's servers (an S3 website,
 CloudFront, GitHub Pages) counts as a site of its own.
 
 Past a count, the connection is refused with `429 Too Many Requests`,
@@ -75,7 +75,7 @@ your work needs more to one site, write to support@withruntime.com.
 
 ## Sites that block by address
 
-Some sites answer an address that sends them too much traffic with a CAPTCHA
+Some sites respond to an address that sends them too much traffic with a CAPTCHA
 or a block, for everyone on that address: Google, Bing, DuckDuckGo, Yahoo,
 Yandex, Baidu, Amazon, LinkedIn, Instagram, Facebook, X, TikTok, Zillow,
 Indeed, Walmart, eBay, Booking.com and Airbnb. Your sandboxes on a server

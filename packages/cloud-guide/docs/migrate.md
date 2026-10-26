@@ -11,9 +11,9 @@ change. For a project with no sandbox yet, start with [Get started](./start).
 > follow it.
 
 The agent follows the steps below and keeps going until your real job runs on
-Runtime. It ends with your monthly saving in dollars and what is left for you
-to go live.
-It tests without credit, asks before going on once the free usage is used, and never touches your old provider's account.
+Runtime. It ends with your monthly saving in dollars, and what is left for you
+to do before going live. It tests without credit. It asks before going on once
+the free usage is used. It never touches your old provider's account.
 
 **Why teams switch:**
 
@@ -29,7 +29,7 @@ It tests without credit, asks before going on once the free usage is used, and n
 - **More is built in.** A desktop, a code interpreter, custom images, volumes,
   and preview URLs that are private by default.
 - **No API key to copy.** One browser approval connects the CLI, SDKs and MCP.
-- **Test it free.** {{included-machine}}, no card, up to {{trial-sandboxes}} running at once.
+- **Test it free.** {{included-machine}}, no card, up to {{trial-sandboxes}} running at the same time.
   A sandbox without credit reaches ports 80 and 443 and shares previews privately, with
   a token; other outbound ports and public previews need paid credit.
 
@@ -99,9 +99,9 @@ old code. Then:
   below).
 - Remove the old provider's SDK, its client setup and its settings from the
   code.
-- Test without credit's hours. Once they are used, sandboxes run on the
-  account's credit by themselves, so check what is left with
-  `npx withruntime usage` and ask the owner before going on.
+- Test within the free usage. Once it is used up, sandboxes run on the
+  account's credit by themselves. Check what is left with
+  `npx withruntime usage`, and ask the owner before going on.
 - Use one sandbox per isolated task or tenant, not a shared global sandbox.
 - Choose an idempotency key before a write that accepts one, and reuse it with
   identical input after a lost response; a new key can run the work twice. The
@@ -156,7 +156,8 @@ later (Python 0.23.0). Modal's own sandbox examples run unchanged where they
 use none of what is refused below, and no Modal
 token is needed or sent. Commands run as root, as in a Modal container. A
 `timeout` ends the sandbox, and an `idle_timeout` pauses it with its memory
-kept until the next call wakes it. GPUs, Modal Functions, named secrets,
+kept until the next call wakes it. A Function with a `schedule` deploys as a
+[job](./jobs#modal) (SDK 0.36.0, Python 0.34.0). GPUs, other Modal Functions, named secrets,
 volumes made on first use, sidecars, connect tokens and directory snapshots
 throw `CompatibilityError` before anything is created, naming what to use
 instead ([Modal](./modal-sandbox-alternative#what-the-drop-in-refuses)).
@@ -167,7 +168,7 @@ instead ([Modal](./modal-sandbox-alternative#what-the-drop-in-refuses)).
 non-zero exit and `TimeoutError` (Python `TimeoutException`) past its timeout,
 so keep your `try`/`catch`. A call Runtime handles differently throws
 `NotSupportedError` naming what to use instead. Without credit a shared port is private, so `getHost(port)` throws `PublicPreviewNotAllowedError` (Python
-`PublicPreviewNotAllowedException`) rather than hand back a host nobody can
+`PublicPreviewNotAllowedException`) instead of returning a host nobody can
 reach: while you test, open
 `(await sandbox.runtime.previews.create(port)).urlWithToken` instead, or send
 its token in the `x-runtime-preview-token` header.
@@ -199,7 +200,7 @@ contexts ([Cloudflare](./cloudflare-sandbox-alternative#change-the-import)).
 
 **From Fly Machines:** code that calls Fly's Machines API (`api.machines.dev`)
 runs on Runtime after one address change. Run `npx withruntime fly-api`, which
-answers the Machines API on `http://127.0.0.1:4280` as your Runtime login, and
+serves the Machines API on `http://127.0.0.1:4280` as your Runtime login, and
 point the client there: `FLY_API_HOSTNAME` in Fly's own examples,
 `FLY_FLAPS_BASE_URL` for Fly's Go client (fly-go), or the base URL of your HTTP
 client. On 18 October 2026 we ran the 22 curl examples on Fly's
@@ -215,7 +216,7 @@ rates, and `npx withruntime switch --from fly-machines` records the switch.
 - A machine is a sandbox, an app a label on it. Its `config.image` is built
   once into a Runtime image, with Fly's `init` (`exec`, `entrypoint`, `cmd`)
   and `files`, and the image's command is the machine's main process.
-- Answered: apps, create, get, list (by `metadata.*`), update (env, metadata
+- Handled: apps, create, get, list (by `metadata.*`), update (env, metadata
   and restart policy), delete (`force`), start, stop, suspend, restart, wait,
   exec, signal, ps, events, versions, metadata and leases.
 - The restart policy is kept: `always` and `on-failure` (up to `max_retries`,
@@ -226,7 +227,7 @@ rates, and `npx withruntime switch --from fly-machines` records the switch.
   of a stopped machine runs the main process again. Fly resets a stopped
   Machine's root disk.
 - `services` (and cordon), `mounts`, `checks`, `processes`, GPUs, `files` from
-  secrets and regions other than `iad` answer 400 naming Runtime's alternative
+  secrets and regions other than `iad` return 400 naming Runtime's alternative
   (previews, volumes, an image ready check, secrets), before anything is made.
   A size change in `update` says plainly when it is not available. Runtime
   runs in one region, us-east in northern Virginia; Fly's `iad` is Ashburn,
@@ -272,7 +273,7 @@ docs.
 - The CLI is `npx withruntime sandboxes <verb>` (`runtime sandboxes <verb>`
   installed), and MCP tools are `runtime_sandboxes_*`, `runtime_sandboxes_exec`,
   `runtime_sandboxes_files_*`.
-- The 0.1.0 HTTP routes were removed; each answers 410 and names its
+- The 0.1.0 HTTP routes were removed; each returns 410 and names its
   replacement.
 
 ## 5. Make it work without credit
@@ -295,13 +296,15 @@ finish the switch.
 
 **Tell the owner what they save each month, in dollars, from measured usage.**
 
-The quickest way: `npx withruntime compare --from <provider>` prices the
-sandboxes you actually ran at that provider's published rates and prints the
-monthly saving, with the date the rates were checked (`runtime_account` with
-action `compare` over MCP). It prices sandboxes without credit at the standard rates and says how many
-ran without credit, so the saving is the one paid credit gives. `npx withruntime switch --from <provider>` records the move,
-and credit the owner adds within {{welcome-days}} days of signing up is matched, up to
-{{welcome-max}} in total ([welcome match](./pricing#welcome-match)). To work it out by hand:
+The quickest way is `npx withruntime compare --from <provider>`. It prices the
+sandboxes you actually ran at that provider's published rates. It prints the
+monthly saving, with the date the rates were checked. Over MCP, use
+`runtime_account` with action `compare`. It prices sandboxes without credit at
+the standard rates, and it says how many ran without credit. So the saving is
+the one paid credit gives. `npx withruntime switch --from <provider>` records the
+move. Credit the owner adds within {{welcome-days}} days of signing up is matched,
+up to {{welcome-max}} in total ([welcome match](./pricing#welcome-match)). To work
+it out by hand:
 
 1. **Runtime's cost.** After the test runs, `npx withruntime usage --json` lists
    each sandbox with its measured `activeCpuSeconds`, `billedCpuSeconds` and
@@ -350,7 +353,7 @@ only they can take:
   this machine only.
 - The owner merges. Then check that `npx withruntime sandboxes ls` shows the
   app's sandboxes.
-- Never spend paid credit on your own: going on past the free usage is the owner's word.
+- Never spend paid credit on your own. Only the owner can decide to go on past the free usage.
 - The old provider's account, keys and data are the owner's to close. Leave
   them as they are.
 - Send feedback on anything that slowed the switch:

@@ -16,6 +16,7 @@ from .._compat import CompatibilityError, ENV_PATH, environment, positive, refus
 from ._dual import Dual, install, local
 from ._object import CONSOLE
 from .app import App
+from ._functions import Cron, Function, Period, Retries
 from .cloud_bucket_mount import CloudBucketMount
 from .exception import ClientClosed, Error, InvalidError, TimeoutError as _ProbeTimeout
 from .file_pattern_matcher import FilePatternMatcher
@@ -31,8 +32,9 @@ from ._tunnel import Tunnel, from_preview as _tunnel_from_preview
 
 UPSTREAM_VERSION = "1.6.2"
 
-__all__ = ["App", "CloudBucketMount", "ContainerProcess", "Error", "FilePatternMatcher", "Image", "Probe", "Proxy",
-           "Sandbox", "SandboxSnapshot", "Secret", "Tunnel", "Volume", "enable_output"]
+__all__ = ["App", "CloudBucketMount", "ContainerProcess", "Cron", "Error", "FilePatternMatcher", "Function", "Image",
+           "Period", "Probe", "Proxy", "Retries", "Sandbox", "SandboxSnapshot", "Secret", "Tunnel", "Volume",
+           "enable_output"]
 
 # Who a sandbox's processes run as: root, as in a Modal container, where
 # Runtime's own default is uid 1000. Modal code writes to /, installs
@@ -41,14 +43,14 @@ ROOT = "root"
 
 # Modal's objects beyond sandboxes, and what to use on Runtime instead: each
 # is refused by name when it is reached, never an AttributeError.
-_FUNCTIONS = ("Runtime runs sandboxes, not Modal Functions: run the code in a modal.Sandbox, or on a schedule "
-              "as a Runtime job (runtime.jobs)")
+_FUNCTIONS = ("Runtime runs sandboxes and scheduled functions, not Modal's other Function features: run the "
+              "code in a modal.Sandbox, or give an @app.function a schedule and deploy it as a Runtime job")
 _SERVICES = {
     "Dict": "keep the state in your own store, or in a file on a Runtime volume (runtime.volumes)",
     "Queue": "keep the queue in your own store, or in a file on a Runtime volume (runtime.volumes)",
     "NetworkFileSystem": "mount a Runtime volume (runtime.volumes) or a CloudBucketMount",
     **{name: _FUNCTIONS for name in (
-        "Function", "FunctionCall", "Cls", "Server", "Cron", "Period", "Retries", "SchedulerPlacement", "Cluster",
+        "FunctionCall", "Cls", "Server", "SchedulerPlacement", "Cluster",
         "asgi_app", "wsgi_app", "web_endpoint", "web_server", "fastapi_endpoint", "method", "parameter", "enter",
         "exit", "batched", "concurrent", "clustered", "sessioned", "current_function_call_id", "current_input_id",
         "is_local", "interact", "forward")},

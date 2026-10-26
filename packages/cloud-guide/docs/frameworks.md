@@ -2,8 +2,8 @@
 
 Keep your framework's model and agent loop, and run the code it writes in a Runtime sandbox.
 
-Every integration below is ready to install. Each runs in its framework's own
-agent loop, was tested against real sandboxes, and keeps your model, prompts and
+Every integration below is ready to install. Each one runs in its framework's own
+agent loop. Each was tested against real sandboxes. Each keeps your model, prompts and
 application as they are.
 
 | Framework                                             | Language           | What you add                                                             |

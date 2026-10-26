@@ -4,9 +4,9 @@ launch: agents
 
 # Set up agents from your repo
 
-A file in your repo plus one command. `runtime.yml` names your agents, and
-`runtime agents deploy` makes your account match it: run it by hand, or from
-CI on every merge.
+Put one file in your repo, then run one command. `runtime.yml` names your
+agents. `runtime agents deploy` makes your account match the file. Run it by
+hand, or from CI on every merge.
 
 ## 1. Write the file
 
@@ -15,7 +15,7 @@ runtime agents init --template claude-code
 ```
 
 That writes a starter `runtime.yml` (or adds an `agents:` section to the
-one you have). Edit it to say what you want:
+one you have). Edit it to set what you want:
 
 ```yaml
 agents:
@@ -36,30 +36,31 @@ agents:
       You answer questions about Acme's billing. Be brief and kind.
 ```
 
-Each agent takes a `template` (`claude-code`, `codex`, `gemini-cli`,
-`claude-agent-sdk`, `openai-agents-sdk`, or `review` and `judge`,
-[CI/CD agent steps'](./ci#agent-steps) reviewer and rule-checker), which fills in its command
-and the secret its model key is stored as, and any field of an agent's
-definition: `command`, `from`, `vcpu`, `memoryMiB`, `instructions` or
-`instructionsFile`, `env`, `secrets`, `pool`, `mcp`, `volumes`, `idlePauseSeconds`,
-`maxSessionSeconds`, `maxConcurrent`, `maxSessionDollars`,
-`maxDayDollars` and `memory`. What you write wins over the template: `secrets:
-[CLAUDE_CODE_OAUTH_TOKEN]` uses your subscription's token in place of the
-API key. Without a size, an agent has 4 vCPU and 8 GiB.
+Each agent takes a `template`. It fills in the agent's command and the secret
+its model key is stored as. The templates are `claude-code`, `codex`,
+`gemini-cli`, `claude-agent-sdk`, `openai-agents-sdk`, and `review` and `judge`,
+the reviewer and rule-checker of [CI/CD agent steps](./ci#agent-steps). An
+agent also takes any field of its definition: `command`, `from`, `vcpu`,
+`memoryMiB`, `instructions` or `instructionsFile`, `env`, `secrets`, `pool`,
+`mcp`, `volumes`, `idlePauseSeconds`, `maxSessionSeconds`, `maxConcurrent`,
+`maxSessionDollars`, `maxDayDollars` and `memory`. Your values override the
+template's. For example, `secrets: [CLAUDE_CODE_OAUTH_TOKEN]` uses your
+subscription's token in place of the API key. Without a size, an agent has 4
+vCPU and 8 GiB.
 
 `triggers` lists `{kind, config, rules?}`: `schedule`, `webhook`, `slack` or
 `github` ([Agents](./agents)), with [its rules](./agents#rules). Add `paused:
 <why>` to hold one. A trigger the file does not name is removed; one whose
 rules changed keeps its secret.
 
-A webhook's secret, which each of its calls carries, is never in the file:
-the deploy that adds the webhook prints it under that line (`secret
-rtat_…`), and in `--json` and the SDK's result it is that change's
-`secret`. It is shown this once, so keep it then. Lost it? Take the webhook
-out of the file and deploy, then put it back and deploy: a new webhook with a
+A webhook's secret, which each of its calls carries, is never in the file.
+The deploy that adds the webhook prints it under that line (`secret
+rtat_…`). In `--json` and the SDK's result, it is that change's `secret`. It is
+shown only once, so save it then. Lost it? Take the webhook out of the file and
+deploy. Then put it back and deploy again: this creates a new webhook with a
 new secret.
 
-Store the model key once; the sandbox only ever sees a placeholder:
+Store the model key once. The sandbox sees only a placeholder:
 
 ```bash no-run
 printf %s "$ANTHROPIC_API_KEY" | runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com
@@ -72,7 +73,7 @@ runtime agents deploy --dry-run   # what it would change, nothing changed
 runtime agents deploy
 ```
 
-It prints one line per change, each with the idempotency key it was sent
+Each change is printed on its own line, with the idempotency key it was sent
 with:
 
 ```
@@ -84,17 +85,18 @@ Done: 3 changes.
 ```
 
 Run it again and nothing changes. An agent whose definition changed gets a
-new version; one that did not keeps its own. If a deploy stops halfway, run
-it again: each change's key means nothing is made twice.
+new version. An agent whose definition did not change keeps its own. If a
+deploy stops halfway, run it again. Each change's key ensures nothing is made
+twice.
 
 An agent the file no longer names is left alone. `--prune` deletes it, with
-its triggers, but only one an earlier deploy made: agents you made by hand
-stay. Deleting an agent deletes its [memory](agents.md#memory) for good, so
-`--prune` keeps one that still holds memory files and says so; add
-`--prune-memory` to delete it and its files too. Renaming an agent in the
-file is a new agent: the old one, and its memory, stay until you prune it. A mistake in
-the file is refused before anything changes, naming the line, the agent and
-the field:
+its triggers. It deletes only agents that an earlier deploy made. Agents you
+made by hand stay. Deleting an agent deletes its [memory](agents.md#memory) for
+good, so `--prune` keeps one that still holds memory files and says so. Add
+`--prune-memory` to delete it and its files too. Renaming an agent in the file
+creates a new agent. The old one, and its memory, stay until you prune it. A
+mistake in the file is refused before anything changes. The error names the
+line, the agent and the field:
 
 ```
 runtime.yml:4: agents.fixer.vcpu takes 1, 2, 4, 8 or 16.
@@ -115,8 +117,8 @@ An agent working on your repo can do the same through MCP:
 `runtime_agents_deploy` takes the file as JSON. Python, Go, Java and Ruby
 run the CLI: `npx withruntime agents deploy`.
 
-The file is at most 256 KiB, and YAML anchors and aliases (`&name`,
-`*name`) are not taken: write each value out where it is used.
+The file is at most 256 KiB. YAML anchors and aliases (`&name`, `*name`) are
+not accepted: write each value out where it is used.
 
 ## The rule
 

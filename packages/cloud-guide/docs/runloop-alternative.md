@@ -6,7 +6,7 @@ Runtime runs agent code in microVMs, like Runloop's devboxes, and costs **{{savi
 Runtime and {{cost:runloop}} on Runloop**. At 100,000 runs a month that is {{cost:runtime:100000}} against
 {{cost:runloop:100000}}, **{{=$0 less:runloop:100000}} a month saved**.
 
-Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ranks the other providers by the cost of the same job.
+If you are weighing more than two, [Runloop alternatives](/compare/runloop-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
@@ -14,11 +14,10 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
   as long as it runs. Runtime measures the CPU your code actually uses, so time
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it, keeps its memory and processes,
-  and runs its next command {{server-wake-command}} after the request that
-  wakes it reaches Runtime. Paused, it
-  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
-- **An uptime promise that pays itself.** Paid accounts are promised
+  {{idle-pause}} with no activity, keeps its memory and processes, and runs its
+  next command {{server-wake-command}} after the request that wakes it reaches
+  Runtime. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
+- **An uptime promise with automatic credit.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).
 - **Lower rates on every meter.** {{cpu-rate}} per vCPU-hour against Runloop's
@@ -32,7 +31,7 @@ Weighing more than two? [Runloop alternatives](/compare/runloop-alternatives) ra
 - **Forks of a running sandbox.** Copy a sandbox with its memory and running
   processes, and try several things from exactly that point.
 - **No plan fee.** Runloop's Pro plan is {{term:runloop:pro}} a month plus usage. Runtime is
-  prepaid credit from {{topup-min}}, with {{included-machine}} every month.
+  prepaid credit from {{topup-min}}, with {{included-machine}} in the first 30 days.
 - **Teams at no extra charge.** Single sign-on over SAML or OIDC (Okta,
   Microsoft Entra ID, Google Workspace), SCIM, roles and an audit log come with
   every account ([single sign-on](./single-sign-on)).
@@ -60,7 +59,7 @@ Runloop's figures come from its public pricing and documentation, checked
 | Memory billing  | {{memory-rate}} per reserved GiB-hour                          | {{rate:runloop:memory}} per GB-hour                     |
 | Disk            | Included while running                                         | {{rate:runloop:disk}} per GB-hour                       |
 | Plan fee        | None; prepaid credit from {{topup-min}}                        | Basic free; Pro {{term:runloop:pro}} a month plus usage |
-| Free start      | {{included-machine}} every month, no card                      | {{term:runloop:credit}} of credit, no card              |
+| Free start      | {{included-machine}} in the first 30 days, no card             | {{term:runloop:credit}} of credit, no card              |
 | Suspend, resume | Pause keeps files, memory and processes                        | Suspend keeps the disk; processes restart               |
 
 ## Cost for the same job
@@ -113,8 +112,8 @@ try {
 
 ## When Runloop may fit better
 
-- **Agent benchmarks.** Runloop runs SWE-Bench and other public benchmarks, and
-  builds custom ones from your data.
+- **Evaluation.** Runloop evaluates models against your own workload and
+  generates RL rollouts checked by running them.
 - **Your own cloud.** Runloop deploys into your cloud account.
 
 ## Sources

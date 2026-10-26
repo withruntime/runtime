@@ -1,30 +1,30 @@
 # Runtime vs Vercel Sandbox
 
-Runtime runs Firecracker microVMs and bills active CPU, like Vercel Sandbox, and costs **{{saving:vercel}} less** for an agent that mostly waits on a model.
+Runtime runs Firecracker microVMs and bills active CPU, like Vercel Sandbox. For an agent that mostly waits on a model, it costs **{{saving:vercel}} less**.
 
 **The saving:** 1,000 one-minute runs of a 2 vCPU sandbox with 4 GiB cost **{{cost:runtime}}
-on Runtime and {{cost:vercel}} on Vercel**. At 100,000 runs a month that is {{cost:runtime:100000}} against
-{{cost:vercel:100000}}, **{{=$0 less:vercel:100000}} a month saved**. Your Vercel Sandbox code keeps working: change one
+on Runtime and {{cost:vercel}} on Vercel**. At 100,000 runs a month, that is {{cost:runtime:100000}} against
+{{cost:vercel:100000}}, **{{=$0 less:vercel:100000}} a month saved**. Your Vercel Sandbox code keeps working. Change one
 import.
 
-Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-alternatives) ranks the other providers by the cost of the same job.
+Comparing more than two providers? [Vercel Sandbox alternatives](/compare/vercel-sandbox-alternatives) ranks the other providers by the cost of the same job.
 
 ## Where Runtime is better
 
-- **{{=n0 100 * ( 1 - cpu-rate / rate:vercel:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} an hour on Runtime and {{rate:vercel:cpu}} on Vercel; memory costs {{=n0 100 * ( 1 - memory-rate / rate:vercel:memory )}}% less. Busier jobs save
-  more: with both CPUs busy the whole minute, the example job costs {{cost:runtime:busy}} on
+- **{{=n0 100 * ( 1 - cpu-rate / rate:vercel:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} an hour on Runtime and {{rate:vercel:cpu}} on Vercel. Memory costs {{=n0 100 * ( 1 - memory-rate / rate:vercel:memory )}}% less. Busier jobs save
+  more. With both CPUs busy the whole minute, the example job costs {{cost:runtime:busy}} on
   Runtime and {{cost:vercel:busy}} on Vercel.
 - **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses and pays only paused
-  storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it with its
-  processes still running and its next command done {{server-wake-command}}
+  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
+  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
+  Its processes keep running, and its next command is done {{server-wake-command}}
   after the request reaches Runtime.
 - **Faster from a snapshot.** Vercel states its snapshot restores take
-  {{speed:vercel:restore}}. On Runtime's servers a create from a snapshot is
+  {{speed:vercel:restore}}. On Runtime's servers, a create from a snapshot is
   running in {{server-restore}}, and {{server-restore-p95}} at p95 ([speed](./speed)).
-- **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
-  measured from outside, and {{uptime-credit}} of a short month's charges back as credit
-  automatically ([Uptime Promise](/legal/sla)).
+- **A written uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month,
+  measured from outside. If a month falls short, {{uptime-credit}} of that month's charges
+  is returned as credit automatically ([Uptime Promise](/legal/sla)).
 - **Memory survives a pause.** A paused Runtime sandbox wakes with its
   processes still running, kept while you have credit. A stopped Vercel sandbox
   keeps its filesystem, and its processes start again.
@@ -34,8 +34,8 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
 - **Private ports by default.** A Runtime preview gives a port an HTTPS address
   that needs a token unless you make it public. Vercel's exposed ports are
   reachable at a public URL.
-- **No platform to join.** Runtime needs no hosting plan, team or project;
-  prepaid credit from {{topup-min}} is the whole account.
+- **No platform to join.** Runtime needs no hosting plan, team or project.
+  Prepaid credit from {{topup-min}} is the whole account.
 - **A one-line switch.** `withruntime/vercel` runs code written for Vercel
   Sandbox's SDK, in JavaScript and Python: commands, files, ports, snapshots and
   persistent sandboxes, with no Vercel project or token. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
@@ -45,13 +45,13 @@ Weighing more than two? [Vercel Sandbox alternatives](/compare/vercel-sandbox-al
   directory sync for Enterprise.
 - **Your agent sets itself up.** It runs `npx withruntime sandboxes run -- ...`,
   shows you a link, and starts once you approve in the browser. No API key goes
-  into a prompt or a config file, and the [MCP server](./mcp) reuses the same
+  into a prompt or a config file. The [MCP server](./mcp) reuses the same
   connection.
 
 **Also included:** a code interpreter, network allow and deny lists, secrets the
 sandbox never sees, custom images, volumes backed up daily, a Linux desktop,
 metrics, webhooks, OpenTelemetry export, S3, R2 and GCS bucket mounts, MCP
-servers from a catalog and identity tokens for AWS and Google Cloud. Paid
+servers from a catalog, and identity tokens for AWS and Google Cloud. Paid
 accounts add custom domains, TCP ports, dedicated outbound addresses and
 WireGuard private networks. See [products](./products).
 
@@ -66,7 +66,7 @@ Vercel's figures come from its public pricing and documentation, checked
 | CPU billing      | {{cpu-rate}} per active vCPU-hour, with a small floor                       | {{rate:vercel:cpu}} per active CPU-hour              |
 | Memory billing   | {{memory-rate}} per reserved GiB-hour                                       | {{rate:vercel:memory}} per provisioned GB-hour       |
 | Plan             | None; prepaid credit from {{topup-min}}                                     | Hobby allowance free; usage beyond it needs Pro      |
-| Free start       | {{included-machine}} every month, no card                                   | 5 active CPU-hours and 420 GB-hours a month on Hobby |
+| Free start       | {{included-machine}} in the first 30 days, no card                          | 5 active CPU-hours and 420 GB-hours a month on Hobby |
 | Session length   | No time limit: runs while it works, pauses itself after {{idle-pause}} idle | 45 minutes on Hobby, 24 hours on Pro                 |
 | Stop and resume  | Pause keeps files, memory and processes                                     | Stop keeps the filesystem; processes start again     |
 | Snapshots, forks | Files, memory and running processes                                         | The filesystem                                       |
@@ -76,7 +76,7 @@ Vercel's figures come from its public pricing and documentation, checked
 
 Take 1,000 runs of a 2 vCPU sandbox with 4 GiB on Runtime and 4 GB on Vercel,
 which gives 2 GB per vCPU. Each run lasts 60 seconds and keeps the CPU busy for
-20 CPU-seconds: an agent that spends most of its time waiting for a model.
+20 CPU-seconds. This is an agent that spends most of its time waiting for a model.
 
 ```
 Runtime  CPU    1,000 × 20 s / 3,600 × {{cpu-rate}}      = {{part:runtime:cpu}}
@@ -94,8 +94,8 @@ Vercel   CPU    1,000 × 20 s / 3,600 × {{rate:vercel:cpu}}      = {{part:verce
   Runtime against {{cost:vercel:busy}} on Vercel, a {{saving:vercel:busy}} saving.
 
 A GiB is about 7% larger than a GB, so Runtime's memory figure covers slightly
-more. Creations, network, storage, plan fees, taxes and free allowances are left
-out of both. On Runtime, inbound traffic is free, and each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for
+more. Creations, network, storage, plan fees, taxes and free allowances are excluded
+from both. On Runtime, inbound traffic is free. Each account's first {{outbound-allowance}} out a month is free, then {{outbound-rate}} per GB (10⁹ bytes). See [pricing](./pricing) for
 Runtime's terms.
 
 ## How to switch
@@ -119,16 +119,16 @@ from withruntime.vercel import sandbox  # was: from vercel import sandbox
 ```
 
 Sandboxes get Vercel's defaults: 2 vCPUs with 2048 MiB each, a 5-minute
-timeout, and persistence, so `stop()` pauses a sandbox and the next call or
-`Sandbox.get({ name })` wakes it. Ports listed at create get public addresses,
-and `domain(port)` answers from them. They use the free usage first, then prepaid credit.
+timeout, and persistence. So `stop()` pauses a sandbox, and the next call or
+`Sandbox.get({ name })` wakes it. Ports listed at create get public addresses.
+`domain(port)` returns the address for that port. Sandboxes use the free usage first, then prepaid credit.
 
-With no timeout a sandbox has no time limit: it runs while it works. A timeout
-over an hour works too: the sandbox object moves Runtime's hour-long limit on
+With no timeout, a sandbox has no time limit: it runs while it works. A timeout
+over an hour works too. The sandbox object moves Runtime's hour-long limit on
 toward it while your program runs. Users and groups (`createUser`,
 `asUser`) and list filters, sorting and cursors work as on Vercel. A call
 Runtime handles differently, such as Drives or other regions, throws
-`NotSupportedError` before anything happens and names what to use instead.
+`NotSupportedError` before anything happens. It names what to use instead.
 `VERCEL.md` in the package lists every mapping.
 
 ### Or port the calls
@@ -158,7 +158,7 @@ try {
 ## When Vercel Sandbox may fit better
 
 - **Regions and scale.** Vercel runs sandboxes in 19 regions, with up to 10,000
-  at once on Pro. Runtime runs in one US region.
+  concurrent sandboxes on Pro. Runtime runs in one US region.
 - **Your app already lives on Vercel.** Sandboxes then share its account,
   billing and observability.
 

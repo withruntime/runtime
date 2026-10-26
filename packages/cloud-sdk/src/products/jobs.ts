@@ -384,6 +384,60 @@ export function switchedOff(product: string) {
   };
 }
 
+/** Another platform's job files, read into Runtime jobs (`jobs.importPlan`). */
+export type JobImportRequest = {
+  /** The files, each with its name: a Cloud Run job's YAML and the Cloud
+   * Scheduler job that runs it, or an AWS Batch job definition (API JSON,
+   * describe-job-definitions output or a CloudFormation template) and the
+   * EventBridge schedule or rule that submits it. At most 1 MiB in all. */
+  files: { path: string; text: string }[];
+  /** Read them as this platform's; detected from the files when omitted. */
+  from?: "cloud-run" | "aws-batch";
+  /** A CloudFormation template's parameters and pseudo parameters, such as
+   * `{ "AWS::Region": "us-east-1" }`. */
+  parameters?: Record<string, string>;
+};
+export type JobImportSchedule =
+  | { kind: "cron"; expression: string; timezone: string }
+  | { kind: "once"; at: string; timezone: string };
+/** One job of a plan. Its image is built from `dockerfile`, and it runs the
+ * built image's start command. */
+export type JobImportJob = {
+  name: string;
+  file: string;
+  /** The container image it ran on the other platform. */
+  sourceImage: string;
+  dockerfile: string;
+  /** The whole command when the file names it; null when part of it is the
+   * container image's own ENTRYPOINT or CMD. */
+  command: string[] | null;
+  env: Record<string, string>;
+  /** Values it read from a secret store; each is bound from the jobs secret
+   * of that name. */
+  secrets: { name: string; from: string }[];
+  compute: { vcpu: number; memoryMib: number; diskMib: number | null };
+  timeoutSeconds: number;
+  retry: { maxAttempts: number; backoffSeconds: number };
+  /** Null: no schedule ran it there; it runs when triggered. */
+  schedule: JobImportSchedule | null;
+  /** Why it cannot be created as planned; null when it can. */
+  blocked: string | null;
+};
+export type JobImportPlan = {
+  from: "cloud-run" | "aws-batch";
+  read: string[];
+  jobs: JobImportJob[];
+  /** unmapped: left out. changed: carried over differently. info: how. */
+  notes: {
+    level: "unmapped" | "changed" | "info";
+    file: string;
+    key: string;
+    job?: string;
+    message: string;
+  }[];
+  importable: boolean;
+};
+
 /** Scheduled jobs: a command run in a fresh sandbox, once or on a cron
  * schedule. Each run is a sandbox, paid for as one: from the free usage first while the run fits the limits without credit, then from credit
  * at the sandbox rates, through the same holds and spending limits.
@@ -438,6 +492,12 @@ export function jobs(transport: Transport) {
       t.json<Job>({ method: "POST", path: "/v1/jobs", body: jobBody(input), ...options }),
     /** Your jobs, oldest first. Await for a page, or `for await` for all. */
     list,
+    /** Read a Cloud Run job or an AWS Batch job definition, with its
+     * schedule, into the jobs that run the same container here, and what
+     * could not be carried over. Changes nothing; `runtime jobs import`
+     * builds and creates the plan. */
+    importPlan: (input: JobImportRequest, options?: RequestOptions) =>
+      t.json<JobImportPlan>({ method: "POST", path: "/v1/job-imports", body: input, ...options }),
     get: (id: string, options?: RequestOptions) =>
       t.json<Job>({ method: "GET", path: `/v1/jobs/${enc(id)}`, ...options }),
     /** A job's runs, oldest first: each attempt of each occurrence.

@@ -84,4 +84,12 @@ public final class AgentAsk extends JsonObject {
   public Instant closedAt() {
     return getInstant("closedAt");
   }
+
+  /**
+   * The tool call it holds, answered Allow or Deny ({@code tool}, {@code input}, {@code toolUseId},
+   * {@code seq}, {@code policy}, {@code reasonCode}); null for any other ask.
+   */
+  public JsonObject toolCall() {
+    return getObject("toolCall");
+  }
 }

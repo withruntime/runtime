@@ -1,12 +1,12 @@
 # Storage and backups
 
 Checked off-server copies of snapshots and volume backups survive the loss of
-the server they were made on, and your own buckets mount inside a sandbox
-without it ever holding their keys. A snapshot starts copying off its server
-once its final compressed form is ready; `backedUp: true` confirms that copy is ready. A volume is
-backed up off its server every day, and whenever you ask, and can be restored
-onto any server in its region. Every copy is encrypted with a key that belongs
-to your organization alone.
+the server they were made on. You can mount your own buckets inside a sandbox,
+and the sandbox never holds their keys. A snapshot starts copying off its server
+once its final compressed form is ready. `backedUp: true` confirms that the copy
+is ready. A volume is backed up off its server every day, and whenever you ask.
+It can be restored onto any server in its region. Every copy is encrypted with a
+key that belongs to your organization alone.
 
 ## What is kept where
 
@@ -21,12 +21,12 @@ to your organization alone.
 off the server, read back and checked. Until then it is `false`.
 
 In your account, [Volumes](https://withruntime.com/account/volumes) lists each
-volume with how full it is, the sandbox it is attached to and its backups, and
-lets you create a volume, back it up now, change its backup policy, restore
-a backup as a new volume, or delete a volume or backup. You can attach a
-volume when creating a new sandbox, and a [scheduled job](./jobs#keep-data-between-runs)
-attaches one to each of its runs. A stop keeps a sandbox's disk, so its
-volume stays attached until that sandbox is deleted. Spending and deletion ask for
+volume with how full it is, the sandbox it is attached to and its backups. It
+lets you create a volume, back it up now, change its backup policy, restore a
+backup as a new volume, or delete a volume or backup. You can attach a volume
+when you create a new sandbox. A [scheduled job](./jobs#keep-data-between-runs)
+attaches one to each of its runs. A stop keeps a sandbox's disk, so its volume
+stays attached until that sandbox is deleted. Spending and deletion ask for
 confirmation using the console agent's existing permissions.
 
 ## Attaching a volume
@@ -36,16 +36,16 @@ two modes:
 
 - **`"rw"`** (the default): read-write, attached to one sandbox at a time.
 - **`"snapshot"`**: a read-only copy of the volume as it is when the sandbox
-  starts, which any number of sandboxes can attach at once. The name means a
-  frozen copy of the volume's files; it is not a sandbox
-  [snapshot](./javascript#snapshots-and-forks) and makes none.
+  starts. Any number of sandboxes can attach it at the same time. The name refers
+  to a frozen copy of the volume's files. It is not a sandbox
+  [snapshot](./javascript#snapshots-and-forks), and it creates none.
 
 ## Volume backups
 
 A backup is a point-in-time copy of a volume, taken while sandboxes may be
-writing to it. It holds everything the volume held at that moment, the way a
-disk does after a power cut: what a program had not yet written to the disk is
-not in it. Stop or flush writes first when you need a clean point.
+writing to it. It holds everything the volume held at that moment, as a disk does
+after a power cut. Data that a program had not yet written to the disk is not in
+it. Stop or flush writes first when you need a clean point.
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -85,59 +85,61 @@ runtime volumes backup-rm "${backup}"
 ```
 
 - **Daily:** every volume is backed up once a day, starting an hour after it is
-  created. Turn that off with `daily: false`. Each daily backup is kept for the
-  volume's `retentionDays`, 7 unless you set 1 to 365.
+  created. Turn this off with `daily: false`. Each daily backup is kept for the
+  volume's `retentionDays`. The default is 7. You can set 1 to 365.
 - **Your own schedule:** `schedule: { everyMinutes: n }` (15 or more, counted
   from 1970-01-01 UTC) or `schedule: { cron: "30 2 * * 1-5" }` (five fields in
-  UTC) backs the volume up on that schedule instead of daily, and `keep` says
-  which of those backups stay: the `last` N, and the newest in each of the
-  newest N `hourly`, `daily`, `weekly` (from Monday), `monthly` and `yearly`
-  periods, each 0 to 1,000. A schedule with no `keep` keeps one a day for
-  `retentionDays`. A backup waits for the one before it to be copied, so a
-  slow copy is never stacked on. `schedule: null` goes back to daily, and its
-  backups are then kept `retentionDays` from that moment. While the account
-  has no credit, each backup is kept at most seven days, whatever the counts.
+  UTC) backs the volume up on that schedule instead of daily. `keep` says which
+  of those backups stay. It keeps the `last` N backups. It also keeps the newest
+  backup in each of the newest N `hourly`, `daily`, `weekly` (from Monday),
+  `monthly` and `yearly` periods. Each count is 0 to 1,000. A schedule with no
+  `keep` keeps one backup a day for `retentionDays`. A backup waits for the one
+  before it to be copied, so backups never stack up behind a slow copy.
+  `schedule: null` goes back to daily. Its backups are then kept `retentionDays`
+  from that moment. While the account has no credit, each backup is kept at most
+  seven days, whatever the counts.
 - **On request:** `backup` makes one now and waits up to a minute for it to be
   ready. A backup can be kept for 1 to 365 days.
 - **Without credit**, a backup is kept at most seven days, whatever you ask
   for, as snapshots and paused sandboxes are.
 - **The newest ready backup is kept** past its retention for as long as the
-  volume exists, so a run of failed backups never leaves a volume with none.
-  It goes once a newer one is ready, when you delete it, or at its retention's
-  end once the volume is deleted. While kept, it is billed as any backup.
+  volume exists. A run of failed backups never leaves a volume with none. It is
+  removed once a newer one is ready, when you delete it, or at its retention's
+  end once the volume is deleted. While kept, it is billed like any other backup.
 - **Restoring:** a restore is a new volume, the size of the backup, in the same
   region, on whichever server has room. It is ready once every byte has been
-  downloaded and checked; `restoredFrom` names the backup. The original volume
-  is untouched.
-- **Proving a backup restores:** a `ready` backup has had every piece it
-  stores found in the object store at the size written (pieces it shares with
-  earlier backups were found there within the past week). Only a restore opens
-  every piece and checks its content, so to prove the data, restore it and
-  delete the restored volume once checked; it is charged by the GiB-hour only
-  while it exists. The restored volume counts toward your volume limit like
-  any other: 5 until the account has credit, 10,000 after ([limits](./limits)).
+  downloaded and checked. `restoredFrom` names the backup. The original volume
+  is not changed.
+- **Proving a backup restores:** a `ready` backup has had every piece it stores
+  found in the object store, at the size written. Pieces it shares with earlier
+  backups were found there within the past week. Only a restore opens every piece
+  and checks its content. To prove the data, restore the backup, check it, then
+  delete the restored volume. A restored volume is charged by the GiB-hour only
+  while it exists. The restored volume counts toward your volume limit like any
+  other: 5 until the account has credit, and 10,000 after that
+  ([limits](./limits)).
 - **Incremental:** only what changed since an earlier backup of the same
   volume is stored again, and empty space is not stored at all.
 - **Deleting a volume** keeps its backups until each one's retention ends, so
   you can still restore it. Deleting a backup removes its copy.
 - **If a volume's server is lost,** the volume is gone with it, and its error
   names the newest backup to restore it from.
-- **Stopping a sandbox** has it write out what it wrote to its volumes first,
-  and a stop that waits answers once its volumes are free to attach again. A
-  sandbox whose time limit or credit runs out does the same: its programs are
-  frozen just before its end, and what they wrote to its volumes, and to a
-  persistent sandbox's own disk, is written out after that at no charge.
+- **Stopping a sandbox** has it write out what it wrote to its volumes first. A
+  stop that waits returns once its volumes are free to attach again. A sandbox
+  whose time limit or credit runs out does the same. Its programs are frozen just
+  before its end. What they wrote to its volumes, and to a persistent sandbox's
+  own disk, is written out after that at no charge.
 - **Pausing a sandbox with volumes** does not copy the paused sandbox off its
-  server; the nightly backup keeps it, and each volume has its own backups above.
+  server. The nightly backup keeps it, and each volume has its own backups above.
 
 ## Snapshots survive their server
 
 A memory snapshot can be `ready`, and started from, while
-`compressionPending: true`: it is still being compressed in the background. It
+`compressionPending: true`. It is still being compressed in the background. It
 is charged on its final compressed size from the time it was ready.
 
-Its encrypted off-server copy is queued only after compression finishes.
-While compression is pending, `meteredBytes` is zero, `backedUp` is false and
+Its encrypted off-server copy is queued only after compression finishes. While
+compression is pending, `meteredBytes` is zero, `backedUp` is false and
 `durability.state` is `none`. `backedUp: true` means the off-server copy has
 been checked. `durability.state` says where that stands:
 
@@ -151,18 +153,18 @@ been checked. `durability.state` says where that stands:
 
 If a snapshot's server is lost, the snapshot is restored from its copy onto a
 server in its region with a compatible processor. Memory snapshots resume the
-saved machine there; disk snapshots boot fresh from the saved root filesystem. While that happens, a create or fork from it
-answers `snapshot_restoring` (503); try again in a few minutes. If no such
-server has room yet, the snapshot stays copied off the server and its `error`
-says it is waiting; it is restored as soon as one does. A snapshot whose server
-was lost before it was copied is deleted, its `error` says why, and it is not
-charged after the server's last sign of life.
+saved machine there. Disk snapshots boot fresh from the saved root filesystem.
+While that happens, a create or fork from it returns `snapshot_restoring` (503).
+Try again in a few minutes. If no such server has room yet, the snapshot stays
+copied off the server, and its `error` says it is waiting. It is restored as soon
+as one does. A snapshot whose server was lost before it was copied is deleted.
+Its `error` says why. It is not charged after the server's last sign of life.
 
 ## Randomness in copies
 
 A fork, or a sandbox created from a memory snapshot, resumes every program
 that was running when the copy was taken. It also copies each program's
-random-number state. Linux itself gets fresh randomness in every copy, but a
+random-number state. Linux itself gets fresh randomness in every copy. But a
 program that keeps its own generator in memory gives the same "random" bytes
 in every copy until it reseeds. Two copies can then make the same key, token,
 session ID or UUID.
@@ -193,19 +195,18 @@ restart it, or reseed its generator from `/dev/urandom` after the copy.
 
 An existing paused sandbox or snapshot keeps the filesystem saved with its
 memory. Updating Runtime's default image does not replace those files. A wake
-or fork preserves that identity when its trusted saved state agrees and the
-kernel and machine remain compatible. New sandboxes use the current default.
-An incompatible or unverifiable saved image is refused rather than silently
-restarted without its memory.
+or fork keeps that identity when its trusted saved state matches, and the kernel
+and machine remain compatible. New sandboxes use the current default. An
+incompatible or unverifiable saved image is refused. It is never restarted
+silently without its memory.
 
 ## Mount your own bucket
 
 A bucket in Amazon S3, Cloudflare R2 or Google Cloud Storage, or any
-S3-compatible store, appears as a directory in a running sandbox. **The
-sandbox never holds the bucket's key.** You store the key once as a secret;
-the sandbox's mount client signs its requests with a placeholder, and
-Runtime's egress proxy signs each request again with the real key as it leaves
-for the bucket's endpoint.
+S3-compatible store, appears as a directory in a running sandbox. **The sandbox
+never holds the bucket's key.** You store the key once as a secret. The sandbox's
+mount client signs its requests with a placeholder. Runtime's egress proxy signs
+each request again with the real key as it leaves for the bucket's endpoint.
 
 ```bash no-run
 printf %s "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" | runtime secrets set DATA_BUCKET \
@@ -240,9 +241,9 @@ await sbx.exec("ls /data");
   only the keys under it, and `readOnly` mounts it read-only. A public bucket
   needs no secret.
 - **What it is:** rclone, installed in the sandbox the first time you mount,
-  which takes a few seconds more. Files are written to the bucket when they are
-  closed. Two sandboxes can mount the same bucket; a file two of them write is
-  the last one closed.
+  which takes a few seconds longer. Files are written to the bucket when they are
+  closed. Two sandboxes can mount the same bucket. When two of them write a file,
+  the last one closed wins.
 - **How long:** a mount lasts through a pause and a wake, and ends when the
   sandbox stops; mount it again after a restart.
 - **Network:** the bucket is reached over HTTPS through the sandbox's own
@@ -255,10 +256,10 @@ await sbx.exec("ls /data");
   about their content. Nothing is shared or compared across organizations.
 - Every piece is checked when it is read back: a copy that does not match what
   was written is refused rather than restored.
-- When an organization is deleted, its key is destroyed first, which makes every
-  copy it had unreadable at once, and then the copies themselves are deleted.
+- When an organization is deleted, its key is destroyed first. That makes every
+  copy it had unreadable immediately. Then the copies themselves are deleted.
 - Apart from these copies, each server's own nightly backup is encrypted with
-  that server's key, not your organization's. It is kept 30 days, and its pieces
+  that server's key, not your organization's key. It is kept 30 days. Its pieces
   leave the object store within 44, so what a closed organization had on that
   server is gone from these backups by then.
 
@@ -266,18 +267,18 @@ await sbx.exec("ls /data");
 
 - Up to 200 volume backups per organization at a time.
 - Backups and restores run at a lower priority than your sandboxes. A backup is
-  `pending` until it is copied and checked, and a restored volume is `creating`
+  `pending` until it is copied and checked. A restored volume is `creating`
   until every byte is downloaded and checked.
-- A backup's copy goes ahead of Runtime's own copies on its volume's server:
-  it never waits behind one. `copyStartedAt` says when its copy off that server
-  began; while it is `null` the backup waits only for other backups there.
+- A backup's copy goes ahead of Runtime's own copies on its volume's server.
+  It never waits behind one. `copyStartedAt` says when its copy off that server
+  began. While it is `null`, the backup waits only for other backups there.
   (A backup whose copy began before this field existed shows `null` too.)
 - A backup whose copy has not begun 15 minutes after you asked for it
-  (`createdAt`) fails with `errorCode` `backup_stalled`, rather than staying
-  `pending`, unless other backups on its server are being copied or one
-  finished there in the last 15 minutes: then it is moving up the line and
-  waits its turn. One whose copy began is never failed this way. The volume
-  is unchanged; back it up again.
+  (`createdAt`) fails with `errorCode` `backup_stalled`. It does not stay
+  `pending`. The exception: other backups on its server are being copied, or one
+  finished there in the last 15 minutes. Then the backup is moving up the line,
+  and it waits its turn. A backup whose copy began is never failed this way. The
+  volume is unchanged. Back it up again.
 - Snapshot copies are part of the snapshot and its [price](./pricing).
 - Volume backups cost {{backup-rate}} per GB (10⁹ bytes) per 30-day month (a
   backup made before this price keeps {{backup-rate-before}} until

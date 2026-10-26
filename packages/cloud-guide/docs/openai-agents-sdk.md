@@ -34,8 +34,8 @@ run_config = RunConfig(
 print(Runner.run_sync(agent, "How much did sales grow?", run_config=run_config).final_output)
 ```
 
-The key comes from `RUNTIME_API_KEY` or this machine's `npx withruntime login`,
-as for the rest of the SDK. Pass `RuntimeCloudSandboxClient(runtime=AsyncRuntime(...))`
+The key comes from `RUNTIME_API_KEY`, or from `npx withruntime login` on this
+machine, as in the rest of the SDK. Pass `RuntimeCloudSandboxClient(runtime=AsyncRuntime(...))`
 to share a client.
 
 ## TypeScript
@@ -92,7 +92,7 @@ Every option is optional.
   repositories, environment variables, and users and groups. Commands with a
   `user` run through `sudo -u`; you are root inside your own sandbox.
 - **Exposed ports** become Runtime previews at `runtimehost.com`. A private
-  preview's endpoint carries its token, so it works as it is in a browser,
+  preview's endpoint carries its token, so it works unchanged in a browser,
   `fetch`, `curl` or a WebSocket client.
 
 ## Keep a workspace between runs

@@ -6,20 +6,20 @@ create request arrives and has run its first Python command
 sequential starts on {{server-date}}. A paused sandbox is running again
 {{server-wake}} after the wake request, and has run its next command
 {{server-wake-command}} after it. These are the API's own times in Virginia,
-the way other providers quote theirs; from your own machine, add the network
-between you and Virginia to each call.
+measured the way other providers quote theirs. From your own machine, add the
+network time between you and Virginia to each call.
 
-A sandbox pauses itself after {{idle-pause}} with nothing happening in it, so
+A sandbox pauses itself after {{idle-pause}} with nothing happening in it. So
 idle time costs paused storage only.
 
 ## Like for like, 28 September 2026
 
-Every step another provider quotes a time for, timed on Runtime's servers: from
-the moment each request reached the API in Virginia until it answered, read
-from the API's own timing log. The host's work and our database are in it; the
-network between the caller and Virginia, and TLS, are not. The same requests
-were timed by the laptop that made them, in the US Mountain time zone, in the
-last column.
+Each step that another provider quotes a time for, timed on Runtime's servers.
+The time runs from the moment each request reached the API in Virginia until
+it responded. It comes from the API's own timing log. The host's work and our
+database are included. The network between the caller and Virginia is not
+included, and neither is TLS. The laptop that made the same requests timed
+them too, in the US Mountain time zone. Its times are in the last column.
 
 | Step                                               | On the server, p50         | p95                            | p99                            | Of it, the host (p50)    | From the laptop (p50)      | Samples |
 | -------------------------------------------------- | -------------------------- | ------------------------------ | ------------------------------ | ------------------------ | -------------------------- | ------- |
@@ -37,43 +37,43 @@ last column.
 | Stop                                               | {{server-stop}}            | {{server-stop-p95}}            | {{server-stop-p99}}            | –                        | {{laptop-stop}}            | 200     |
 | A preview request to a running sandbox, first byte | –                          | –                              | –                              | –                        | {{laptop-preview}}         | 100     |
 
-- **When and where:** one run from 23:21 to 23:45 UTC, one request at a time,
-  with no errors, on Runtime's server in Virginia that serves every customer
-  today, with guest kernel 6.1. The client was Node 24.20.0 with `withruntime`
-  0.8.4 from npm and no retries, on an account without credit.
-- **What ran:** the default sandbox, 2 vCPU, 4 GiB of memory and 4 GiB
-  of disk, which the server keeps a few spares of, started ahead of time; all
-  100 warm creates were handed one. The template row is 2 vCPU and 2 GiB, a
-  shape with no spare, restored from a saved template. The first command was
-  `python3 -c pass`; every other command was `true`.
+- **When and where:** one run from 23:21 to 23:45 UTC. One request ran at a
+  time, with no errors. The run used Runtime's server in Virginia, which serves
+  every customer today. The guest kernel was 6.1. The client was Node 24.20.0
+  with `withruntime` 0.8.4 from npm, with no retries. The account had no credit.
+- **What ran:** the default sandbox, with 2 vCPU, 4 GiB of memory and 4 GiB of
+  disk. The server keeps a few spares of it, started ahead of time, and all 100 warm
+  creates were handed one. The template row is 2 vCPU and 2 GiB. That shape has
+  no spare, so it was restored from a saved template. The first command was
+  `python3 -c pass`. Every other command was `true`.
 - **Two requests added:** "through the first Python result" is each start's
-  create and first command added together, and "through the next command" each
+  create and first command added together. "Through the next command" is each
   wake and the command after it.
-- **Pause and wake:** a pause answers once the sandbox is frozen; its memory is
-  written after. Every other round left the pause ten seconds, so the memory
-  was on disk and the wake read it back: the "wake from disk" row. The laptop's
-  figure for that row includes a new connection to the API after ten idle
-  seconds.
+- **Pause and wake:** a pause returns once the sandbox is frozen. Its memory is
+  written after that. Every other round left the pause ten seconds, so the
+  memory was on disk. The wake read it back. That is the "wake from disk" row.
+  The laptop's figure for that row includes a new connection to the API, made
+  after ten idle seconds.
 - **Snapshot and fork** pause a running source for the capture and wake it
-  again. The snapshot row is the snapshot request; the laptop's figure also
+  again. The snapshot row is the snapshot request. The laptop's figure also
   holds the wake that follows it.
-- **Preview:** the preview service keeps no timing log, so that row has the
+- **Preview:** the preview service keeps no timing log. So that row has the
   laptop's figure only.
 - **Percentiles** are nearest-rank. The [1,800 samples](/benchmarks/like-for-like-2026-09-28.jsonl)
-  hold every request, its time on the laptop and on the server, and how each
-  create was served; they are observations, not a latency promise.
+  hold every request. They record its time on the laptop and on the server, and
+  how each create was served. They are observations, not a latency promise.
 
 The run is `packages/cloud-guide/benchmarks/like-for-like.mts` in the Runtime
-repository, and `server-timings.ts` beside it joins each request to the API's
-log line for it.
+repository. `server-timings.ts` beside it joins each request to the API's log
+line for it.
 
 ## What others publish
 
 Each provider's own figure, in its own words. None of these pages says where
-its figure is timed from or whether the network is in it, except where the
-figure says otherwise. A figure under one network round trip across the United
-States can only be timed on the provider's own servers, so set it beside the
-server column above.
+its figure is timed from, or whether the network is in it. The exception is
+where the figure says otherwise. A figure under one network round trip across
+the United States can only be timed on the provider's own servers. So set it
+beside the server column above.
 
 | Provider           | Step                    | What it publishes              | Source                                                                                                                 |
 | ------------------ | ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
@@ -99,21 +99,23 @@ Their workloads and conditions differ from Runtime's.
 ## From your own machine
 
 These are the times your own code sees from a laptop in the US Mountain time
-zone, network included. **A new default sandbox took {{first-command}} from
+zone. The network is included. **A new default sandbox took {{first-command}} from
 the create request through the first Python result at the median** on
 {{speed-date}}, with a p95 of {{first-command-p95}} across 20 sequential
 starts and no errors. A paused sandbox ran its next command {{wake}} after the
-call that woke it, and a preview visit to one answered in {{preview-visit}},
-on {{operations-date}}. The laptop is about one network round trip from
-Virginia, and each of those calls pays one.
+call that woke it. A preview visit to one responded in {{preview-visit}}, on
+{{operations-date}}. The laptop is about one network round trip from Virginia.
+Each of those calls pays one.
 
 ### Startup, 28 September 2026
 
-The script at the end of this page ran 20 sequential starts at 02:35 UTC, then
-20 more straight after, from a MacBook Pro in the US Mountain time zone with
-Node 24.20.0 and `withruntime` 0.8.1 from npm. Runtime runs in one region, in
-Virginia, so these are the times your own code sees, network included. Each sandbox, without credit, had 2 vCPU, 4 GiB memory and 4 GiB disk, with shared CPU, ran
-`python3 -c pass` as its first command, and was stopped before the next began.
+The script at the end of this page ran 20 sequential starts at 02:35 UTC. Then
+it ran 20 more straight after. It ran on a MacBook Pro in the US Mountain time
+zone, with Node 24.20.0 and `withruntime` 0.8.1 from npm. Runtime runs in one
+region, in Virginia. So these are the times your own code sees, network
+included. Each sandbox had no credit. It had 2 vCPU, 4 GiB of memory and 4 GiB
+of disk, with shared CPU. It ran `python3 -c pass` as its first command. It was
+stopped before the next began.
 
 | Step                               | Median | p95    | Repeat median | Repeat p95 |
 | ---------------------------------- | ------ | ------ | ------------- | ---------- |
@@ -121,18 +123,19 @@ Virginia, so these are the times your own code sees, network included. Each sand
 | Create through first Python result | 331 ms | 465 ms | 338 ms        | 604 ms     |
 | First Python request after create  | 155 ms | 258 ms | 160 ms        | 472 ms     |
 
-Each run had 20 successful starts and no errors; p95 is nearest-rank. The
+Each run had 20 successful starts and no errors. p95 is nearest-rank. The
 server keeps a few sandboxes of the most common shapes started ahead of time,
-this one included, and hands one over when a create asks for exactly that
-shape; 30 of these 40 creates reached running in under 200 ms. A shape with no
-spare starts from a saved template instead. The
+this one included. When a create asks for exactly that shape, the server hands
+one over. 30 of these 40 creates reached running in under 200 ms. A shape with
+no spare starts from a saved template instead. The
 [40 recorded samples](/benchmarks/startup-2026-09-28.jsonl) include every
-attempt and its cleanup; these are observations, not a latency promise.
+attempt and its cleanup. These are observations, not a latency promise.
 
 ### Fork, snapshot, pause and wake, 28 September 2026
 
-Ten rounds from the same laptop at 02:29 UTC, through the public API with
-`withruntime` 0.8.1, one source sandbox at a time. The source was the same default shape without credit, running a Python web server.
+Ten rounds ran from the same laptop at 02:29 UTC. They used the public API with
+`withruntime` 0.8.1, one source sandbox at a time. The source was the same
+default shape, without credit, running a Python web server.
 
 | Step                                                | Median | p95    | Samples |
 | --------------------------------------------------- | ------ | ------ | ------- |
@@ -140,24 +143,23 @@ Ten rounds from the same laptop at 02:29 UTC, through the public API with
 | Wake, until running                                 | 282 ms | 414 ms | 10      |
 | Wake, through the first command                     | 569 ms | 764 ms | 10      |
 | Wake straight after a pause, until running          | 137 ms | 236 ms | 10      |
-| Preview visit to a paused sandbox, until it answers | 0.51 s | 0.62 s | 10      |
+| Preview visit to a paused sandbox, until it returns | 0.51 s | 0.62 s | 10      |
 | Fork of one, until the copy is running              | 4.57 s | 5.03 s | 10      |
 | Fork of four, until all four are running            | 5.33 s | 5.67 s | 5       |
 | Snapshot of a running sandbox, until it is ready    | 3.27 s | 3.81 s | 10      |
 | Create from a snapshot, until running               | 601 ms | 807 ms | 10      |
 | Create from a snapshot, through the first command   | 745 ms | 978 ms | 10      |
 
-- **Pause** answers once the sandbox is frozen; its memory is written after.
-- **Wake** was asked for 10 seconds after the pause, by which time this
-  sandbox's memory had been written to disk, and the wake read it back.
-  Straight after a pause the memory has not left the server, so the wake is
-  quicker.
+- **Pause** returns once the sandbox is frozen. Its memory is written after.
+- **Wake** was asked for 10 seconds after the pause. By then, this sandbox's
+  memory had been written to disk, and the wake read it back. Straight after a
+  pause, the memory has not left the server, so the wake is quicker.
 - **Preview visit** is a separate run at 02:33 UTC: one request to a private
-  preview, with its token, of a sandbox paused 15 seconds earlier, timed until
-  the web server in the sandbox answered with 200. Its [samples](/benchmarks/preview-wake-2026-09-28.jsonl)
-  are recorded apart.
+  preview, with its token, of a sandbox paused 15 seconds earlier. It was timed
+  until the web server in the sandbox responded with 200. Its
+  [samples](/benchmarks/preview-wake-2026-09-28.jsonl) are recorded apart.
 - **Fork** and **snapshot** pause a running source for the capture and wake it
-  again; each answered only when its copies were running, or its snapshot was
+  again. Each returned only when its copies were running, or its snapshot was
   ready and the source running again.
 - The [recorded samples](/benchmarks/operations-2026-09-28.jsonl) hold every
   step of every round.
@@ -168,12 +170,13 @@ The measurements below are dated history, each with its own conditions.
 
 ### On the server, 02:28 UTC, 28 September 2026
 
-The same kind of requests timed inside Runtime: from the moment each reached
-the API in Virginia until it answered, read from the API's own timing log for
-the 20 runs of create, command, pause, wake, command, extend, pause, wake and
-stop that the same laptop made at 02:28 UTC. The host's work and our database
-are in it; the network between your machine and Virginia, and TLS, are not. The
-like-for-like run above replaces it.
+The same kind of requests, timed inside Runtime. The time runs from the moment
+each request reached the API in Virginia until it responded. It is read from
+the API's own timing log. The log covers the 20 runs of create, command, pause,
+wake, command, extend, pause, wake and stop that the same laptop made at 02:28
+UTC. The host's work and our database are included. The network between your
+machine and Virginia is not, and neither is TLS. The like-for-like run above
+replaces this.
 
 | Step      | Median | p95    | Of it, the host (median) | Requests |
 | --------- | ------ | ------ | ------------------------ | -------- |
@@ -184,7 +187,7 @@ like-for-like run above replaces it.
 | An extend | 54 ms  | 296 ms | 22 ms                    | 20       |
 | A stop    | 37 ms  | 102 ms | 8 ms                     | 20       |
 
-A command's time is the API and the sandbox together; the log does not split
+A command's time is the API and the sandbox together. The log does not split
 them. The [timings](/benchmarks/server-2026-09-28.json) are published beside
 the samples.
 
@@ -224,8 +227,8 @@ preview visit to a paused sandbox in 3.99 s, and a create from a snapshot in
 ### Matched startup, 24 September 2026
 
 The same client and command (`python3 -c pass`) ran 20 times before and 20 times
-after the default start template was rebuilt, on the same shape as above, with
-the same guest image in both runs.
+after the default start template was rebuilt. The shape was the same as above,
+and so was the guest image in both runs.
 
 | Step                               | Before median | Before p95 | After median | After p95 |
 | ---------------------------------- | ------------- | ---------- | ------------ | --------- |
@@ -233,25 +236,22 @@ the same guest image in both runs.
 | Create through first Python result | 3,631 ms      | 3,806 ms   | 351 ms       | 815 ms    |
 | First Python request after create  | 137 ms        | 186 ms     | 140 ms       | 226 ms    |
 
-Each phase had 20 successful runs and zero errors. The improvement was
-startup: the first Python request itself did not get faster. The before run
-began at 19:16 UTC and the after run at 19:23 UTC; the
+Each phase had 20 successful runs and zero errors. The improvement was in
+startup. The first Python request itself did not get faster. The before run
+began at 19:16 UTC, and the after run at 19:23 UTC. The
 [40 recorded samples](/benchmarks/startup-2026-09-24.jsonl) include every
 attempt and its cleanup result.
 
 ### Echo startup, 24 September 2026
 
-Before the default start template was rebuilt, a new Runtime sandbox
-ran its first command 0.81 seconds after it was asked for, at the median,
-measured from a laptop over the public internet.
-The slowest of 30 took 1.06 seconds.
+Before the default start template was rebuilt, a new Runtime sandbox ran its first command 0.81 seconds after it was asked for, at the median. It was measured from a laptop over the public internet. The slowest of 30 took 1.06 seconds.
 
 At 00:09 UTC, one after another:
 
 | Step                                   | Median | p95    | p99      | Samples |
 | -------------------------------------- | ------ | ------ | -------- | ------- |
 | Create, until the sandbox is running   | 607 ms | 732 ms | 949 ms   | 30      |
-| Create, until the first `echo` answers | 814 ms | 928 ms | 1,059 ms | 30      |
+| Create, until the first `echo` returns | 814 ms | 928 ms | 1,059 ms | 30      |
 | First `node -e` in a new sandbox       | 219 ms | 265 ms | 410 ms   | 30      |
 | First `python3 -c` in a new sandbox    | 116 ms | 136 ms | 217 ms   | 30      |
 | A command in a sandbox already in use  | 105 ms | 149 ms | 216 ms   | 100     |
@@ -266,23 +266,24 @@ At 00:09 UTC, one after another:
   of disk, shared CPU), started from the default template, one at a time. Each
   was stopped before the next began.
 - **Percentiles:** p95 and p99 are nearest-rank. With 30 samples p99 is the
-  slowest run; with 10, p95 and p99 are both the slowest.
+  slowest run. With 10, p95 and p99 are both the slowest.
 - **A second run:** a run four minutes earlier had medians within 6 per cent of
   these on every step.
 - **On the server:** measured on the host itself, with no network, a create took
   a median 270 ms on 22 September 2026.
 
-The client's connection to the API is opened before timing starts, as it would
-be in a program that has already made one call. A fresh process pays for that
+The client opens its connection to the API before timing starts. This is what a
+program does after it has already made one call. A fresh process pays for that
 once, about 140 ms here.
 
 ## Run the latest measurement yourself
 
 This measures the same workload as the startup table under "From your own
-machine": sequential starts without credit, 2 vCPU, 4 GiB memory, 4 GiB disk, then `python3 -c pass` as the first
-command. It opens the API connection before timing, disables automatic request
-and capacity retries, and confirms each sandbox is stopped before the next.
-There are no pause, wake or fork operations in this measurement.
+machine". It runs sequential starts without credit, with 2 vCPU, 4 GiB memory
+and 4 GiB disk. The first command is `python3 -c pass`. The script opens the API
+connection before timing. It disables automatic request and capacity retries.
+It confirms each sandbox is stopped before the next. This measurement has no
+pause, wake or fork operations.
 
 1. Save the script as `bench.mts` in an empty folder.
 2. Run `npm install withruntime` and sign in with `npx withruntime login`, or set
@@ -291,17 +292,18 @@ There are no pause, wake or fork operations in this measurement.
    `OUT=after.json bun bench.mts`.
 
 `RUNS` defaults to 20 and accepts 1–100. It runs without credit's hours first,
-then on the account's credit if it has some. Ctrl-C prevents further starts and lets
-the current attempt finish cleanup. A failed or uncertain create stops the
-benchmark after cleanup; its five-minute time limit is a backstop. Cleanup failures
-print the attempt labels for follow-up and make the command fail.
+then on the account's credit if it has some. Ctrl-C prevents further starts. It
+lets the current attempt finish its cleanup. A failed or uncertain create stops
+the benchmark after cleanup. Its five-minute time limit is a backstop. If
+cleanup fails, the script prints the attempt labels for follow-up, and the
+command fails.
 
-For a before/after comparison, run the identical script on the same client,
-connection and shape, saving separate output files. Record the SDK version and
+For a before and after comparison, run the identical script on the same client,
+connection and shape. Save separate output files. Record the SDK version and
 when each run happened. The September comparison used one unchanged guest
-image, confirmed by the host operator; the public API does not expose that
+image. The host operator confirmed it. The public API does not expose that
 image's filesystem hash. Running this now measures the current default image
-and templates, rather than recreating the historical before state.
+and templates. It does not recreate the historical before state.
 
 ```ts check
 // bench.mts

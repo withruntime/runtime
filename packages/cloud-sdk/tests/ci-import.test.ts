@@ -281,6 +281,13 @@ test("`runtime ci import` prints the file, writes it with --write, and never ove
   await expect(run(["ci", "import", join(dir, "nothing-here")], env, out)).rejects.toThrow(
     "has neither .github/workflows/*.yml nor .circleci/config.yml",
   );
+  // A Cloud Build or CodeBuild config needs no import: it runs as it is.
+  const gcb = join(dir, "gcb");
+  mkdirSync(gcb);
+  writeFileSync(join(gcb, "cloudbuild.yaml"), "steps: [{name: node, args: [npm, test]}]\n");
+  await expect(run(["ci", "import", gcb], env, out)).rejects.toThrow(
+    "cloudbuild.yaml needs no import: CI/CD runs it as it is. Connect with",
+  );
 });
 
 test("a value GitHub filled in is filled in by the shell, and its literal text is kept as written", () => {

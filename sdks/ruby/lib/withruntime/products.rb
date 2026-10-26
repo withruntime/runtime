@@ -186,6 +186,24 @@ module WithRuntime
     def get = Record.new(@t.json("GET", "/v1/limits"))
   end
 
+  # +runtime.jobs+: other platforms' jobs read into Runtime jobs. Create and manage
+  # jobs with the CLI (+runtime jobs+), the TypeScript or Python SDK, or the HTTP API.
+  class Jobs < Product
+    # Reads a Google Cloud Run job's YAML (with the Cloud Scheduler job that runs it)
+    # or an AWS Batch job definition (API JSON, describe-job-definitions output or a
+    # CloudFormation template, with the EventBridge schedule or rule that submits it)
+    # into the Runtime jobs that run the same container. +files+ is
+    # <tt>[{ "path" => "job.yaml", "text" => ... }]</tt>; +from+ is "cloud-run" or
+    # "aws-batch" (found from the files when nil); +parameters+ are a CloudFormation
+    # template's values. Changes nothing: +runtime jobs import+ builds and creates it.
+    def import_plan(files, from: nil, parameters: nil)
+      body = { "files" => files }
+      body["from"] = from if from
+      body["parameters"] = parameters if parameters && !parameters.empty?
+      Record.new(@t.json("POST", "/v1/job-imports", body: body))
+    end
+  end
+
   # +runtime.referrals+: the account's referral link and what it earned. Money is
   # integer microdollars in strings.
   class Referrals < Product

@@ -37,6 +37,26 @@ type AgentService struct {
 	Asks *AgentAskService
 }
 
+// AnthropicOptions is Claude Managed Agents' API on Runtime: the base URL
+// and key Anthropic's Go SDK takes, so code written for it runs here
+// unchanged:
+//
+//	o := client.Agents.Anthropic()
+//	anthropicClient := anthropic.NewClient(option.WithBaseURL(o.BaseURL), option.WithAPIKey(o.APIKey))
+//
+// Sessions call the model with the account's own Anthropic key, the egress
+// secret ANTHROPIC_API_KEY (runtime secrets set ANTHROPIC_API_KEY --host
+// api.anthropic.com).
+type AnthropicOptions struct {
+	BaseURL string
+	APIKey  string
+}
+
+// Anthropic answers the AnthropicOptions for this client's origin and key.
+func (s *AgentService) Anthropic() AnthropicOptions {
+	return AnthropicOptions{BaseURL: s.c.baseURL + "/anthropic", APIKey: s.c.apiKey}
+}
+
 func newAgentService(c *Client) *AgentService {
 	return &AgentService{
 		c:         c,
@@ -76,6 +96,10 @@ type AgentDefinition struct {
 	Pool    []string         `json:"pool,omitempty"`
 	MCP     []AgentMCPServer `json:"mcp,omitempty"`
 	Volumes []AgentVolume    `json:"volumes,omitempty"`
+	// Network is where each session's sandbox may connect, enforced by its
+	// network rules from its first packet: with Allow, only those hosts.
+	// Nil: anywhere.
+	Network *AgentNetwork `json:"network,omitempty"`
 	// IdlePauseSeconds pauses a session's sandbox once it has been idle this
 	// long (10 to 86400).
 	IdlePauseSeconds int `json:"idlePauseSeconds,omitempty"`
@@ -93,9 +117,28 @@ type AgentDefinition struct {
 	MaxDayDollars float64 `json:"maxDayDollars,omitempty"`
 	// Template is the use it was made for: "support" or "team".
 	Template string `json:"template,omitempty"`
+	// Permissions say which tool calls of the harness run, wait for a
+	// person, or are refused; nil: every call runs.
+	Permissions *AgentPermissions `json:"permissions,omitempty"`
 	// Extra holds fields newer than this SDK: kept when read, sent when
 	// written, so a definition read and written back loses nothing.
 	Extra map[string]any `json:"-"`
+}
+
+// AgentPermissions hold tool calls for a person. Each call is a tool_call
+// event in the session's log; one that waits is an ask of the inbox with the
+// options Allow and Deny (Asks.Approve, Asks.Deny), and only that call waits.
+// A policy is "always_allow" (it runs), "always_ask" (it waits for a person)
+// or "auto" (Runtime reads it: it runs, is refused as high_risk, or waits).
+type AgentPermissions struct {
+	// Default is the policy of a call no entry of Tools names
+	// ("always_allow" unless set).
+	Default string `json:"default,omitempty"`
+	// Tools give a policy by the most particular name that matches: the
+	// harness's own tool name (Bash, Edit, apply_patch, run_shell_command,
+	// mcp__github__create_issue), an MCP server (mcp:github), or a family
+	// (shell, edit, read, web, mcp).
+	Tools map[string]string `json:"tools,omitempty"`
 }
 
 // AgentFrom is where a session's sandbox starts, one of the three: an image,
@@ -121,6 +164,13 @@ type AgentVolume struct {
 	Path   string `json:"path"`
 }
 
+// AgentNetwork is an agent's sandbox network rules: Internet, and with
+// Allow only those hosts.
+type AgentNetwork struct {
+	Internet bool     `json:"internet"`
+	Allow    []string `json:"allow,omitempty"`
+}
+
 type agentDefinitionFields AgentDefinition
 
 // MarshalJSON writes the definition with its Extra fields.
@@ -144,7 +194,7 @@ func (d *AgentDefinition) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for _, known := range []string{"command", "from", "vcpu", "memoryMiB", "instructions", "env", "secrets", "pool", "mcp",
-		"volumes", "idlePauseSeconds", "maxSessionSeconds", "maxConcurrent", "maxSessionDollars", "maxDayDollars", "template"} {
+		"volumes", "idlePauseSeconds", "maxSessionSeconds", "maxConcurrent", "maxSessionDollars", "maxDayDollars", "template", "permissions"} {
 		delete(all, known)
 	}
 	fields.Extra = nil
@@ -249,8 +299,10 @@ func (i AgentSessionInfo) Ended() bool {
 // AgentEvent is one entry of a session's log.
 type AgentEvent struct {
 	Seq int64 `json:"seq"`
-	// Kind is input, answer, reply, ask, status, result, error, note, or
-	// child: a child session's end, posted into its parent's log.
+	// Kind is input, answer, reply, ask, status, result, error, note,
+	// child (a child session's end, posted into its parent's log), turn (a
+	// model turn) or tool (a tool call): the trace's spans, whose fields
+	// are in Body (see AgentSpan).
 	Kind string `json:"kind"`
 	// Actor is who: a principal's id for the API, slack:<user>,
 	// github:<login>, agent for the harness, runtime for the runner.
@@ -263,6 +315,99 @@ type AgentEvent struct {
 func (e AgentEvent) Text() string {
 	text, _ := e.Body["text"].(string)
 	return text
+}
+
+// AgentTokens counts tokens and their cost at the provider's list price.
+type AgentTokens struct {
+	// InputTokens leaves out tokens read from or written to the prompt cache.
+	InputTokens      int64   `json:"inputTokens"`
+	OutputTokens     int64   `json:"outputTokens"`
+	CacheReadTokens  int64   `json:"cacheReadTokens"`
+	CacheWriteTokens int64   `json:"cacheWriteTokens"`
+	CostUSD          float64 `json:"costUsd"`
+}
+
+// AgentToolCallRef is a tool call a turn asked for.
+type AgentToolCallRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// AgentSpan is one span of a session's trace: a model turn (Kind "turn")
+// or a tool call (Kind "tool"). The fields of the other kind are zero.
+type AgentSpan struct {
+	Seq       int64     `json:"seq"`
+	Kind      string    `json:"kind"`
+	ID        string    `json:"id"`
+	StartedAt time.Time `json:"startedAt"`
+	// DurationMS is the turn's time in the model, or the tool call's from
+	// the turn that asked for it to the request that carried its result.
+	DurationMS int64 `json:"durationMs"`
+
+	// A turn's.
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
+	FirstTokenMS     *int64 `json:"firstTokenMs,omitempty"`
+	InputTokens      int64  `json:"inputTokens,omitempty"`
+	OutputTokens     int64  `json:"outputTokens,omitempty"`
+	CacheReadTokens  int64  `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens,omitempty"`
+	// CostUSD is nil for a model with no known list price.
+	CostUSD    *float64           `json:"costUsd,omitempty"`
+	StopReason *string            `json:"stopReason,omitempty"`
+	Status     int                `json:"status,omitempty"`
+	ToolCalls  []AgentToolCallRef `json:"toolCalls,omitempty"`
+
+	// A tool call's: Turn is the ID of the turn that asked for it; Input
+	// and Output are at most 2,000 characters each.
+	Name   string  `json:"name,omitempty"`
+	Turn   *string `json:"turn,omitempty"`
+	Input  string  `json:"input,omitempty"`
+	Output string  `json:"output,omitempty"`
+
+	// Error is a turn's error message (a JSON string) or whether a tool
+	// call failed (a JSON boolean).
+	Error json.RawMessage `json:"error,omitempty"`
+}
+
+// AgentTrace is a page of a session's trace: the whole session's totals,
+// by model and by tool, and the spans after the page's after. NextAfter is
+// where the next page starts, nil when the log held no more.
+type AgentTrace struct {
+	SessionID string `json:"sessionId"`
+	Totals    struct {
+		AgentTokens
+		Turns           int64 `json:"turns"`
+		ToolCalls       int64 `json:"toolCalls"`
+		UnpricedTurns   int64 `json:"unpricedTurns"`
+		FailedTurns     int64 `json:"failedTurns"`
+		FailedToolCalls int64 `json:"failedToolCalls"`
+		ModelMS         int64 `json:"modelMs"`
+		ToolMS          int64 `json:"toolMs"`
+	} `json:"totals"`
+	Models []struct {
+		AgentTokens
+		Model         string `json:"model"`
+		Provider      string `json:"provider"`
+		Turns         int64  `json:"turns"`
+		UnpricedTurns int64  `json:"unpricedTurns"`
+	} `json:"models"`
+	Tools []struct {
+		Name       string `json:"name"`
+		Calls      int64  `json:"calls"`
+		Failed     int64  `json:"failed"`
+		DurationMS int64  `json:"durationMs"`
+	} `json:"tools"`
+	Spans     []AgentSpan `json:"spans"`
+	NextAfter *int64      `json:"nextAfter"`
+}
+
+// AgentTraceOTLP is a page of a session's trace as OpenTelemetry traces.
+type AgentTraceOTLP struct {
+	// Request is an OTLP/JSON ExportTraceServiceRequest, to POST as it is to
+	// any collector's /v1/traces; the first page holds the session's root.
+	Request   json.RawMessage
+	NextAfter *int64
 }
 
 // AgentTrigger starts sessions of its agent from outside the API.
@@ -703,6 +848,58 @@ func (s *AgentSession) Events(ctx context.Context, after int64) iter.Seq2[AgentE
 			}
 		}
 	}
+}
+
+func tracePage(format string, after int64, limit int) url.Values {
+	q := url.Values{"format": {format}, "after": {strconv.FormatInt(after, 10)}}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	return q
+}
+
+// Trace reads a page of the session's trace: every model turn and tool call
+// its harness made, with timing, tokens and cost at the provider's list
+// price. It holds up to limit spans after after (0: 200; 500 at most) and
+// the whole session's totals; read on with after set to *NextAfter until
+// NextAfter is nil.
+//
+//	for after := int64(0); ; {
+//		page, err := session.Trace(ctx, after, 500)
+//		if err != nil {
+//			return err
+//		}
+//		for _, span := range page.Spans {
+//			fmt.Println(span.Kind, span.DurationMS)
+//		}
+//		if page.NextAfter == nil {
+//			break
+//		}
+//		after = *page.NextAfter
+//	}
+func (s *AgentSession) Trace(ctx context.Context, after int64, limit int) (*AgentTrace, error) {
+	var trace AgentTrace
+	if err := s.c.do(ctx, &call{method: http.MethodGet, path: s.path("/trace"), query: tracePage("json", after, limit)}, &trace); err != nil {
+		return nil, err
+	}
+	return &trace, nil
+}
+
+// TraceOTLP reads the same page as OpenTelemetry traces: OTLP/JSON (an
+// ExportTraceServiceRequest) in the GenAI semantic conventions.
+func (s *AgentSession) TraceOTLP(ctx context.Context, after int64, limit int) (*AgentTraceOTLP, error) {
+	var page struct {
+		ResourceSpans json.RawMessage `json:"resourceSpans"`
+		NextAfter     *int64          `json:"nextAfter"`
+	}
+	if err := s.c.do(ctx, &call{method: http.MethodGet, path: s.path("/trace"), query: tracePage("otlp", after, limit)}, &page); err != nil {
+		return nil, err
+	}
+	request, err := json.Marshal(map[string]json.RawMessage{"resourceSpans": page.ResourceSpans})
+	if err != nil {
+		return nil, err
+	}
+	return &AgentTraceOTLP{Request: request, NextAfter: page.NextAfter}, nil
 }
 
 // Stop asks the session to stop and returns it as it is then. A running

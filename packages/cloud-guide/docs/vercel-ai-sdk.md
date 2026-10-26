@@ -34,8 +34,8 @@ export async function fixTests(harness: HarnessAgentAdapter) {
 }
 ```
 
-The key comes from `RUNTIME_API_KEY` or this machine's `npx withruntime login`,
-as for the rest of the SDK. Pass `createRuntimeSandbox({ runtime })` to share a
+The key comes from `RUNTIME_API_KEY`, or from `npx withruntime login` on this
+machine, as in the rest of the SDK. Pass `createRuntimeSandbox({ runtime })` to share a
 client, or `{ sandbox }` to run the harness in a sandbox you created and keep.
 
 Bridge harnesses (Claude Code, Codex, OpenCode, Deep Agents) talk to a bridge in
@@ -62,8 +62,9 @@ Every option is optional.
 
 - **Commands** run under `bash` as the sandbox user, with passwordless `sudo`,
   in the session's working directory under `/workspace`. Output streams, so a
-  long log is not cut at the size of one answer. A command past its limit exits 124. `run` also takes `stdin` and `timeoutMs`, and aborting a command ends it
-  in the sandbox too.
+  long log is not cut at the size of one response. A command past its limit
+  exits 124. `run` also takes `stdin` and `timeoutMs`, and aborting a command
+  ends it in the sandbox too.
 - **Files** are read and written atomically, with parent directories made for
   you. A file over 1 MiB is written under `/workspace`.
 - **Ports** become previews at `runtimehost.com`, private unless you ask. An
@@ -71,7 +72,7 @@ Every option is optional.
   `x-runtime-preview-token` header; a WebSocket endpoint sends it in the header.
 - **Network policy.** `allow-all` is the public web, `deny-all` refuses every
   outbound connection, and `custom` reaches only the listed hosts and ranges,
-  with `deniedCIDRs` refused. Changes apply at once, to open connections too.
+  with `deniedCIDRs` refused. Changes apply immediately, to open connections too.
 - **Bootstrap.** A harness's setup recipe runs once in each new sandbox before
   its first turn.
 

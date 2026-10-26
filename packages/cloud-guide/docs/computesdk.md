@@ -1,6 +1,6 @@
 # Runtime for ComputeSDK
 
-Create Runtime sandboxes through ComputeSDK's provider interface, with commands, streaming, files, preview URLs and snapshots.
+Create Runtime sandboxes through ComputeSDK's provider interface. Run commands, stream output, and use files, preview URLs and snapshots.
 
 `@computesdk/runtime` is a ComputeSDK provider, like its E2B, Modal or Daytona
 providers. Change the provider and the same `compute.sandbox` code runs in a
@@ -9,15 +9,15 @@ SDK, `withruntime`.
 
 ## Install
 
-ComputeSDK publishes its providers to npm itself, from its own repository,
-the Runtime provider among them (`@computesdk/runtime` since 28 September 2026):
+ComputeSDK publishes its providers to npm from its own repository. The Runtime
+provider is one of them, as `@computesdk/runtime` since 28 September 2026:
 
 ```bash no-run
 npm install computesdk @computesdk/runtime
 ```
 
-It needs Node.js 22.12 or later. The key comes from `RUNTIME_API_KEY` or this
-machine's `npx withruntime login`, as for the rest of the SDK.
+It needs Node.js 22.12 or later. The key comes from `RUNTIME_API_KEY`, or from
+`npx withruntime login` on this machine, as in the rest of the SDK.
 
 ## Example
 
@@ -37,7 +37,7 @@ try {
 }
 ```
 
-`sandbox.getInstance()` returns the `withruntime` sandbox, for everything
+`sandbox.getInstance()` returns the `withruntime` sandbox. Use it for anything
 ComputeSDK's interface does not cover: processes, terminals, network rules,
 the desktop and the rest.
 
@@ -64,13 +64,13 @@ that sandbox.
 - **Commands** run under `bash -c`, for 60 seconds unless `timeout` says
   otherwise (up to 24 hours). One that runs past its timeout returns exit code
   124 with its output so far. `background: true` starts a Runtime process and
-  returns at once.
+  returns immediately.
 - **Streaming.** `onStdout` and `onStderr` receive output through Runtime's API
   as the command writes it, so ComputeSDK needs no port inside the sandbox.
 - **Files** use Runtime's file calls, not shell commands.
 - **`getUrl`** shares the port as a private
   [preview](./javascript#share-a-port) and returns a link that carries its
-  token. The link works as it is in a browser, `fetch`, `curl` or a
+  token. The link works unchanged in a browser, `fetch`, `curl` or a
   WebSocket client, until the token expires.
 - **`destroy`** stops the sandbox. `getById` returns `null` for a stopped one,
   and a paused one wakes when used.
@@ -82,12 +82,12 @@ that sandbox.
 
 ## What was verified
 
-On 25 September 2026 the provider was built in a clone of ComputeSDK's
-repository (commit `d52afb5`) against `withruntime` 0.5.1 from npm. There its
-CommonJS and ESM builds, type declarations, typecheck and lint passed; 28 unit
-tests passed with the Runtime SDK mocked; ComputeSDK's shared provider suite
-passed against ComputeSDK's own mock sandbox; and both builds loaded
-`withruntime` and called a local stand-in for Runtime's API.
+On 25 September 2026, the provider was built in a clone of ComputeSDK's
+repository (commit `d52afb5`) against `withruntime` 0.5.1 from npm. There, its
+CommonJS and ESM builds, type declarations, typecheck and lint passed. 28 unit
+tests passed with the Runtime SDK mocked. ComputeSDK's shared provider suite
+passed against ComputeSDK's own mock sandbox. Both builds loaded `withruntime`
+and called a local stand-in for Runtime's API.
 
 On 11 October 2026 the published `@computesdk/runtime` 0.1.4 ran against
 Runtime's API: create, a command, streamed output, a file written and read, a

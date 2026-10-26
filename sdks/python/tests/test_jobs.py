@@ -50,6 +50,9 @@ class Stub(BaseHTTPRequestHandler):
         if path.endswith("/logs"):
             return self.answer({"chunks": [{"offset": 0, "stream": "stdout", "text": "hi\n"}], "nextCursor": 3,
                                 "truncated": False, "complete": True})
+        if path == "/v1/job-imports":
+            return self.answer({"from": "aws-batch", "read": ["job.json"], "jobs": [], "notes": [],
+                                "importable": False})
         if path.startswith("/v1/job-runs/"):
             return self.answer(RUN)
         if path.startswith("/v1/jobs"):
@@ -135,6 +138,20 @@ class JobsTest(unittest.TestCase):
         self.assertEqual([s[1].split("?")[0] for s in Stub.seen[1:]], [
             "/v1/jobs", f"/v1/jobs/{JOB_ID}/runs", f"/v1/job-runs/{RUN_ID}", f"/v1/job-runs/{RUN_ID}/logs",
             f"/v1/jobs/{JOB_ID}:pause", f"/v1/jobs/{JOB_ID}:resume", f"/v1/jobs/{JOB_ID}:cancel"])
+
+    def test_import_plan_sends_the_files_and_answers_the_plan(self):
+        with self.client() as runtime:
+            plan = runtime.jobs.import_plan([{"path": "job.json", "text": "{}"}], from_="aws-batch",
+                                            parameters={"AWS::Region": "us-east-1"})
+        self.assertEqual(plan["from"], "aws-batch")
+        self.assertEqual(Stub.seen[0][:3], ("POST", "/v1/job-imports", {
+            "files": [{"path": "job.json", "text": "{}"}], "from": "aws-batch",
+            "parameters": {"AWS::Region": "us-east-1"}}))
+
+        async def run():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=2) as runtime:
+                return await runtime.jobs.import_plan([{"path": "job.yaml", "text": "kind: Job"}])
+        self.assertEqual(asyncio.run(run())["read"], ["job.json"])
 
     def test_runs_reads_newest_first_on_asking(self):
         with self.client() as runtime:

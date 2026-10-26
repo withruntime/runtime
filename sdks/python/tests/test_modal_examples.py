@@ -176,7 +176,8 @@ class ModalExamples(World):
 
     def test_modals_other_objects_refuse_by_name(self):
         # guide/sandbox-snapshots: modal.Dict; modal-examples: modal.Server.
-        for name in ("Dict", "Queue", "Function", "Server", "fastapi_endpoint"):
+        # modal.Function is a scheduled function now (deployed as a job).
+        for name in ("Dict", "Queue", "FunctionCall", "Server", "fastapi_endpoint"):
             with self.assertRaises(CompatibilityError) as raised:
                 getattr(modal, name)
             self.assertIn("Runtime", str(raised.exception))

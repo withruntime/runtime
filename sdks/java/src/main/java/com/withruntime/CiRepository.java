@@ -45,7 +45,10 @@ public final class CiRepository extends JsonObject {
     return getString("productionBranch");
   }
 
-  /** Where in the repository its checks are written. */
+  /**
+   * Where in the repository its checks are written: a runtime.yml, or a cloudbuild.yaml or
+   * buildspec.yml, run as Cloud Build or CodeBuild runs it.
+   */
   public String configPath() {
     return getString("configPath");
   }

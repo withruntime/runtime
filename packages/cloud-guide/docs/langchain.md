@@ -32,8 +32,8 @@ def solve(model, task: str) -> str:
         return result["messages"][-1].content
 ```
 
-The key comes from `RUNTIME_API_KEY` or this machine's `npx withruntime login`,
-as for the rest of the SDK. Leaving the `with` block deletes the sandbox.
+The key comes from `RUNTIME_API_KEY`, or from `npx withruntime login` on this
+machine, as in the rest of the SDK. Leaving the `with` block deletes the sandbox.
 `Sandbox.create()` takes the sandbox's settings, such as `image`, `region`,
 `vcpu`, `memory_mib` and `timeout_seconds`; see the [Python guide](./python).
 
@@ -157,7 +157,7 @@ machine and serves `/workspace` from a directory:
 
 - LangChain's standard sandbox suite, `SandboxIntegrationTests`, ran against
   `RuntimeSandbox`: 79 of its 86 cases passed. The other seven expect
-  behaviour Deep Agents 0.7 changed (`write_file` now overwrites a file, and
+  behavior Deep Agents 0.7 changed (`write_file` now overwrites a file, and
   `glob` returns absolute paths); they fail the same way on a bare
   `BaseSandbox` with no Runtime code in it.
 - `create_deep_agent`, driven by a scripted model, called `write_file`,

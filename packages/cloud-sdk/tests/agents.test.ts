@@ -215,3 +215,14 @@ test("asks: the inbox lists with labels as label=key:value, gets one and answers
   });
   expect(calls[2]!.body).toEqual({ option: "Raise to 20 TB", text: "Done." });
 });
+
+test("anthropic() is the options Anthropic's SDK takes: Runtime's origin with /anthropic, and the key", async () => {
+  const transport = {
+    baseUrl: "https://api.withruntime.com",
+    apiKey: async () => "rt_live_key",
+  } as unknown as Transport;
+  expect(await agents(transport).anthropic()).toEqual({
+    baseURL: "https://api.withruntime.com/anthropic",
+    apiKey: "rt_live_key",
+  });
+});

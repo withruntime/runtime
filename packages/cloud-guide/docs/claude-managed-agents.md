@@ -1,6 +1,6 @@
 # Runtime for Claude Managed Agents
 
-Give a Claude Managed Agent Runtime's sandboxes through Runtime's remote MCP server: machines it creates, runs, shares and keeps, beside its own session container.
+Give a Claude Managed Agent access to Runtime's sandboxes through Runtime's remote MCP server. The agent can create, run, share and keep machines, beside its own session container.
 
 Claude Managed Agents runs the agent loop and a container for each session on
 Anthropic's side. Add Runtime's MCP server to the agent and it can also create
@@ -9,6 +9,14 @@ for days, pause with their memory and wake in about {{server-wake-command}} on R
 port at an HTTPS address, fork, run Docker, and start from your own images.
 Runtime bills them for the CPU they use. The Runtime key stays in an
 Anthropic vault and never enters the session's container.
+
+<!-- launch: agents -->
+
+To run the agents themselves on Runtime instead, with your code unchanged but
+for the client's base URL and key, see
+[switch from Claude Managed Agents](./switch-from-claude-managed-agents).
+
+<!-- /launch: agents -->
 
 ## Set it up
 
@@ -95,20 +103,20 @@ covers both.
 The agent sees every tool of Runtime's [MCP server](./mcp#tools), named
 `runtime_<product>_<verb>`. The ones a builder uses most:
 
-| Tool                            | What the agent does with it                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| `runtime_sandboxes_create`      | Start a sandbox of the size it needs, from Runtime's base image or yours       |
-| `runtime_sandboxes_exec`        | Run a command and read its exit code and output, or start it in the background |
-| `runtime_sandboxes_files_write` | Write the files it generated                                                   |
-| `runtime_sandboxes_previews`    | Share a port at a private HTTPS address under `runtimehost.com`                |
-| `runtime_sandboxes_manage`      | Pause, wake, extend or stop                                                    |
-| `runtime_sandboxes_fork`        | Copy a running sandbox, memory included, to try two approaches at once         |
-| `runtime_images_build`          | Build an image from a Dockerfile once, so later sandboxes start ready          |
+| Tool                            | What the agent does with it                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------- |
+| `runtime_sandboxes_create`      | Start a sandbox of the size it needs, from Runtime's base image or yours        |
+| `runtime_sandboxes_exec`        | Run a command and read its exit code and output, or start it in the background  |
+| `runtime_sandboxes_files_write` | Write the files it generated                                                    |
+| `runtime_sandboxes_previews`    | Share a port at a private HTTPS address under `runtimehost.com`                 |
+| `runtime_sandboxes_manage`      | Pause, wake, extend or stop                                                     |
+| `runtime_sandboxes_fork`        | Copy a running sandbox, memory included, to try two approaches at the same time |
+| `runtime_images_build`          | Build an image from a Dockerfile once, so later sandboxes start ready           |
 
-A pattern that uses both machines: the agent writes and tests code in its
-session container, then deploys the result to a named Runtime sandbox with a
+A pattern that uses both kinds of machine: the agent writes and tests code in
+its session container, then deploys the result to a named Runtime sandbox with a
 preview. That sandbox outlives the session. The next session finds it by name,
-wakes it, and carries on.
+wakes it, and continues.
 
 ## Keep the agent inside its budget
 
@@ -119,8 +127,8 @@ wakes it, and carries on.
   it, so a forgotten one stops costing compute. Tell the agent in its system
   prompt to stop what it starts, as the example does, and to set
   `timeoutSeconds` when a task should end at a fixed time.
-- **A read-only key** gives a reviewing agent the
-  sandboxes, their files and their cost, and nothing it can change.
+- **A read-only key** lets a reviewing agent see the sandboxes, their files and
+  their cost. It cannot change anything.
 - **A session budget** on the Managed Agents side caps the model spend of one
   session, independently of Runtime.
 

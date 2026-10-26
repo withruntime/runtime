@@ -14,8 +14,8 @@ uses rather than the CPUs it holds.
 pip install "withruntime[harbor]"
 ```
 
-Harbor needs Python 3.12 or newer. The key comes from `RUNTIME_API_KEY` or this
-machine's `npx withruntime login`, as for the rest of the SDK.
+Harbor needs Python 3.12 or newer. The key comes from `RUNTIME_API_KEY`, or from
+`npx withruntime login` on this machine, as in the rest of the SDK.
 
 ## Run a benchmark
 
@@ -84,10 +84,10 @@ Every option is optional.
 **Root and `sudo`.** Commands in a Runtime sandbox run as the sandbox user,
 uid 1000, and Harbor runs them as root. The environment runs root commands
 through the sandbox user's passwordless `sudo`, which Runtime's base image
-has. Runtime adds it to every image it builds, from a public image too; an
-image built before 25 September 2026 may lack it, and rebuilding adds it. The
-environment checks when the trial starts and, when it is missing, stops the
-trial with this line to add to the task's `Dockerfile`:
+has. Runtime adds it to every image it builds, including images built from a
+public image. An image built before 25 September 2026 may lack it. Rebuilding
+adds it. The environment checks when the trial starts. If `sudo` is missing, it
+stops the trial and shows this line to add to the task's `Dockerfile`:
 
 ```dockerfile
 RUN apt-get update && apt-get install -y sudo && echo '#1000 ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/runtime
@@ -99,7 +99,7 @@ only to its built-in environments.
 
 ## Limits to plan for
 
-- The trial runs {{trial-sandboxes}} sandboxes at once, so keep `--n-concurrent` at {{trial-concurrency}} or
+- The trial runs {{trial-sandboxes}} sandboxes at the same time, so keep `--n-concurrent` at {{trial-concurrency}} or
   below without credit. A paid account runs more; see [pricing](./pricing#how-many-at-once).
 - Each task is its own image. Builds run one at a time until your account holds
   credit, then four. An account without credit keeps its first three images free;

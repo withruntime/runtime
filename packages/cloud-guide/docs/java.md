@@ -10,19 +10,19 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.19.0</version>
+  <version>0.21.0</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.19.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.21.0")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
 command connects it, with one browser approval).
 
 On a server, put a key from https://withruntime.com/account/keys in
-`RUNTIME_API_KEY` from your secret manager. Never put it in source code, a URL
-or a command-line argument. With no key anywhere, `RuntimeClient.create()`
+`RUNTIME_API_KEY`, stored in your secret manager. Never put it in source code, a
+URL or a command-line argument. With no key anywhere, `RuntimeClient.create()`
 throws `RuntimeCloudException.Authentication` whose code is `missing_api_key`
 and whose hint says how to get one.
 
@@ -43,13 +43,14 @@ public class Hello {
 }
 ```
 
-`create` returns once the sandbox is running, and closing it deletes it;
-`new CreateSandbox().keep()` makes closing stop it instead and keep its disk,
-and `delete()` deletes one at any time. With no
-options you get the free usage while it lasts, the default region, and 2 vCPU,
-4 GiB of memory and a 4 GiB disk, running while it works and pausing itself
-when idle, with no time limit (`timeoutSeconds(seconds)` sets one, 60 to
-86,400). The free usage is spent first, then prepaid credit; `funding(...)` is accepted and ignored. Every field is optional:
+`create` returns once the sandbox is running. Closing the sandbox deletes it.
+`new CreateSandbox().keep()` makes closing stop the sandbox instead, and keeps
+its disk. `delete()` deletes a sandbox at any time. With no options, you get the
+free usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and a
+4 GiB disk. The sandbox runs while it works and pauses itself when idle. It has
+no time limit unless you set one with `timeoutSeconds(seconds)` (60 to 86,400).
+The free usage is spent first, then prepaid credit. `funding(...)` is accepted
+and ignored. Every field is optional:
 
 ```java
 import com.withruntime.*;
@@ -81,7 +82,7 @@ A field newer than the SDK goes in with `.set("field", value)`.
 ## Run commands
 
 `exec` runs a string under `bash -c`. `execArgv` runs a program directly, with
-no shell, which is what you want for untrusted arguments.
+no shell. Use it for untrusted arguments.
 
 ```java
 import com.withruntime.*;
@@ -113,20 +114,20 @@ public class Commands {
 }
 ```
 
-- `env` is how secrets reach a command. It is never echoed back. Never put a
-  secret in the command line itself.
+- `env` passes secrets to a command. Runtime never echoes them back. Never put a
+  secret in the command line.
 - `stdin` gives the command input, then closes it.
 - `.user("root")` runs the command as root, with no `sudo` in front, keeping
   its `env` and `PATH`; `HOME` is `/root`. `SpawnOptions` takes it too, and
-  `ProcessInfo.user()` says which a process runs as.
+  `ProcessInfo.user()` says which user a process runs as.
 - The default timeout is 60 seconds; the maximum is 24 hours. A timeout is a
   result (`timedOut()` is true, with the output so far), not an exception.
 - `check(true)` throws `RuntimeCloudException.Command`, with the exit code and
   output, on a non-zero exit or a timeout.
-- A result holds at most 64 KiB of each stream unless it streams; with
-  `onStdout`, `onStderr` or a timeout over a minute, the command streams and
-  the result keeps everything it printed. A long stream resumes by itself when
-  the server ends it, so no output is dropped.
+- A result holds at most 64 KiB of each stream, unless the command streams. With
+  `onStdout`, `onStderr`, or a timeout over a minute, the command streams. The
+  result then keeps everything it printed. When the server ends a long stream,
+  it resumes by itself. No output is dropped.
 
 ## Background processes
 
@@ -148,7 +149,7 @@ public class Processes {
 }
 ```
 
-A process outlives your connection; get it back with `sbx.process(id)`.
+A process outlives your connection. Get it back with `sbx.process(id)`.
 `write` tracks input offsets, so a retried write is never typed twice.
 
 ## Files
@@ -174,13 +175,13 @@ public class FilesExample {
 }
 ```
 
-`write` makes parent directories and replaces the file atomically; a file over
-1 MiB goes in parallel chunks checked by SHA-256. `stat` returns `null` for a
-path that does not exist. `upload` and `download` move a whole directory as
-one gzipped tar archive through the API's folder routes, which pack and unpack
-it with `tar` inside the sandbox ([files in the API guide](./api#files)); a
-large one uploads in parts. A downloaded folder is unpacked as it arrives and
-lands in place only once it has all arrived: one cut short is
+`write` creates parent directories and replaces the file atomically. A file over
+1 MiB goes in parallel chunks, each checked by SHA-256. `stat` returns `null` for
+a path that does not exist. `upload` and `download` move a whole directory as
+one gzipped tar archive, through the API's folder routes. The sandbox packs and
+unpacks it with `tar` ([files in the API guide](./api#files)). A large folder
+uploads in parts. A downloaded folder is unpacked as it arrives. It lands in place
+only after all of it has arrived. A download cut short fails with
 `download_incomplete` and writes nothing.
 
 ## Pause, wake, fork and snapshot
@@ -213,14 +214,15 @@ public class Lifecycle {
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on its server while it has room and on another when it is full; see
-[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the exception's
+processes. It runs on its server while that server has room, and on another
+server when it is full. See [JavaScript](./javascript) for what forks and
+snapshots keep and how they are billed. If a copy fails, the exception's
 `details().get("startedSandboxIds")` names the copies that did start.
 `wake(Duration)` and `extend(Duration)` set and move a time limit, for a
-sandbox that has one; on one without, `extend` changes nothing.
-`sbx.keepAlive(every, margin, onError)` moves a time limit on from your
-process until `stop()`, and `runtime.sandboxes().getOrCreate(name, options)` answers
-the sandbox with that name, woken or restarted, or creates it.
+sandbox that has one. On a sandbox without a time limit, `extend` changes
+nothing. `sbx.keepAlive(every, margin, onError)` moves the time limit on from
+your process until `stop()`. `runtime.sandboxes().getOrCreate(name, options)`
+returns the sandbox with that name, woken or restarted, or creates it.
 
 ## Share a port
 
@@ -239,7 +241,7 @@ public class Share {
 }
 ```
 
-A preview is private by default; `create(port, "public", null)` shares it with
+A preview is private by default. `create(port, "public", null)` shares it with
 anyone who has the address. Addresses are under `runtimehost.com`.
 
 ## Images, volumes, network rules and secrets
@@ -271,13 +273,13 @@ public class Storage {
 }
 ```
 
-`images().build` waits until the image is ready and throws with code
-`image_failed` when the build fails; `images().create` queues it and returns. A
-Dockerfile build takes `dockerfile(text)` and `contextDir(path)`, the folder
-`docker build` would read, with its `.dockerignore`; only the parts the server
-does not have yet are uploaded. See [custom images](./images). A volume lives
-on one server; its backups can restore a new volume onto another host. `sbx.desktop()` drives a Linux
-desktop in the sandbox.
+`images().build` waits until the image is ready. It throws with code
+`image_failed` when the build fails. `images().create` queues the build and
+returns. A Dockerfile build takes `dockerfile(text)` and `contextDir(path)`, the
+folder `docker build` would read, with its `.dockerignore`. Only the parts the
+server does not have yet are uploaded. See [custom images](./images). A volume
+lives on one server. Its backups can restore a new volume onto another host.
+`sbx.desktop()` drives a Linux desktop in the sandbox.
 
 ## Metrics, events and webhooks
 
@@ -334,33 +336,34 @@ Every exception is a `RuntimeCloudException` (unchecked) with `code()`,
 `getMessage()`, `hint()`, `requestId()`, `status()` and `details()`. Its
 subclasses are `Authentication`, `PermissionDenied`, `NotFound`, `Conflict`,
 `InvalidRequest`, `RateLimited`, `ServiceUnavailable`, `Connection` and
-`Command`, the same classes as the JavaScript, Python and Go SDKs. `no_capacity` is
-`ServiceUnavailable`; `no_credit_running_limit` and a `quota_exceeded` on what
-runs at once are `RateLimited`, and a `quota_exceeded` on what is kept is
-`Conflict`.
+`Command`. They are the same classes as in the JavaScript, Python and Go SDKs.
+`no_capacity` is `ServiceUnavailable`. `no_credit_running_limit`, and a
+`quota_exceeded` on what runs at the same time, are `RateLimited`. A
+`quota_exceeded` on what is kept is `Conflict`.
 
-Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures and every answer that says
-`retryable: true` are retried after its `Retry-After`, up to the maximum number
-of retries, with the same key, so a retry never makes two sandboxes or runs a
-command twice. A wait over 60 seconds is not slept on: the error is returned at
-once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
-`rate_limited`) is sent again until the call's deadline, or for five minutes
-without one, past the maximum. `retryable()` says whether trying the same call again
-may work.
+Every write carries an idempotency key. The client makes it for you and keeps it
+across its own retries. Transport failures, and every response that says
+`retryable: true`, are retried after its `Retry-After`. Retries stop at the
+maximum number of retries. Each retry uses the same key, so a retry never makes
+two sandboxes or runs a command twice. A wait over 60 seconds is not slept on.
+The error returns immediately, with `retryAfterMs`. A response that ran nothing
+(`guest_busy`, `busy`, `rate_limited`) is sent again until the call's deadline.
+Without a deadline, it is sent again for five minutes, past the maximum.
+`retryable()` says whether trying the same call again may work.
 
-**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
-account is at its limit (`quota_exceeded`) or the region is full
-(`no_capacity`), `sandboxes().create` waits and sends the same request again,
-for up to two minutes. Set `waitForCapacity` on the client builder, or on one
-`CreateSandbox`, wake or restart; zero fails at once. A sandbox stays on its
-server, so a wake or restart refused with `no_capacity` is sent again with the
-same idempotency key until room frees. A fork never waits.
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots
+without credit are taken (`no_credit_running_limit`), the account is at its limit
+(`quota_exceeded`), or the region is full (`no_capacity`), `sandboxes().create`
+waits and sends the same request again, for up to two minutes. Set
+`waitForCapacity` on the client builder, or on one `CreateSandbox`, wake or
+restart. Zero fails immediately. A sandbox stays on its server, so a wake or
+restart refused with `no_capacity` is sent again with the same idempotency key
+until room frees. A fork never waits.
 
 An owner, admin or developer can make a read-only key and set a daily spending
 limit on a key at [API keys](https://withruntime.com/account/keys).
-`runtime.limits().get()` reads both; past the limit, a create, wake or
-extension throws with code `spending_limit_reached`, and it is not retried.
+`runtime.limits().get()` reads both. Past the limit, a create, wake or extension
+throws with code `spending_limit_reached`, and it is not retried.
 
 ## Configuration
 
@@ -387,26 +390,26 @@ public class Configured {
   does.
 - Code inside a Runtime sandbox calls Runtime's API at `http://runtime.internal`
   ([Runtime's API from inside a sandbox](./sandbox-environment#runtime-s-api-from-inside-a-sandbox)).
-- The client is safe for concurrent use. Make one and share it: it keeps its
+- The client is safe for concurrent use. Make one and share it. It keeps its
   connections open and holds at most 32 calls in flight (`maxConnections`).
 - It honours `HTTPS_PROXY` and `NO_PROXY`. `httpClient` supplies your own
   `java.net.http.HttpClient`.
 - Money is integer microdollars: 1,000,000 is one US dollar.
   `runtime.usage()` returns the account's balance exactly, as `BigInteger`.
 - `runtime.usageExport(since, until, cursor, limit)` reads one page of settled
-  usage over a UTC range, with its server CSV; follow `nextCursor()` until it
+  usage over a UTC range, with its server CSV. Follow `nextCursor()` until it
   is null. `finalThrough()` is the time before which no more charges will
-  settle, and a row's `isFinal()` is true once its resource is deleted and can
-  be charged nothing more ([export settled usage](./api#export-settled-usage)).
+  settle. A row's `isFinal()` is true once its resource is deleted and can be
+  charged nothing more ([export settled usage](./api#export-settled-usage)).
 
 ## Network products and backups
 
 `runtime.domains()`, `ports()`, `addresses()` and `tunnel()` manage account
 networking. Domains and ports name the sandbox they serve. `tunnel()` is the
-account's WireGuard network; it is separate from a sandbox's TCP forwarding.
-Answers keep the API's complete fields through `JsonObject`: use `getLong`
-for integer money and `getInstant` for funding deadlines. An address or tunnel
-reservation stays until released when credit runs out; traffic stops during
+account's WireGuard network. It is separate from a sandbox's TCP forwarding.
+Responses keep the API's complete fields through `JsonObject`. Use `getLong`
+for integer money, and `getInstant` for funding deadlines. When credit runs out,
+an address or tunnel reservation stays until it is released. Traffic stops during
 the unfunded time.
 
 ```java
@@ -434,10 +437,11 @@ public class NetworkProductsExample {
 `volumes().backup`, `backups`, `getBackup`, `deleteBackup`, `setBackupPolicy`
 and `restore` manage backups. `setBackupSchedule(id, 60, null, Map.of("hourly",
 24, "daily", 7))` backs the volume up every 60 minutes (or pass a UTC cron
-instead of the minutes) and keeps backups by those counts;
-`clearBackupSchedule(id, null)` goes back to daily. A restore creates a new volume; it does not
-replace the original. A backup's `backedUp` field is true once its copy has
-been checked off the source host. Writes after that backup are not in it.
+instead of the minutes) and keeps backups by those counts.
+`clearBackupSchedule(id, null)` goes back to daily. A restore creates a new
+volume. It does not replace the original. A backup's `backedUp` field is true
+once its copy has been checked off the source host. Writes after that backup are
+not in it.
 
 ```java
 import com.withruntime.*;
@@ -458,14 +462,14 @@ public class VolumeBackupExample {
 ## File permissions and watching
 
 `Files.WriteOptions.mode(0755)` sets permissions atomically on current guest
-images; `0` means no permissions, rather than the default. Older images use
+images. `0` means no permissions, rather than the default. Older images use
 the `exec` permission for a chmod fallback. A supplied write idempotency key
 covers the whole upload, including completed retries. `files().chmod` changes
 an existing file's permissions.
 
 A watch's `events()` follows its cursor across server handovers. Loss notices
 (`overflow` or `lost`) mean the caller should rescan. Closing the event stream
-stops reading; `watch.stop()` also stops the guest watch. A later `events()`
+stops reading. `watch.stop()` also stops the guest watch. A later `events()`
 resumes after a pause or an earlier reader close. Only one reader uses a watch
 at a time. `files().watches()` also lists watches, polls and stops them by ID.
 
@@ -495,15 +499,15 @@ public class FileWatchExample {
 
 A terminal carries binary input/output over an authenticated WebSocket.
 Read output while writing input. Close it to release a blocked reader or
-writer; interrupting its reader also closes it. Its opening deadline follows
+writer. Interrupting its reader also closes it. Its opening deadline follows
 the client's timeout. Closing an attached terminal does not stop its existing
-process; a new terminal's shell ends with the connection.
+process. A new terminal's shell ends with the connection.
 
 `openTunnel()` multiplexes loopback TCP streams. A stream's `closeWrite()`
 sends input EOF and keeps reading the response. Each stream holds at most
-1 MiB of unread response data; exceeding that bound fails only that stream
-with `tunnel_receive_overflow`, after delivering its buffered bytes.
-`portForward()` copies both directions for each local connection and closes
+1 MiB of unread response data. If a stream exceeds that bound, only that stream
+fails with `tunnel_receive_overflow`, after delivering its buffered bytes.
+`portForward()` copies both directions for each local connection. It closes
 its listener and active connections together.
 
 ```java
@@ -531,8 +535,8 @@ public class TerminalForwardExample {
 `sbx.mounts().add(options)` takes provider, bucket, path and the name of a
 Runtime secret, keeping the bucket key outside the sandbox. `list()` and
 `remove(path)` manage its lifecycle. `runtime.mcp().catalog()` lists server
-choices; `sbx.mcp().start(options)`, `get()`, `ready(timeout)` and `stop()`
-manage sandbox servers. `ready` waits for installation to end; inspect each
+choices. `sbx.mcp().start(options)`, `get()`, `ready(timeout)` and `stop()`
+manage sandbox servers. `ready` waits for installation to end. Inspect each
 server's status for failures. Interrupted waits stop promptly.
 
 `sbx.desktop().recordings()` has `start`, `get`, `list`, `stop`, `download`
@@ -545,12 +549,12 @@ own disk and count toward that disk's space.
 
 `runtime.ci()` reads CI/CD, which checks every push and pull request of a
 connected GitHub repository in sandboxes. `ci().repositories()` has `connect`,
-`list` and `disconnect` (only a full key connects one); `ci().checks().list`
+`list` and `disconnect` (only a full key connects one). `ci().checks().list`
 and `get`, `ci().jobs().get` (with the tail of the job's log) and
-`ci().tests().list` read what ran, and `ci().releases().list` a release's
-steps as they were taken. Times are milliseconds since the epoch,
-lists are `Page`s like the others, and an account outside the beta gets
-`PermissionDenied` with code `product_in_beta`.
+`ci().tests().list` read what ran. `ci().releases().list` returns a release's
+steps as they ran. Times are milliseconds since the epoch. Lists are `Page`s
+like the others. An account outside the beta gets `PermissionDenied` with code
+`product_in_beta`.
 
 ```java check
 import com.withruntime.CiCheck;

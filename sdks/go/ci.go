@@ -27,7 +27,9 @@ type CIRepository struct {
 	Repository string `json:"repository"`
 	// ProductionBranch is the branch whose pushes are checked as landed.
 	ProductionBranch string `json:"productionBranch"`
-	// ConfigPath is where in the repository its checks are written.
+	// ConfigPath is where in the repository its checks are written: a
+	// runtime.yml, or a cloudbuild.yaml or buildspec.yml, run as Cloud Build
+	// or CodeBuild runs it.
 	ConfigPath string `json:"configPath"`
 	// Installation is the organization's installation of Runtime's GitHub
 	// App the repository is read through.
@@ -45,7 +47,8 @@ type CIRepository struct {
 type ConnectCIRepositoryOptions struct {
 	// ProductionBranch is main unless set.
 	ProductionBranch string `json:"productionBranch,omitempty"`
-	// ConfigPath is runtime.yml unless set.
+	// ConfigPath is runtime.yml unless set; a cloudbuild.yaml or
+	// buildspec.yml runs as Cloud Build or CodeBuild runs it.
 	ConfigPath string `json:"configPath,omitempty"`
 	// Installation is the GitHub App installation to read through; the
 	// newest when 0.
@@ -148,8 +151,15 @@ type CIJob struct {
 	Reason     *string `json:"reason"`
 	// SandboxIDs are the sandboxes it ran in. A failure's may be kept
 	// paused: wake it, or exec in it, with the sandbox calls.
-	SandboxIDs     []string `json:"sandboxIds"`
-	GithubCheckRun *int64   `json:"githubCheckRun"`
+	SandboxIDs []string `json:"sandboxIds"`
+	// GithubCheckRun is the ID of the job's own GitHub check run,
+	// "runtime / <name>", created completed when the job ends; nil while it
+	// runs, for a reused pass, or when GitHub did not accept the run.
+	GithubCheckRun *int64 `json:"githubCheckRun"`
+	// Annotations are the lines of the repository's files that the job's log
+	// reports as failing, or as warnings and notices, as its GitHub check run
+	// shows them. At most 50, failures first; empty while it runs.
+	Annotations []CIAnnotation `json:"annotations"`
 	// Review is a review step's verdict on the commit; nil for a command's
 	// job.
 	Review    *CIReview `json:"review"`
@@ -158,6 +168,19 @@ type CIJob struct {
 	UpdatedAt int64     `json:"updatedAt"`
 	StartedAt *int64    `json:"startedAt"`
 	EndedAt   *int64    `json:"endedAt"`
+}
+
+// CIAnnotation is a line of a repository's file that a job's log reports.
+type CIAnnotation struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
+	// StartColumn is set only for a single line.
+	StartColumn *int `json:"startColumn,omitempty"`
+	// Level is notice, warning or failure.
+	Level   string `json:"level"`
+	Message string `json:"message"`
+	Title   string `json:"title,omitempty"`
 }
 
 // CIReview is a review step's verdict on one commit: it passes only with

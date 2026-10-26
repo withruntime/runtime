@@ -1,8 +1,8 @@
 # Roll Runtime out to your company
 
 One Runtime account can hold your whole company: its people, their agents, one
-prepaid balance and one audit log. This guide is the order to set it up in.
-Each step links to the guide with the detail.
+prepaid balance and one audit log. This guide gives the order to set it up in.
+Each step links to the guide with the details.
 
 Single sign-on, directory sync, roles and the audit log are free on every
 account. There is no seat fee and no plan to buy.
@@ -29,7 +29,7 @@ Everyone in the account spends the same prepaid balance.
 - Give whoever pays the bills the **billing** role. They add credit and see
   payments, and cannot start anything or make keys.
 - The first top-up lifts the account from the [free usage](./included-usage) to the paid
-  limits and, while it is not refunded, opens every outbound port,
+  limits. While it is not refunded, it also opens every outbound port,
   custom domains, TCP ports, public previews and private networks
   ([pricing](./pricing#how-many-at-once)).
 - Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total ([welcome match](./pricing#welcome-match)).
@@ -52,7 +52,7 @@ Then, if you want:
   through your provider.
 - **Turn on directory sync (SCIM)** in Okta or Entra ID. Your directory then
   adds people, sets their roles from its groups and removes them the moment
-  they leave, revoking every key they made.
+  they leave, and revokes every key they made.
 
 The provider-by-provider steps are in [single sign-on](./single-sign-on).
 
@@ -117,7 +117,7 @@ and their keys change with it on the next request.
 ## 7. When someone leaves
 
 - **With directory sync,** deactivate them in your directory. They lose access
-  at once and every key they made is revoked in the same step.
+  immediately, and every key they made is revoked in the same step.
 - **Without it,** an owner or admin chooses **Remove** in their row at
   [Members](https://withruntime.com/account/members). The effect is the same.
 - What they created, such as sandboxes, volumes and images, stays with the

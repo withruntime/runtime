@@ -21,7 +21,7 @@ export type CiRepository = {
   repository: string;
   /** The branch whose pushes are checked as landed. */
   productionBranch: string;
-  /** Where in the repository its checks are written. */
+  /** Where in the repository its checks are written: a `runtime.yml`, or a `cloudbuild.yaml` or `buildspec.yml`, run as Cloud Build or CodeBuild runs it. */
   configPath: string;
   /** The organization's installation of Runtime's GitHub App it is read through. */
   installation: number;
@@ -125,7 +125,14 @@ export type CiJob = {
   /** The sandboxes it ran in. A failure's may be kept paused: wake it, or
    * exec in it, with runtime.sandboxes. */
   sandboxIds: string[];
+  /** The ID of the job's own GitHub check run (`runtime / <name>`), created
+   * completed when the job ends; null while it runs, for a reused pass, or
+   * when GitHub did not accept the run. */
   githubCheckRun: number | null;
+  /** Lines of the repository's files that the job's log reports as failing,
+   * or as warnings and notices, as its GitHub check run shows them. At most
+   * 50, failures first. */
+  annotations: CiAnnotation[];
   /** A review step's verdict on the commit; null for a command's job. */
   review: CiReview | null;
   ms: number | null;
@@ -133,6 +140,17 @@ export type CiJob = {
   updatedAt: number;
   startedAt: number | null;
   endedAt: number | null;
+};
+/** A line of a file that a job's log reports. */
+export type CiAnnotation = {
+  path: string;
+  startLine: number;
+  endLine: number;
+  /** Present only for a single line. */
+  startColumn?: number;
+  level: "notice" | "warning" | "failure";
+  message: string;
+  title?: string;
 };
 /** What one finding of a review is about. */
 export type CiReviewKind =

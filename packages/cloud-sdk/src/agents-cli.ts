@@ -15,9 +15,13 @@ import {
   type AgentEvent,
   type AgentHeldCall,
   type AgentSessionState,
+  type AgentToolCall,
+  type AgentTraceOtlp,
   type AgentTriggerRules,
+  type AgentTurn,
   type CreateAgentTrigger,
 } from "./products/agents.js";
+import { secrets } from "./products/secrets.js";
 
 /* `runtime agents`, kept out of cli.ts as apps-cli.ts is. In a private
    beta: a key outside it is refused product_in_beta, said in the server's
@@ -45,7 +49,7 @@ export const AGENT_HELP = `runtime agents <command>
   create <name> (--template <harness> | --command "<cmd>") [--use support|team]
          [--instructions <text> | --instructions-file <path>] [--secret NAME]... [--pool NAME]...
          [--env KEY=VALUE]... [--image <image> | --snapshot <id>] [--vcpu n] [--memory n]
-         [--max-concurrent n] [--idle-pause n] [--label key=value]...
+         [--max-concurrent n] [--idle-pause n] [--permissions '<json>'] [--label key=value]...
                                               Make an agent; prints its id. --secret names an egress
                                               secret it may use: its model key, of any provider.
                                               --pool names a Claude account's secret (each one
@@ -61,17 +65,30 @@ export const AGENT_HELP = `runtime agents <command>
                                               until it ends
   send <session> <words...>                   Words into a session
   events <session> [--after <seq>] [--follow] A session's log; --follow until it ends
+  trace <session> [--otlp] [--export [--endpoint <url>] [--header key=value]...]
+                                              Every model turn and tool call: timing, tokens and
+                                              cost, totals by model and tool. --otlp prints
+                                              OpenTelemetry traces (OTLP/JSON); --export sends them
+                                              to a collector (--endpoint, or
+                                              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT /
+                                              OTEL_EXPORTER_OTLP_ENDPOINT and _HEADERS)
   sessions [--agent <agent>] [--state <state>]...
                                               Sessions, newest first
   sessions delete <session>                   Delete an ended session and its log; its history is
                                               storage, kept until you delete it
   stop <session>                              Stop a session
+  switch anthropic                            Run Claude Managed Agents code on Runtime: the
+                                              base URL to give Anthropic's SDK, and whether
+                                              the model key (ANTHROPIC_API_KEY) is set
   asks [--state <state>]... [--agent <agent>] [--label key=value]...
                                               The inbox: what your agents' sessions need answered,
                                               one row per step however many sessions ask it
   asks get <ask>                              One ask: its options, pick and the sessions asking
   answer <ask> [<option>] [--text <words>]    Answer it with an option's label, words, or both:
                                               every session asking reads it next and wakes
+  approve <ask>                               Let a tool call the agent's permissions held run
+  deny <ask> [--message <words>]              Keep a held tool call from running; the message is
+                                              told to the agent
   triggers <agent>                            Its triggers
   triggers add <agent> --kind <slack|github|schedule|webhook> --config '<json>' [--rules '<json>']
   triggers rules <triggerId> '<json>'         Set its rules in place: priority, maxStartsPerHour,
@@ -108,11 +125,17 @@ Examples
   runtime agents start helper "How do I reset my password?" --key customer:42 --follow
   runtime agents memory put helper faq/refunds.md refunds.md
   runtime agents asks && runtime agents answer <ask> "Raise to 20 TB"
+  runtime agents update helper --permissions '{"default":"auto","tools":{"shell":"always_ask"}}'
+  runtime agents approve <ask>
+  runtime agents trace <session> --export --endpoint https://otel.example.com
   runtime agents init --template claude-code && runtime agents deploy --dry-run
   runtime agents create ci-review --template review --pool CLAUDE_1 --pool CLAUDE_2
+  runtime agents switch anthropic
 `;
 
 const when = (iso: string | null | undefined) => iso ?? "-";
+/** The guide to running Claude Managed Agents code on Runtime. */
+const SWITCH_DOCS = "https://withruntime.com/docs/switch-from-claude-managed-agents";
 /** A trigger's rules as the CLI takes them: one JSON object. */
 function rulesOf(text: string, kit: CliKit): AgentTriggerRules {
   let rules: unknown;
@@ -142,6 +165,7 @@ const OPTIONS = [
   "memory",
   "max-concurrent",
   "idle-pause",
+  "permissions",
   "label",
 ];
 const ASK_STATES: readonly AgentAskState[] = ["open", "answered", "expired", "withdrawn", "closed"];
@@ -151,6 +175,7 @@ const askLine = (a: AgentAsk) => {
     `${a.id} ${a.state}${a.step ? ` step ${a.step}` : ""}, ${a.sessions.length} session${a.sessions.length === 1 ? "" : "s"} asking`,
     `  ${a.question}`,
     ...(a.why ? [`  why: ${a.why}`] : []),
+    ...(a.toolCall ? [`  tool call: ${a.toolCall.tool} ${JSON.stringify(a.toolCall.input)}`] : []),
     ...(options.length ? [`  options: ${options.join(" | ")}`] : []),
     ...(a.expiresAt ? [`  expires ${a.expiresAt}`] : []),
     ...(a.answer
@@ -212,11 +237,83 @@ function definitionOf(args: Args, kit: CliKit, env: NodeJS.ProcessEnv, base?: Ag
   set("memoryMiB", integer(args, "memory"));
   set("maxConcurrent", integer(args, "max-concurrent"));
   set("idlePauseSeconds", integer(args, "idle-pause"));
+  const permissions = flag(args, "permissions");
+  if (permissions !== undefined) {
+    try {
+      set("permissions", JSON.parse(permissions));
+    } catch {
+      throw usage(`--permissions takes JSON: '{"default":"auto","tools":{"shell":"always_ask"}}'.`);
+    }
+  }
   return definition as AgentDefinition;
 }
 
 const line = (e: AgentEvent) =>
-  `${String(e.seq).padStart(4)} ${e.kind.padEnd(6)} ${e.actor}: ${typeof e.body.text === "string" ? e.body.text : JSON.stringify(e.body)}`;
+  `${String(e.seq).padStart(4)} ${e.kind.padEnd(6)} ${e.actor}: ${
+    e.kind === "turn"
+      ? turnLine(e.body as unknown as AgentTurn)
+      : e.kind === "tool"
+        ? toolLine(e.body as unknown as AgentToolCall)
+        : typeof e.body.text === "string"
+          ? e.body.text
+          : JSON.stringify(e.body)
+  }`;
+
+const count = (n: number) => n.toLocaleString("en-US");
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+const dollars = (usd: number | null) =>
+  usd === null ? "unpriced" : `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`;
+function turnLine(t: AgentTurn) {
+  const calls = t.toolCalls.length ? ` -> ${t.toolCalls.map((c) => c.name).join(", ")}` : "";
+  const failed = t.error ? ` FAILED ${t.error}` : "";
+  return `${t.model} ${seconds(t.durationMs)}, ${count(t.inputTokens)} in, ${count(t.outputTokens)} out, ${count(t.cacheReadTokens)} cached, ${dollars(t.costUsd)}${calls}${failed}`;
+}
+function toolLine(t: AgentToolCall) {
+  return `${t.name} ${seconds(t.durationMs)}${t.error ? " FAILED" : ""}${t.input ? ` ${t.input.slice(0, 100)}` : ""}`;
+}
+
+/** Spans a trace command reads a request: the API's most. */
+const TRACE_PAGE = 500;
+/** The span list of an OTLP page, as the API writes it: one resource, one scope. */
+function otlpSpans(otlp: Pick<AgentTraceOtlp, "resourceSpans">): unknown[] {
+  const scope = (otlp.resourceSpans[0] as { scopeSpans?: { spans?: unknown[] }[] } | undefined)
+    ?.scopeSpans?.[0];
+  if (!scope) return [];
+  scope.spans ??= [];
+  return scope.spans;
+}
+
+/** Where --export sends OTLP: --endpoint, else the OpenTelemetry SDK's own
+ * variables; a base URL gets /v1/traces, as an OTLP/HTTP exporter adds it. */
+export function otlpTarget(
+  endpoint: string | undefined,
+  env: NodeJS.ProcessEnv,
+  headers: Record<string, string>,
+): { url: string; headers: Record<string, string> } | null {
+  const full = endpoint ?? env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
+  const base = endpoint ? undefined : env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const url = full
+    ? endpoint && !/\/v1\/traces\/?$/.test(endpoint)
+      ? `${endpoint.replace(/\/+$/, "")}/v1/traces`
+      : full
+    : base
+      ? `${base.replace(/\/+$/, "")}/v1/traces`
+      : null;
+  if (!url) return null;
+  const fromEnv: Record<string, string> = {};
+  for (const pair of (
+    env.OTEL_EXPORTER_OTLP_TRACES_HEADERS ??
+    env.OTEL_EXPORTER_OTLP_HEADERS ??
+    ""
+  ).split(",")) {
+    const at = pair.indexOf("=");
+    if (at > 0)
+      fromEnv[decodeURIComponent(pair.slice(0, at).trim())] = decodeURIComponent(
+        pair.slice(at + 1).trim(),
+      );
+  }
+  return { url, headers: { ...fromEnv, ...headers } };
+}
 
 export async function agentsCommand(
   argv: string[],
@@ -379,6 +476,110 @@ export async function agentsCommand(
       print(read.data.map(line).join("\n") || "No events yet.", read);
       return 0;
     }
+    case "trace": {
+      const args = parse(rest, ["otlp", "export"], ["endpoint", "header"]);
+      const id = need(args.positional[0], "a session's id");
+      if (has(args, "export")) {
+        const target = otlpTarget(
+          flag(args, "endpoint"),
+          env,
+          args.flags.has("header") ? pairs(args, "header") : {},
+        );
+        if (!target)
+          throw usage(
+            "Give --endpoint, or set OTEL_EXPORTER_OTLP_ENDPOINT: where your collector takes OTLP/HTTP.",
+          );
+        // One export request a page: the collector joins them by trace id.
+        let spans = 0;
+        for (let after: number | null = 0; after !== null;) {
+          const { nextAfter, ...otlp }: AgentTraceOtlp = await api.sessions.trace(id, {
+            format: "otlp" as const,
+            after,
+            limit: TRACE_PAGE,
+          });
+          const sent = await fetch(target.url, {
+            method: "POST",
+            headers: { "content-type": "application/json", ...target.headers },
+            body: JSON.stringify(otlp),
+          });
+          if (!sent.ok) {
+            out.error(
+              `${target.url} returned ${sent.status}: ${(await sent.text()).slice(0, 500)}`,
+            );
+            return 1;
+          }
+          spans += otlpSpans(otlp).length;
+          after = nextAfter;
+        }
+        print(`Sent ${spans} spans to ${target.url}.`, { sent: spans, url: target.url });
+        return 0;
+      }
+      if (has(args, "otlp")) {
+        // Every page's spans in one ExportTraceServiceRequest.
+        let whole: AgentTraceOtlp | undefined;
+        for (let after: number | null = 0; after !== null;) {
+          const page: AgentTraceOtlp = await api.sessions.trace(id, {
+            format: "otlp" as const,
+            after,
+            limit: TRACE_PAGE,
+          });
+          if (whole) otlpSpans(whole).push(...otlpSpans(page));
+          else whole = page;
+          after = page.nextAfter;
+        }
+        const { nextAfter: _, ...otlp } = whole!;
+        out.write(JSON.stringify(otlp));
+        return 0;
+      }
+      const trace = await api.sessions.trace(id, { limit: TRACE_PAGE });
+      for (let after = trace.nextAfter; after !== null;) {
+        const page = await api.sessions.trace(id, { after, limit: TRACE_PAGE });
+        trace.spans.push(...page.spans);
+        after = trace.nextAfter = page.nextAfter;
+      }
+      const t = trace.totals;
+      print(
+        [
+          `${count(t.turns)} turns, ${count(t.toolCalls)} tool calls, ${dollars(t.costUsd)}${t.unpricedTurns ? ` (${t.unpricedTurns} turns unpriced)` : ""}`,
+          `${count(t.inputTokens)} in, ${count(t.outputTokens)} out, ${count(t.cacheReadTokens)} cache read, ${count(t.cacheWriteTokens)} cache write; ${seconds(t.modelMs)} in the model, ${seconds(t.toolMs)} in tools`,
+          "",
+          trace.models.length
+            ? table([
+                ["MODEL", "TURNS", "IN", "OUT", "CACHE READ", "COST"],
+                ...trace.models.map((m) => [
+                  m.model,
+                  count(m.turns),
+                  count(m.inputTokens),
+                  count(m.outputTokens),
+                  count(m.cacheReadTokens),
+                  m.unpricedTurns === m.turns ? "unpriced" : dollars(m.costUsd),
+                ]),
+              ])
+            : "No turns yet.",
+          ...(trace.tools.length
+            ? [
+                "",
+                table([
+                  ["TOOL", "CALLS", "FAILED", "TIME"],
+                  ...trace.tools.map((k) => [
+                    k.name,
+                    count(k.calls),
+                    count(k.failed),
+                    seconds(k.durationMs),
+                  ]),
+                ]),
+              ]
+            : []),
+          "",
+          ...trace.spans.map(
+            (x) =>
+              `${String(x.seq).padStart(4)} ${x.startedAt} ${x.kind.padEnd(4)} ${x.kind === "turn" ? turnLine(x) : toolLine(x)}`,
+          ),
+        ].join("\n"),
+        trace,
+      );
+      return 0;
+    }
     case "sessions": {
       if (rest[0] === "delete" || rest[0] === "rm") {
         const target = need(rest[1], "a session's id");
@@ -454,9 +655,59 @@ export async function agentsCommand(
       );
       return 0;
     }
+    case "approve":
+    case "deny": {
+      const args = parse(rest, [], verb === "deny" ? ["message"] : []);
+      const id = need(args.positional[0], "an ask's id");
+      const message = verb === "deny" ? flag(args, "message") : undefined;
+      const answered =
+        verb === "approve" ? await api.asks.approve(id) : await api.asks.deny(id, message);
+      print(
+        `${answered.id}: ${answered.toolCall?.tool ?? "the call"} ${verb === "approve" ? "allowed" : "denied"}.`,
+        answered,
+      );
+      return 0;
+    }
     case "stop": {
       const session = await (await api.session(need(rest[0], "a session's id"))).stop();
       print(`${session.id} ${session.state}.`, session);
+      return 0;
+    }
+    case "switch": {
+      const platform = need(rest[0], "the platform to switch from: anthropic");
+      if (platform !== "anthropic")
+        throw usage(
+          `runtime agents switch takes anthropic (Claude Managed Agents); ${platform} is not available yet.`,
+        );
+      const { baseURL } = await api.anthropic();
+      const modelKey = (await secrets(transport).list()).find(
+        (s) => s.name === "ANTHROPIC_API_KEY",
+      );
+      const value = {
+        platform,
+        baseURL,
+        modelKey: modelKey ? { name: modelKey.name, hosts: modelKey.hosts } : null,
+        docs: SWITCH_DOCS,
+      };
+      print(
+        [
+          "Claude Managed Agents code runs on Runtime with its client's base URL and key changed:",
+          "",
+          `  new Anthropic({ baseURL: "${baseURL}", apiKey: process.env.RUNTIME_API_KEY })`,
+          `  anthropic.Anthropic(base_url="${baseURL}", api_key=os.environ["RUNTIME_API_KEY"])`,
+          "",
+          modelKey
+            ? `Model key: ANTHROPIC_API_KEY is set (${modelKey.hosts.join(", ")}); sessions use it.`
+            : [
+                "Model key: ANTHROPIC_API_KEY is not set. Agents run on your own Anthropic key;",
+                "store it once, and the sandbox never sees it:",
+                '  printf %s "$ANTHROPIC_API_KEY" | runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com',
+              ].join("\n"),
+          `What maps and what does not: ${SWITCH_DOCS}`,
+          "",
+        ].join("\n"),
+        value,
+      );
       return 0;
     }
     case "triggers": {
@@ -620,10 +871,13 @@ export async function agentsCommand(
         "start",
         "send",
         "events",
+        "trace",
         "sessions",
         "stop",
         "asks",
         "answer",
+        "approve",
+        "deny",
         "triggers",
         "memory",
       ]);

@@ -7,8 +7,33 @@ NO_APP = "Runtime sandboxes need no deployed app: create them with Sandbox.creat
 
 
 class App:
-    def __init__(self, name=None):
+    def __init__(self, name=None, *, image=None, secrets=[], volumes={}, include_source=None, tags=None, **options):
+        reject(options, "Modal App")
         self._name, self._description = name, name
+        self._image, self._secrets, self._functions = image, list(secrets), {}
+
+    def function(self, _warn_parentheses_missing=None, **options):
+        """A function; with ``schedule=``, ``deploy`` runs it as a Runtime job
+        (_functions.py)."""
+        from ._functions import Function
+        if _warn_parentheses_missing is not None:
+            raise TypeError("Use @app.function() with parentheses")
+        if self._secrets:
+            options["secrets"] = [*self._secrets, *(options.get("secrets") or [])]
+
+        def wrap(fn):
+            function = Function(self, fn, options)
+            self._functions[function.tag] = function
+            return function
+        return wrap
+
+    def cls(self, *args, **options):
+        raise CompatibilityError("Modal classes are not run as jobs: use a module-level @app.function")
+
+    def local_entrypoint(self, *args, **options):
+        def wrap(fn):
+            return fn
+        return wrap
 
     @property
     def name(self):
@@ -40,7 +65,16 @@ class App:
         raise CompatibilityError(NO_APP)
 
     def deploy(self, *, name=None, environment_name=None, tag="", client=None, strategy="rolling"):
-        raise CompatibilityError(NO_APP)
+        """Each function with a schedule as a Runtime job (``modal deploy``)."""
+        from ._functions import deploy
+        if name:
+            self._name = name
+        scheduled = next((fn for fn in self._functions.values() if fn.schedule is not None), None)
+        if scheduled is None:
+            raise CompatibilityError(NO_APP)
+        source = scheduled._fn.__code__.co_filename
+        deploy(self, source, runtime=getattr(client, "_runtime", None))
+        return self
 
     def include(self, other_app, inherit_tags=True):
         raise CompatibilityError(NO_APP)
@@ -60,7 +94,7 @@ class App:
 
     @property
     def registered_functions(self):
-        raise CompatibilityError(NO_APP)
+        return dict(self._functions)
 
     @property
     def registered_classes(self):
@@ -75,5 +109,6 @@ class App:
         raise CompatibilityError(NO_APP)
 
 
-install(App, ("get_dashboard_url", "run", "deploy", "set_tags", "get_tags", "info"), refused=True)
+install(App, ("get_dashboard_url", "run", "set_tags", "get_tags", "info"), refused=True)
+install(App, ("deploy",))
 install(App, ("lookup",), static=("lookup",))

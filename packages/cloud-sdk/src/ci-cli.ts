@@ -11,6 +11,7 @@ import {
   type CiFlake,
   type CiFlakeState,
   type CiJob,
+  type CiAnnotation,
   type CiReview,
   type CiRepository,
   type ConnectCiRepository,
@@ -39,6 +40,8 @@ export const CI_HELP = `runtime ci <command>
   connect <owner/name> [--branch main] [--config runtime.yml] [--installation <id>]
           [--trust <app-slug>[bot]]... [--name <name>]
                                               Connect a repository; prints its id. Takes a full key.
+                                              --config cloudbuild.yaml or buildspec.yml runs a Google
+                                              Cloud Build or AWS CodeBuild config as it is.
                                               --trust runs that App's pushes as its own from the start
   repos [ls] [--all]                          Connected repositories, with the Apps each trusts;
                                               --all: disconnected ones too
@@ -131,10 +134,19 @@ async function importCommand(argv: string[], out: Out, kit: CliKit): Promise<num
   const circle = join(root, ".circleci", "config.yml");
   if (existsSync(circle))
     files.push({ path: ".circleci/config.yml", text: readFileSync(circle, "utf8") });
-  if (!files.length)
+  if (!files.length) {
+    // Cloud Build and CodeBuild configs run as they are: nothing to import.
+    const vendor = ["cloudbuild.yaml", "cloudbuild.yml", "buildspec.yml", "buildspec.yaml"].find(
+      (name) => existsSync(join(root, name)),
+    );
+    if (vendor)
+      throw kit.usage(
+        `${vendor} needs no import: CI/CD runs it as it is. Connect with ${me} ci connect <owner/name> --config ${vendor}, or add "- ${vendor.startsWith("cloudbuild") ? "cloudbuild" : "buildspec"}: ${vendor}" to runtime.yml's steps.`,
+      );
     throw kit.usage(
       `${root} has neither .github/workflows/*.yml nor .circleci/config.yml to import.`,
     );
+  }
   const made = importCi(files);
   if (!made.yaml) {
     out.error(made.notes.join("\n"));
@@ -392,6 +404,8 @@ export async function ciCommand(
       }
       out.write(job.log.endsWith("\n") || !job.log ? job.log : `${job.log}\n`);
       if (job.review) out.write(reviewed(job.review));
+      // An API before annotations sends none.
+      if (job.annotations?.length) out.write(annotated(job.annotations));
       out.error(
         `[${job.name}${job.parts > 1 ? ` ${job.part}/${job.parts}` : ""} ${job.state}${job.exitCode === null ? "" : `, exit code ${job.exitCode}`}${job.reason ? `, ${job.reason}` : ""}]`,
       );
@@ -552,6 +566,21 @@ export async function ciCommand(
 
 /** An agent step's verdict in words: each finding with its place and fix,
  * then the notes, then who judged. */
+/** A job's annotations as `path:line:col: level: title: message`, each
+ * message's first line, the way compilers print them. */
+export function annotated(lines: CiAnnotation[]): string {
+  const failing = lines.filter((a) => a.level === "failure").length;
+  return [
+    `\n${lines.length} line${lines.length === 1 ? "" : "s"} of the repository's files${failing ? `, ${failing} failing` : ""}:`,
+    ...lines.map((a) => {
+      const at = `${a.path}:${a.startLine}${a.startColumn ? `:${a.startColumn}` : ""}`;
+      const first = a.message.split("\n")[0];
+      return `  ${at}: ${a.level}: ${a.title ? `${a.title}: ` : ""}${first}`;
+    }),
+    "",
+  ].join("\n");
+}
+
 function reviewed(r: CiReview): string {
   const at = (f: { file: string; line: number }) => (f.line > 0 ? `${f.file}:${f.line}` : f.file);
   return [

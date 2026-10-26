@@ -14,8 +14,8 @@ set, and otherwise the connection this machine saved (any `npx withruntime`
 command connects it, with one browser approval).
 
 On a server, put a key from https://withruntime.com/account/keys in
-`RUNTIME_API_KEY` from your secret manager. Never put it in source code, a URL
-or a command-line argument. With no key anywhere, `WithRuntime::Client.new`
+`RUNTIME_API_KEY`, stored in your secret manager. Never put it in source code, a
+URL or a command-line argument. With no key anywhere, `WithRuntime::Client.new`
 raises `WithRuntime::AuthenticationError` whose `code` is `missing_api_key`
 and whose `hint` says how to get one.
 
@@ -34,10 +34,12 @@ ensure
 end
 ```
 
-`create` returns once the sandbox is running. With no arguments you get the free usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and
-a 4 GiB disk, running while it works and pausing itself when idle, with no
-time limit (`timeout_seconds:` sets one, 60 to 86,400). The free usage is spent first, then prepaid credit; `funding:` is accepted and ignored. Every
-field is optional, in snake_case:
+`create` returns once the sandbox is running. With no arguments, you get the free
+usage while it lasts, the default region, and 2 vCPU, 4 GiB of memory and a
+4 GiB disk. The sandbox runs while it works and pauses itself when idle. It has
+no time limit unless you set one with `timeout_seconds:` (60 to 86,400). The
+free usage is spent first, then prepaid credit. `funding:` is accepted and
+ignored. Every field is optional, in snake_case:
 
 ```ruby
 require "withruntime"
@@ -57,14 +59,14 @@ puts sbx.id, sbx.info.funding, sbx.info.ends_at
 sbx.stop
 ```
 
-An answer reads by snake_case name (`sbx.info.memory_mib`) or by the API's own
-key (`sbx.info["memoryMiB"]`), so a field newer than the SDK is always there. A
-string key in a request (`"newField" => 1`) is sent as it is.
+A response can be read by snake_case name (`sbx.info.memory_mib`) or by the
+API's own key (`sbx.info["memoryMiB"]`). A field newer than the SDK is always
+there. A string key in a request (`"newField" => 1`) is sent as written.
 
 ## Run commands
 
-A string runs under `bash -c`; an array runs the program directly, with no
-shell, which is what you want for untrusted arguments.
+A string runs under `bash -c`. An array runs the program directly, with no
+shell. Use an array for untrusted arguments.
 
 ```ruby
 require "withruntime"
@@ -83,8 +85,8 @@ end
 sbx.stop
 ```
 
-- `env:` is how secrets reach a command. It is never echoed back. Never put a
-  secret in the command line itself.
+- `env:` passes secrets to a command. Runtime never echoes them back. Never put
+  a secret in the command line.
 - `stdin:` gives the command input, then closes it.
 - `user: "root"` runs the command as root, with no `sudo` in front, keeping its
   `env:` and `PATH`; `HOME` is `/root`. `spawn` and `terminal` take it too.
@@ -92,9 +94,9 @@ sbx.stop
   result (`timed_out` is true, with the output so far), not an exception.
 - `check: true` raises `WithRuntime::CommandError`, with the exit code and
   output, on a non-zero exit or a timeout.
-- With `on_stdout:`, `on_stderr:` or a timeout over a minute, the command
-  streams and the result keeps everything it printed. A long stream resumes by
-  itself when the server ends it, so no output is dropped.
+- With `on_stdout:`, `on_stderr:`, or a timeout over a minute, the command
+  streams. The result keeps everything it printed. When the server ends a long
+  stream, the stream resumes by itself. No output is dropped.
 
 ## Background processes
 
@@ -112,7 +114,7 @@ server.kill("SIGTERM")
 sbx.stop
 ```
 
-A process outlives your connection; get it back with `sbx.process(id)`.
+A process outlives your connection. Get it back with `sbx.process(id)`.
 `write` tracks input offsets, so a retried write is never typed twice.
 
 ## Files
@@ -132,22 +134,22 @@ sbx.files.download("/workspace/out", "./out")
 sbx.stop
 ```
 
-`write` makes parent directories and replaces the file atomically; a file over
-1 MiB goes in parallel chunks checked by SHA-256. `stat` returns `nil` for a
-path that does not exist. `upload` and `download` move a whole directory as
-one gzipped archive. Pass `mode: 0o755` to write an executable, or
-`mode: 0` for no permission bits. `chmod(path, mode)` changes an existing
-file. A caller-supplied `idempotency_key:` also makes a complete large-file
-write safe to repeat; each upload phase keeps its own stable key. On an
-older guest, setting a mode also needs the exec grant for its chmod fallback.
+`write` creates parent directories and replaces the file atomically. A file over
+1 MiB goes in parallel chunks, each checked by SHA-256. `stat` returns `nil` for
+a path that does not exist. `upload` and `download` move a whole directory as
+one gzipped archive. Pass `mode: 0o755` to write an executable. Pass `mode: 0`
+for no permission bits. `chmod(path, mode)` changes an existing file. A
+caller-supplied `idempotency_key:` also makes a complete large-file write safe
+to repeat. Each upload phase keeps its own stable key. On an older guest,
+setting a mode also needs the exec grant for its chmod fallback.
 
 ### Links
 
-A link is a secret URL anyone can open with no API key: a GET downloads the
-file (Range works, so videos play and downloads resume), and a PUT with the raw
-body uploads it atomically. A link expires in 1 hour by default, at most 7 days.
-`revoke_links` ends every link made for the sandbox, and revoking the key that
-made a link ends its links too.
+A link is a secret URL that anyone can open, with no API key. A GET downloads
+the file. Range requests work, so videos play and downloads resume. A PUT with
+the raw body uploads the file atomically. A link expires in 1 hour by default,
+and at most 7 days. `revoke_links` ends every link made for the sandbox.
+Revoking the key that made a link also ends its links.
 
 ```ruby
 require "withruntime"
@@ -183,14 +185,14 @@ again.stop
 ```
 
 A fork copies a sandbox as it is now, with its files, memory and running
-processes, on its server while it has room and on another when it is full; see
-[JavaScript](./javascript) for what forks and snapshots keep and how they are billed. If a copy fails, the error's
-`details["startedSandboxIds"]` names the copies that did start. Because
-`extend` is Ruby's own, a time limit is moved on with `extend_lease(seconds)`;
-a sandbox with no time limit has nothing to move. `sbx.keep_alive` moves it on
-from your process until `stop`, and
-`runtime.sandboxes.get_or_create(name, **fields)` answers the sandbox with
-that name, woken or restarted, or creates it.
+processes. It runs on its server while that server has room, and on another
+server when it is full. See [JavaScript](./javascript) for what forks and
+snapshots keep and how they are billed. If a copy fails, the error's
+`details["startedSandboxIds"]` names the copies that did start. Ruby's own
+`extend` is taken, so a time limit moves on with `extend_lease(seconds)`. A
+sandbox with no time limit has nothing to move. `sbx.keep_alive` moves the time
+limit on from your process until `stop`. `runtime.sandboxes.get_or_create(name, **fields)`
+returns the sandbox with that name, woken or restarted, or creates it.
 
 ## Share a port
 
@@ -205,9 +207,9 @@ puts preview.url, preview.token # send the token as x-runtime-preview-token
 sbx.stop
 ```
 
-A preview is private by default; `visibility: "public"` shares it with anyone
-who has the address, on a paid sandbox only (a sandbox without credit's previews stay
-private). Addresses are under `runtimehost.com`.
+A preview is private by default. `visibility: "public"` shares it with anyone
+who has the address. It works on a paid sandbox only. A sandbox without credit
+keeps its previews private. Addresses are under `runtimehost.com`.
 
 ## Images, volumes, network rules and secrets
 
@@ -228,12 +230,12 @@ secret = runtime.secrets.set("OPENAI_API_KEY", value: "sk-...", hosts: ["api.ope
 puts secret.placeholder # what sandboxes see in $OPENAI_API_KEY
 ```
 
-`images.build` waits until the image is ready and raises with code
-`image_failed` when the build fails; `images.create` queues it and returns. A
-Dockerfile build takes `dockerfile:` and `context_dir:`, the folder
-`docker build` would read, with its `.dockerignore`; only the parts the server
+`images.build` waits until the image is ready. It raises with code
+`image_failed` when the build fails. `images.create` queues the build and
+returns. A Dockerfile build takes `dockerfile:` and `context_dir:`, the folder
+`docker build` would read, with its `.dockerignore`. Only the parts the server
 does not have yet are uploaded. See [custom images](./images). A volume lives
-on one server; volume backups can restore its data onto another host.
+on one server. Volume backups can restore its data onto another host.
 `sbx.desktop` drives a Linux desktop in the sandbox.
 
 ## Domains, TCP ports and private networking
@@ -253,13 +255,14 @@ runtime.domains.remove("app.example.org")
 sbx.stop
 ```
 
-`runtime.ips.reserve(family: 4)` reserves a dedicated address;
-`list` and `release(id)` manage it. Returned funding fields and integer money
-are preserved. `runtime.networks.wireguard` manages the account's WireGuard network with
-`create`, `get`, `delete`, `add_peer`, `rotate_peer` and `remove_peer`.
-Save a generated peer's `config` securely even when `config_ready` is false:
-its private key is returned once. Calls generating a private key are not
-retried automatically. `runtime.sso.get` reads the organization's SSO state.
+`runtime.ips.reserve(family: 4)` reserves a dedicated address. `list` and
+`release(id)` manage it. The SDK keeps returned funding fields and integer money
+as the API sends them. `runtime.networks.wireguard` manages the account's
+WireGuard network with `create`, `get`, `delete`, `add_peer`, `rotate_peer` and
+`remove_peer`. Save a generated peer's `config` securely, even when
+`config_ready` is false. Its private key is returned once. Calls that generate a
+private key are not retried automatically. `runtime.sso.get` reads the
+organization's SSO state.
 
 ## Backups, mounts, MCP and recordings
 
@@ -280,11 +283,11 @@ runtime.volumes.delete(volume.id)
 ```
 
 `sbx.mounts.add(provider: "s3", bucket: "data", path: "/data", secret: "S3_KEY")`
-mounts an object store; `list` and `remove(path)` manage mounts. The named
-secret stays on Runtime. `runtime.mcp.catalog` lists supported servers;
+mounts an object store. `list` and `remove(path)` manage mounts. The named
+secret stays on Runtime. `runtime.mcp.catalog` lists supported servers.
 `sbx.mcp.start(servers: [{ id: "fetch" }])`, `ready`, `get` and `stop` manage
-servers in a sandbox. Server `secrets`, `env` and `options` keep their
-original dictionary keys.
+servers in a sandbox. Server `secrets`, `env` and `options` keep their original
+dictionary keys.
 
 `sbx.desktop.recordings.start(fps: 10)` returns a recording. Use `get(id)`,
 `list`, `stop(id)`, `download(id)` for MP4 bytes, and `delete(id)` to manage it.
@@ -307,7 +310,7 @@ end
 
 The reader follows continuation messages and keeps `watch.cursor`. Overflow
 and lost-event notices reach your block. `watch.close` cancels only the active
-reader; another thread can call it while HTTP headers, a body or a retry delay
+reader. Another thread can call it while HTTP headers, a body or a retry delay
 is pending. `watch.stop` also removes the watch in the guest and prevents new
 readers. A paused sandbox ends the current stream.
 
@@ -337,16 +340,16 @@ end
 A terminal exposes `read`, `write`, `resize`, `process_id`, `exit_code` and
 `close`. `sbx.open_tunnel` shares one authenticated connection across
 `connect(port)` and `ssh(public_key)` streams. Each stream supports `read`,
-`write`, `close_write` and `close`; half-closing input still permits a response.
-`port_forward` binds to `127.0.0.1` and a free port by default; pass `host:`
-and `local_port:` to choose them. Closing it releases its listener and active
-connections.
+`write`, `close_write` and `close`. After `close_write`, the stream can still
+read the response. `port_forward` binds to `127.0.0.1` and a free port by
+default. Pass `host:` and `local_port:` to choose them. Closing it releases its
+listener and active connections.
 
-Read responses while writing large requests. An individual unread stream has
-at most 1 MiB buffered; overflow closes that stream with
-`tunnel_receive_overflow` and leaves other streams usable. Closing a terminal
-or tunnel wakes blocked readers and writers. WebSockets use the same API key
-and origin, support an HTTP CONNECT proxy, and verify TLS certificates.
+Read responses while you write large requests. An unread stream buffers at most
+1 MiB. Overflow closes that stream with `tunnel_receive_overflow`. Other streams
+stay usable. Closing a terminal or tunnel wakes blocked readers and writers.
+WebSockets use the same API key and origin. They support an HTTP CONNECT proxy
+and verify TLS certificates.
 
 ## Metrics, events and webhooks
 
@@ -386,12 +389,12 @@ runtime.ci.checks.list(repository_id: repo.id, state: ["failed"]).each do |check
 end
 ```
 
-CI/CD runs a repository's checks as jobs in sandboxes. It is in a private beta:
-an account outside it gets `PermissionDeniedError` with code `product_in_beta`.
-`checks.list` and `tests.list(repository_id)` page like the other lists
-(`limit` 1 to 100). A failed job's `sandbox_ids` may be kept paused, to wake
-and look into. `releases.list(commit: ...)` reads a release's steps as they
-were taken.
+CI/CD runs a repository's checks as jobs in sandboxes. It is in private beta.
+An account outside the beta gets `PermissionDeniedError` with code
+`product_in_beta`. `checks.list` and `tests.list(repository_id)` are paginated
+like the other lists (`limit` 1 to 100). A failed job's `sandbox_ids` may stay
+paused, so you can wake one and look into it. `releases.list(commit: ...)`
+returns a release's steps as they ran.
 <!-- /launch: ci -->
 
 ## Errors and retries
@@ -413,34 +416,34 @@ Every error is a `WithRuntime::Error` with `code`, `message`, `hint`,
 `request_id`, `status` and `details`. Its subclasses are
 `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`,
 `ConflictError`, `InvalidRequestError`, `RateLimitError`,
-`ServiceUnavailableError`, `ConnectionError` and `CommandError`, the same
-classes as the JavaScript, Python, Go and Java SDKs. `no_capacity` raises
-`ServiceUnavailableError`; `no_credit_running_limit` and a `quota_exceeded` on
-what runs at once raise `RateLimitError`, and a `quota_exceeded` on what is
-kept raises `ConflictError`.
+`ServiceUnavailableError`, `ConnectionError` and `CommandError`. They are the
+same classes as in the JavaScript, Python, Go and Java SDKs. `no_capacity`
+raises `ServiceUnavailableError`. `no_credit_running_limit`, and a
+`quota_exceeded` on what runs at the same time, raise `RateLimitError`. A
+`quota_exceeded` on what is kept raises `ConflictError`.
 
-Every write carries an idempotency key, made for you and kept across the
-client's own retries. Transport failures and every answer that says
-`retryable: true` are retried after its `Retry-After`, up to the maximum number
-of retries, with the same key, so a retry never makes two sandboxes or runs a
-command twice. A wait over 60 seconds is not slept on: the error is returned at
-once, with `retryAfterMs`. An answer that ran nothing (`guest_busy`, `busy`,
-`rate_limited`) is sent again until the call's deadline, or for five minutes
-without one, past the maximum. `retryable?` says whether trying the same call again
-may work.
+Every write carries an idempotency key. The client makes it for you and keeps it
+across its own retries. Transport failures, and every response that says
+`retryable: true`, are retried after its `Retry-After`. Retries stop at the
+maximum number of retries. Each retry uses the same key, so a retry never makes
+two sandboxes or runs a command twice. A wait over 60 seconds is not slept on.
+The error returns immediately, with `retryAfterMs`. A response that ran nothing
+(`guest_busy`, `busy`, `rate_limited`) is sent again until the call's deadline.
+Without a deadline, it is sent again for five minutes, past the maximum.
+`retryable?` says whether trying the same call again may work.
 
-**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots without credit are taken (`no_credit_running_limit`), the
-account is at its limit (`quota_exceeded`) or the region is full
-(`no_capacity`), `sandboxes.create` waits and sends the same request again, for
-up to two minutes. Pass `wait_for_capacity:` (seconds) to the client or to one
-create, wake or restart; zero fails at once, as in
-`sandbox.wake(wait_for_capacity: 0)`. A sandbox stays on its server, so a wake
-or restart refused with `no_capacity` is sent again with the same idempotency
-key until room frees. A fork never waits.
+**A create, wake or restart waits for room.** When all {{trial-sandboxes}} slots
+without credit are taken (`no_credit_running_limit`), the account is at its
+limit (`quota_exceeded`), or the region is full (`no_capacity`),
+`sandboxes.create` waits and sends the same request again, for up to two
+minutes. Pass `wait_for_capacity:` (seconds) to the client or to one create,
+wake or restart. Zero fails immediately, as in `sandbox.wake(wait_for_capacity: 0)`.
+A sandbox stays on its server, so a wake or restart refused with `no_capacity`
+is sent again with the same idempotency key until room frees. A fork never waits.
 
 An owner, admin or developer can make a read-only key and set a daily spending
 limit on a key at [API keys](https://withruntime.com/account/keys).
-`runtime.limits.get` reads both; past the limit, a create, wake or extension
+`runtime.limits.get` reads both. Past the limit, a create, wake or extension
 raises with code `spending_limit_reached`, and it is not retried.
 
 ## Configuration
@@ -469,7 +472,7 @@ p runtime.request("GET", "/v1/volumes") # any endpoint, same rules
   `runtime.usage.available` is the account's balance as an exact decimal
   string.
 - `runtime.usage_export(since:, until:, cursor:)` reads one page of settled
-  usage over a UTC range, with its server CSV; follow `next_cursor` until it is
-  nil. `final_through` is the time before which no more charges will settle,
-  and a row's `final` is true once its resource is deleted and can be charged
-  nothing more ([export settled usage](./api#export-settled-usage)).
+  usage over a UTC range, with its server CSV. Follow `next_cursor` until it is
+  nil. `final_through` is the time before which no more charges will settle. A
+  row's `final` is true once its resource is deleted and can be charged nothing
+  more ([export settled usage](./api#export-settled-usage)).

@@ -36,7 +36,7 @@ export const NOTHING_RAN: ReadonlySet<string> = new Set(["guest_busy", "busy", "
 const PASSING = new Set(["no_capacity", "no_credit_running_limit", "no_credit_total_limit"]);
 /** Refusals of a create that clear when a sandbox stops or pauses, or a host
  * frees room: an account without credit's four at once and its total, an
- * email domain's, the account's quota and the region's capacity. `sandboxes.create` waits them out, retrying
+ * email domain's, the account's quota, its share of the region's servers and the region's capacity. `sandboxes.create` waits them out, retrying
  * with the same key and input, for up to `waitForCapacityMs`. */
 export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
   "no_credit_running_limit",
@@ -44,6 +44,9 @@ export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
   "no_credit_domain_limit",
   "no_credit_capacity_full",
   "quota_exceeded",
+  // The account holds its share of every server that could run it: clears
+  // as its own sandboxes end.
+  "account_share_full",
   "no_capacity",
   // A volume whose last sandbox is stopping: free once the stop lets go of
   // its disk, up to about a minute (measured 50 to 60 s, 6 October 2026).

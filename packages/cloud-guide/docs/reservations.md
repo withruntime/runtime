@@ -1,18 +1,18 @@
 # Book room for a burst
 
-Batch work comes in bursts: a run of evals, RL rollouts or browser sessions
-wants hundreds of sandboxes at nine tonight, not a steady few. Book the room
-ahead and you are told at once whether you have it. Inside the window your
-creates are never refused `no_capacity` or `quota_exceeded` up to what you
-booked, and you create sandboxes as usual: there is nothing to name.
+Batch work comes in bursts. A run of evals, RL rollouts or browser sessions
+may need hundreds of sandboxes at nine tonight, not a steady few. Book the room
+ahead, and you are told immediately whether you have it. Inside the window, your
+creates are never refused `no_capacity` or `quota_exceeded`, up to what you
+booked. You create sandboxes as usual. There is nothing to name.
 
 - **Up to 10,000 sandboxes** of one size, in one region.
 - **A window of up to 24 hours**, starting now or within 14 days.
-- **Confirmed or declined at once.** A decline says why, the most sandboxes
+- **Confirmed or declined immediately.** A decline says why, the most sandboxes
   that window can take, and the nearest window that takes them all.
-- **Sandboxes you run bill as usual**, per second. Booked room none of them
+- **Sandboxes you run bill as usual**, per second. Booked room that none of them
   uses costs a quarter of the memory rate, {{booked-unused-rate}} per GiB-hour,
-  with no CPU charge; cancel at least an hour before the start and it costs
+  with no CPU charge. Cancel at least an hour before the start, and it costs
   nothing. See [What it costs](#what-it-costs).
 
 ```ts check
@@ -47,23 +47,23 @@ npx withruntime reservations book --sandboxes 300 --vcpu 1 --memory 2048 --from 
 
 `--from` and `--to` take a time in your own time zone (today, or tomorrow
 once it has passed), an ISO time, or `now`. The API is
-`POST /v1/reservations`; MCP's tool is `runtime_reservations`.
+`POST /v1/reservations`. MCP's tool is `runtime_reservations`.
 
 ## Standing room for a pool
 
-A pool keeps sandboxes ready and replaces each one after use: a warm pool of
-CI machines, a fleet of agents forked from one snapshot. Its replacements are
-creates like any other, so on a busy server one can be refused. Standing room
-is held from now until you cancel it, and a replacement inside it is never
+A pool keeps sandboxes ready and replaces each one after use. Examples are a warm pool of
+CI machines, or a fleet of agents forked from one snapshot. Its replacements are
+creates like any other, so on a busy server, one can be refused. Standing room
+is held from now until you cancel it. A replacement inside it is never
 refused for room or limits.
 
-- **Name the snapshots** your pool forks from, and the room is held on the
+- **Name the snapshots** your pool forks from. The room is held on the
   servers holding them, where their forks start, at their size.
-- **`forKey`** keeps it for the sandboxes of the key that booked it, so the
+- **`forKey`** keeps it for the sandboxes of the key that booked it. The
   rest of your account's work never takes the pool's room.
 - **Keep a few more than the pool runs.** A deleted sandbox gives its room
-  back once its server has stopped it, a moment later; the spare room lets
-  the replacement start at once.
+  back once its server has stopped it, a moment later. The spare room lets
+  the replacement start immediately.
 - **`inUse`** says how many of its sandboxes run now, read live.
 
 ```ts check
@@ -92,17 +92,17 @@ npx withruntime reservations keep --sandboxes 40 --snapshot 3f6a0d2e-9b1c-4f7a-8
 ```
 
 The API is `POST /v1/reservations` with `standing: true` and no `startsAt` or
-`endsAt`. `POST /v1/reservations/{id}:update` changes how many it holds or
-its snapshots: the room moves, or grows, only when all of it fits now;
-otherwise the answer is `503 no_capacity` with what fits, and nothing
+`endsAt`. `POST /v1/reservations/{id}:update` changes how many sandboxes it holds, or
+its snapshots. The room moves, or grows, only when all of it fits now.
+Otherwise, the response is `503 no_capacity` with what fits, and nothing
 changes. Snapshots of one standing booking are all one size.
 
-Room none of its sandboxes uses costs what a booking's does, a quarter of the
-memory rate, **{{booked-unused-rate}} per GiB-hour**, charged every hour it is
-held; `unusedPerHourMicros` is the most that comes to in an hour. Cancel it
-and the charge stops at once. It is held while it is paid for: once your
+Room that none of its sandboxes uses costs what a booking's does: a quarter of the
+memory rate, **{{booked-unused-rate}} per GiB-hour**. It is charged every hour it is
+held. `unusedPerHourMicros` is the most that comes to in an hour. Cancel it
+and the charge stops immediately. It is held while it is paid for. Once your
 balance can't cover a day of it unused, or your account is held back, it is
-let go and the room goes back to everyone; sandboxes you run keep running.
+let go, and the room goes back to everyone. Sandboxes you run keep running.
 Standing room is decided as a booking is,
 against what is free on its servers now and the margin of every hour of the
 day.
@@ -110,13 +110,13 @@ day.
 ## What a booking holds
 
 The size you book is the size you will create: `vcpu`, `memoryMiB` and
-`diskMiB` of each sandbox (by default 2 vCPU, 4096 MiB and
-4096 MiB, a create's defaults). Room is held for that many sandboxes of that
+`diskMiB` of each sandbox. By default, that is 2 vCPU, 4096 MiB and
+4096 MiB, a create's defaults. Room is held for that many sandboxes of that
 size on the region's servers.
 
 In the window:
 
-- Your account's limits on sandboxes at once, their vCPUs, memory and disk
+- Your account's limits on sandboxes running at the same time, their vCPUs, memory and disk
   rise by what you booked. The [Limits page](https://withruntime.com/account/limits)
   and `GET /v1/limits` show the raised numbers.
 - The room is kept from every other account, and your creates go there
@@ -124,10 +124,10 @@ In the window:
 - Past the window's half, room you are not using goes back to everyone in
   quarters. The sandboxes you are running are always kept.
 
-At the end nothing is stopped: sandboxes still running keep running, and new
+At the end, nothing is stopped. Sandboxes still running keep running, and new
 creates meet your usual limits again. Cancel a booking you no longer need
-(`runtime.reservations.cancel(id)`, `DELETE /v1/reservations/{id}`): its room
-goes back at once and what runs keeps running.
+(`runtime.reservations.cancel(id)`, `DELETE /v1/reservations/{id}`). Its room
+goes back immediately, and what runs keeps running.
 
 ## What it costs
 
@@ -138,15 +138,15 @@ sandboxes' memory, with no CPU charge.
 
 - It is measured each minute the window is live: the sandboxes the booking
   holds room for, less the sandboxes you run in the region.
-- Past the window's half, unused room goes back to everyone in quarters, and
-  room that has gone back costs nothing.
-- Cancel at least an hour before the start and it costs nothing. Cancel later
+- Past the window's half, unused room goes back to everyone in quarters. Room
+  that has gone back costs nothing.
+- Cancel at least an hour before the start, and it costs nothing. Cancel later,
   and the unused room is charged until an hour after the start, or until you
   cancel if that is later.
 - It is charged from your balance every hour of the window and when it ends.
 
 The confirmation says the rate (`unusedRateMicros`, per GiB-hour) and the
-most the booking costs if none of its sandboxes run (`unusedMaxMicros`), and
+most the booking costs if none of its sandboxes run (`unusedMaxMicros`).
 `unusedChargedMicros` shows what it has cost so far. For 300 sandboxes of
 2 GiB booked for 2 hours:
 
@@ -163,30 +163,30 @@ Room going back past the half brings it to $1.83.
 
 ## When a booking is declined
 
-A declined booking is an answer, not an error: `status` is `declined` and
+A declined booking is a normal result, not an error. `status` is `declined`, and
 `reason` says why.
 
 | `reason` | What it means                                                                                                                               | What to do                                                                                   |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `room`   | That window has no more room without taking what other customers need                                                                       | Book `largestSandboxes`, or the `nearestWindow` it names                                     |
-| `share`  | One account books at most a quarter of the region's spare room at once                                                                      | Book `largestSandboxes`, or split the burst over windows                                     |
+| `share`  | One account books at most a quarter of the region's spare room at the same time                                                             | Book `largestSandboxes`, or split the burst over windows                                     |
 | `usage`  | Three of your bookings in the last 30 days used under a fifth of what they held, so bookings are smaller for now                            | Book what you will run                                                                       |
 | `credit` | The balance doesn't cover `estimateMicros` beside your other bookings' (with auto top-up on, what you paid more than a week ago counts too) | Book `largestSandboxes`, or add credit in [Billing](https://withruntime.com/account/billing) |
 
 An account whose sandbox limits Runtime set lower, a pilot, or an account
-held back by a dispute or an abuse report can't book (`403`): write to
-support@withruntime.com. An account asks at most 20 times in ten minutes
-(`429`).
+held back by a dispute or an abuse report can't book. It gets `403`. Write to
+support@withruntime.com. An account can ask at most 20 times in ten minutes.
+Past that, it gets `429`.
 
 `estimateMicros` is the most the booking can cost: every sandbox running the
-whole window (any mix of running and unused costs less). It is not charged.
+whole window. Any mix of running and unused costs less. It is not charged.
 Your balance covers it, beside the estimates of your other bookings not yet
 ended. With auto top-up on, what you have paid and kept for more than a week
 counts toward it too, so a new card alone doesn't raise your limits.
 
 ## How room is decided
 
-Each region keeps a margin for everyone else: the most its customers ran
+Each region keeps a margin for everyone else. The margin is the most its customers ran
 outside bookings in the same hours over the last two weeks, plus a fifth. A
 booking never takes the margin, and never stops, moves or pauses anyone's
 sandbox. That is why a booking is a promise we can keep, and why a busy hour

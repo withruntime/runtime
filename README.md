@@ -29,6 +29,35 @@ The client reads `RUNTIME_API_KEY`, or the connection `npx withruntime login`
 saved on this machine. A new account starts on a free trial with no card. The
 [quickstart](https://withruntime.com/docs/start) takes it from there.
 
+## MCP server
+
+The MCP server gives an agent every Runtime product as tools. It needs Node
+22.12 or later and no API key. Claude Code:
+
+```bash
+claude mcp add --scope user runtime -- npx -y withruntime mcp
+```
+
+Cursor, Cline, Windsurf and other clients that take this shape:
+
+```json
+{
+  "mcpServers": {
+    "runtime": { "command": "npx", "args": ["-y", "withruntime", "mcp"] }
+  }
+}
+```
+
+The first time, the server offers one tool, `runtime_connect`. The agent calls
+it and shows a link and a code; approve **Connect agent** in the browser, and
+every Runtime tool appears. A machine already connected with
+`npx withruntime login` skips this step. In CI, set `RUNTIME_API_KEY` instead.
+
+Clients that connect over HTTP use `https://api.withruntime.com/mcp` (MCP
+Streamable HTTP) and sign in through the browser. The server is in the
+official MCP Registry as `com.withruntime/runtime`. Details:
+[withruntime.com/docs/mcp](https://withruntime.com/docs/mcp).
+
 ## What is here
 
 | Path                                                                              | What it is                                                                                                                  |
