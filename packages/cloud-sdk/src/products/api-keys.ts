@@ -69,6 +69,15 @@ export type MadeKey = {
   madeBy: string;
 };
 
+/** What `keys.update` changes: either or both. */
+export type KeyChange = {
+  /** account: everything in the account (only from an account-wide key).
+   *  agent: back to only what the key's own agent makes. */
+  reach?: "agent" | "account";
+  /** The most its agent may commit in any 24 hours, or null for none. */
+  dailyLimitMicros?: number | null;
+};
+
 export type ListedKey = {
   keyId: string;
   agentId: string;
@@ -112,6 +121,16 @@ export function keys(t: Transport) {
      *  live first, with what each spent in the last 24 hours. */
     list: async (options?: RequestOptions) =>
       (await t.json<{ keys: ListedKey[] }>({ method: "GET", path: "/v1/keys", ...options })).keys,
+    /** Change a key's reach or daily limit (null removes it). A key widens
+     *  only the keys it made, never past itself; it narrows any key it sees,
+     *  and never changes itself. Returns the key as `list` shows it. */
+    update: (keyId: string, change: KeyChange, options?: RequestOptions) =>
+      t.json<ListedKey>({
+        method: "PATCH",
+        path: `/v1/keys/${encodeURIComponent(keyId)}`,
+        body: change,
+        ...options,
+      }),
     /** Revoke this key or one it made: a worker's, when the worker is done. */
     revoke: (keyId: string, options?: RequestOptions) =>
       t.json<{ keyId: string; revokedAt: string }>({

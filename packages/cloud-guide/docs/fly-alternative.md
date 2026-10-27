@@ -14,9 +14,8 @@ Comparing more than two? [Fly.io alternatives for agent sandboxes](/compare/fly-
 - **Lower rates.** Measured CPU costs {{cpu-rate}} a vCPU-hour, {{=n0 100 * ( 1 - cpu-rate / rate:fly-sprites:cpu )}}% below Sprites' {{rate:fly-sprites:cpu}}. Reserved memory costs {{memory-rate}} per GiB-hour, {{=n0 100 * ( 1 - memory-rate / rate:fly-sprites:memory )}}% below Sprites' {{rate:fly-sprites:memory}} per GB-hour of memory in use.
 - **Idle time bills only storage.** A Runtime sandbox pauses itself after
   {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
-  Its next command runs {{server-wake-command}} after the request that
-  wakes it reaches Runtime. While paused, it
-  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
+  While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state
+  a month.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month. A month below it returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

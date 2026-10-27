@@ -67,7 +67,7 @@ The key is printed once, alone on standard output. Everything else goes to stand
 
 - With `--browser`, the command waits up to 15 minutes for the approval. Stopping it cancels the request. A key that was approved but not yet received is revoked.
 - These options match the API keys page. There are no others. A key lasts until it is revoked. Daily limits are in dollars.
-- `runtime keys ls` lists this key and the keys it made, with what each spent in the last 24 hours. `runtime keys usage <keyId>` shows one key's spend, held money and running sandboxes. `runtime keys revoke <keyId>` revokes a key this key made.
+- `runtime keys ls` lists this key and the keys it made, with what each spent in the last 24 hours. `runtime keys usage <keyId>` shows one key's spend, held money and running sandboxes. `runtime keys update <keyId>` changes a key's daily limit (`--daily-limit <usd>`, `--no-daily-limit`) or reach (`--account-wide`, `--own-agent`): a key widens only the keys it made, within its own limit. `runtime keys revoke <keyId>` revokes a key this key made.
 - To change a key's daily limit, list every key, or revoke them, use [API keys](https://withruntime.com/account/keys).
 
 ## Book room for a burst or a pool

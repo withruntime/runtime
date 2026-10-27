@@ -14,14 +14,9 @@ Comparing more than two providers? [Vercel Sandbox alternatives](/compare/vercel
 - **{{=n0 100 * ( 1 - cpu-rate / rate:vercel:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} an hour on Runtime and {{rate:vercel:cpu}} on Vercel. Memory costs {{=n0 100 * ( 1 - memory-rate / rate:vercel:memory )}}% less. Busier jobs save
   more. With both CPUs busy the whole minute, the example job costs {{cost:runtime:busy}} on
   Runtime and {{cost:vercel:busy}} on Vercel.
-- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
-  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
-  Its processes keep running, and its next command is done {{server-wake-command}}
-  after the request reaches Runtime.
-- **Faster from a snapshot.** Vercel states its snapshot restores take
-  {{speed:vercel:restore}}. On Runtime's servers, a create from a snapshot is
-  running in {{server-restore}}, and {{server-restore-p95}} at p95 ([speed](./speed)).
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command, connection,
+  traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only paused storage,
+  {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it. Its processes keep running.
 - **A written uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month,
   measured from outside. If a month falls short, {{uptime-credit}} of that month's charges
   is returned as credit automatically ([Uptime Promise](/legal/sla)).

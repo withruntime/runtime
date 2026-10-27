@@ -13,14 +13,9 @@ Comparing more than two? [Cloudflare Sandbox alternatives](/compare/cloudflare-s
 
 - **{{=n0 100 * ( 1 - cpu-rate / rate:cloudflare:cpu )}}% cheaper CPU.** Active CPU costs {{cpu-rate}} a vCPU-hour on Runtime and {{rate:cloudflare:cpu}} on Cloudflare. Memory is cheaper too, at {{memory-rate}} per GiB-hour
   against {{rate:cloudflare:memory}}.
-- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}}
-  pauses by itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
-  Runtime's servers.
-- **Starts in milliseconds.** Cloudflare states container cold starts take
-  {{speed:cloudflare:create}}. On Runtime's servers a new sandbox is running
-  {{server-create}} after the create request, and {{server-create-template}} for a size with
-  no warm spare ([speed](./speed)).
+- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}} pauses by
+  itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a month
+  until a request wakes it.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month. A month below it returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

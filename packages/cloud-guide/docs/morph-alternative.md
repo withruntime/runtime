@@ -13,11 +13,9 @@ Comparing more than two providers? [Morph Cloud alternatives](/compare/morph-alt
 - **You pay for the CPU you use.** Morph bills a machine's full size in MCUs for
   as long as it runs. Runtime measures the CPU your code actually uses. Time
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **Idle time bills only storage.** A Runtime sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
-  The next command runs {{server-wake-command}} after the request that wakes it
-  reaches Runtime. While paused, the sandbox pays {{paused-storage-rate}} per GB (10⁹ bytes)
-  of saved state a month.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after {{idle-pause}}
+  with nothing happening in it. It keeps its memory and processes. While paused, the sandbox
+  pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **A written uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month,
   measured from outside. If a month falls short, {{uptime-credit}} of that month's charges
   is returned as credit automatically ([Uptime Promise](/legal/sla)).

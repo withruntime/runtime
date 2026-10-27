@@ -15,11 +15,9 @@ Comparing more than two providers? [Freestyle alternatives](/compare/freestyle-a
   reserved core is yours whether or not the guest is busy. Runtime measures the
   CPU your code actually uses. Time spent waiting on a model costs only a
   small floor, {{cpu-floor-share}}.
-- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
-  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
-  Its processes keep running, and its next command is done {{server-wake-command}}
-  after the request reaches Runtime.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command, connection,
+  traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only paused storage,
+  {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it. Its processes keep running.
 - **A written uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month,
   measured from outside. If a month falls short, {{uptime-credit}} of that month's charges
   is returned as credit automatically ([Uptime Promise](/legal/sla)).
@@ -140,11 +138,9 @@ await box.spawn("nginx -g 'daemon off;'", { user: "root" });
 - **More than 16 vCPUs in one VM.** Freestyle's Pro plan goes to 32 vCPUs.
 - **Forking without a pause.** Freestyle clones a running VM without pausing
   it. A Runtime fork pauses the source for the capture and has it running
-  again when the call returns. That takes {{server-fork}} on Runtime's servers for one copy.
+  again when the call returns.
 - **The fastest start.** Freestyle states VMs provision with a p99 under
-  400 ms. A Runtime sandbox ran its first command {{server-first-command}} after the request at
-  the median on Runtime's servers, and {{server-first-command-p95}} at the 95th percentile on {{server-date}}
-  ([speed](./speed)).
+  400 ms.
 
 ## Sources
 

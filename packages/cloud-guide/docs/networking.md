@@ -445,9 +445,7 @@ soon as it runs. A join that fails stops the new sandbox and says why.
 
 Paid sandboxes send UDP to any public address and port: HTTP/3 and QUIC, DNS
 to a resolver of your choice, time sync, game and media servers, WireGuard or
-other VPN clients. Sandboxes without credit send TCP only. In a measurement on
-25 September 2026, a paid sandbox got an NTP reply in 18 ms and a QUIC reply
-from Google in 16 ms.
+other VPN clients. Sandboxes without credit send TCP only.
 
 - Each flow has one destination. Only that destination's replies come back.
   Nothing reaches a sandbox over UDP unless the sandbox asked for it.

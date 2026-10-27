@@ -14,10 +14,9 @@ Comparing more than two providers? [Prime Sandboxes alternatives](/compare/prime
   sandbox is given for as long as it runs. Runtime measures the CPU your code
   actually uses. Time spent waiting on a model costs only a small floor, {{cpu-floor-share}}. Even with both CPUs busy the whole minute, the example
   job costs {{cost:runtime:busy}} on Runtime and {{cost:prime}} on Prime.
-- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime
-  sandbox pauses by itself with its memory kept. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
-  Runtime's servers.
+- **Waiting costs storage, not compute.** Left idle for {{idle-pause}}, a Runtime sandbox pauses by
+  itself with its memory kept. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) a
+  month until a request wakes it.
 - **A written uptime promise.** Paid accounts get {{uptime-promise}} API uptime a month,
   measured from outside. If a month falls short, {{uptime-credit}} of that month's charges
   is returned as credit automatically ([Uptime Promise](/legal/sla)).

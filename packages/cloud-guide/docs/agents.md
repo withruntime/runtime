@@ -8,7 +8,7 @@ An agent runs a harness in a sandbox of its own for each session, using your own
 
 Use an agent for one of two things:
 
-- **Your customers.** Your product calls the API for each of your customers, with a key of your own (`key: "customer:42"`). Each customer gets a session of their own. A waiting session's sandbox pauses after 10 seconds. It then pays only for its storage until the next message. A paused sandbox is running again 76 ms after it is asked to wake (median, timed on Runtime's servers on 28 September 2026: [speed](./speed)).
+- **Your customers.** Your product calls the API for each of your customers, with a key of your own (`key: "customer:42"`). Each customer gets a session of their own. A waiting session's sandbox pauses after 10 seconds. It then pays only for its storage until the next message.
 - **Your team.** An agent works on your code from a Slack thread or a GitHub pull request. It runs on a 4 vCPU, 8 GiB machine. It ends with what it made.
 
 Choose a harness: [Claude Code](./agents-claude-code), [Codex](./agents-codex), [Gemini CLI](./agents-gemini-cli), [Claude Agent SDK](./agents-claude-agent-sdk) or [OpenAI Agents SDK](./agents-openai-agents-sdk). Each page has three steps.

@@ -8,7 +8,7 @@ One client for every Runtime Cloud product. It runs on Node 22.12 or later, and 
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.45.0. Run `npm ls withruntime` to see the version you have. If a method named here is missing from yours, you have an older version. Run `npm install withruntime@latest` to update it.
+This guide describes `withruntime` 0.46.0. Run `npm ls withruntime` to see the version you have. If a method named here is missing from yours, you have an older version. Run `npm install withruntime@latest` to update it.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that variable is set. Otherwise, it uses the connection this machine saved. Any `npx withruntime` command creates that connection, with one browser approval.
 
@@ -328,7 +328,7 @@ A server keeps room for the memory of every sandbox it runs that can pause. When
 
 ### Wake on request
 
-A paused sandbox wakes by itself when a request needs it. Such requests include an `exec`, a file, process, terminal, desktop or code-interpreter call, or a visit to one of its shared ports. The call waits while the sandbox wakes. This takes about {{server-wake-command}} on Runtime's servers. Then the call runs. A browser that visits a shared port sees a short "Waking up" page. The page reloads itself. The wake is billed like any wake. Billing starts from the moment the sandbox runs again. The sandbox runs while it works again. A sandbox with a time limit gets a fresh limit of its own `timeoutSeconds`. Or it keeps the limit it paused with, if that ends later.
+A paused sandbox wakes by itself when a request needs it. Such requests include an `exec`, a file, process, terminal, desktop or code-interpreter call, or a visit to one of its shared ports. The call waits while the sandbox wakes. Then the call runs. A browser that visits a shared port sees a short "Waking up" page. The page reloads itself. The wake is billed like any wake. Billing starts from the moment the sandbox runs again. The sandbox runs while it works again. A sandbox with a time limit gets a fresh limit of its own `timeoutSeconds`. Or it keeps the limit it paused with, if that ends later.
 
 Turn it off with `autoWake: false` at create. Or turn it off later with `sbx.update({ autoWake: false })`. A call to a paused sandbox that cannot wake then fails with `sandbox_paused`, until you call `wake()`.
 
@@ -568,7 +568,7 @@ await using later = await runtime.sandboxes.create({ snapshot: snapshot.id });
 await runtime.snapshots.delete(snapshot.id);
 ```
 
-A running sandbox is paused while a snapshot or fork captures it. It is woken before the call returns. A snapshot of a fresh sandbox is ready in {{server-snapshot}} on Runtime's servers. A bigger snapshot takes longer, the more memory it holds. A paused sandbox stays paused. Copies get the source's vCPUs, memory, disk and CPU. That covers reserved CPU, or a raised floor. Copies are billed as a create with those settings would be. They run on its host. A snapshot is kept on that host. It is copied off the host, encrypted, after its final compressed form is ready. It survives loss of the server once `backedUp` is `true`. That means the off-host copy has been checked ([storage and backups](./storage)). A sandbox with volumes cannot be snapshotted.
+A running sandbox is paused while a snapshot or fork captures it. It is woken before the call returns. A bigger snapshot takes longer, the more memory it holds. A paused sandbox stays paused. Copies get the source's vCPUs, memory, disk and CPU. That covers reserved CPU, or a raised floor. Copies are billed as a create with those settings would be. They run on its host. A snapshot is kept on that host. It is copied off the host, encrypted, after its final compressed form is ready. It survives loss of the server once `backedUp` is `true`. That means the off-host copy has been checked ([storage and backups](./storage)). A sandbox with volumes cannot be snapshotted.
 
 Snapshots default to `mode: "memory"`. That mode keeps files, memory and running processes. `await base.snapshot({ mode: "disk" })` keeps only the root filesystem. Each sandbox created from it boots fresh, without the saved processes. You set the `vcpu`, `memoryMiB` and `diskMiB` for each one. The disk must be at least the saved size. A copy of a memory snapshot is always the snapshot's size. Both modes pause a running source until capture finishes. Then they wake it. A source that was already paused stays paused. For a disk snapshot, the pause first waits for the sandbox to write out what it holds in memory. This takes a few seconds at most.
 
@@ -733,9 +733,9 @@ Pass `cdpUrl` to the tool as it is. Use `chromium.connectOverCDP(cdpUrl)` in Pla
 
 The CLI is `runtime sandboxes browser <id> start`, and agents use the MCP tool `runtime_sandboxes_browser`.
 
-### A page in under a second
+### Spare browsers, paused
 
-For many short tasks, such as fetching one page each, keep spare browsers paused. A paused sandbox is charged only for its storage. It wakes in about a tenth of a second, with Chromium as it was:
+For many short tasks, such as fetching one page each, keep spare browsers paused. A paused sandbox is charged only for its storage. It wakes on the next request, with Chromium as it was:
 
 ```ts check
 import { Sandbox } from "withruntime";

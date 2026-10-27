@@ -402,12 +402,12 @@ snapshot asked for meanwhile waits for that write.
 
 A paused sandbox also wakes by itself when a request needs it: an `exec`, a
 file, process, terminal, desktop or code-interpreter call, or a visit to one of
-its shared ports. The call waits while it wakes, about {{server-wake-command}} on Runtime's servers.
-The wake is billed like any wake, from the moment it runs again, and it again
-runs while it works. A sandbox with a time limit gets a fresh one of its own
-`timeout_seconds`, or keeps the one it paused with when that ends later. Turn
-it off with `auto_wake=False` at create or `sbx.update(auto_wake=False)`. A call
-to a paused sandbox then fails with `sandbox_paused` until you call `wake()`.
+its shared ports. The wake is billed like any wake, from the moment it runs
+again, and it again runs while it works. A sandbox with a time limit gets a
+fresh one of its own `timeout_seconds`, or keeps the one it paused with when
+that ends later. Turn it off with `auto_wake=False` at create or
+`sbx.update(auto_wake=False)`. A call to a paused sandbox then fails with
+`sandbox_paused` until you call `wake()`.
 
 A sandbox pauses itself after **{{idle-pause}}** in which nothing happens in it: no
 request, no command or terminal still running, no open preview, port, SSH or
@@ -824,14 +824,13 @@ with Sandbox.create(vcpu=1, memory_mib=2048) as sbx:
     # playwright: browser = p.chromium.connect_over_cdp(cdp_url)
 ```
 
-For a page in well under a second, keep spare browsers paused. A paused
-sandbox is charged only for its storage, and wakes in about 0.1 s with
-Chromium running. Run `spare.pause()` after `browser.start()`. Then, for each
+For a page without a browser start, keep spare browsers paused. A paused
+sandbox is charged only for its storage, and wakes with Chromium running. Run `spare.pause()` after `browser.start()`. Then, for each
 page, run `spare.wake()`, open a new browser context and the page, and run
 `spare.pause()` again.
 Open each page in its own context so nothing passes between pages. Heavy apps
 need 2 GiB; 1 GiB suits light pages and scraping at half the memory charge.
-[JavaScript](./javascript#a-page-in-under-a-second) has the measured times.
+[JavaScript](./javascript#spare-browsers-paused) has the same in TypeScript.
 
 ## A sandbox from a browser
 

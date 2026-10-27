@@ -346,11 +346,10 @@ See [storage and retention terms](./pricing) and [isolation](./security).
 
 ## A sandbox stays `resuming`, or its operation never finishes
 
-**A wake that is still `resuming` after a minute is stuck on our side.** A
-paused sandbox normally runs its next command {{wake}} after the wake. One that
-boots from the disk, because the memory could not be kept
-(`memoryRestored: false`), does so within seconds. While a sandbox is `resuming`, a command on it waits up to 30 seconds
-and then returns `sandbox_not_ready`.
+**A wake that is still `resuming` after a minute is stuck on our side.** A wake that boots from the
+disk, because the memory could not be kept (`memoryRestored: false`), does so within seconds. While
+a sandbox is `resuming`, a command on it waits up to 30 seconds and then returns
+`sandbox_not_ready`.
 
 **An operation we cannot finish gives up within about a minute.** The
 sandbox then stays in the state it was moving from (`starting`, `resuming`,

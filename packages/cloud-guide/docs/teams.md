@@ -107,7 +107,8 @@ can see every key, and who made it, on the
 - A full-access key of an owner or admin can make more keys over the API
   ([run a swarm](#run-a-swarm)).
 - The person who made a key sets or changes its daily spending limit. Owners and
-  admins can limit or revoke any key.
+  admins can limit or revoke any key. A key can also change the keys it made
+  ([run a swarm](#run-a-swarm)).
 - When someone leaves or is removed, the keys they made are revoked in the same
   step. What they created, such as sandboxes, volumes and images, stays with the
   account.
@@ -122,6 +123,7 @@ one key per worker, each with its own daily cap.
 runtime keys create --name worker-1 --daily-limit 5   # prints the key once
 runtime keys ls                                       # each worker, with its spend
 runtime keys usage <keyId>                            # one worker in full
+runtime keys update <keyId> --daily-limit 10          # give a worker more room
 runtime keys revoke <keyId>                           # when the worker is done
 ```
 
@@ -132,6 +134,7 @@ const runtime = new Runtime(); // RUNTIME_API_KEY
 const worker = await runtime.keys.create({ name: "worker-1", dailyLimitMicros: 5_000_000 });
 // hand worker.key to the worker, then later:
 console.log(await runtime.keys.usage(worker.keyId));
+await runtime.keys.update(worker.keyId, { dailyLimitMicros: 10_000_000 });
 await runtime.keys.revoke(worker.keyId);
 ```
 
@@ -140,6 +143,8 @@ curl -sS https://api.withruntime.com/v1/keys -H "Authorization: Bearer ${RUNTIME
   -H "Idempotency-Key: worker-1" -H "Content-Type: application/json" \
   -d '{"name":"worker-1","dailyLimitMicros":5000000}'
 curl -sS "https://api.withruntime.com/v1/usage?key=${KEY_ID}" -H "Authorization: Bearer ${RUNTIME_API_KEY}"
+curl -sS -X PATCH "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authorization: Bearer ${RUNTIME_API_KEY}" \
+  -H "Content-Type: application/json" -d '{"dailyLimitMicros":10000000}'
 curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authorization: Bearer ${RUNTIME_API_KEY}"
 ```
 
@@ -148,6 +153,15 @@ curl -sS -X DELETE "https://api.withruntime.com/v1/keys/${KEY_ID}" -H "Authoriza
   also take `sandboxes` and `actions` for [a key limited to sandboxes](#a-key-limited-to-sandboxes).
   It returns the new key once. A retry with the same `Idempotency-Key` returns
   without the key.
+- `PATCH /v1/keys/{id}` changes a key's `reach` (`agent` or `account`) or
+  `dailyLimitMicros` (`null` removes the limit), and returns the key as
+  `GET /v1/keys` lists it. A key can change another key only to what it could
+  make itself. It widens a key (account-wide, a larger limit, or no limit) only
+  if it made that key, at any depth: account-wide only from an account-wide
+  key, and the limits of the keys it made still add up to at most its own.
+  Otherwise the request returns `403 forbidden`. It can narrow any key it sees:
+  back to its own agent, or a smaller limit. A key never changes itself. A key
+  limited to sandboxes keeps its reach. Each change is in the audit log.
 - Each key is its own agent. A worker with reach `agent` sees only its own
   sandboxes, and its spend and audit rows are its own.
 - A key made by a key with reach `agent` can use what a sandbox needs (sandboxes,

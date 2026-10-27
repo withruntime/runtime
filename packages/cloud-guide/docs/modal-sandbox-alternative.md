@@ -28,13 +28,9 @@ Comparing more than two? [Modal Sandbox alternatives](/compare/modal-alternative
 - **You pay for the CPU you use.** Modal bills whichever is higher, the CPU a
   sandbox requested or the CPU it used. So a requested core is billed while it
   waits. Runtime measures the CPU your code actually uses, with a floor of {{cpu-floor-share}}. There is no request to size in advance.
-- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}}
-  pauses by itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
-  Runtime's servers.
-- **Starts in milliseconds.** Modal states its sandboxes start in {{speed:modal:create}}.
-  On Runtime's servers a new sandbox is running {{server-create}} after the create request
-  and has run its first Python command {{server-first-command}} after it ([speed](./speed)).
+- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}} pauses by
+  itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a month
+  until a request wakes it.
 - **An uptime promise that pays itself.** Paid accounts are promised
   {{uptime-promise}} API uptime each month. A month below it returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

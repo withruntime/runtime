@@ -448,6 +448,39 @@ A 5xx response sets the span's status to `ERROR`. A 4xx response is an error in 
 
 Spans are sent in batches as each call is answered, within about a second. If an endpoint refuses a batch, or does not answer within 2 seconds, that batch is lost, as with an OpenTelemetry SDK's exporter. That export's spans are then dropped for 5 seconds, doubling up to 5 minutes while its endpoint keeps failing, and sending resumes after the first success. Each export is separate: another export of the same account keeps receiving every span. Spans that cannot be held because the endpoint falls behind are also dropped and reported. `tracesLastError` says why, and `exportedSpans` counts what arrived. Spans have their own `tracesLastAttemptAt`, `tracesLastSuccessAt`, `tracesLastError` and `tracesFailures`. `lastSuccessAt`, `lastError` and `failures` describe logs and metrics only, so one signal's failure never hides behind another's success.
 
+## What metrics and traces cost
+
+Disk, disk I/O and network metrics, and a trace span of every API call,
+measured for what they cost on 25 October 2026 at 7:20 p.m. US Mountain time, in a production Runtime
+sandbox with 4 vCPU (AMD EPYC), Bun 1.4.0 and Python 3.12.3. Percentiles are
+nearest-rank.
+
+| What                                                     | p50     | p95     | p99      | Samples |
+| -------------------------------------------------------- | ------- | ------- | -------- | ------- |
+| The sandbox's CPU for one disk reading                   | 54 µs   | 60 µs   | 86 µs    | 5,000   |
+| Recording one API call's span                            | 0.87 µs | 7.03 µs | 14.23 µs | 100,000 |
+| Recording one span inside your own trace (`traceparent`) | 1.08 µs | 5.61 µs | 12.97 µs | 100,000 |
+| An API call of an account that exports no traces         | 0.04 µs | 0.05 µs | 0.05 µs  | 100,000 |
+| Encoding 512 spans as one OTLP/JSON body                 | 0.82 ms | 2.35 ms | 2.87 ms  | 300     |
+
+- **Disk reading.** The host asks each running sandbox's kernel for its disk
+  counters once a reading, every 30 seconds: 54 µs of the sandbox's CPU in 30
+  seconds is under 0.0002% of one vCPU. A sandbox that does not answer in
+  250 ms is not waited for; that reading has no disk figures. Network traffic
+  is counted on the host and costs the sandbox nothing.
+- **Spans.** A span is made in memory when the call is answered and sent
+  within about a second, so it adds about a microsecond to the call and
+  nothing to the database.
+- **Reading the metrics.** A day of readings, one every 30 seconds, read as
+  the `1h` range reads it took 3.19 ms at the median (3.43 ms p95) with disk
+  and network, against 2.02 ms (6.04 ms p95) without; as the `24h` range reads
+  it, 20.9 ms (30.3 ms p95) against 12.2 ms (18.8 ms p95). Measured on
+  Postgres 18 in the same sandbox, 50 reads each.
+
+The [recorded figures](/benchmarks/metrics-traces-2026-10-25.json) and the
+[test that measures them](https://github.com/withruntime/runtime/blob/main/packages/cloud/tests/metrics-traces.speed.test.ts)
+are published. These are observations, not a latency promise.
+
 ## MCP
 
 `runtime_sandboxes_metrics` reads a sandbox's CPU, memory, CPU wait, memory stalls, disk and network. `runtime_events_list` reads its events. `runtime_webhooks_manage` and `runtime_otel_manage` list, create, test and change webhooks and exports.

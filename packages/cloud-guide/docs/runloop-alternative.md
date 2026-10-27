@@ -13,10 +13,8 @@ If you are weighing more than two, [Runloop alternatives](/compare/runloop-alter
 - **You pay for the CPU you use.** Runloop bills a devbox's CPUs and memory for
   as long as it runs. Runtime measures the CPU your code actually uses, so time
   spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **Idle time bills only storage.** A Runtime sandbox pauses itself after
-  {{idle-pause}} with no activity, keeps its memory and processes, and runs its
-  next command {{server-wake-command}} after the request that wakes it reaches
-  Runtime. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after {{idle-pause}} with no activity, keeps its memory and processes, and runs its next command when a request wakes it. While paused, it pays {{paused-storage-rate}} per GB (10⁹
+  bytes) of saved state a month.
 - **An uptime promise with automatic credit.** Paid accounts are promised
   {{uptime-promise}} API uptime each month; a month below it returns {{uptime-credit}} of that
   month's charges as credit, with no claim to file ([Uptime Promise](/legal/sla)).

@@ -13,14 +13,9 @@ Comparing more than two providers? [Daytona alternatives](/compare/daytona-alter
 - **You pay for the CPU you use.** Daytona bills every vCPU for as long as the
   sandbox runs. Runtime measures the CPU your code actually uses. Time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
-  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
-  Its processes keep running, and its next command is done {{server-wake-command}}
-  after the request reaches Runtime.
-- **Back from a pause in milliseconds.** Daytona states a paused VM resumes in
-  {{speed:daytona:wake}}. On Runtime's servers, a wake takes {{server-wake}}, on every sandbox
-  ([speed](./speed)).
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command, connection,
+  traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only paused storage,
+  {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it. Its processes keep running.
 - **An uptime promise that pays itself.** Paid accounts get
   {{uptime-promise}} API uptime each month. A month below that returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

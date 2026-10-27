@@ -38,7 +38,10 @@ curl -sS "https://api.withruntime.com/v1/sandboxes/${ID}:exec" \
 
 ## Responses and errors
 
-Every response includes an `x-request-id` header. Every error has one shape:
+Every response includes an `x-request-id` header and a `Server-Timing`
+header, `app;dur=12.3`: the time in milliseconds from when the API received the
+request until its response headers were ready. Subtract it from the time your
+client measured to get the network's share. Every error has one shape:
 
 ```json
 {

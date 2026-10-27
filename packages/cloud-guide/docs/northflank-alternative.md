@@ -13,11 +13,9 @@ Comparing more than two providers? [Northflank alternatives](/compare/northflank
 - **You pay for the CPU you use.** Northflank bills the vCPUs and memory a
   sandbox holds for as long as it runs. Runtime measures the CPU your code
   actually uses. Time spent waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **It pauses itself when idle.** After {{idle-pause}} with no request, command,
-  connection, traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only
-  paused storage, {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it.
-  Its processes keep running, and its next command is done {{server-wake-command}}
-  after the request reaches Runtime.
+- **It pauses itself when idle.** After {{idle-pause}} with no request, command, connection,
+  traffic or CPU use, a Runtime sandbox pauses. While paused, it pays only paused storage,
+  {{paused-storage-rate}} per GB (10⁹ bytes) a month. The next request wakes it. Its processes keep running.
 - **An uptime promise that pays itself.** Paid accounts get
   {{uptime-promise}} API uptime each month. A month below that returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

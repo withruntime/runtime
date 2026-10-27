@@ -3729,14 +3729,19 @@ const KEYS_HELP = `runtime keys <command>
       account route, no MCP.
   ls                      This key and the keys it made, with what each spent today
   usage <keyId>           What one of them has spent and holds
+  update <keyId> [--daily-limit <usd> | --no-daily-limit] [--account-wide | --own-agent]
+      Change a key's daily limit or reach. A key widens (account-wide, a larger
+      limit, or none) only the keys it made, within its own limit; it narrows
+      any key it sees, and never changes itself.
   revoke <keyId>          Revoke one: a worker's key when the worker is done
 
   runtime keys create --name worker-1 --daily-limit 5
+  runtime keys update <keyId> --daily-limit 10
   runtime keys create --name ci --daily-limit 25 --browser | gh secret set RUNTIME_API_KEY
   runtime keys create --name watcher --sandbox sbx_id --actions get,create --daily-limit 2
   runtime keys create --name helper --sandbox sbx_a,sbx_b --actions get,exec,read_file,write_file --browser
 
-Making, listing and revoking keys with a key needs one an owner or admin made.
+Making, listing, changing and revoking keys with a key needs one an owner or admin made.
 Every key is also at https://withruntime.com/account/keys.
 `;
 
@@ -4181,7 +4186,36 @@ async function keys(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promise<n
     print(`Revoked ${revoked.keyId}. It stops working within ten seconds.`, revoked);
     return 0;
   }
-  if (verb !== "create") throw unknown("keys command", verb, ["create", "ls", "usage", "revoke"]);
+  if (verb === "update") {
+    const args = parse(rest, ["account-wide", "own-agent", "no-daily-limit"], ["daily-limit"]);
+    const known = new Set(["account-wide", "own-agent", "no-daily-limit", "daily-limit"]);
+    for (const name of args.flags.keys())
+      if (!known.has(name)) throw usage(`Unknown option --${name}.`);
+    const id = args.positional[0];
+    const shape = `Usage: ${named("runtime keys update <keyId> [--daily-limit <usd> | --no-daily-limit] [--account-wide | --own-agent]")}`;
+    if (!id || args.positional.length > 1 || args.rest) throw usage(shape);
+    if (has(args, "account-wide") && has(args, "own-agent"))
+      throw usage("Give --account-wide or --own-agent, not both.");
+    const limit = flag(args, "daily-limit");
+    if (limit !== undefined && has(args, "no-daily-limit"))
+      throw usage("Give --daily-limit or --no-daily-limit, not both.");
+    const { dailyLimitMicros } = await import("./keys.js");
+    const change = {
+      ...(has(args, "account-wide") ? { reach: "account" as const } : {}),
+      ...(has(args, "own-agent") ? { reach: "agent" as const } : {}),
+      ...(limit !== undefined ? { dailyLimitMicros: dailyLimitMicros(limit) } : {}),
+      ...(has(args, "no-daily-limit") ? { dailyLimitMicros: null } : {}),
+    };
+    if (!Object.keys(change).length) throw usage(shape);
+    const updated = await (await client(env)).keys.update(id, change);
+    print(
+      `${updated.name} (${updated.keyId}): reach ${updated.reach}, daily limit ${updated.dailyLimitMicros === null ? "none" : usdOf(updated.dailyLimitMicros)}.`,
+      updated,
+    );
+    return 0;
+  }
+  if (verb !== "create")
+    throw unknown("keys command", verb, ["create", "ls", "usage", "update", "revoke"]);
   const args = parse(
     rest,
     ["read-only", "account-wide", "browser"],

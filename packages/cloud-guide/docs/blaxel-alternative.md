@@ -187,11 +187,6 @@ Moving from Blaxel? Credit you add within {{welcome-days}} days of signing up is
 
 ## When Blaxel may fit better
 
-- **A shorter stated wake.** Blaxel states a resume from standby in
-  {{speed:blaxel:wake}} and does not say how it is timed. On Runtime's servers, a
-  wake returns in {{server-wake}}. The host's part of it is {{host-wake}}. The
-  next command has run {{server-wake-command}} after the wake request
-  ({{server-date}}, [speed](./speed)).
 - **Very large fleets.** Blaxel's top tier runs over 100,000 sandboxes at the same time.
   A tier is the credit topped up over the last 30 days, which is then spent on
   usage: {{term:blaxel:tier-1}} unlocks 50 sandboxes and {{term:blaxel:tier-2}} unlocks 200.

@@ -11,9 +11,6 @@ every Runtime product. New accounts get [{{included-machine}} every month](./inc
   {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
 - **Idle time costs almost nothing:** a sandbox pauses itself after
   {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
-  It runs its next command {{server-wake-command}} server-side after the request that wakes it.
-- **Fast:** a new sandbox runs its first command {{server-first-command}} server-side after the
-  create request ([speed](./speed)).
 - **Pause keeps memory.** A fork copies a running sandbox with its memory
   and processes.
 - **An uptime promise:** paid accounts are promised {{uptime-promise}} API

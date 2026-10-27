@@ -13,14 +13,9 @@ Comparing more than two? [E2B alternatives](/compare/e2b-alternatives) ranks the
 - **You pay for the CPU you use.** E2B bills every vCPU for as long as the
   sandbox runs. Runtime measures the CPU your code actually uses. Time spent
   waiting on a model costs only a small floor, {{cpu-floor-share}}.
-- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}}
-  pauses by itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a
-  month until a request wakes it. The next command runs {{server-wake-command}} after that, timed on
-  Runtime's servers.
-- **Back from a pause in milliseconds.** E2B states a resume takes {{speed:e2b:wake}} and a
-  pause {{speed:e2b:pause}}. On Runtime's servers, a wake takes {{server-wake}}. A pause
-  returns in {{server-pause}}. A new sandbox is running {{server-create}} after the create
-  request, against E2B's {{speed:e2b:create}} ([speed](./speed)).
+- **Waiting costs storage, not compute.** A Runtime sandbox left idle for {{idle-pause}} pauses by
+  itself and keeps its memory. It then pays {{paused-storage-rate}} per GB (10⁹ bytes) a month
+  until a request wakes it.
 - **A written uptime promise.** {{uptime-promise}} API uptime a month for paid accounts,
   measured from outside. {{uptime-credit}} of a short month's charges comes back as credit
   automatically ([Uptime Promise](/legal/sla)).

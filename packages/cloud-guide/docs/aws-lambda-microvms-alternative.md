@@ -14,11 +14,9 @@ Comparing more than two providers? [AWS Lambda MicroVMs alternatives](/compare/a
   memory for every second a MicroVM runs, busy or not. Runtime measures the CPU
   your code actually uses. Time spent waiting on a model costs only a small
   floor, {{cpu-floor-share}}.
-- **Idle time bills only storage.** A Runtime sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
-  The next command runs {{server-wake-command}} after the request that
-  wakes it reaches Runtime. While paused, it pays {{paused-storage-rate}} per GB (10⁹ bytes)
-  of saved state a month.
+- **Idle time bills only storage.** A Runtime sandbox pauses itself after {{idle-pause}}
+  with nothing happening in it. It keeps its memory and processes. While paused, it pays
+  {{paused-storage-rate}} per GB (10⁹ bytes) of saved state a month.
 - **An uptime promise that pays itself.** Paid accounts get
   {{uptime-promise}} API uptime each month. A month below that returns {{uptime-credit}} of that
   month's charges as credit. No claim is needed ([Uptime Promise](/legal/sla)).

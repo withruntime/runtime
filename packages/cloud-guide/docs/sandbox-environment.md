@@ -46,7 +46,7 @@ npx playwright install chromium
 
 ## The machine's identity
 
-A sandbox starts in milliseconds because it is not booted. It is a copy of a machine that booted once. Most of what a machine calls its own identity is made new for each copy. Not all of it is.
+A sandbox is not booted when it starts. It is a copy of a machine that booted once. Most of what a machine calls its own identity is made new for each copy. Not all of it is.
 
 - `/etc/machine-id` belongs to the sandbox. It is made when the sandbox first starts, and kept for its whole life. That includes pauses, wakes, stops and restarts. A fork, or a sandbox created from a snapshot, gets a new one. Use it when a program needs an ID for the machine it runs on.
 - `/dev/urandom`, `getrandom` and every program started in the sandbox get fresh randomness. Programs already running when a fork or snapshot was taken keep their own state. See [randomness in copies](./storage#randomness-in-copies).
