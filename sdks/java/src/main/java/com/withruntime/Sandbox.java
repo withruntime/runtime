@@ -212,7 +212,8 @@ public final class Sandbox implements AutoCloseable {
 
   /**
    * Changes name, labels, autoWake, user ("sandbox" or "root": who later commands run as when
-   * one names no user), idlePauseSeconds, persistent or maxTotalCostMicros; fields left out stay
+   * one names no user), leaseSeconds (with no time limit, how far ahead each renewal funds it,
+   * 300 to 43200), idlePauseSeconds, persistent or maxTotalCostMicros; fields left out stay
    * as they are, and a null maxTotalCostMicros removes the cap.
    */
   public Sandbox update(Map<String, Object> settings) {

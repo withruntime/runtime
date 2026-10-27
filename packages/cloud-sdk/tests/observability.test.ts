@@ -56,6 +56,7 @@ const metrics = {
       memoryBytes: 1073741824,
       memoryPeakBytes: 1073741824,
       samples: 1,
+      diskUsedBytes: 2147483648,
     },
   ],
 };
@@ -203,7 +204,7 @@ test("E2B's getMetrics is Runtime's measured readings", async () => {
           cpuCount: 2,
           memUsed: 1073741824,
           memTotal: 4294967296,
-          diskUsed: null,
+          diskUsed: 2147483648,
           diskTotal: 10737418240,
         },
       ]);

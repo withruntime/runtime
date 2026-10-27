@@ -36,7 +36,10 @@ export const CI_HELP = `runtime ci <command>
   import [dir] [--write] [--force]            This folder's GitHub Actions workflows and CircleCI
                                               config as a runtime.yml: printed, or written with
                                               --write; what isn't carried over is noted at its top.
-                                              Needs no key and sends nothing
+                                              Needs no key and sends nothing. Without a runtime.yml,
+                                              checks run .circleci/config.yml, .gitlab-ci.yml,
+                                              .buildkite/pipeline.yml or a .harness/ pipeline
+                                              unchanged: connecting is the whole move
   connect <owner/name> [--branch main] [--config runtime.yml] [--installation <id>]
           [--trust <app-slug>[bot]]... [--name <name>]
                                               Connect a repository; prints its id. Takes a full key.
@@ -56,7 +59,8 @@ export const CI_HELP = `runtime ci <command>
                                               takes an owner's or admin's full key
   disconnect <repoId | owner/name>            Stop checking it; its checks still going are cancelled
   checks [--repository <repoId>] [--branch <name>] [--commit <sha>] [--pr <number>]
-     [--state <state>]... [--limit 20]        Checks, newest first, with their jobs by state (or ls)
+     [--state <state>]... [--event <event>]... [--limit 20]
+                                              Checks, newest first, with their jobs by state (or ls)
   check <checkId>                             One check and its jobs in plan order (or get)
   cancel <checkId>                            Cancel a queued or running check: its jobs end,
                                               its machines are let go, GitHub is told
@@ -112,10 +116,32 @@ const machined = (m: CiCheck["machines"]) => {
 const where = (c: CiCheck) =>
   c.pullRequest !== null ? `#${c.pullRequest}` : (c.branch ?? c.event);
 const STATES = ["queued", "running", "passed", "failed", "cancelled"];
+const EVENTS = ["push", "pull_request", "merge_group", "rerun"];
 const ownerOf = (f: CiFlake) =>
   f.owner === null
     ? "nobody found"
     : `@${f.owner.login}${f.owner.pullRequest === null ? "" : ` (#${f.owner.pullRequest})`}`;
+
+/** The pipeline file of another CI that CI/CD's checks run unchanged when a
+ * repository has no runtime.yml (engines checks-runner `pipelines::find`), in
+ * the same order; null for none. */
+export function runsAsIs(root: string): string | null {
+  for (const path of [
+    ".circleci/config.yml",
+    ".circleci/config.yaml",
+    ".gitlab-ci.yml",
+    ".buildkite/pipeline.yml",
+    ".buildkite/pipeline.yaml",
+    "buildkite.yml",
+  ])
+    if (existsSync(join(root, path))) return path;
+  const harness = join(root, ".harness");
+  if (existsSync(harness))
+    for (const name of readdirSync(harness).sort())
+      if (/\.ya?ml$/.test(name) && /^\s*stages:/m.test(readFileSync(join(harness, name), "utf8")))
+        return `.harness/${name}`;
+  return null;
+}
 
 /** `runtime ci import [dir] [--write] [--force]`: the folder's GitHub Actions
  * workflows and CircleCI config as a `runtime.yml`, printed or written. */
@@ -135,6 +161,16 @@ async function importCommand(argv: string[], out: Out, kit: CliKit): Promise<num
   if (existsSync(circle))
     files.push({ path: ".circleci/config.yml", text: readFileSync(circle, "utf8") });
   if (!files.length) {
+    // A pipeline CI/CD runs as it is needs no runtime.yml.
+    const direct = runsAsIs(root);
+    if (direct) {
+      out.write(
+        out.json
+          ? JSON.stringify({ steps: [], notes: [], yaml: "", read: [], runsAsIs: direct })
+          : `${direct}: CI/CD runs it as it is, so there is nothing to import. Push it, then \`${me} ci connect <owner/name>\`; what can't run on a check is listed as a warning on its job.`,
+      );
+      return 0;
+    }
     // Cloud Build and CodeBuild configs run as they are: nothing to import.
     const vendor = ["cloudbuild.yaml", "cloudbuild.yml", "buildspec.yml", "buildspec.yaml"].find(
       (name) => existsSync(join(root, name)),
@@ -144,7 +180,7 @@ async function importCommand(argv: string[], out: Out, kit: CliKit): Promise<num
         `${vendor} needs no import: CI/CD runs it as it is. Connect with ${me} ci connect <owner/name> --config ${vendor}, or add "- ${vendor.startsWith("cloudbuild") ? "cloudbuild" : "buildspec"}: ${vendor}" to runtime.yml's steps.`,
       );
     throw kit.usage(
-      `${root} has neither .github/workflows/*.yml nor .circleci/config.yml to import.`,
+      `${root} has no .github/workflows/*.yml or .circleci/config.yml to import, and no .gitlab-ci.yml, .buildkite/pipeline.yml or .harness/ pipeline for CI/CD to run as it is.`,
     );
   }
   const made = importCi(files);
@@ -228,7 +264,7 @@ export async function ciCommand(
       const repo = await api.repositories.connect(input);
       if (!out.json)
         out.error(
-          `Connected ${repo.repository}: each push and pull request is checked as ${repo.configPath} says; ${repo.productionBranch} is its production branch; it trusts ${trusted(repo)}. Its checks: ${me} ci ls --repository ${repo.id}`,
+          `Connected ${repo.repository}: each push and pull request is checked as ${repo.configPath} says, or without it as its CircleCI, GitLab CI, Buildkite or Harness pipeline says, unchanged; ${repo.productionBranch} is its production branch; it trusts ${trusted(repo)}. Its checks: ${me} ci ls --repository ${repo.id}`,
         );
       print(repo.id, repo);
       return 0;
@@ -306,7 +342,11 @@ export async function ciCommand(
     case "ls":
     case "list":
     case "checks": {
-      const args = parse(rest, [], ["repository", "branch", "commit", "pr", "state", "limit"]);
+      const args = parse(
+        rest,
+        [],
+        ["repository", "branch", "commit", "pr", "state", "event", "limit"],
+      );
       const commit = flag(args, "commit");
       if (commit !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(commit))
         throw usage(
@@ -315,6 +355,9 @@ export async function ciCommand(
       const states = args.flags.get("state");
       for (const state of states ?? [])
         if (!STATES.includes(state)) throw unknown("state", state, STATES);
+      const events = args.flags.get("event");
+      for (const event of events ?? [])
+        if (!EVENTS.includes(event)) throw unknown("event", event, EVENTS);
       const pullRequest = whole(flag(args, "pr"), "--pr");
       const limit = whole(flag(args, "limit"), "--limit") ?? 20;
       const page = await api.checks.list({
@@ -324,6 +367,7 @@ export async function ciCommand(
         ...(commit ? { commit } : {}),
         ...(pullRequest === undefined ? {} : { pullRequest }),
         ...(states ? { state: states as CiCheckState[] } : {}),
+        ...(events ? { event: events as CiCheck["event"][] } : {}),
       });
       const all = await page.toArray(limit);
       print(

@@ -103,13 +103,23 @@ type SecretAPIPolicy struct {
 // organization has an environment variable of the secret's name holding
 // Placeholder; the egress proxy puts the value into HTTPS requests to Hosts,
 // or sets Header on every such request. Rules, when present, limit it to the
-// requests a rule allows. The value is never returned.
+// requests a rule allows. An Exposed secret is the other kind: the sandboxes
+// and Apps its Only names by id get the value itself, and Hosts is empty. The value is never returned.
 type Secret struct {
-	Name   string       `json:"name"`
-	Hosts  []string     `json:"hosts"`
-	Header string       `json:"header,omitempty"`
-	Format string       `json:"format,omitempty"`
-	Rules  []SecretRule `json:"rules,omitempty"`
+	Name string `json:"name"`
+	// Exposed is true when the sandboxes it reaches get the value itself in the
+	// variable; false when they get a placeholder the proxy swaps on HTTPS to
+	// Hosts.
+	Exposed bool `json:"exposed"`
+	// Version is 1 when stored and one more each time the secret changes: its
+	// value, who gets it, its hosts, rules or variable. Pass it as
+	// SetSecretOptions.ExpectedVersion to write only if no one else has
+	// changed it since.
+	Version int          `json:"version"`
+	Hosts   []string     `json:"hosts"`
+	Header  string       `json:"header,omitempty"`
+	Format  string       `json:"format,omitempty"`
+	Rules   []SecretRule `json:"rules,omitempty"`
 	// Only is who gets the secret; nil is every sandbox of the organization.
 	Only *SecretScope `json:"only,omitempty"`
 	// Env is the environment variable sandboxes see it in, when not the secret's
@@ -134,13 +144,16 @@ type NarrowSecretOptions struct {
 	Rules []SecretRule `json:"rules,omitempty"`
 }
 
-// SetSecretOptions are a secret's fields. Value and Hosts are required.
+// SetSecretOptions are a secret's fields. Value is required, and Hosts unless
+// Exposed.
 type SetSecretOptions struct {
 	// Value is visible ASCII and spaces, at most 8 KiB (with GithubApp, the
-	// App's PEM private key). Stored sealed.
+	// App's PEM private key; with Exposed, any text of up to 64 KiB, several
+	// lines included). Stored sealed.
 	Value string `json:"value"`
 	// Hosts are where the value may go: "api.openai.com", "*.github.com".
-	Hosts []string `json:"hosts"`
+	// Required unless Exposed.
+	Hosts []string `json:"hosts,omitempty"`
 	// Header is set on every request to the hosts, replacing the sandbox's own.
 	Header string `json:"header,omitempty"`
 	// Format is the header's value, with {value} where the secret goes.
@@ -166,6 +179,23 @@ type SetSecretOptions struct {
 	// GITHUB_TOKEN per repository; a write that would put two in one sandbox is
 	// refused (409). Empty when replacing: the variable it has stays.
 	Env string `json:"env,omitempty"`
+	// Exposed, with no Hosts, gives the sandboxes the value itself in the
+	// variable instead of a placeholder: for what is not an HTTPS header, such
+	// as a database password, an SSH key or a service account's JSON. It takes
+	// no Header, Format, Rules, GithubApp, Git or API. It needs Only naming
+	// the sandboxes or Apps that get it by id (Sandboxes, Apps), never Labels
+	// or every sandbox; a replacement may leave Only nil to keep the scope it
+	// has. Which machines get it changes only with the value: Scope is
+	// refused for it, so Set it again. Code in the sandbox can read the value
+	// and send it anywhere, and it can be in the sandbox's snapshots and
+	// forks; for an HTTPS API, prefer Hosts. It is not kept: set it on every
+	// write of such a secret.
+	Exposed bool `json:"exposed,omitempty"`
+	// ExpectedVersion writes only if the secret is at that version (its
+	// Version from Get or List; 0: it must not exist yet). Otherwise nothing
+	// is written and the error is 409 version_conflict, with the current
+	// version in details. Nil: written whatever its version.
+	ExpectedVersion *int `json:"expectedVersion,omitempty"`
 }
 
 // SecretService is client.Secrets.
@@ -183,9 +213,18 @@ func (s *SecretService) Set(ctx context.Context, name string, opts SetSecretOpti
 	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name), body: opts}, &secret)
 }
 
+// Get returns one secret by name: its kind, version, variable and
+// placeholder; never its value. The error is 404 not_found when there is
+// none.
+func (s *SecretService) Get(ctx context.Context, name string) (*Secret, error) {
+	var secret Secret
+	return &secret, s.c.do(ctx, &call{method: http.MethodGet, path: secretPath(name)}, &secret)
+}
+
 // Scope changes which sandboxes get a secret, without its value:
 // &SecretScope{} is every sandbox of the organization again. Enforced is set
-// on the secret returned.
+// on the secret returned. Refused (400) for an Exposed secret, whose machines
+// change only with its value: Set it again with Value, Exposed and Only.
 func (s *SecretService) Scope(ctx context.Context, name string, only SecretScope) (*Secret, error) {
 	var secret Secret
 	return &secret, s.c.do(ctx, &call{method: http.MethodPut, path: secretPath(name) + "/sandboxes", body: only}, &secret)
@@ -208,7 +247,7 @@ type SecretListOptions struct {
 	After string
 }
 
-// List returns names, hosts and placeholders. Never values. With options,
+// List returns names, kinds, versions, hosts and placeholders. Never values. With options,
 // one page; with nil, every secret.
 func (s *SecretService) List(ctx context.Context, opts ...*SecretListOptions) ([]Secret, error) {
 	var page *SecretListOptions

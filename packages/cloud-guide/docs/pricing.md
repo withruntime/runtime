@@ -46,7 +46,7 @@ A plan is a monthly commitment. Its full fee is returned as usage. Every meter k
 - **Traffic out costs {{outbound-rate}} per GB,** whether it is served from the CDN's cache or not. It is drawn from the plan's usage like everything else.
 - **A plan's usage is spent first each month,** then free usage and credit Runtime gave, then credit you bought. Unused plan usage ends with the month. Your credit never does.
 - **The first month on a paid plan, and after an upgrade, includes twice the plan's usage.**
-- **Try Pro for 14 days with no card,** once per person.
+- **Try Pro for 14 days,** once per person. The trial saves a card and charges nothing until it ends. Then Pro's first month is charged, unless you cancel before.
 - **Pro's add-ons,** monthly: 50 more sandboxes at once $25, single sign-on $150, the audit log kept a year $50, a dedicated outbound address $25.
 - **An upgrade starts immediately** and is charged for the rest of the month. A downgrade or a cancellation takes effect at the end of the month you paid for. Nothing is refunded, because the fee is already usage.
 - **Limits are ceilings, not reserved room.** When the servers are full, a new sandbox is refused with `no_capacity`, whatever the plan.

@@ -39,6 +39,10 @@ type Build struct {
 	// OutputSnapshotID is the saved server an App deploys, once a build of a
 	// repository with a start command succeeded; nil otherwise.
 	OutputSnapshotID *string `json:"outputSnapshotId"`
+	// Framework is the framework detected in the build folder for the
+	// commands its repository leaves unset (nextjs, vite, fastapi, django,
+	// rails, go, docker, ...); nil when none was or every command is set.
+	Framework *string `json:"framework"`
 }
 
 // CreateBuildOptions build a connected repository at Ref.

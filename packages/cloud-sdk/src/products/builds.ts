@@ -36,6 +36,10 @@ export type Build = Resource & {
   /** The saved server an App deploys, once a build of a repository with a
    * start command succeeded; null otherwise. */
   outputSnapshotId: string | null;
+  /** The framework detected in the build folder for the commands its
+   * repository leaves unset (nextjs, vite, fastapi, django, rails, go,
+   * docker, ...); null when none was or every command is set. */
+  framework: string | null;
 };
 export type CreateBuild = {
   repositoryId: string;
@@ -60,11 +64,16 @@ export type ConnectRepository = {
   previews?: boolean;
   /** The folder the build runs in; the repository's root by default. */
   rootDirectory?: string;
-  /** Leave out to choose by the lockfile (bun, pnpm, Yarn or npm). */
+  /** Leave out to use the detected framework's install (when startCommand
+   * is left out too), or the lockfile's
+   * (bun, pnpm, Yarn or npm). */
   installCommand?: string | null;
+  /** Leave out to use the detected framework's build (when startCommand is
+   * left out too), or the lockfile's. */
   buildCommand?: string | null;
   /** Run after the build with PORT set; the build ends as this server,
-   * answering healthPath with 200 and saved with its memory. */
+   * answering healthPath with 200 and saved with its memory. Leave out to
+   * use the detected framework's server (the build's `framework`). */
   startCommand?: string | null;
   port?: number;
   healthPath?: string | null;

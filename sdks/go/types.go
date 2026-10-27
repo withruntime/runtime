@@ -36,6 +36,9 @@ type SandboxInfo struct {
 	// names no user: "sandbox" or "root"; empty from an API before 25
 	// October 2026.
 	User string `json:"user,omitempty"`
+	// LeaseSeconds is how far ahead each renewal funds it while it has no
+	// time limit; 0 from an API before 25 October 2026.
+	LeaseSeconds int `json:"leaseSeconds,omitempty"`
 	// Persistent: it runs until stopped while credit lasts, never paused for
 	// idleness or a time limit, and its disk is kept after a stop.
 	Persistent bool `json:"persistent"`
@@ -153,6 +156,12 @@ type CreateOptions struct {
 	// "sandbox". Empty is the sandbox user, or for a copy of a snapshot, its
 	// source's. Files written through the files API stay the sandbox user's.
 	User string `json:"user,omitempty"`
+	// LeaseSeconds, with no time limit, is how far ahead each renewal funds
+	// it: 300 to 43200 seconds (12 hours). It is renewed when half is left,
+	// so it keeps running for at least half of this through an outage of
+	// Runtime's control plane. Each renewal holds that much time's credit;
+	// what it does not use is released. 0 is its first lease, usually 1800.
+	LeaseSeconds int `json:"leaseSeconds,omitempty"`
 	// Persistent keeps it running until you stop it, while credit lasts, with
 	// no idle pause unless IdlePauseSeconds asks for one. Its disk is billed
 	// as any sandbox's, and kept after a stop, for Restart, as any sandbox's
@@ -308,6 +317,9 @@ type SandboxSettings struct {
 	// User is who later commands, processes and terminals run as when one
 	// names no user: "sandbox" or "root"; running ones keep theirs.
 	User *string `json:"user,omitempty"`
+	// LeaseSeconds, with no time limit, is how far ahead each renewal funds
+	// it: 300 to 43200 seconds. A running one is renewed by it within seconds.
+	LeaseSeconds *int `json:"leaseSeconds,omitempty"`
 	// IdlePauseSeconds pauses it after this many idle seconds, counted from
 	// now; 0 never, otherwise 60 to 86400 (a shorter
 	// time is raised to 60).

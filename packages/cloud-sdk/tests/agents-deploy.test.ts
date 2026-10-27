@@ -295,6 +295,34 @@ test("from takes a repository connected to CI/CD, as the API does, and names it 
   );
 });
 
+test("model and sessionOverrides are taken as the API takes them, and named when malformed", () => {
+  const file = (lines: string) =>
+    parseAgentsFile(`agents:\n  helper:\n    template: claude-code\n${lines}`, "runtime.yml");
+  const [helper] = checkAgentsFile(
+    file(
+      "    model: claude-sonnet-5-5\n    sessionOverrides: { models: [claude-opus-5-5], instructions: replace, maxVcpu: 8, maxSessionDollars: 20 }\n",
+    ),
+  );
+  expect(helper!.definition).toMatchObject({
+    model: "claude-sonnet-5-5",
+    sessionOverrides: {
+      models: ["claude-opus-5-5"],
+      instructions: "replace",
+      maxVcpu: 8,
+      maxSessionDollars: 20,
+    },
+  });
+  expect(() => checkAgentsFile(file("    model: bad model\n"))).toThrow(
+    "runtime.yml:4: agents.helper.model takes a model as its provider names it, such as claude-opus-5-5.",
+  );
+  expect(() => checkAgentsFile(file("    sessionOverrides: { maxVcpu: 3 }\n"))).toThrow(
+    "agents.helper.sessionOverrides.maxVcpu takes 1, 2, 4, 8 or 16.",
+  );
+  expect(() => checkAgentsFile(file("    sessionOverrides: { temperature: 1 }\n"))).toThrow(
+    "agents.helper.sessionOverrides takes { models, instructions, maxVcpu, maxMemoryMiB, maxSessionDollars }.",
+  );
+});
+
 test("every mistake is named by file, line, agent and field, all at once", () => {
   const bad = `agents:
   fixer:
@@ -324,15 +352,15 @@ test("every mistake is named by file, line, agent and field, all at once", () =>
   expect(error!.code).toBe("invalid_file");
   expect(error!.message.split("\n")).toEqual([
     "runtime.yml:4: agents.fixer.instructons is not a field an agent takes (did you mean instructions?).",
-    "runtime.yml:3: agents.fixer.template takes claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge.",
+    "runtime.yml:3: agents.fixer.template takes claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge, browser.",
     "runtime.yml:5: agents.fixer.vcpu takes 1, 2, 4, 8 or 16.",
     'runtime.yml:6: agents.fixer.env.PORT takes text: quote it, as PORT: "3000".',
     "runtime.yml:7: agents.fixer.maxSessionDollars takes dollars from 0.01 to 10000.",
-    "runtime.yml:2: agents.fixer.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge) or command.",
+    "runtime.yml:2: agents.fixer.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge, browser) or command.",
     "runtime.yml:9: agents.fixer.triggers.0.kind takes slack, github, schedule, webhook.",
     "runtime.yml:13: agents.snap.memoryMiB cannot be set with from.snapshot: a snapshot keeps the size it was taken at.",
     "runtime.yml:14: agents.sessions may not be an agent's name: /v1/agents/sessions is another route.",
-    "runtime.yml:16: agents.lost.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge) or command.",
+    "runtime.yml:16: agents.lost.command is missing: give template (claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge, browser) or command.",
   ]);
   expect(error!.details!.issues).toContainEqual({
     agent: "fixer",

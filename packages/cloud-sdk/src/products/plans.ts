@@ -38,7 +38,8 @@ export type Plan = {
   yearlyFeeMicros: string | null;
   /** Usage given on top of the fee each month. */
   bonusMicros: string;
-  /** Days of trial, no card; 0 for none. */
+  /** Days of trial; 0 for none. A trial saves a card and charges the
+   * first period when it ends, unless cancelled before. */
   trialDays: number;
   /** The first month on the plan, and the first after an upgrade to it,
    * holds twice its usage. */
@@ -64,13 +65,14 @@ export type PlanNow = {
   planId: string;
   name: string;
   /** incomplete: the first payment is not through yet. trialing: a trial,
-   * until trialEndsAt. past_due: a payment failed and is retried. */
+   * until trialEndsAt, when the saved card is charged the first period
+   * unless cancelAtPeriodEnd. past_due: a payment failed and is retried. */
   status: "incomplete" | "trialing" | "active" | "past_due" | "canceled";
   interval: "month" | "year";
   periodStart: string | null;
   /** The next fee, or the end of a cancelled plan. */
   periodEnd: string | null;
-  /** When a trial ends; null outside one. */
+  /** When a trial ends and its first period is charged; null outside one. */
   trialEndsAt: string | null;
   /** True once a cancel takes effect at periodEnd. */
   cancelAtPeriodEnd: boolean;

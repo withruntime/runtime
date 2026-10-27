@@ -539,6 +539,136 @@ test("triggers rules, call, held, held start and dismiss send what the API takes
   );
 });
 
+test("workflow run sends the file, --follow prints each phase's progress and the result; get, steps, stop and the list", async () => {
+  const WF = "33333333-3333-4333-8333-333333333333";
+  const flow = (version: number, state: string, done: number, result: string | null = null) => ({
+    id: WF,
+    name: "triage",
+    state,
+    reason: state === "running" ? null : "done",
+    result,
+    parentSessionId: null,
+    spec: {},
+    maxSessions: 100,
+    maxConcurrent: 20,
+    maxDollars: 10,
+    started: 3,
+    version,
+    labels: {},
+    phases: [
+      {
+        name: "fix",
+        agentId: AGENT,
+        total: 2,
+        ready: true,
+        pending: 0,
+        running: 2 - done,
+        done,
+        failed: 0,
+      },
+    ],
+    cost: { dollars: 0.0123, vcpuSeconds: 1, gibSeconds: 2 },
+    createdAt: "2025-10-09T08:53:20.000Z",
+    updatedAt: "2025-10-09T08:53:20.000Z",
+    endedAt: null,
+  });
+  const spec = {
+    agent: "helper",
+    phases: [{ name: "fix", input: "Fix {{item}}", each: ["a.ts", "b.ts"] }],
+  };
+  const file = `${process.env.TMPDIR ?? "/tmp"}/workflow-${crypto.randomUUID()}.json`;
+  await Bun.write(file, JSON.stringify(spec));
+  let polls = 0;
+  await withStub(
+    ({ method, path, query }) => {
+      if (method === "POST" && path === "/v1/agents/workflows") return flow(1, "running", 0);
+      if (method === "POST" && path === `/v1/agents/workflows/${WF}/stop`)
+        return flow(9, "stopped", 1);
+      if (path === `/v1/agents/workflows/${WF}/steps`)
+        return {
+          data: [
+            {
+              phase: "fix",
+              item: 0,
+              itemText: "a.ts",
+              state: "done",
+              reason: "done",
+              result: "ok",
+              sessionId: SESSION,
+              createdAt: "2025-10-09T08:53:20.000Z",
+              startedAt: null,
+              endedAt: null,
+            },
+          ],
+          nextCursor: null,
+        };
+      if (path === "/v1/agents/workflows") return { data: [flow(3, "done", 2)], nextCursor: null };
+      if (path === `/v1/agents/workflows/${WF}`) {
+        if (!query.get("wait")) return flow(3, "done", 2, "Both fixed.");
+        polls += 1;
+        return polls === 1 ? flow(2, "running", 1) : flow(3, "done", 2, "Both fixed.");
+      }
+      return undefined;
+    },
+    async (lines, sent) => {
+      expect(await run(["agents", "workflow", "run", file, "--follow"], env, out(lines))).toBe(0);
+      expect(sent[0]).toMatchObject({ method: "POST", path: "/v1/agents/workflows", body: spec });
+      expect(sent[1]!.query.get("after")).toBe("1");
+      expect(sent[1]!.query.get("wait")).toBe("30");
+      expect(lines[0]).toBe(`ERR Workflow ${WF}`);
+      expect(lines[1]).toBe(
+        `${WF} triage running, 3 sessions, $0.01 of $10\n  fix              0/2 done, 2 running, 0 waiting\n`,
+      );
+      expect(lines.at(-2)).toContain("fix              2/2 done, 0 running");
+      expect(lines.at(-1)).toBe("Both fixed.");
+      lines.length = 0;
+      expect(await run(["agents", "workflow", "get", WF], env, out(lines))).toBe(0);
+      expect(lines[0]).toEndWith("\n\nBoth fixed.");
+      expect(await run(["agents", "workflow", "steps", WF], env, out(lines))).toBe(0);
+      expect(lines.at(-1)).toContain("a.ts");
+      expect(await run(["agents", "workflow", "stop", WF], env, out(lines))).toBe(0);
+      expect(lines.at(-1)).toBe(`${WF} stopped.`);
+      expect(await run(["agents", "workflows", "--state", "done"], env, out(lines))).toBe(0);
+      expect(sent.at(-1)!.query.getAll("state")).toEqual(["done"]);
+      expect(lines.at(-1)).toContain("triage");
+    },
+  );
+  await expect(run(["agents", "workflows", "--state", "lost"], env, out([]))).rejects.toThrow(
+    "--state takes running, done, failed, stopped.",
+  );
+});
+
+test("create names an advisor and a tree's children", async () => {
+  await withStub(
+    ({ method, path, body }) =>
+      method === "POST" && path === "/v1/agents"
+        ? agent((body as { definition: Record<string, unknown> }).definition)
+        : undefined,
+    async (lines, sent) => {
+      const code = await run(
+        [
+          "agents",
+          "create",
+          "lead",
+          "--template",
+          "claude-code",
+          "--advisor",
+          "claude-opus-5-5",
+          "--max-children",
+          "300",
+        ],
+        env,
+        out(lines),
+      );
+      expect(code).toBe(0);
+      expect((sent[0]!.body as { definition: Record<string, unknown> }).definition).toMatchObject({
+        maxChildren: 300,
+        advisor: { model: "claude-opus-5-5" },
+      });
+    },
+  );
+});
+
 test("a held tool call shows in asks; approve and deny answer it Allow or Deny, a deny with its message", async () => {
   const held = (state = "open", option?: string) => ({
     ...inboxRow(state),
@@ -799,6 +929,148 @@ test("trace reads every page: prints totals, models, tools and each span; --otlp
       await expect(run(["agents", "trace", SESSION, "--export"], env, out(lines))).rejects.toThrow(
         "Give --endpoint, or set OTEL_EXPORTER_OTLP_ENDPOINT",
       );
+    },
+  );
+});
+
+test("start's overrides and create's model and session overrides send what the API takes", async () => {
+  await withStub(
+    ({ method, path, body }) => {
+      if (method === "POST" && path === "/v1/agents/helper/sessions")
+        return {
+          session: { ...session(), overrides: (body as { overrides?: unknown }).overrides ?? null },
+          joined: false,
+          seq: 1,
+        };
+      if (method === "POST" && path === "/v1/agents")
+        return agent((body as { definition: Record<string, unknown> }).definition);
+    },
+    async (lines, sent) => {
+      expect(
+        await run(
+          [
+            "agents",
+            "start",
+            "helper",
+            "Summarize",
+            "the",
+            "ticket",
+            "--model",
+            "claude-haiku-5-5",
+            "--instructions",
+            "Be terse.",
+            "--replace-instructions",
+            "--mcp",
+            "github",
+            "--disallow",
+            "Bash",
+            "--disallow",
+            "spawn",
+            "--vcpu",
+            "2",
+            "--memory",
+            "2048",
+            "--max-dollars",
+            "0.5",
+          ],
+          env,
+          out(lines),
+        ),
+      ).toBe(0);
+      expect(sent[0]!.body).toEqual({
+        input: "Summarize the ticket",
+        overrides: {
+          model: "claude-haiku-5-5",
+          instructions: "Be terse.",
+          instructionsMode: "replace",
+          mcp: ["github"],
+          disallowedTools: ["Bash", "spawn"],
+          vcpu: 2,
+          memoryMiB: 2048,
+          maxSessionDollars: 0.5,
+        },
+      });
+      expect(await run(["agents", "start", "helper", "hi", "--no-mcp"], env, out(lines))).toBe(0);
+      expect(sent[1]!.body).toEqual({ input: "hi", overrides: { mcp: [] } });
+      expect(await run(["agents", "start", "helper", "hi"], env, out(lines))).toBe(0);
+      expect(sent[2]!.body).toEqual({ input: "hi" });
+      expect(
+        await run(
+          [
+            "agents",
+            "create",
+            "helper",
+            "--command",
+            "claude",
+            "--model",
+            "claude-sonnet-5-5",
+            "--session-overrides",
+            '{"models":["claude-opus-5-5"],"maxVcpu":8}',
+          ],
+          env,
+          out(lines),
+        ),
+      ).toBe(0);
+      expect((sent[3]!.body as { definition: unknown }).definition).toMatchObject({
+        command: "claude",
+        model: "claude-sonnet-5-5",
+        sessionOverrides: { models: ["claude-opus-5-5"], maxVcpu: 8 },
+      });
+      // A mistake is said before anything is sent.
+      const before = sent.length;
+      await expect(
+        run(["agents", "start", "helper", "hi", "--replace-instructions"], env, out(lines)),
+      ).rejects.toThrow("--replace-instructions needs --instructions");
+      await expect(
+        run(["agents", "start", "helper", "hi", "--max-dollars", "free"], env, out(lines)),
+      ).rejects.toThrow("--max-dollars takes a number of dollars");
+      await expect(
+        run(["agents", "start", "helper", "hi", "--mcp", "a", "--no-mcp"], env, out(lines)),
+      ).rejects.toThrow("Give --mcp or --no-mcp, not both.");
+      await expect(
+        run(
+          ["agents", "create", "x", "--command", "c", "--session-overrides", "[]"],
+          env,
+          out(lines),
+        ),
+      ).rejects.toThrow("--session-overrides takes a JSON object");
+      expect(sent.length).toBe(before);
+    },
+  );
+});
+
+test("slack install, ls and rm reach the account's Slack workspaces", async () => {
+  const team = {
+    team: "T0ACME",
+    name: "Acme",
+    botUser: "U0BOT",
+    installedAt: "2026-10-26T17:00:00.000Z",
+  };
+  await withStub(
+    ({ method, path }) => {
+      if (method === "POST" && path === "/v1/agents/slack/installs")
+        return {
+          url: "https://withruntime.com/api/account/agents/slack/start?install=s",
+          expiresAt: "2026-10-26T17:15:00.000Z",
+        };
+      if (method === "GET" && path === "/v1/agents/slack/teams") return { data: [team] };
+      if (method === "DELETE" && path === "/v1/agents/slack/teams/T0ACME")
+        return { team: "T0ACME", removed: true };
+    },
+    async (lines, sent) => {
+      await run(["agents", "slack", "install"], env, out(lines));
+      await run(["agents", "slack", "ls"], env, out(lines));
+      await run(["agents", "slack", "rm", "T0ACME"], env, out(lines));
+      expect(sent.map((s) => `${s.method} ${s.path}`)).toEqual([
+        "POST /v1/agents/slack/installs",
+        "GET /v1/agents/slack/teams",
+        "DELETE /v1/agents/slack/teams/T0ACME",
+      ]);
+      expect(lines[0]).toContain(
+        "https://withruntime.com/api/account/agents/slack/start?install=s",
+      );
+      expect(lines[1]).toBe("T0ACME  Acme  added 2026-10-26T17:00:00.000Z");
+      expect(lines[2]).toBe("T0ACME removed.");
     },
   );
 });

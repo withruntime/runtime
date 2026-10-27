@@ -50,7 +50,12 @@ test("each method's route, method, query and body", async () => {
   await api.repositories.connect({ repository: "acme/app", configPath: ".runtime/ci.yml" });
   await api.repositories.list({ state: ["connected"] });
   await api.repositories.disconnect("r 1");
-  await api.checks.list({ repositoryId: "r", state: ["failed", "running"], pullRequest: 7 });
+  await api.checks.list({
+    repositoryId: "r",
+    state: ["failed", "running"],
+    event: ["merge_group"],
+    pullRequest: 7,
+  });
   await api.checks.get("c 1");
   await api.jobs.get("j/1");
   await api.tests.list("r", { quarantined: true });
@@ -70,7 +75,7 @@ test("each method's route, method, query and body", async () => {
     [
       "GET",
       "/v1/ci/checks",
-      { repositoryId: "r", state: ["failed", "running"], pullRequest: 7 },
+      { repositoryId: "r", state: ["failed", "running"], event: ["merge_group"], pullRequest: 7 },
       null,
     ],
     ["GET", "/v1/ci/checks/c%201", null, null],

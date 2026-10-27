@@ -15,15 +15,29 @@ import (
 	"time"
 )
 
-// MetricPoint is one bucket of a sandbox's measured CPU and memory.
+// MetricPoint is one bucket of a sandbox's measured CPU, memory, disk and
+// network. A nil pointer is a value the bucket did not measure.
 type MetricPoint struct {
-	At             time.Time `json:"at"`
-	CPUPercent     *float64  `json:"cpuPercent"`
-	CPUCores       *float64  `json:"cpuCores"`
-	CPUPeakPercent *float64  `json:"cpuPeakPercent"`
-	MemoryBytes    int64     `json:"memoryBytes"`
-	MemoryPeak     int64     `json:"memoryPeakBytes"`
-	Samples        int       `json:"samples"`
+	At                 time.Time `json:"at"`
+	CPUPercent         *float64  `json:"cpuPercent"`
+	CPUCores           *float64  `json:"cpuCores"`
+	CPUPeakPercent     *float64  `json:"cpuPeakPercent"`
+	CPUWaitPercent     *float64  `json:"cpuWaitPercent,omitempty"`
+	MemoryStallPercent *float64  `json:"memoryStallPercent,omitempty"`
+	MemoryBytes        int64     `json:"memoryBytes"`
+	MemoryPeak         int64     `json:"memoryPeakBytes"`
+	Samples            int       `json:"samples"`
+	// DiskUsedBytes is the bytes used on the root file system, as `df /` in
+	// the sandbox reports.
+	DiskUsedBytes *int64 `json:"diskUsedBytes,omitempty"`
+	// The sandbox's disk reads and writes and its network bytes, per second,
+	// as its kernel counts them.
+	DiskReadBytesPerSecond        *float64 `json:"diskReadBytesPerSecond,omitempty"`
+	DiskWriteBytesPerSecond       *float64 `json:"diskWriteBytesPerSecond,omitempty"`
+	DiskReadOpsPerSecond          *float64 `json:"diskReadOpsPerSecond,omitempty"`
+	DiskWriteOpsPerSecond         *float64 `json:"diskWriteOpsPerSecond,omitempty"`
+	NetworkReceivedBytesPerSecond *float64 `json:"networkReceivedBytesPerSecond,omitempty"`
+	NetworkSentBytesPerSecond     *float64 `json:"networkSentBytesPerSecond,omitempty"`
 }
 
 // SandboxMetrics is a sandbox's CPU and memory over a range.
@@ -204,8 +218,9 @@ func (s *WebhookService) Retry(ctx context.Context, deliveryID string) (*Webhook
 	return &delivery, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/webhook-deliveries/" + url.PathEscape(deliveryID) + ":retry", body: map[string]any{}}, &delivery)
 }
 
-// OtelExport pushes events (as logs) and CPU and memory (as metrics) to an
-// OpenTelemetry endpoint over OTLP/HTTP.
+// OtelExport pushes events (as logs), CPU, memory, disk and network (as
+// metrics) and a span for every API call (as traces) to an OpenTelemetry
+// endpoint over OTLP/HTTP.
 type OtelExport struct {
 	ID             string     `json:"id"`
 	Endpoint       string     `json:"endpoint"`
@@ -220,6 +235,13 @@ type OtelExport struct {
 	Failures       int        `json:"failures"`
 	ExportedEvents int64      `json:"exportedEvents"`
 	ExportedPoints int64      `json:"exportedPoints"`
+	ExportedSpans  int64      `json:"exportedSpans"`
+	// The span pushes' own health; LastAttemptAt, LastSuccessAt, LastError
+	// and Failures describe logs and metrics only.
+	TracesLastAttemptAt *time.Time `json:"tracesLastAttemptAt"`
+	TracesLastSuccessAt *time.Time `json:"tracesLastSuccessAt"`
+	TracesLastError     *string    `json:"tracesLastError"`
+	TracesFailures      int        `json:"tracesFailures"`
 }
 
 // OtelOptions are an export's fields. Endpoint is required on create; on
@@ -229,7 +251,9 @@ type OtelOptions struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// Headers authenticate to the endpoint; never shown back.
 	Headers map[string]string `json:"headers,omitempty"`
-	// Signals are "logs" and "metrics".
+	// Signals are any of "logs", "metrics" and "traces"; "logs" and
+	// "metrics" when empty. A call sent with a W3C traceparent header has its
+	// span made a child of that span.
 	Signals []string `json:"signals,omitempty"`
 	Enabled *bool    `json:"enabled,omitempty"`
 }

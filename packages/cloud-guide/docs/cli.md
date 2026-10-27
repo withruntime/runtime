@@ -11,6 +11,8 @@ npm install --global withruntime                   # then the command is runtime
 runtime sandboxes run -- python3 - < invoice.py
 ```
 
+An installed CLI stays at its version until you update it with `npm install --global withruntime@latest`, and `npx withruntime` runs an installed copy before it downloads one, so it can be older than the docs. When the CLI rejects an option or a command, it checks npm for a later version, for at most 1.5 seconds, and prints how to update when one exists. It skips the check in CI (the `CI` variable set) and when `RUNTIME_NO_UPDATE_CHECK=1` is set. `npx withruntime@latest` always runs the latest version.
+
 The examples below use `runtime`, the installed command. Without installing, write `npx withruntime` in its place. Commands follow the pattern `runtime <product> <command>`, with account commands at the top. Running `runtime` on its own shows whether this machine is connected and what to run first.
 
 Each product is one plural word. The word is the same in the CLI, the API, the SDKs and MCP: `runtime sandboxes`, `runtime images`, `runtime ips`, `runtime networks`. The singular is a typing shortcut for the same product (`runtime sandbox ls`). On 6 October 2026, three words were renamed: `runtime address` is now `runtime ips`, `runtime network` is now `runtime networks`, and `runtime tunnel` is now `runtime networks wireguard`. The old words keep working for 30 days after the rename ships. Each use prints the new command. After that, they fail with `name_retired` and a hint that names the new command.
@@ -110,6 +112,7 @@ runtime sandboxes stop "${id}"
 - `--idle-pause <seconds>` pauses the sandbox after that long with nothing happening in it. The default is {{idle-pause-seconds}}. The range is {{idle-pause-min}} to {{idle-pause-max}}, or 0 for never. `--no-auto-wake` keeps a paused sandbox paused until you run `wake`.
 - `--persistent` keeps a paid sandbox running until you stop it, idle or not, while credit lasts.
 - `--user root` runs its commands, background processes and shells as root, with no `sudo` in front, unless one says otherwise.
+- `--lease <seconds>`, with no time limit, funds each renewal that many seconds ahead, from the first lease (1,800) to 43,200 (12 hours); the default is 1,800. The sandbox keeps running for at least half of that if Runtime's control plane cannot renew it.
 - `--get-or-create` with `--name` prints the id of the sandbox that already has the name, woken if paused. Without it, the command fails with `name_taken`.
 
 From withruntime 0.7.0, every command refuses an option it does not take, before it sends anything. It names the option you likely meant: `--memory-mib` gets "Did you mean --memory?". A value option followed by another flag fails locally. For example, `--name --json` fails with `--name needs a value.` Boolean options accept `=true` or `=false`. `--persistent=maybe` fails with `--persistent takes true or false.` Explicit numeric values, including zero, are sent to the API for validation. They do not silently use a default. `--help` after any command prints its product's help and runs nothing.
@@ -175,6 +178,7 @@ runtime sandboxes exec "${id}" -- git -C /workspace/app pull
 ```bash no-run
 runtime sandboxes update "${id}" --idle-pause 0 --auto-wake off
 runtime sandboxes update "${id}" --user root    # later commands run as root
+runtime sandboxes update "${id}" --lease 43200  # funded 12 hours ahead; --lease default undoes it
 runtime sandboxes update "${id}" --persistent on --max-total-cost 50   # dollars
 runtime sandboxes update "${id}" --name dev-2 --label team=search
 runtime sandboxes update "${id}" --env MODE=drain --unset-env QUEUE_URL
@@ -270,7 +274,11 @@ runtime secrets set SLACK_APP_TOKEN --host slack.com --all-sandboxes < token.txt
 runtime secrets set GITHUB_TOKEN_WEB --host api.github.com --only-label repo=web --env GITHUB_TOKEN < web.txt   # seen as GITHUB_TOKEN
 runtime secrets scope SLACK_APP_TOKEN --only-label role=hub                                  # change who gets it, no value
 runtime secrets set GITHUB_TOKEN --keep-value --allow 'GET /repos/acme/app/*'               # narrow it, no value
+runtime secrets set DB_PASSWORD --exposed --only-sandbox "${id}" < password.txt             # that sandbox gets the value itself
+runtime secrets set DEPLOY_KEY --exposed --only-app "${app}" --env SSH_KEY --from-file deploy_key   # several lines, read as they are
+runtime secrets set OPENAI_API_KEY --host api.openai.com --expected-version 3 < key.txt     # only over version 3
 printf %s "$DB_PASSWORD" | runtime secrets set DB_PASSWORD --jobs
+runtime secrets get DEPLOY_KEY                                                               # its kind, version and variable
 runtime secrets ls
 runtime secrets ls --limit 10 --after GITHUB_TOKEN    # a page of 10, by name
 runtime secrets rotate DB_PASSWORD < new-password.txt
@@ -279,11 +287,15 @@ runtime secrets share DB_PASSWORD --agent "${agent}"   # or --all, or --none
 runtime secrets rm OPENAI_API_KEY
 ```
 
-The value is read from standard input only, so it stays out of your shell history. Typed at a terminal, it is not shown. After this, every sandbox in the account has `OPENAI_API_KEY` set to a placeholder. The proxy swaps in the real value on HTTPS requests to the hosts you named. On accounts with credit, from `withruntime` 0.7.0, `--allow` narrows that to some methods and paths, once per rule:
+The value is read from standard input or `--from-file PATH`, so it stays out of your shell history. Typed at a terminal, it is not shown. After this, every sandbox in the account has `OPENAI_API_KEY` set to a placeholder. The proxy swaps in the real value on HTTPS requests to the hosts you named. On accounts with credit, from `withruntime` 0.7.0, `--allow` narrows that to some methods and paths, once per rule:
 `--allow /v1/chat/completions` for every method,
-`--allow 'GET,HEAD /repos/acme/*'` for two. With `--keep-value` (from 0.22.0), `set` reads no value. It only narrows the `--host` and `--allow` an existing secret has. Anything wider is refused, because widening needs the value. `--only-label key=value` (once per selector) and `--only-sandbox <id>` give the secret to those sandboxes alone. `--only-app <id>` gives it to every copy of that App, whatever its version. A new value keeps that scope until `--all-sandboxes`. `--env VAR` puts the placeholder in `VAR` instead of `NAME`. Secrets scoped to different sandboxes may share one, such as a `GITHUB_TOKEN` per repository. A set that would give one sandbox two of them is refused. `ls` shows names, hosts, placeholders, rules and which sandboxes get each secret. It never shows values. See [Security](./security#secrets-sandboxes-never-see).
+`--allow 'GET,HEAD /repos/acme/*'` for two. With `--keep-value` (from 0.22.0), `set` reads no value. It only narrows the `--host` and `--allow` an existing secret has. Anything wider is refused, because widening needs the value. `--only-label key=value` (once per selector) and `--only-sandbox <id>` give the secret to those sandboxes alone. `--only-app <id>` gives it to every copy of that App, whatever its version. A new value keeps that scope until `--all-sandboxes`. `--env VAR` puts the placeholder in `VAR` instead of `NAME`. Secrets scoped to different sandboxes may share one, such as a `GITHUB_TOKEN` per repository. A set that would give one sandbox two of them is refused. `ls` shows names, kinds, versions, hosts, placeholders, rules and which sandboxes get each secret. It never shows values. See [Security](./security#secrets-sandboxes-never-see).
 
-`--jobs` keeps a copy that [scheduled jobs](./jobs#secrets-in-a-job) put into their run's environment. The copy is bound with `runtime jobs create --secret NAME`. Give `--host` too, and the secret goes to both. Only the jobs copy has versions (`rotate`), and it can be read back (`reveal`, with a key allowed to reveal). The sandboxes' copy is never readable. `rm` deletes every copy.
+`--exposed` stores a real value instead of a placeholder. The machines the secret reaches get the value itself in its variable. Use it for a database password, an SSH key, or anything that is not an HTTPS header. Code in the machine can read it, so prefer `--host` when you can. It takes no `--host`, `--header`, `--format`, `--allow` or `--github-app`. A new one needs `--only-sandbox <id>` and/or `--only-app <id>`; it takes no `--only-label` or `--all-sandboxes`, because code in any sandbox it reaches can read it. To change which machines get it, set it again with its value: `scope` is refused for it. Only a key that may run commands (`exec`) in each of its machines can set it; otherwise it is refused with `forbidden`. `--env` works as usual, but never with a variable that makes programs load or run code, such as `BASH_ENV`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`, `PYTHON*` or `LD_*`. Its value is read exactly as it is, several lines and a last new line included, up to 64 KiB. Give `--exposed` on every set of such a secret. See [a secret the machine needs itself](./security#a-secret-the-machine-needs-itself).
+
+`--expected-version N` works on every `set`. The secret is written only if it is still at version `N`. Every change counts a version: a new value, who gets it, its hosts or its variable. `0` means it must not exist yet. Otherwise nothing changes, and the error gives the current version. `get NAME` prints one secret: its kind (added on the way out, or real value), version, variable, hosts, scope, placeholder, size and last change. It never prints the value. `--json` prints the same as JSON.
+
+`--jobs` keeps a copy that [scheduled jobs](./jobs#secrets-in-a-job) put into their run's environment. The copy is bound with `runtime jobs create --secret NAME`. Give `--host` too, and the secret goes to both. The jobs copy has its own versions (`rotate`), and it can be read back (`reveal`, with a key allowed to reveal). The sandboxes' copy is never readable. `rm` deletes every copy.
 
 A jobs copy stored by an API key belongs to that key. Your other keys need it shared, with `runtime secrets share NAME --agent <id>` (repeat the flag; an id is the `principalId` from `runtime me`), `--all` for every key of yours, or `--none` for only the key that stored it. It replaces the list and prints who may use it now. A secret stored on the website belongs to every key.
 

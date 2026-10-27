@@ -798,10 +798,11 @@ export class Sandbox {
     );
   }
   /** E2B's metrics, from Runtime's measured readings (`sbx.metrics()`): CPU
-   * as a percent of the sandbox's vCPUs and resident memory, one entry per
-   * host reading (every minute by default) between `start` and `end`, kept
-   * 24 hours at that resolution. Disk use inside the sandbox is not measured:
-   * `diskUsed` is null and `diskTotal` is the disk's size. */
+   * as a percent of the sandbox's vCPUs, resident memory and the bytes used
+   * on the root file system (`df /`), one entry per bucket between `start`
+   * and `end` (10 s buckets over the last 15 minutes, of readings every
+   * 30 s), kept 24 hours at that resolution. `diskTotal` is the disk's size;
+   * `diskUsed` is null only for a reading the sandbox did not answer. */
   async getMetrics(opts: MetricsOpts = {}): Promise<E2BSandboxMetrics[]> {
     return e2bMetrics(this.#runtime, opts);
   }
@@ -1021,7 +1022,7 @@ export type E2BSandboxMetrics = {
   cpuCount: number;
   memUsed: number;
   memTotal: number;
-  /** Not measured by Runtime: null. */
+  /** Bytes used on the root file system; null where a reading carries none. */
   diskUsed: number | null;
   diskTotal: number;
 };
@@ -1047,7 +1048,7 @@ async function e2bMetrics(
       cpuCount: metrics.vcpu,
       memUsed: point.memoryBytes,
       memTotal: metrics.memoryLimitBytes,
-      diskUsed: null,
+      diskUsed: point.diskUsedBytes ?? null,
       diskTotal: metrics.diskLimitBytes,
     }));
 }

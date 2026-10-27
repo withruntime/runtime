@@ -25,7 +25,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.21.0";
+  public static final String VERSION = "0.28.1";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -41,6 +41,7 @@ public final class RuntimeClient {
   private final Builds builds;
   private final Ci ci;
   private final Containers containers;
+  private final Browsers browsers;
   private final Products.Secrets secrets;
   private final Reservations reservations;
   private final Products.Limits limits;
@@ -85,6 +86,7 @@ public final class RuntimeClient {
     this.builds = new Builds(transport);
     this.ci = new Ci(transport);
     this.containers = new Containers(transport);
+    this.browsers = new Browsers(transport);
     this.secrets = new Products.Secrets(transport);
     this.reservations = new Reservations(transport);
     this.limits = new Products.Limits(transport);
@@ -256,6 +258,14 @@ public final class RuntimeClient {
    */
   public Containers containers() {
     return containers;
+  }
+
+  /**
+   * Tasks in plain words, done by an agent that browses in a sandbox with Chromium. In private
+   * beta: outside it, PermissionDenied with code product_in_beta.
+   */
+  public Browsers browsers() {
+    return browsers;
   }
 
   /** Values sandboxes use on the way out without seeing them. */

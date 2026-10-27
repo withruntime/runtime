@@ -151,7 +151,7 @@ class Apps:
                      stop_grace_seconds: Optional[int] = None,
                      release_stages: Optional[str] = None, release_soak_seconds: Optional[int] = None,
                      idempotency_key: Optional[str] = None) -> dict[str, Any]:
-        """Create one waiting for its first version. ``max_copies`` (1 to 1000)
+        """Create one waiting for its first version. ``max_copies`` (1 to the account's App copies at once, its plan's sandboxes at once)
         bounds the awake copies, each ``vcpu`` (1 to 16) and ``memory_mib`` (128
         to 65536). ``min_copies`` (Apps only) keeps that many awake, at most
         ``max_copies``; ``concurrency`` (default 100) is the requests one copy

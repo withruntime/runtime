@@ -73,6 +73,11 @@ public final class AgentSessionInfo extends JsonObject {
     return getStringMap("labels");
   }
 
+  /** What its start overrode of its agent's definition, as given, or null. */
+  public JsonObject overrides() {
+    return getObject("overrides");
+  }
+
   public Instant createdAt() {
     return getInstant("createdAt");
   }
@@ -128,6 +133,11 @@ public final class AgentSessionInfo extends JsonObject {
   /** When its history was deleted, or null: a deleted session is kept as a record. */
   public Instant deletedAt() {
     return getInstant("deletedAt");
+  }
+
+  /** The workflow that started it as one of its steps, or null. */
+  public String workflowId() {
+    return getString("workflowId");
   }
 
   /** What a session (or its tree) has used: dollars, vCPU-seconds and GiB-seconds. */

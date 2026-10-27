@@ -46,7 +46,7 @@ export type AgentsFileTrigger = {
  * what it leaves out, then each definition field it sets. */
 export type AgentsFileAgent = Omit<Partial<AgentDefinition>, "template"> & {
   /** A harness: claude-code, codex, gemini-cli, claude-agent-sdk,
-   * openai-agents-sdk, review, judge. Fills in `command` and its model keys. */
+   * openai-agents-sdk, review, judge, browser. Fills in `command` and its model keys. */
   template?: string;
   /** support or team: a size and bounds for that use (`agents.uses`). */
   use?: "support" | "team";
@@ -200,13 +200,19 @@ const DEFINITION_FIELDS = [
   "maxSessionDollars",
   "maxDayDollars",
   "memory",
+  "model",
+  "sessionOverrides",
+  "maxChildren",
+  "advisor",
 ] as const;
 const FILE_FIELDS = ["template", "use", "instructionsFile", "triggers", ...DEFINITION_FIELDS];
 const TRIGGER_KINDS: readonly AgentTriggerKind[] = ["slack", "github", "schedule", "webhook"];
-const RESERVED = new Set(["sessions", "triggers", "approvals", "templates"]);
+const RESERVED = new Set(["sessions", "triggers", "approvals", "templates", "asks", "workflows"]);
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
+const VCPUS = [1, 2, 4, 8, 16];
 const bytes = (text: string) => new TextEncoder().encode(text).length;
 
 type Path = (string | number)[];
@@ -519,9 +525,77 @@ function checkAgent(
       );
     else def.memory = { scope: v.scope };
   }
+  if (entry.model !== undefined) {
+    if (typeof entry.model !== "string" || !MODEL.test(entry.model))
+      note(at("model"), "takes a model as its provider names it, such as claude-opus-5-5.");
+    else def.model = entry.model;
+  }
+  if (entry.sessionOverrides !== undefined) {
+    const v = entry.sessionOverrides;
+    const keys = ["models", "instructions", "maxVcpu", "maxMemoryMiB", "maxSessionDollars"];
+    if (!isObject(v) || Object.keys(v).some((k) => !keys.includes(k)))
+      note(at("sessionOverrides"), `takes { ${keys.join(", ")} }.`);
+    else {
+      if (
+        v.models !== undefined &&
+        (!Array.isArray(v.models) ||
+          v.models.length > 32 ||
+          v.models.some((m) => typeof m !== "string" || !MODEL.test(m)))
+      )
+        note(at("sessionOverrides", "models"), "takes a list of at most 32 models.");
+      if (
+        v.instructions !== undefined &&
+        !["append", "replace", "none"].includes(v.instructions as string)
+      )
+        note(at("sessionOverrides", "instructions"), "takes append, replace or none.");
+      if (v.maxVcpu !== undefined && !VCPUS.includes(v.maxVcpu as number))
+        note(at("sessionOverrides", "maxVcpu"), "takes 1, 2, 4, 8 or 16.");
+      const mib = v.maxMemoryMiB;
+      if (
+        mib !== undefined &&
+        (typeof mib !== "number" || mib % 256 !== 0 || mib < 512 || mib > 65536)
+      )
+        note(at("sessionOverrides", "maxMemoryMiB"), "takes 512 to 65536, a multiple of 256.");
+      const most = v.maxSessionDollars;
+      if (
+        most !== undefined &&
+        (typeof most !== "number" || !Number.isFinite(most) || most < 0.01 || most > 10000)
+      )
+        note(at("sessionOverrides", "maxSessionDollars"), "takes dollars from 0.01 to 10000.");
+      def.sessionOverrides = v;
+    }
+  }
   integer("idlePauseSeconds", 10, 86400);
   integer("maxSessionSeconds", 60, 604800);
   integer("maxConcurrent", 1, 1000);
+  integer("maxChildren", 1, 1000);
+  if (entry.advisor !== undefined) {
+    const v = entry.advisor;
+    const fields = ["model", "provider", "secret", "baseUrl", "maxCalls", "instructions"];
+    if (
+      !isObject(v) ||
+      Object.keys(v).some((k) => !fields.includes(k)) ||
+      typeof v.model !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/.test(v.model) ||
+      (v.provider !== undefined &&
+        !["anthropic", "openai", "google", "openrouter", "openai-compatible"].includes(
+          v.provider as string,
+        )) ||
+      (v.secret !== undefined && (typeof v.secret !== "string" || !SHELL_NAME.test(v.secret))) ||
+      (v.baseUrl !== undefined &&
+        (typeof v.baseUrl !== "string" || !/^https:\/\/\S+$/.test(v.baseUrl))) ||
+      (v.maxCalls !== undefined &&
+        (!Number.isInteger(v.maxCalls) ||
+          (v.maxCalls as number) < 1 ||
+          (v.maxCalls as number) > 200)) ||
+      (v.instructions !== undefined && typeof v.instructions !== "string")
+    )
+      note(
+        at("advisor"),
+        "takes { model, provider?, secret?, baseUrl?, maxCalls? (1 to 200), instructions? }: a model's name such as claude-opus-5-5.",
+      );
+    else def.advisor = v as AgentDefinition["advisor"];
+  }
   dollars("maxSessionDollars", 10000);
   dollars("maxDayDollars", 100000);
   if (def.command === undefined)

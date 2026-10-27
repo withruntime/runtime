@@ -10,7 +10,7 @@ its connections open between calls.
 pip install withruntime
 ```
 
-This guide describes `withruntime` 0.35.0. `pip show withruntime` shows the
+This guide describes `withruntime` 0.43.0. `pip show withruntime` shows the
 version you have. A method named here that yours lacks means an older version.
 Run `pip install -U withruntime` to update it.
 

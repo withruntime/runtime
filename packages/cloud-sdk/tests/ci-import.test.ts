@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { cacheFiles, importCi, installsOnly, matrixCells } from "../src/ci-import";
+import { runsAsIs } from "../src/ci-cli";
 import { run } from "../src/cli";
 
 /* `runtime ci import`: a team's GitHub Actions workflows and CircleCI config
@@ -279,7 +280,7 @@ test("`runtime ci import` prints the file, writes it with --write, and never ove
   );
   expect(await run(["ci", "import", dir, "--write", "--force"], env, out)).toBe(0);
   await expect(run(["ci", "import", join(dir, "nothing-here")], env, out)).rejects.toThrow(
-    "has neither .github/workflows/*.yml nor .circleci/config.yml",
+    "has no .github/workflows/*.yml or .circleci/config.yml to import, and no .gitlab-ci.yml",
   );
   // A Cloud Build or CodeBuild config needs no import: it runs as it is.
   const gcb = join(dir, "gcb");
@@ -288,6 +289,29 @@ test("`runtime ci import` prints the file, writes it with --write, and never ove
   await expect(run(["ci", "import", gcb], env, out)).rejects.toThrow(
     "cloudbuild.yaml needs no import: CI/CD runs it as it is. Connect with",
   );
+});
+
+test("`runtime ci import` of a GitLab, Buildkite or Harness pipeline says CI/CD runs it as it is", async () => {
+  const lines: string[] = [];
+  const out = {
+    json: false,
+    write: (t: string) => lines.push(t),
+    error: (t: string) => lines.push(t),
+  };
+  for (const [path, text] of [
+    [".gitlab-ci.yml", "test:\n  script: make test\n"],
+    [".buildkite/pipeline.yml", "steps:\n  - command: make test\n"],
+    [".harness/ci.yaml", "pipeline:\n  stages:\n    - stage: { type: CI }\n"],
+  ] as const) {
+    const dir = mkdtempSync(join(tmpdir(), "ci-import-"));
+    mkdirSync(join(dir, path, ".."), { recursive: true });
+    writeFileSync(join(dir, path), text);
+    lines.length = 0;
+    expect(await run(["ci", "import", dir], {}, out)).toBe(0);
+    expect(lines[0]).toStartWith(`${path}: CI/CD runs it as it is, so there is nothing to import.`);
+    expect(runsAsIs(dir)).toBe(path);
+  }
+  expect(runsAsIs(mkdtempSync(join(tmpdir(), "ci-import-")))).toBeNull();
 });
 
 test("a value GitHub filled in is filled in by the shell, and its literal text is kept as written", () => {

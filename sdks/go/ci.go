@@ -414,6 +414,9 @@ type CICheckListOptions struct {
 	// Commit is a full SHA.
 	Commit      string
 	PullRequest int
+	// Event is any of push, pull_request, merge_group (GitHub's merge
+	// queue) or rerun.
+	Event []string
 	// Limit is 1 to 100, 50 when 0.
 	Limit  int
 	Cursor string
@@ -536,6 +539,9 @@ func (s *CICheckService) List(ctx context.Context, opts *CICheckListOptions) (*P
 			"pullRequest", itoa(opts.PullRequest), "limit", itoa(opts.Limit))
 		if len(opts.State) > 0 {
 			query["state"] = opts.State
+		}
+		if len(opts.Event) > 0 {
+			query["event"] = opts.Event
 		}
 		cursor = opts.Cursor
 	}

@@ -50,7 +50,7 @@ export const APP_HELP = `runtime apps <command>
   requests come and stop when they end, between --min-copies and --max-copies.
   In a private beta: outside it, each command says how to ask to join.
 
-  create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-1000>
+  create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-plan limit>
          [--min-copies 0] [--concurrency 100] [--spares 2] [--port 8080]
          [--health-path /healthz] [--health-fail 60] [--stop-grace 30] [--cdn on|off]
          [--release at-once|staged] [--soak 300] [--volume <volumeId>:<path>] [--label key=value]...
@@ -124,7 +124,7 @@ export const FUNCTION_HELP = `runtime functions <command>
   they stop: an idle Function has no copy awake.
   In a private beta: outside it, each command says how to ask to join.
 
-  create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-1000>
+  create [<name>] --vcpu <1-16> --memory <128-65536> --max-copies <1-plan limit>
          [--concurrency 100] [--spares 2] [--port 8080]
          [--health-path /healthz] [--health-fail 60] [--label key=value]...
                                               Make a Function, waiting for its first deploy; prints its id.
@@ -175,7 +175,10 @@ export const BUILD_HELP = `runtime builds <command>
         [--port 8080] [--health-path /healthz] [--build-env KEY=VALUE]... [--name <name>]
                                               Connect a repository; prints its id. --deploy takes an
                                               App's name, or function:<name>. --start runs once the
-                                              build is done, with PORT set: the server the App deploys
+                                              build is done, with PORT set: the server the App deploys.
+                                              A command left out is the detected framework's (Next.js,
+                                              Vite, Remix, Astro, SvelteKit, Nuxt, Express, Hono,
+                                              FastAPI, Django, Flask, Rails, Go, Rust, a Dockerfile)
   repos ls                                    Connected repositories
   repos change <repoId> [the options of connect but the repository]
                                               Change its settings; its id and builds stay
@@ -188,14 +191,16 @@ export const BUILD_HELP = `runtime builds <command>
                                               The same, then follows its log; exits 0 once it succeeds
   ls [--repository <repoId>] [--commit <sha>] [--state <state>]...
                                               Builds, oldest first; --commit: a full sha
-  get <buildId>                               One build: state, commit, step times, what it made
+  get <buildId>                               One build: state, commit, framework, step times, what it
+                                              made
   cancel <buildId>                            Stop a build that has not ended
   logs <buildId> [--follow] [--raw]           Its last 200 lines, or every line as it comes until it
                                               ends; on a terminal control characters show as \\uXXXX
                                               unless --raw
 
 Examples
-  runtime builds repos connect acme/web --deploy web --start "npm start"
+  runtime builds repos connect acme/web --deploy web
+  runtime builds repos connect acme/api --deploy api --start "node dist/server.js"
   runtime builds run <repoId> --ref main
   runtime builds ls --commit $(git rev-parse HEAD)
 `;

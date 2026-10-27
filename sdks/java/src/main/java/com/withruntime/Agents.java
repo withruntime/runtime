@@ -22,15 +22,19 @@ public final class Agents {
   private final Transport t;
   private final Sessions sessions;
   private final Triggers triggers;
+  private final Slack slack;
   private final AgentMemory memory;
   private final Asks asks;
+  private final Workflows workflows;
 
   Agents(Transport transport) {
     this.t = transport;
     this.sessions = new Sessions(transport);
     this.triggers = new Triggers(transport);
+    this.slack = new Slack(transport);
     this.memory = new AgentMemory(transport);
     this.asks = new Asks(transport);
+    this.workflows = new Workflows(transport);
   }
 
   static String path(String agent) {
@@ -66,6 +70,44 @@ public final class Agents {
     return triggers;
   }
 
+  /** Runtime's Slack app in your workspaces, for {@code slack} triggers. */
+  public Slack slack() {
+    return slack;
+  }
+
+  /**
+   * {@code runtime.agents().slack()}: Runtime's Slack app in your workspaces. Add it with {@link
+   * #install}'s link; a {@code slack} trigger then names a workspace's {@code team} and a channel
+   * the app is in.
+   */
+  public static final class Slack {
+    private final Transport t;
+
+    Slack(Transport transport) {
+      this.t = transport;
+    }
+
+    /**
+     * A link that adds Runtime's Slack app to a workspace, good for 15 minutes: {@code url} and
+     * {@code expiresAt}. Open it as a person who may add apps to the workspace; Slack sends them
+     * back to the console once it is added.
+     */
+    public JsonObject install() {
+      return new JsonObject(t.object(new Transport.Call("POST", "/v1/agents/slack/installs").body(Map.of())));
+    }
+
+    /** The workspaces added to this account: {@code team}, {@code name}, {@code botUser}, {@code installedAt}. */
+    public List<JsonObject> teams() {
+      return new JsonObject(t.object(new Transport.Call("GET", "/v1/agents/slack/teams")))
+          .getObjects("data", JsonObject::new);
+    }
+
+    /** Removes a workspace: its token is revoked, and its triggers refuse events until it is added again. */
+    public void remove(String team) {
+      t.json(new Transport.Call("DELETE", "/v1/agents/slack/teams/" + Transport.segment(team)));
+    }
+  }
+
   /** Each agent's built-in memory: files its sessions keep and search, shared or one key's alone. */
   public AgentMemory memory() {
     return memory;
@@ -74,6 +116,11 @@ public final class Agents {
   /** The account's inbox: what its sessions need answered, one row per step however many ask it. */
   public Asks asks() {
     return asks;
+  }
+
+  /** Many sessions in phases, fanned out and pipelined, with limits and a cost cap. */
+  public Workflows workflows() {
+    return workflows;
   }
 
   /**
@@ -146,10 +193,27 @@ public final class Agents {
    */
   public AgentSession start(
       String agent, String input, String key, Map<String, String> labels, String idempotencyKey) {
+    return start(agent, input, key, labels, null, idempotencyKey);
+  }
+
+  /**
+   * Starts a session with its own model, instructions, MCP servers, disallowed tools, size and
+   * budget, within the agent's session overrides; every argument but agent and input may be null.
+   * An override the agent does not allow is refused with permission_denied (403), naming what it
+   * allows; words that join an open session carry its own overrides or none (else conflict, 409).
+   */
+  public AgentSession start(
+      String agent,
+      String input,
+      String key,
+      Map<String, String> labels,
+      AgentSessionOverrides overrides,
+      String idempotencyKey) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("input", input);
     if (key != null) body.put("key", key);
     if (labels != null) body.put("labels", labels);
+    if (overrides != null) body.put("overrides", overrides.toMap());
     JsonObject answer =
         new JsonObject(
             t.object(new Transport.Call("POST", path(agent) + "/sessions").body(body).key(idempotencyKey)));
@@ -401,6 +465,56 @@ public final class Agents {
      */
     public AgentAsk deny(String id, String message) {
       return answer(id, "Deny", message);
+    }
+  }
+
+  /**
+   * {@code runtime.agents().workflows()}: many sessions in phases. A workflow is data, not code:
+   * each phase names an {@code agent} (or uses the workflow's), an {@code input} template
+   * ({@code {{input}}}, {@code {{item}}}, {@code {{index}}}, and {@code {{<phase>}}} for an earlier
+   * phase's results) and {@code each}, a list of items (1 to 1000) or {@code {from, split}} (json
+   * or lines) to fan out over an earlier phase's result. A phase waits for every phase before it,
+   * unless {@code pipeline} is true: then each item starts as soon as its own item in the source
+   * phase ends. {@code maxSessions} (100 unless set, at most 1000), {@code maxConcurrent} (20, at
+   * most 200) and {@code maxDollars} (10, at most 10000) bound it; at the cap it fails with reason
+   * budget.
+   */
+  public static final class Workflows {
+    private final Transport t;
+
+    Workflows(Transport transport) {
+      this.t = transport;
+    }
+
+    /** Runs it now. An invalid spec is an InvalidRequest, its details naming the field. */
+    public AgentWorkflow run(Map<String, ?> spec) {
+      return run(spec, null);
+    }
+
+    /** Runs it now; a retry with the same idempotencyKey (null: one made here) runs it once. */
+    public AgentWorkflow run(Map<String, ?> spec, String idempotencyKey) {
+      Map<String, Object> raw = t.object(new Transport.Call("POST", "/v1/agents/workflows").body(spec).key(idempotencyKey));
+      return new AgentWorkflow(t, new AgentWorkflow.Info(raw));
+    }
+
+    public AgentWorkflow get(String id) {
+      return new AgentWorkflow(t, new AgentWorkflow.Info(t.object(new Transport.Call("GET", AgentWorkflow.path(id, "")))));
+    }
+
+    /** Workflows, newest first. */
+    public Page<AgentWorkflow.Info> list() {
+      return list(null, null, null);
+    }
+
+    /** The page at cursor (null: the first), newest first, in these states (null: all). */
+    public Page<AgentWorkflow.Info> list(List<String> states, String cursor, Integer limit) {
+      return Page.read(t, call(states, cursor, limit), AgentWorkflow.Info::new, next -> call(states, next, limit));
+    }
+
+    private static Transport.Call call(List<String> states, String cursor, Integer limit) {
+      Transport.Call call = new Transport.Call("GET", "/v1/agents/workflows");
+      if (states != null) for (String state : states) call.query("state", state);
+      return call.query("cursor", cursor).query("limit", limit);
     }
   }
 }

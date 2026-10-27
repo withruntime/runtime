@@ -204,6 +204,8 @@ export type CiJobDetail = CiJob & { log: string };
 export type ListCiChecks = {
   repositoryId?: string;
   state?: CiCheckState[];
+  /** Only checks started by these events: `merge_group` lists GitHub's merge queue's. */
+  event?: CiCheck["event"][];
   branch?: string;
   /** A full commit SHA. */
   commit?: string;

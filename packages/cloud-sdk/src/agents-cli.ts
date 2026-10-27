@@ -14,12 +14,16 @@ import {
   type AgentDefinition,
   type AgentEvent,
   type AgentHeldCall,
+  type AgentSessionOverrides,
   type AgentSessionState,
   type AgentToolCall,
   type AgentTraceOtlp,
   type AgentTriggerRules,
+  type AgentWorkflow,
+  type AgentWorkflowState,
   type AgentTurn,
   type CreateAgentTrigger,
+  type RunAgentWorkflow,
 } from "./products/agents.js";
 import { secrets } from "./products/secrets.js";
 
@@ -49,20 +53,36 @@ export const AGENT_HELP = `runtime agents <command>
   create <name> (--template <harness> | --command "<cmd>") [--use support|team]
          [--instructions <text> | --instructions-file <path>] [--secret NAME]... [--pool NAME]...
          [--env KEY=VALUE]... [--image <image> | --snapshot <id>] [--vcpu n] [--memory n]
-         [--max-concurrent n] [--idle-pause n] [--permissions '<json>'] [--label key=value]...
+         [--max-concurrent n] [--idle-pause n] [--max-children n] [--advisor <model>]
+         [--advisor-secret NAME] [--model <model>] [--session-overrides '<json>']
+         [--permissions '<json>'] [--label key=value]...
                                               Make an agent; prints its id. --secret names an egress
                                               secret it may use: its model key, of any provider.
                                               --pool names a Claude account's secret (each one
                                               given replaces the template's): each session takes
-                                              the one with the most usage left
+                                              the one with the most usage left. --advisor names a
+                                              model its sessions may ask for advice (advise), its
+                                              key the egress secret --advisor-secret names (that
+                                              provider's usual one by default, among --secret).
+                                              --session-overrides sets what a session's start may
+                                              override:
+                                              '{"models":["claude-opus-5-5"],"instructions":"replace",
+                                              "maxVcpu":8,"maxMemoryMiB":16384,"maxSessionDollars":20}'
   ls                                          Your agents
   get <agent>                                 One agent, in full (an id or its name)
   update <agent> [the options of create]      A new version: what you give changes, the rest stays
   rm <agent>                                  Delete it, its triggers, and stop its sessions
-  start <agent> <words...> [--key <key>] [--follow]
+  start <agent> <words...> [--key <key>] [--follow] [--model <model>]
+        [--instructions <text> | --instructions-file <path>] [--replace-instructions]
+        [--mcp <server>]... [--no-mcp] [--disallow <tool>]... [--vcpu n] [--memory n]
+        [--max-dollars n]
                                               A session with these words, or the open one with the
                                               key (such as customer:42); --follow prints its log
-                                              until it ends
+                                              until it ends. The other options override the
+                                              agent's definition for this session alone, within
+                                              its session overrides: its model, instructions added
+                                              (or in place of the agent's), the MCP servers it
+                                              keeps, tools it may not use, its size and budget
   send <session> <words...>                   Words into a session
   events <session> [--after <seq>] [--follow] A session's log; --follow until it ends
   trace <session> [--otlp] [--export [--endpoint <url>] [--header key=value]...]
@@ -86,9 +106,22 @@ export const AGENT_HELP = `runtime agents <command>
   asks get <ask>                              One ask: its options, pick and the sessions asking
   answer <ask> [<option>] [--text <words>]    Answer it with an option's label, words, or both:
                                               every session asking reads it next and wakes
+  workflow run <file.json | -> [--follow]     Run a workflow: many sessions in phases, fanned out
+                                              and pipelined, with maxSessions, maxConcurrent and
+                                              maxDollars; prints its id, or --follow prints each
+                                              phase's progress until it ends, then its result
+  workflow get <workflow>                     Its state, each phase's progress, cost and result
+  workflow watch <workflow>                   Its progress as it changes, until it ends
+  workflow steps <workflow> [--state <state>]...
+                                              Each step: its phase, item, session and state
+  workflow stop <workflow>                    Nothing more starts; its open sessions stop
+  workflows [--state running|done|failed|stopped]...
+                                              Workflows, newest first
   approve <ask>                               Let a tool call the agent's permissions held run
   deny <ask> [--message <words>]              Keep a held tool call from running; the message is
                                               told to the agent
+  slack install                               A link that adds Runtime's Slack app to a workspace
+  slack ls | rm <team>                        The workspaces added; remove one
   triggers <agent>                            Its triggers
   triggers add <agent> --kind <slack|github|schedule|webhook> --config '<json>' [--rules '<json>']
   triggers rules <triggerId> '<json>'         Set its rules in place: priority, maxStartsPerHour,
@@ -123,8 +156,10 @@ Examples
   printf %s "$ANTHROPIC_API_KEY" | runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com
   runtime agents create helper --template claude-code --use support --instructions "Answer briefly."
   runtime agents start helper "How do I reset my password?" --key customer:42 --follow
+  runtime agents start helper "Summarize this ticket" --model claude-haiku-5-5 --disallow Bash
   runtime agents memory put helper faq/refunds.md refunds.md
   runtime agents asks && runtime agents answer <ask> "Raise to 20 TB"
+  runtime agents workflow run review.json --follow
   runtime agents update helper --permissions '{"default":"auto","tools":{"shell":"always_ask"}}'
   runtime agents approve <ask>
   runtime agents trace <session> --export --endpoint https://otel.example.com
@@ -165,6 +200,11 @@ const OPTIONS = [
   "memory",
   "max-concurrent",
   "idle-pause",
+  "model",
+  "session-overrides",
+  "max-children",
+  "advisor",
+  "advisor-secret",
   "permissions",
   "label",
 ];
@@ -237,6 +277,20 @@ function definitionOf(args: Args, kit: CliKit, env: NodeJS.ProcessEnv, base?: Ag
   set("memoryMiB", integer(args, "memory"));
   set("maxConcurrent", integer(args, "max-concurrent"));
   set("idlePauseSeconds", integer(args, "idle-pause"));
+  set("model", flag(args, "model"));
+  const limits = flag(args, "session-overrides");
+  if (limits !== undefined) set("sessionOverrides", jsonObject(limits, "--session-overrides", kit));
+  set("maxChildren", integer(args, "max-children"));
+  const advisor = flag(args, "advisor");
+  const advisorSecret = flag(args, "advisor-secret");
+  if (advisorSecret !== undefined && advisor === undefined && !definition.advisor)
+    throw usage("Give --advisor <model> with --advisor-secret.");
+  if (advisor !== undefined || advisorSecret !== undefined)
+    set("advisor", {
+      ...((definition.advisor as Record<string, unknown> | undefined) ?? {}),
+      ...(advisor === undefined ? {} : { model: advisor }),
+      ...(advisorSecret === undefined ? {} : { secret: advisorSecret }),
+    });
   const permissions = flag(args, "permissions");
   if (permissions !== undefined) {
     try {
@@ -247,6 +301,60 @@ function definitionOf(args: Args, kit: CliKit, env: NodeJS.ProcessEnv, base?: Ag
   }
   return definition as AgentDefinition;
 }
+
+/** A flag's JSON object, or a usage error that says so. */
+function jsonObject(text: string, name: string, kit: CliKit): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    value = undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw kit.usage(`${name} takes a JSON object, such as '{"models":["claude-opus-5-5"]}'.`);
+  return value as Record<string, unknown>;
+}
+
+/** A session's overrides, from start's options; none given, none. */
+function overridesOf(args: Args, kit: CliKit): AgentSessionOverrides | undefined {
+  const { flag, has, integer, usage } = kit;
+  const file = flag(args, "instructions-file");
+  const instructions = file !== undefined ? readFileSync(file, "utf8") : flag(args, "instructions");
+  if (has(args, "replace-instructions") && instructions === undefined)
+    throw usage("--replace-instructions needs --instructions or --instructions-file.");
+  if (has(args, "no-mcp") && args.flags.has("mcp"))
+    throw usage("Give --mcp or --no-mcp, not both.");
+  const dollars = flag(args, "max-dollars");
+  if (dollars !== undefined && !(Number(dollars) > 0))
+    throw usage("--max-dollars takes a number of dollars, such as 2.5.");
+  const o: AgentSessionOverrides = {};
+  const model = flag(args, "model");
+  if (model !== undefined) o.model = model;
+  if (instructions !== undefined) o.instructions = instructions;
+  if (has(args, "replace-instructions")) o.instructionsMode = "replace";
+  if (has(args, "no-mcp")) o.mcp = [];
+  else if (args.flags.has("mcp")) o.mcp = [...new Set(args.flags.get("mcp"))];
+  if (args.flags.has("disallow")) o.disallowedTools = [...new Set(args.flags.get("disallow"))];
+  const vcpu = integer(args, "vcpu");
+  if (vcpu !== undefined) o.vcpu = vcpu;
+  const memory = integer(args, "memory");
+  if (memory !== undefined) o.memoryMiB = memory;
+  if (dollars !== undefined) o.maxSessionDollars = Number(dollars);
+  return Object.keys(o).length ? o : undefined;
+}
+
+const WORKFLOW_STATES: readonly AgentWorkflowState[] = ["running", "done", "failed", "stopped"];
+/** A workflow in a few lines: its state, cost, each phase's progress and,
+ * once ended, its result. */
+const workflowLines = (w: AgentWorkflow) =>
+  [
+    `${w.id}${w.name ? ` ${w.name}` : ""} ${w.state}${w.reason && w.reason !== "done" ? ` (${w.reason})` : ""}, ${w.started} session${w.started === 1 ? "" : "s"}, $${w.cost.dollars.toFixed(2)} of $${w.maxDollars}`,
+    ...w.phases.map(
+      (p) =>
+        `  ${p.name.padEnd(16)} ${p.done}/${p.total}${p.ready ? "" : "+"} done, ${p.running} running, ${p.pending} waiting${p.failed ? `, ${p.failed} failed` : ""}`,
+    ),
+    ...(w.result !== null ? ["", w.result] : []),
+  ].join("\n");
 
 const line = (e: AgentEvent) =>
   `${String(e.seq).padStart(4)} ${e.kind.padEnd(6)} ${e.actor}: ${
@@ -433,15 +541,31 @@ export async function agentsCommand(
       return 0;
     }
     case "start": {
-      const args = parse(rest, ["follow"], ["key"]);
+      const args = parse(
+        rest,
+        ["follow", "replace-instructions", "no-mcp"],
+        [
+          "key",
+          "model",
+          "instructions",
+          "instructions-file",
+          "mcp",
+          "disallow",
+          "vcpu",
+          "memory",
+          "max-dollars",
+        ],
+      );
       const target = need(args.positional[0], "an agent's id or name");
       const input = args.positional.slice(1).join(" ");
       if (!input)
         throw usage(`Give the words: ${me} agents start ${target} "Fix the failing test"`);
       const key = flag(args, "key");
+      const overrides = overridesOf(args, kit);
       const session = await api.start(target, {
         input,
         ...(key === undefined ? {} : { key }),
+        ...(overrides ? { overrides } : {}),
       });
       if (!has(args, "follow")) {
         print(session.id, { session: session.session, joined: session.joined, seq: session.seq });
@@ -655,6 +779,112 @@ export async function agentsCommand(
       );
       return 0;
     }
+    case "workflows": {
+      const args = parse(rest, [], ["state"]);
+      const states = args.flags.get("state");
+      for (const state of states ?? [])
+        if (!WORKFLOW_STATES.includes(state as AgentWorkflowState))
+          throw usage(`--state takes ${WORKFLOW_STATES.join(", ")}.`);
+      const page = await api.workflows.list({
+        limit: 100,
+        ...(states ? { state: states as AgentWorkflowState[] } : {}),
+      });
+      print(
+        page.data.length
+          ? table([
+              ["ID", "NAME", "STATE", "SESSIONS", "COST", "CREATED"],
+              ...page.data.map((w) => [
+                w.id,
+                w.name ?? "-",
+                w.reason && w.reason !== "done" ? `${w.state} (${w.reason})` : w.state,
+                String(w.started),
+                `$${w.cost.dollars.toFixed(2)}`,
+                when(w.createdAt),
+              ]),
+            ])
+          : `No workflows. Run one: ${me} agents workflow run workflow.json`,
+        page.data,
+      );
+      return 0;
+    }
+    case "workflow": {
+      const [sub, ...more] = rest;
+      const watch = async (id: string, after: number) => {
+        let last: AgentWorkflow | undefined;
+        for await (const now of api.workflows.follow(id, { after })) {
+          last = now;
+          out.write(
+            out.json ? JSON.stringify(now) : `${workflowLines({ ...now, result: null })}\n`,
+          );
+        }
+        last ??= await api.workflows.get(id);
+        if (!out.json && last.result !== null) out.write(last.result);
+        return last.state === "done" ? 0 : 1;
+      };
+      if (sub === "run") {
+        const args = parse(more, ["follow"], []);
+        const file = need(args.positional[0], "a workflow's JSON file, or - for stdin");
+        let text: string;
+        if (file === "-") {
+          const chunks: Buffer[] = [];
+          for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+          text = Buffer.concat(chunks).toString("utf8");
+        } else text = readFileSync(file, "utf8");
+        let spec: RunAgentWorkflow;
+        try {
+          spec = JSON.parse(text) as RunAgentWorkflow;
+        } catch (error) {
+          throw usage(`${file} is not JSON: ${(error as Error).message}`);
+        }
+        const made = await api.workflows.run(spec);
+        if (!has(args, "follow")) {
+          print(made.id, made.workflow);
+          return 0;
+        }
+        if (!out.json) out.error(`Workflow ${made.id}`);
+        out.write(out.json ? JSON.stringify(made.workflow) : `${workflowLines(made.workflow)}\n`);
+        return watch(made.id, made.workflow.version);
+      }
+      if (sub === "get") {
+        const w = await api.workflows.get(need(more[0], "a workflow's id"));
+        print(workflowLines(w), w);
+        return 0;
+      }
+      if (sub === "watch") return watch(need(more[0], "a workflow's id"), 0);
+      if (sub === "steps") {
+        const args = parse(more, [], ["state"]);
+        const id = need(args.positional[0], "a workflow's id");
+        const states = args.flags.get("state");
+        const all = await (
+          await api.workflows.steps(id, {
+            limit: 100,
+            ...(states ? { state: states as never } : {}),
+          })
+        ).toArray(Infinity);
+        print(
+          all.length
+            ? table([
+                ["PHASE", "ITEM", "STATE", "SESSION", "ITEM TEXT"],
+                ...all.map((x) => [
+                  x.phase,
+                  String(x.item + 1),
+                  x.state,
+                  x.sessionId ?? "-",
+                  (x.itemText ?? "-").replace(/\s+/g, " ").slice(0, 60),
+                ]),
+              ])
+            : "No steps yet.",
+          all,
+        );
+        return 0;
+      }
+      if (sub === "stop") {
+        const w = await api.workflows.stop(need(more[0], "a workflow's id"));
+        print(`${w.id} ${w.state}.`, w);
+        return 0;
+      }
+      throw unknown("agents workflow command", sub ?? "", ["run", "get", "watch", "steps", "stop"]);
+    }
     case "approve":
     case "deny": {
       const args = parse(rest, [], verb === "deny" ? ["message"] : []);
@@ -709,6 +939,34 @@ export async function agentsCommand(
         value,
       );
       return 0;
+    }
+    case "slack": {
+      const [sub, ...more] = rest;
+      if (sub === "install") {
+        const link = await api.slack.install();
+        print(
+          `Open this link to add Runtime's Slack app to a workspace (good until ${link.expiresAt}):\n${link.url}`,
+          link,
+        );
+        return 0;
+      }
+      if (sub === "rm") {
+        const team = need(more[0], "a workspace's id (T…), from `agents slack ls`");
+        await api.slack.remove(team);
+        print(`${team} removed.`, { team, removed: true });
+        return 0;
+      }
+      if (sub === undefined || sub === "ls") {
+        const teams = await api.slack.teams();
+        print(
+          teams.length
+            ? teams.map((w) => `${w.team}  ${w.name ?? ""}  added ${w.installedAt}`).join("\n")
+            : `No Slack workspace is added. Add one: ${me} agents slack install`,
+          teams,
+        );
+        return 0;
+      }
+      throw usage(`Use ${me} agents slack install, ls or rm <team>.`);
     }
     case "triggers": {
       const [sub, ...more] = rest;
@@ -876,6 +1134,8 @@ export async function agentsCommand(
         "stop",
         "asks",
         "answer",
+        "workflow",
+        "workflows",
         "approve",
         "deny",
         "triggers",

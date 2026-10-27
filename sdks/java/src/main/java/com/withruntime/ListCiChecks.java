@@ -9,6 +9,7 @@ public final class ListCiChecks {
 
   String repositoryId;
   final List<String> states = new ArrayList<>();
+  final List<String> events = new ArrayList<>();
   String branch;
   String commit;
   Integer pullRequest;
@@ -23,6 +24,15 @@ public final class ListCiChecks {
   /** Keep only these states: queued, running, passed, failed or cancelled. */
   public ListCiChecks state(String... states) {
     this.states.addAll(List.of(states));
+    return this;
+  }
+
+  /**
+   * Keep only checks started by these events: push, pull_request, merge_group (GitHub's merge
+   * queue) or rerun.
+   */
+  public ListCiChecks event(String... events) {
+    this.events.addAll(List.of(events));
     return this;
   }
 
@@ -62,6 +72,7 @@ public final class ListCiChecks {
             .query("commit", commit)
             .query("pullRequest", pullRequest);
     for (String state : states) call.query("state", state);
+    for (String event : events) call.query("event", event);
     return call.query("limit", limit).query("cursor", from != null ? from : cursor);
   }
 }

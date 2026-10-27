@@ -73,6 +73,15 @@ public final class Build extends JsonObject {
     return getString("outputSnapshotId");
   }
 
+  /**
+   * The framework detected in the build folder for the commands its repository leaves unset
+   * (nextjs, vite, fastapi, django, rails, go, docker, ...); null when none was or every command
+   * is set.
+   */
+  public String framework() {
+    return getString("framework");
+  }
+
   /** Unix milliseconds. */
   public long createdAt() {
     return getLong("createdAt", 0);

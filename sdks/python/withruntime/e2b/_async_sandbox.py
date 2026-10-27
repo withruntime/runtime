@@ -969,11 +969,12 @@ class AsyncSandbox:
 
     async def get_metrics(self, start: Any = None, end: Any = None) -> list["SandboxMetrics"]:
         """E2B's metrics, from Runtime's measured readings (``sbx.metrics()``):
-        CPU as a percent of the sandbox's vCPUs and resident memory, one entry
-        per host reading (every minute by default) between ``start`` and
-        ``end`` (datetimes; the last 15 minutes by default), kept 24 hours at
-        that resolution. Disk use inside the sandbox is not measured:
-        ``disk_used`` is None and ``disk_total`` is the disk's size."""
+        CPU as a percent of the sandbox's vCPUs, resident memory and the bytes
+        used on the root file system (``df /``), one entry per bucket between
+        ``start`` and ``end`` (datetimes; the last 15 minutes by default, in
+        10 s buckets of readings every 30 s), kept 24 hours at that
+        resolution. ``disk_total`` is the disk's size; ``disk_used`` is None
+        only for a reading the sandbox did not answer."""
         now = _dt.datetime.now(_dt.timezone.utc)
         begin = start or now - _dt.timedelta(minutes=15)
         finish = end or now
@@ -988,7 +989,7 @@ class AsyncSandbox:
                 continue
             out.append(SandboxMetrics(timestamp=at, cpu_used_pct=point["cpuPercent"], cpu_count=m["vcpu"],
                                       mem_used=point["memoryBytes"], mem_total=m["memoryLimitBytes"],
-                                      disk_used=None, disk_total=m["diskLimitBytes"]))
+                                      disk_used=point.get("diskUsedBytes"), disk_total=m["diskLimitBytes"]))
         return out
 
     async def download_url(self, path: str, user: Optional[str] = None,
@@ -1071,8 +1072,8 @@ __all__ = ["AsyncSandbox", "AsyncCommands", "AsyncCommandHandle", "AsyncFilesyst
 
 @_dataclasses.dataclass
 class SandboxMetrics:
-    """One reading, in E2B's shape. ``disk_used`` is None: Runtime does not
-    read disk use inside the sandbox."""
+    """One reading, in E2B's shape. ``disk_used`` is the bytes used on the
+    root file system, None where a reading carries none."""
     timestamp: "_dt.datetime"
     cpu_used_pct: float
     cpu_count: int

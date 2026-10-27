@@ -61,18 +61,92 @@ App or version. Agents use the same calls through the MCP tools
 `runtime_apps_create`, `runtime_apps_deploy`, `runtime_apps_get_deploy`,
 `runtime_apps_rollback`, `runtime_apps_versions` and `runtime_apps_copies`.
 
+<!-- launch: builds -->
+
+## Deploy from GitHub on every push
+
+Connect a repository to an App once. Every push to its production branch then
+builds the commit and deploys it, with no configuration file. Install
+Runtime's GitHub App on the repository first if it is private:
+`runtime.builds.repositories.installGithub()` returns the install link.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const repo = await runtime.builds.repositories.connect({
+  provider: "github",
+  repository: "acme/web",
+  deploy: "app:web",
+});
+const build = await runtime.builds.create({ repositoryId: repo.id, ref: "main" });
+console.log(build.id, build.state);
+```
+
+From the CLI: `runtime builds repos connect acme/web --deploy web`.
+
+When the repository sets no `startCommand`, Runtime reads the build folder
+(`rootDirectory`, the repository's root by default) before any machine
+starts, and detects its framework. The build's `framework` field names what
+it found. An `installCommand` or `buildCommand` you set is used in place of
+the detected one. A repository with its own `startCommand` is built with its
+own commands and its lockfile's, and no framework is detected.
+
+| Framework                           | Detected by                                             | Server                                       |
+| ----------------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| Dockerfile                          | `Dockerfile` (used before anything else)                | The image, its `EXPOSE` port published       |
+| Next.js                             | `next` in package.json                                  | `next start`; a static export is served      |
+| Nuxt                                | `nuxt`                                                  | `.output/server/index.mjs`                   |
+| Remix, React Router                 | `@remix-run/dev`, `@react-router/dev`                   | The `start` script, or the framework's own   |
+| Astro                               | `astro`                                                 | `@astrojs/node`'s server, or `dist` served   |
+| SvelteKit                           | `@sveltejs/kit` with `adapter-node` or `adapter-static` | `node build`, or `build` served              |
+| Vite, Create React App              | `vite`, `react-scripts`                                 | The built folder, as a single-page app       |
+| Express, Hono, Fastify, Koa, NestJS | The package                                             | The `start` script, or the `main` file       |
+| FastAPI, Flask                      | The package, and its `app = FastAPI()` or `Flask()`     | Uvicorn, or Gunicorn                         |
+| Django                              | `manage.py`                                             | Gunicorn with the project's WSGI module      |
+| Rails, Sinatra, Rack                | `Gemfile` with `rails`, or `config.ru`                  | `rails server`, or `rackup`                  |
+| Go                                  | `go.mod`                                                | The main package, compiled                   |
+| Rust                                | `Cargo.toml`                                            | The package's binary, built with `--release` |
+| Static site                         | `index.html`                                            | The folder, served                           |
+
+Node.js installs with the lockfile's package manager (bun, pnpm, Yarn or npm).
+Python installs with uv, Poetry, Pipenv or pip, by the lockfile the folder
+holds. Ruby uses the version that `.ruby-version` or the Gemfile pins. Go
+and Rust install their toolchains once. Every server is given `PORT` and
+listens on `0.0.0.0`. A SvelteKit project without a server adapter, or a
+Python app whose app object Runtime cannot find, fails its build with a
+message that names the setting to add.
+
+Each build's install, and the tools' own caches (`.next/cache`, Go's build
+cache, Cargo's `target`), are kept between builds of the production branch.
+A later build starts from them and runs only its change.
+
+On GitHub, each build shows as a check named `runtime deploy` on its commit:
+in progress while it builds, then a success with its time and framework, a
+failure with the reason, or neutral when a newer commit supersedes it or it is
+cancelled. A successful build deploys to the App, which goes
+live once its copies pass their health check (see below). In Node.js, the
+deploy's environment is in `process.env` before the first request. Outside
+Node.js, a server built from a repository finds the deploy's environment in
+`/run/runtime-app/env.json`, a JSON object of names to values, before its
+first request. A server that reads its environment only at start should read
+that file, or be deployed from an image, whose server starts with the
+deploy's environment.
+
+<!-- /launch: builds -->
+
 ## Settings
 
-| Setting       | What it does                                                                 | Default  |
-| ------------- | ---------------------------------------------------------------------------- | -------- |
-| `vcpu`        | vCPUs of each copy, 1 to {{max-vcpu}}                                        | Required |
-| `memoryMiB`   | Memory of each copy, 128 MiB to {{max-memory}}                               | Required |
-| `maxCopies`   | The most copies running at the same time, 1 to 1,000 and the account's limit | Required |
-| `minCopies`   | Copies kept awake and billed even with no requests                           | 0        |
-| `concurrency` | Requests one copy takes at the same time, 1 to 10,000                        | 100      |
-| `spares`      | Frozen copies kept ready for the next burst, free, 0 to 16                   | 2        |
-| `port`        | The port the server listens on, given to it as `PORT`                        | 8080     |
-| `healthPath`  | A path that must return 200; without it, the port accepting is healthy       | None     |
+| Setting       | What it does                                                                                              | Default  |
+| ------------- | --------------------------------------------------------------------------------------------------------- | -------- |
+| `vcpu`        | vCPUs of each copy, 1 to {{max-vcpu}}                                                                     | Required |
+| `memoryMiB`   | Memory of each copy, 128 MiB to {{max-memory}}                                                            | Required |
+| `maxCopies`   | The most copies running at the same time, 1 to the account's App copies at once ([limits](./limits#apps)) | Required |
+| `minCopies`   | Copies kept awake and billed even with no requests                                                        | 0        |
+| `concurrency` | Requests one copy takes at the same time, 1 to 10,000                                                     | 100      |
+| `spares`      | Frozen copies kept ready for the next burst, free, 0 to 16                                                | 2        |
+| `port`        | The port the server listens on, given to it as `PORT`                                                     | 8080     |
+| `healthPath`  | A path that must return 200; without it, the port accepting is healthy                                    | None     |
 
 Change any of them in place with `runtime.apps.update(id, { ... })` (`POST
 /v1/apps/{id}:update`). A setting left out stays as it is. A deploy can also
@@ -92,6 +166,30 @@ const changed = await runtime.apps.update(app.id, { minCopies: 1, spares: 0 });
 console.log(changed.state, changed.minCopies, changed.maxCopies, changed.concurrency);
 await runtime.apps.delete(app.id);
 ```
+
+## Requests at once
+
+An App's copies at once follow the account's plan, as sandboxes do: Free 2,
+Pro 100, Pro Max 250, Scale 500 and Enterprise 2,000 across all its Apps
+([limits](./limits#apps)). Each copy takes up to `concurrency` requests at the
+same time, up to 10,000, so the requests an App serves at once are `maxCopies`
+times `concurrency`. For 30,000 requests at once, set `maxCopies: 100` and
+`concurrency: 300`, or `maxCopies: 20` and `concurrency: 1500`. An agent's own
+API key sets `maxCopies` to at most 20; an account-wide key made at
+https://withruntime.com/account/keys sets up to the account's limit. A copy holds
+that many requests only if its server does: most event-driven servers (Node.js,
+Go, Rust, Python's asyncio) hold thousands on 1 vCPU while they wait.
+
+## Long requests and streaming
+
+A request has no total time limit. A response streams (server-sent events,
+chunked bodies, WebSockets) for as long as the copy sends it and the visitor
+reads it. The copy has 900 seconds (15 minutes) to send the response head after
+the request arrives; a request whose head is later returns `504`. With `cdn`
+on, Cloudflare's own limit of 100 seconds to the response head applies instead,
+and a later head returns Cloudflare's `524`: set `cdn: false` for requests that
+wait longer before they answer. A copy serving an open request or stream never
+freezes.
 
 ## How copies scale
 
@@ -123,6 +221,9 @@ A deploy makes a new version beside the live one. It goes from `building`
 passes its health check, and is saved with its memory). Then it goes to `switching` (its
 copies start beside the old ones) and finally to `live`. The address moves to the new
 version only once as many of its copies pass the health check as the old version had awake.
+A deploy is `live` only once every router serves the new version's route, so a request
+to the address reaches the new version when the deploy reports `live`. Until a first
+version is served, the App's `state` is `waiting`.
 
 A version that never passes its health check ends `failed` with
 `deploy_health_failed`, a hint and its server's last output. The old

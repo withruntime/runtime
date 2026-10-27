@@ -82,17 +82,28 @@ export type SecretApiPolicy = {
     mutations: string[];
   };
 };
-/** A secret your sandboxes use without seeing it. Every sandbox of your
+/** A secret, of one of two kinds. The placeholder kind (`exposed: false`):
+ * your sandboxes use it without seeing it. Every sandbox of your
  * organization has an environment variable of the secret's name (or `env`)
  * holding `placeholder`; the egress proxy sets `header` on every HTTPS request to
  * `hosts`, or, without `header`, replaces the placeholder in a credential
  * header (Authorization, x-api-key, x-goog-api-key, api-key, xi-api-key,
  * x-subscription-token, private-token). Never in the URL or another header.
- * The value is never returned. */
+ * The real-value kind (`exposed: true`): the sandboxes and Apps its `only`
+ * names by id get the value itself in the variable, for a database password
+ * or an SSH key; it has no hosts. Either way, the value is never returned. */
 export type Secret = {
   name: string;
-  /** The environment variable the placeholder is in, when not `name`. */
+  /** The environment variable the placeholder or value is in, when not `name`. */
   env?: string;
+  /** true: the machines it reaches get the value itself in the variable.
+   * false: they see `placeholder`, which the proxy swaps on HTTPS to `hosts`. */
+  exposed: boolean;
+  /** 1 when stored, one more each time the secret changes: its value, who
+   * gets it, its hosts, rules or variable. Pass it as `expectedVersion` to
+   * write only if no one else has changed it since. */
+  version: number;
+  /** Empty for a real-value secret. */
   hosts: string[];
   header?: string;
   format?: string;
@@ -102,18 +113,25 @@ export type Secret = {
   githubApp?: SecretGithubApp;
   git?: SecretGit;
   api?: SecretApiPolicy;
+  /** What the variable holds. For a real-value secret, the server running a
+   * machine replaces it with the value wherever it stands in an environment
+   * variable given to that machine (a command's env, a deploy's), so
+   * `DATABASE_URL=postgres://app:<placeholder>@db/app` works. */
   placeholder: string;
   valueBytes: number;
   createdAt: string;
   updatedAt: string;
 };
 export type SetSecret = {
-  /** Visible ASCII and spaces, at most 8 KiB for sandboxes (64 KiB of UTF-8
-   * for a jobs-only secret). Stored sealed; the sandboxes' copy is never
+  /** Visible ASCII and spaces, one line, at most 8 KiB for sandboxes. With
+   * `exposed`: any UTF-8 text without NUL of at most 64 KiB, several lines
+   * included (a PEM key, a service account's JSON), sent as it is. 64 KiB of
+   * UTF-8 for a jobs-only secret. Stored sealed; the sandboxes' copy is never
    * returned. */
   value: string;
   /** Where the value may go: `api.openai.com`, `*.github.com`. 1 to 16.
-   * Required unless `jobs` is true. */
+   * Required unless `exposed` or `jobs` is true; a real-value secret takes
+   * none. */
   hosts?: string[];
   /** Set this header on every request to the hosts, replacing the sandbox's
    * own; the value then goes nowhere else. Needed when the API reads its key
@@ -145,6 +163,30 @@ export type SetSecret = {
    * secret's own name gives the name back. Absent when replacing a secret:
    * the variable it has stays. */
   env?: string;
+  /** Give the machines the value itself in the variable (`env`, or the
+   * secret's name) instead of a placeholder: for a database password, an SSH
+   * or signing key, anything that is not an HTTPS header. It then takes no
+   * `hosts`, `header`, `format`, `rules`, `githubApp`, `git` or `api`. It
+   * needs `only` naming the sandboxes or Apps that get it by id
+   * (`only.sandboxes`, `only.apps`), never labels or every sandbox, since code
+   * in them can read it; a replacement may leave `only` out to keep the scope
+   * it has. Which machines get it changes only with the value: `scope` is
+   * refused for it, so store it again. `env` works as for any secret. An
+   * organization's real-value secrets
+   * hold at most 64 KiB together. The value is still sealed and opened only on
+   * the server running the machine, but code in the machine can read it and
+   * send it anywhere, and it is in the machine's memory, so in its snapshots,
+   * forks and an App's saved server image. Prefer the placeholder kind for
+   * HTTPS APIs. Not kept: give it on every write of such a secret. A command
+   * in a machine it reaches may fail with 503 `secret_withheld` while the
+   * server cannot give the value right now; nothing ran, and the same call
+   * a few seconds later may work (`error.retryable`). */
+  exposed?: boolean;
+  /** Write only if the sandboxes' copy is at this version (0: it must not
+   * exist yet). At another, nothing is written and the call fails with 409
+   * `version_conflict`, `details.version` the current one. Read it with
+   * `get(name)`. */
+  expectedVersion?: number;
   /** Also keep a copy for scheduled jobs, which a job puts into its run's
    * environment (`jobs.create({ secrets: [...] })`). Unlike the sandboxes'
    * copy, the jobs copy is yours rather than the account's, versioned, and can
@@ -315,7 +357,7 @@ export function secrets(t: Transport) {
   }
   function set(
     name: string,
-    input: SetSecret & { hosts: string[] },
+    input: SetSecret & ({ hosts: string[] } | { exposed: true }),
     options?: RequestOptions,
   ): Promise<Secret & { enforced: boolean; jobs?: JobSecret }>;
   function set(
@@ -325,16 +367,26 @@ export function secrets(t: Transport) {
   ): Promise<{ name: string; jobs: JobSecret } & Partial<Secret & { enforced: boolean }>>;
   async function set(name: string, input: SetSecret, options?: RequestOptions) {
     const { jobs, value, ...egress } = input;
-    if (!egress.hosts?.length && !jobs)
+    // The sandboxes' copy: through the proxy to hosts, or the value itself.
+    const forSandboxes = !!egress.hosts?.length || egress.exposed === true;
+    if (!forSandboxes && !jobs)
       throw new RuntimeError({
         message:
-          "Say where the value may go: hosts for sandboxes, jobs: true for scheduled jobs, or both.",
+          "Say where the value may go: hosts for sandboxes through the proxy, exposed: true to give the machines the value itself, jobs: true for scheduled jobs.",
         code: "invalid_request",
         status: 0,
         details: { field: "hosts" },
       });
+    if (!forSandboxes && egress.expectedVersion !== undefined)
+      throw new RuntimeError({
+        message:
+          "expectedVersion is the version of the sandboxes' copy, and this call stores only the jobs copy.",
+        code: "invalid_request",
+        status: 0,
+        details: { field: "expectedVersion" },
+      });
     let sandboxes: (Secret & { enforced: boolean }) | undefined;
-    if (egress.hosts?.length)
+    if (forSandboxes)
       sandboxes = await t.json<Secret & { enforced: boolean }>({
         method: "PUT",
         path: path(name),
@@ -362,13 +414,19 @@ export function secrets(t: Transport) {
   return {
     /** Store or replace a secret. With `hosts`, sandboxes see a placeholder
      * and the egress proxy puts the value into HTTPS requests to them
-     * (replacing keeps the placeholder). With `jobs: true`, a copy scheduled
-     * jobs can put into their environment; setting it again rotates it. Both
-     * at once store both; if only the first lands, `SecretPartlyStoredError`
-     * says so and the same call again finishes it. */
+     * (replacing keeps the placeholder). With `exposed: true`, no hosts and
+     * `only` naming sandboxes or Apps by id, those machines get the value
+     * itself. Each new value raises the
+     * sandboxes' copy's version; `expectedVersion` writes only over that
+     * one. With `jobs: true`, a copy scheduled jobs can put into their
+     * environment; setting it again rotates it. Both at once store both; if
+     * only the first lands, `SecretPartlyStoredError` says so and the same
+     * call again finishes it. */
     set,
     /** Changes which sandboxes get a secret, without its value: `{}` is every
-     * sandbox of the organization again. */
+     * sandbox of the organization again. Refused (400) for a real-value secret
+     * (`exposed`), whose machines change only with its value: `set` it again
+     * with `value`, `exposed` and `only`. */
     scope: (name: string, only: SecretScope, options?: RequestOptions) =>
       t.json<Secret & { enforced: boolean }>({
         method: "PUT",
@@ -397,17 +455,29 @@ export function secrets(t: Transport) {
     list,
     /** Every secret by name, with where its value may go. */
     all,
-    /** One secret by name, with where its value may go. */
+    /** One secret by name, with where its value may go: `sandboxes` (its
+     * kind, `version`, variable, hosts and placeholder, from
+     * `GET /v1/egress-secrets/{name}`) and `jobs`, each null when it has no
+     * such copy. Never the value. */
     get: async (name: string, options?: RequestOptions): Promise<SecretUse> => {
-      const found = (await all(options)).find((s) => s.name === name);
-      if (!found)
+      const [sandboxes, jobs] = await Promise.all([
+        t.json<Secret>({ method: "GET", path: path(name), ...options }).catch((error: unknown) => {
+          if (error instanceof NotFoundError) return null;
+          throw error;
+        }),
+        liveCopy(name, options).catch((error: unknown) => {
+          if (unavailable(error)) return undefined;
+          throw error;
+        }),
+      ]);
+      if (!sandboxes && !jobs)
         throw new NotFoundError({
           message: `No secret named ${name}.`,
           code: "not_found",
           status: 404,
           hint: "List them with runtime.secrets.all().",
         });
-      return found;
+      return { name, sandboxes, jobs: jobs ?? null };
     },
     /** Replace the jobs copy's value with a new version. Runs already bound to
      * the old version are refused it. Only the jobs copy has versions; to

@@ -9,7 +9,7 @@ import java.util.Map;
  */
 public final class CreateApp extends Params<CreateApp> {
   /**
-   * @param maxCopies 1 to 1000: the most copies awake at once
+   * @param maxCopies 1 to the account's App copies at once (its plan's sandboxes at once): the most copies awake at once
    * @param vcpu 1 to 16
    * @param memoryMiB 128 to 65536
    */

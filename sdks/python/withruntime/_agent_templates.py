@@ -1,4 +1,4 @@
-"""Agents' templates, as data: seven harnesses and the two uses each can serve.
+"""Agents' templates, as data: eight harnesses and the two uses each can serve.
 The same values are in every Runtime SDK and the guide
 (packages/cloud-guide/agent-templates.json; tests/test_agents.py holds this
 file to it).
@@ -21,6 +21,7 @@ from typing import Any
 _START = "\"$(cat ~/.runtime-agent/start.md)\""
 _REVIEW = "python3 ~/.runtime-agent/runtime-agent review"
 _JUDGE = "python3 ~/.runtime-agent/runtime-agent judge"
+_BROWSE = "python3 ~/.runtime-agent/runtime-agent browse"
 
 
 def _template(key: str, title: str, command: str, secret: str, host: str, subscription: Any) -> dict[str, Any]:
@@ -60,6 +61,11 @@ TEMPLATES: dict[str, dict[str, Any]] = {t["key"]: t for t in (
                  "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block"),
      "definition": {"command": _JUDGE, "pool": ["ANTHROPIC_API_KEY"], "vcpu": 2, "memoryMiB": 2048,
                     "maxSessionSeconds": 1800}},
+    # A browser run's harness: browser-use on the sandbox's own Chromium
+    # (POST /v1/browsers/runs starts its sessions).
+    {**_template("browser", "Browser task", _BROWSE, "ANTHROPIC_API_KEY", "api.anthropic.com", None),
+     "definition": {"command": _BROWSE, "secrets": ["ANTHROPIC_API_KEY"],
+                    "vcpu": 2, "memoryMiB": 4096, "maxSessionSeconds": 1800}},
 )}
 
 USES: dict[str, dict[str, Any]] = {

@@ -14,6 +14,8 @@ Use an agent for one of two things:
 Choose a harness: [Claude Code](./agents-claude-code), [Codex](./agents-codex), [Gemini CLI](./agents-gemini-cli), [Claude Agent SDK](./agents-claude-agent-sdk) or [OpenAI Agents SDK](./agents-openai-agents-sdk). Each page has three steps.
 Code written for Claude Managed Agents runs here with its client's base URL and key changed: [switch from Claude Managed Agents](./switch-from-claude-managed-agents).
 
+To have an agent do a task in a web browser, use a [browser run](./browsers#run-a-task): one call starts a session of the `browser` template, with Chromium in its sandbox.
+
 ## Make one
 
 An agent has a name and a definition. A template sets the harness's command and the secret that holds its key. A use sets the size and bounds:
@@ -43,7 +45,7 @@ runtime agents create helper --template claude-code --use support \
 | `support` | your customers, one session per customer | 1 vCPU, 1 GiB | 10 s         | 1,000               | API, webhook  |
 | `team`    | your team's code                         | 4 vCPU, 8 GiB | 60 s         | 10                  | Slack, GitHub |
 
-Besides `command`, the definition takes these fields. `from` takes an image of yours, a snapshot, or `{"repo": "owner/name"}`. The repo is a GitHub repository connected to CI/CD. With a repo, each session starts as a copy of its warm snapshot. The repository is checked out at `/workspace/repo`, at the last passing commit on its production branch, with its setup run. The harness runs there. The other fields are `vcpu`, `memoryMiB`, `instructions` (up to 64 KiB), `env`, `secrets`, `mcp` (MCP servers it may reach), `volumes`, `network`, `idlePauseSeconds`, `maxSessionSeconds`, `maxConcurrent` and `permissions` (which tool calls wait for a person: see [permissions](#permissions)). `network` limits where each session's sandbox may connect: `{"internet": true, "allow": ["pypi.org"]}` lets it reach only the hosts listed, enforced by the sandbox's network rules from its first packet. Without a use, an agent's sandbox has 4 vCPU and 8 GiB. A change creates a new version. Sessions already running keep the version they started with.
+Besides `command`, the definition takes these fields. `from` takes an image of yours, a snapshot, or `{"repo": "owner/name"}`. The repo is a GitHub repository connected to CI/CD. With a repo, each session starts as a copy of its warm snapshot. The repository is checked out at `/workspace/repo`, at the last passing commit on its production branch, with its setup run. The harness runs there. The other fields are `vcpu`, `memoryMiB`, `instructions` (up to 64 KiB), `env`, `secrets`, `mcp` (MCP servers it may reach), `volumes`, `network`, `idlePauseSeconds`, `maxSessionSeconds`, `maxConcurrent`, `permissions` (which tool calls wait for a person: see [permissions](#permissions)), `maxChildren` ([subagents](#subagents)) and `advisor` ([an advisor](#an-advisor)). `network` limits where each session's sandbox may connect: `{"internet": true, "allow": ["pypi.org"]}` lets it reach only the hosts listed, enforced by the sandbox's network rules from its first packet. Without a use, an agent's sandbox has 4 vCPU and 8 GiB. A change creates a new version. Sessions already running keep the version they started with.
 
 Or keep your agents in your repo. A `runtime.yml` file names them. One command makes your account match the file.
 
@@ -128,6 +130,113 @@ runtime agents sessions delete <sessionId>   # an ended one, and its log
 ```
 
 A session is `queued`, `running`, `waiting`, then `done`, `failed` or `stopped`. In `waiting`, its harness waits for words, and its sandbox is paused. Its log holds `input` and `answer` (words in). It also holds `reply`, `ask`, `status`, `result`, `error` and `note` (words out), `child` (a [subagent](#subagents) ended), `turn` and `tool` (its [trace](#traces)), and `tool_call` (a call its [permissions](#permissions) checked). Each entry is numbered. `events` follows the log. It wakes as soon as an event is written, and it ends with the session. Over HTTP, `GET /v1/agents/sessions/{id}/events?after=<seq>&wait=30` long-polls. With `Accept: text/event-stream`, it streams the log instead.
+
+A session that ends `done`, or that you, its agent's deletion or its account's closing stop, deletes its sandbox. A session that reaches `maxSessionSeconds` or its budget, or fails, keeps its sandbox so you can read its files. Its harness is stopped and the sandbox is paused immediately, so it uses no compute after the session ends. The sandbox is deleted 7 days after it pauses (or after the session's longest life, if longer), unless you delete it first. A `status` event names it.
+
+## Per-session overrides
+
+A session can start with its own model, instructions, MCP servers, disallowed
+tools, size and budget, without a new version of its agent. Pass `overrides`
+when you start it. The overrides apply to that session only, are returned on
+the session as `overrides`, and are recorded in its log as a `note` event
+(actor `runtime`) after its first words.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const session = await runtime.agents.start("helper", {
+  input: "Summarize this ticket.",
+  key: "customer:42",
+  overrides: {
+    model: "claude-haiku-5-5",
+    instructions: "This customer is on the Team plan.",
+    mcp: ["github"],
+    disallowedTools: ["Bash", "spawn"],
+    maxSessionDollars: 1,
+  },
+});
+console.log(session.session.overrides);
+```
+
+```bash no-run
+runtime agents start helper "Summarize this ticket." --model claude-haiku-5-5 \
+  --instructions "This customer is on the Team plan." --mcp github \
+  --disallow Bash --disallow spawn --max-dollars 1
+```
+
+| Override            | What it does                                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`             | The model the harness runs.                                                                                                                                 |
+| `instructions`      | Added after the agent's instructions, separated by a blank line. With `instructionsMode: "replace"`, used instead of them. At most 64 KiB with the agent's. |
+| `mcp`               | The names of the agent's MCP servers the session keeps. `[]` keeps none.                                                                                    |
+| `disallowedTools`   | Tools the harness may not use, up to 64.                                                                                                                    |
+| `vcpu`, `memoryMiB` | The session's size. Not available for an agent that starts from a snapshot.                                                                                 |
+| `maxSessionDollars` | The session's budget, its subagents included.                                                                                                               |
+
+The agent's owner sets the limits in the definition's `sessionOverrides`:
+
+| Limit               | Default                         | Meaning                                                                                               |
+| ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `models`            | any model                       | The models a session may name.                                                                        |
+| `instructions`      | `append`                        | `append` lets a session add instructions, `replace` also lets it replace them, `none` allows neither. |
+| `maxVcpu`           | the agent's `vcpu`              | The most vCPU a session may request.                                                                  |
+| `maxMemoryMiB`      | the agent's `memoryMiB`         | The most memory a session may request.                                                                |
+| `maxSessionDollars` | the agent's `maxSessionDollars` | The most budget a session may request.                                                                |
+
+Narrowing MCP servers and disallowing tools is always allowed, except for
+the CI/CD review and judge harnesses (`runtime-agent review` and
+`runtime-agent judge`): their sessions take no overrides, and their
+definitions take no `model` or `sessionOverrides`, so the reviewer's model
+is always the one the review step names. An override
+outside the limits returns `403 permission_denied`, and `details.why` names
+what the agent allows (for example `maxSessionDollars: at most 2`). An
+unknown or malformed override returns `400 invalid_request`. Words that join
+an open session by `key` may repeat that session's own overrides or omit
+them; other overrides return `409 conflict`. The same Idempotency-Key with
+different overrides returns `422 idempotency_conflict`.
+
+The definition's own `model` sets the model for every session. The harness
+receives the session's model as `RUNTIME_AGENT_MODEL`, and also as
+`ANTHROPIC_MODEL` (Claude Code and the Claude Agent SDK), `GEMINI_MODEL`
+(Gemini CLI), `OPENAI_DEFAULT_MODEL` (the OpenAI Agents SDK) and the top-level
+`model` in `~/.codex/config.toml` (Codex). Disallowed tools are enforced as
+follows:
+
+- Runtime's own tools (`spawn`, `workflow`, `workflow_status`, `pr`, `ask`,
+  `withdraw`, `status`, `remember`, `recall`, `search`, `list`, `forget`)
+  are refused by Runtime's API with `403 permission_denied`, whichever way
+  the sandbox calls them, including with the session's report token
+  directly. Every subagent the session starts, each step of a workflow it
+  submits, and every session under those, is refused the same tools. They
+  are also left out of the session's MCP server. `wait`, `reply` and `done` cannot be
+  disallowed.
+- The harness's own tools are passed to the harness's settings: Claude Code
+  gets them as `permissions.deny` rules in `~/.claude/settings.json` (use
+  Claude Code's names: `Bash`, `WebFetch`, `mcp__github`, or a scoped rule
+  such as `Bash(rm *)`), and Gemini CLI as `tools.exclude` in
+  `~/.gemini/settings.json`. Your own code reads them as
+  `RUNTIME_AGENT_DISALLOWED_TOOLS`, comma-separated. These settings live in
+  the sandbox, so they are advisory: a harness that can run commands can
+  change them. When the harness must not reach something, keep it out of the
+  sandbox instead: leave its secret out of `secrets` and its server out of
+  `mcp`.
+
+MCP servers a session's `mcp` leaves out are also left out of every subagent
+and workflow step under it. A subagent receives only those of its own agent's servers whose
+name and URL match a server the session kept, so `mcp: []` gives every
+subagent no MCP servers, whichever agent it runs.
+
+Settings your own files already hold are kept, and a later session that sets
+no overrides gets them back. When `~/.claude`, `~/.gemini` or `~/.codex` is on
+a volume that sessions share, they share these settings too: a session that
+starts while another is open replaces the other's model and denied tools.
+
+In `runtime.yml`, set `model` and `sessionOverrides` on an agent as on its
+definition. In the CLI, `runtime agents create` and `update` take `--model`
+and `--session-overrides '<json>'`. In the console, **Options for this
+session** on the start form sets the model, instructions, disallowed tools
+and budget; a session's page lists what it overrode.
 
 ## Asks and the inbox
 
@@ -401,7 +510,116 @@ run unchecked.
 
 ## Subagents
 
-A session's harness can start a child session to work beside it. The child has its own sandbox. It runs the same agent, or another of yours. A tree extends at most 3 levels below its first session. It holds at most 20 open children. Stopping a session stops every open session under it. When a child ends, it writes a `child` event to its parent's log. A parent waiting for that child wakes.
+A session's harness can start a child session to work beside it. The child has its own sandbox. It runs the same agent, or another of yours. A tree extends at most 3 levels below its first session. It holds at most `maxChildren` open children. The top session's agent sets it, from 1 to 1,000; it is 100 unless set. Starting one more returns `429` with the code `subagent_quota`. Stopping a session stops every open session under it. When a child ends, it writes a `child` event to its parent's log. A parent waiting for that child wakes.
+
+## Workflows
+
+A workflow runs many sessions in phases: fanned out over a list, pipelined
+from one phase into the next, and combined at the end, with a cap on
+sessions, on how many run at once and on cost. It is data, not code: a JSON
+spec that Runtime runs for you. Nothing of yours runs between steps, and a
+workflow costs only its sessions.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const workflow = await runtime.agents.workflows.run({
+  agent: "helper",
+  name: "fix-and-review",
+  input: "The tests in packages/api fail on main.",
+  phases: [
+    { name: "fix", input: "{{input}} Fix {{item}}.", each: ["auth.test.ts", "billing.test.ts"] },
+    { name: "review", input: "Review this fix:\n{{item}}", each: { from: "fix" }, pipeline: true },
+    { name: "summary", input: "Write one summary of these reviews:\n{{review}}" },
+  ],
+  maxConcurrent: 20,
+  maxDollars: 25,
+});
+for await (const now of workflow.follow())
+  console.log(now.phases.map((p) => `${p.name} ${p.done}/${p.total}`).join(", "));
+const ended = await workflow.wait();
+console.log(ended.state, ended.result);
+```
+
+```bash no-run
+runtime agents workflow run review.json --follow   # each phase's progress, then the result
+runtime agents workflows                           # the account's workflows
+runtime agents workflow steps <workflow>           # each step, its item and its session
+runtime agents workflow stop <workflow>
+```
+
+Each phase starts one session of its `agent` (or the workflow's) for each of
+its items, with `input` as its first words:
+
+- `each` is a list of 1 to 1,000 items, or `{"from": "<phase>"}` to fan out
+  over an earlier phase's results. A result that holds a JSON array gives one
+  item per element, and any other result is one item; with `"split":
+"lines"`, each non-empty line is an item. Without `each`, a phase runs one
+  session.
+- `input` is a template: `{{item}}` is the item, `{{index}}` its place from
+  1, `{{input}}` the workflow's `input`, and `{{<phase>}}` an earlier phase's
+  results: one result as it is, several each under its number (`[1]`, `[2]`).
+  A step's words are cut at 32 KiB, and say so.
+- A phase starts once every phase before it has ended. With `"pipeline":
+true` and `each.from`, each item instead starts as soon as its own source
+  step ends, so the review of the first fix starts while the second fix still
+  runs.
+
+The workflow ends `done` when its last phase has; its `result` is that
+phase's one result, or a JSON array of its results. A step that fails does not
+stop the workflow: it is `failed` in the steps list, and the phases after it
+get nothing from it.
+
+| Limit           | Default | At most | Past it                                                  |
+| --------------- | ------- | ------- | -------------------------------------------------------- |
+| `maxSessions`   | 100     | 1,000   | The workflow fails with the reason `max_sessions`        |
+| `maxConcurrent` | 20      | 200     | Further steps wait until one ends                        |
+| `maxDollars`    | 10      | 10,000  | The workflow and its open sessions stop, reason `budget` |
+
+Each step is an ordinary session of its agent, with that agent's own caps:
+its page, log and cost are in the console, and its `workflowId` names the
+workflow. The console's **Agents → Workflows** shows each phase's progress
+live, the steps and their sessions, and stops a workflow.
+`GET /v1/agents/workflows/{id}` with `after` (a `version`) and `wait` (up to
+30 seconds) returns as soon as the workflow changes, which is how `follow`
+works.
+
+A session can run a workflow too: its harness's `workflow` tool takes the
+same spec, and the steps are its children, counted against its tree's
+`maxChildren` and `maxSessionDollars`. The session is told in its log, with a
+`child` event, when the workflow ends, and `workflow_status` reads it at any
+time. When the session ends, its workflows stop.
+
+## An advisor
+
+An agent can name a second model, often a stronger one, that its sessions ask
+for advice when they are unsure: a decision, a plan, a bug they cannot find.
+Each session's harness has an `advise` tool; the question and the advice are
+kept in the session's log as a `note` event with `advice` in its body.
+
+```json
+{
+  "command": "claude",
+  "secrets": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  "advisor": { "model": "gpt-5", "maxCalls": 10 }
+}
+```
+
+`advisor` takes `model` and, optionally, `provider` (`anthropic`, `openai`,
+`google`, `openrouter` or `openai-compatible`, which takes a `baseUrl`; the
+provider is inferred from the model's name when not set), `secret` (the
+egress secret that holds its key, that provider's usual one when not set:
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+`OPENROUTER_API_KEY`), `maxCalls` (1 to 200 a session, 20 unless set) and
+`instructions` for the advisor. The secret must be among the definition's
+`secrets` or `pool`, so the key never enters the sandbox. Advice is billed by
+the model's provider on your key.
+
+```bash no-run
+runtime agents create helper --template claude-code --use team \
+  --secret ANTHROPIC_API_KEY --advisor claude-opus-5-5
+```
 
 ## Budgets
 
@@ -527,12 +745,12 @@ it.
 
 Besides the API, a trigger starts or adds input to an agent's sessions:
 
-| Kind       | Config                                                                     | A session per         |
-| ---------- | -------------------------------------------------------------------------- | --------------------- |
-| `slack`    | `{team, channel}`, once Runtime's Slack app is installed in your workspace | thread                |
-| `github`   | `{installation, repository}`, once Runtime's GitHub App is installed       | pull request or issue |
-| `schedule` | `{cron, timezone?, input}`                                                 | run                   |
-| `webhook`  | `{}`                                                                       | call, or its key      |
+| Kind       | Config                                                                                   | A session per         |
+| ---------- | ---------------------------------------------------------------------------------------- | --------------------- |
+| `slack`    | `{team, channel}`, once Runtime's Slack app is added to your workspace ([Slack](#slack)) | thread                |
+| `github`   | `{installation, repository}`, once Runtime's GitHub App is installed                     | pull request or issue |
+| `schedule` | `{cron, timezone?, input}`                                                               | run                   |
+| `webhook`  | `{}`                                                                                     | call, or its key      |
 
 Adding a webhook returns its `secret` once, and never again. Each of its calls carries the secret as a Bearer token. It never carries your API key. So whatever sends the calls (an alerting system, a form, your server) holds only that secret.
 
@@ -558,6 +776,40 @@ const done = await runtime.agents.triggers.call(
 );
 console.log(done.outcome, done.sessionId ?? done.callId);
 ```
+
+### Slack
+
+A `slack` trigger starts a session for each new message in a channel. A reply in that message's thread joins the session. The session's replies, questions, status and result are posted in the thread.
+
+1. Add Runtime's Slack app to your workspace. Open the link `install` returns in a browser signed in to the same Runtime account, as a member whose role may create resources, and approve the app in Slack as a person who may add apps to the workspace. Slack returns you to the console when the app is added. The link expires after 15 minutes, and works only for a member of the account that made it: opened by anyone else, it adds nothing.
+
+   ```bash no-run
+   runtime agents slack install
+   runtime agents slack ls        # the workspace's id, T…, is the trigger's team
+   ```
+
+2. Invite the app to the channel in Slack (`/invite @Runtime`). The app reads only the channels it is in.
+3. Add the trigger with the workspace's id and the channel's id (C… for a public channel, G… for a private one):
+
+   ```bash no-run
+   runtime agents triggers add helper --kind slack --config '{"team":"T0123ABCD","channel":"C0456EFGH"}'
+   ```
+
+Each message is one call of the trigger. Its key is `slack:<channel>:<thread ts>`, so every reply in a thread joins that thread's session. The trigger's rules apply as to any call. The words are the message's text. The actor is `slack:<user id>`, and the session's `slackUser` label is the user who started it. Messages from bots, edits and deletions start nothing.
+
+In the thread, the session's `reply` and `result` are posted as messages, and its `status` is one message that is edited in place. An `ask` is posted with a button for each option, its pick highlighted. Anyone in the channel can answer: a button click answers the ask, and a reply in the thread reaches the session as words. Errors are posted too. A tool call held for approval by the agent's permissions is never approved from Slack: only a member of the account can approve or deny it, on the console's **Agents › Asks** page or with `POST /v1/agents/asks/{id}/answer`.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const link = await runtime.agents.slack.install();
+console.log(link.url, link.expiresAt);
+for (const workspace of await runtime.agents.slack.teams())
+  console.log(workspace.team, workspace.name);
+```
+
+Remove a workspace with `runtime agents slack rm <team>` (`DELETE /v1/agents/slack/teams/{team}`). Runtime revokes its token, and its triggers refuse events until the app is added again. A workspace belongs to one account at a time; adding one that another account holds returns `409 conflict`.
 
 ### Rules
 
@@ -599,7 +851,7 @@ Over HTTP: `GET /v1/agents/triggers/{id}/held?state=held`, then `POST .../held/{
 
 ## Inside the sandbox
 
-Each session's harness is given `RUNTIME_AGENT_SESSION`, `RUNTIME_AGENT_REPORT_TOKEN` and `RUNTIME_API`. It is also given the agent's instructions in `~/.runtime-agent/start.md`. It gets an MCP server, `runtime-agent` (`~/.runtime-agent/mcp.json`), with these tools: `reply`, `ask` and `withdraw` (see [asks](#asks-and-the-inbox)), `status`, `wait` (for the next words) and `done`. For its [memory](#memory), it has `remember`, `recall`, `search`, `list` and `forget`. It also has `spawn`, which starts a subagent's session. The report token reaches only that session and its memory. No API key enters the sandbox.
+Each session's harness is given `RUNTIME_AGENT_SESSION`, `RUNTIME_AGENT_REPORT_TOKEN` and `RUNTIME_API`. It is also given the agent's instructions in `~/.runtime-agent/start.md`. It gets an MCP server, `runtime-agent` (`~/.runtime-agent/mcp.json`), with these tools: `reply`, `ask` and `withdraw` (see [asks](#asks-and-the-inbox)), `status`, `wait` (for the next words) and `done`. For its [memory](#memory), it has `remember`, `recall`, `search`, `list` and `forget`. It also has `spawn`, which starts a subagent's session; `workflow` and `workflow_status`, which run and read a [workflow](#workflows); and `advise`, when the agent names an [advisor](#an-advisor). The report token reaches only that session and its memory. No API key enters the sandbox.
 
 ## Memory
 

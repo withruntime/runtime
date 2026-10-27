@@ -77,6 +77,14 @@ public final class SandboxInfo extends JsonObject {
     return getString("user");
   }
 
+  /**
+   * With no time limit, how far ahead each renewal funds it, in seconds; 0 from an API before 25
+   * October 2026.
+   */
+  public int leaseSeconds() {
+    return (int) getLong("leaseSeconds", 0);
+  }
+
   public Instant createdAt() {
     return getInstant("createdAt");
   }

@@ -21,7 +21,9 @@ public final class Products {
   /**
    * {@code runtime.secrets()}: a value your sandboxes use without seeing it. Every sandbox of the
    * organization has an environment variable of the secret's name holding a placeholder; the
-   * egress proxy puts the value into HTTPS requests to its hosts. The value is never returned.
+   * egress proxy puts the value into HTTPS requests to its hosts. With {@link #setExposed}, the
+   * sandboxes and Apps its only names by id get the value itself instead. The value is never
+   * returned.
    */
   public static final class Secrets {
     private final Transport t;
@@ -72,7 +74,10 @@ public final class Products {
      * when not the secret's name. Secrets scoped to different sandboxes may share one, such as one
      * GITHUB_TOKEN per repository; a write that would put two in one sandbox is refused (409); absent
      * when replacing, the variable it has stays. The answer and {@link #list} return them under
-     * the same names.
+     * the same names. {@code expectedVersion} writes only if the secret is at that version (its
+     * {@code version} from {@link #get} or {@link #list}; 0: it must not exist yet), or fails with
+     * 409 version_conflict and the current one in the details. {@code exposed} ({@code true}, with
+     * null hosts) is the kind {@link #setExposed} stores. Hosts are required unless exposed.
      */
     public JsonObject set(
         String name,
@@ -84,12 +89,13 @@ public final class Products {
         Map<String, Object> policy) {
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("value", value);
-      body.put("hosts", hosts);
+      if (hosts != null) body.put("hosts", hosts);
       if (header != null) body.put("header", header);
       if (format != null) body.put("format", format);
       if (only != null) body.put("only", only);
       if (policy != null) {
-        for (String field : List.of("rules", "githubApp", "git", "api", "env")) {
+        for (String field :
+            List.of("rules", "githubApp", "git", "api", "env", "exposed", "expectedVersion")) {
           if (policy.get(field) != null) body.put(field, policy.get(field));
         }
       }
@@ -97,8 +103,48 @@ public final class Products {
     }
 
     /**
+     * Stores or replaces a secret whose sandboxes get the value itself in the variable instead of
+     * a placeholder: for what is not an HTTPS header, such as a database password, an SSH key or a
+     * service account's JSON. The value may be any text of up to 64 KiB, several lines included.
+     * With no only, this replaces such a secret and keeps the scope it has; a new one needs the
+     * form with only.
+     */
+    public JsonObject setExposed(String name, String value) {
+      return setExposed(name, value, null, null);
+    }
+
+    /**
+     * With only, as {@link #set}, and policy's {@code env} and {@code expectedVersion}. Such a
+     * secret takes no hosts, header, format, rules, githubApp, git or api. Its only names the
+     * sandboxes or Apps that get it by id ({@code {sandboxes: [ids]}}, {@code {apps: [ids]}}),
+     * never labels or every sandbox; null on a replacement keeps the scope it has. Which machines
+     * get it changes only with the value: {@link #scope} is refused for it, so store it again
+     * here. Code in the sandbox can
+     * read the value and send it anywhere, and it can be in the sandbox's snapshots and forks; for
+     * an HTTPS API, prefer {@link #set} with hosts. It is not kept: every write of such a secret
+     * goes through here.
+     */
+    public JsonObject setExposed(
+        String name, String value, Map<String, Object> only, Map<String, Object> policy) {
+      Map<String, Object> exposed = new LinkedHashMap<>();
+      if (policy != null) exposed.putAll(policy);
+      exposed.put("exposed", true);
+      return set(name, value, null, null, null, only, exposed);
+    }
+
+    /**
+     * One secret by name: its kind ({@code exposed}), {@code version}, variable, hosts and
+     * placeholder. Never its value. Fails with 404 not_found when there is none.
+     */
+    public JsonObject get(String name) {
+      return new JsonObject(t.object(new Transport.Call("GET", path(name))));
+    }
+
+    /**
      * Changes which sandboxes get a secret, without its value: an empty map is every sandbox of the
-     * organization again. Returns the secret, with only and enforced.
+     * organization again. Returns the secret, with only and enforced. Refused (400) for a
+     * real-value secret ({@code exposed}), whose machines change only with its value: store it
+     * again with {@link #setExposed} and only.
      */
     public JsonObject scope(String name, Map<String, Object> only) {
       return new JsonObject(
@@ -116,7 +162,7 @@ public final class Products {
       return new JsonObject(t.object(new Transport.Call("PUT", path(name) + "/rules").body(body)));
     }
 
-    /** Names, hosts and placeholders, every secret. Never values. */
+    /** Names, kinds, versions, hosts and placeholders, every secret. Never values. */
     public List<JsonObject> list() {
       List<JsonObject> all = new java.util.ArrayList<>();
       String after = null;
@@ -501,7 +547,10 @@ public final class Products {
     }
   }
 
-  /** {@code runtime.otel()}: events (as logs) and CPU and memory (as metrics) pushed over OTLP/HTTP. */
+  /**
+   * {@code runtime.otel()}: events (as logs), CPU, memory, disk and network (as metrics) and a span
+   * for every API call (as traces, with signals including "traces") pushed over OTLP/HTTP.
+   */
   public static final class Otel {
     private final Transport t;
 

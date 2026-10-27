@@ -92,6 +92,16 @@ public final class CreateSandbox extends Params<CreateSandbox> {
   }
 
   /**
+   * With no time limit, how far ahead each renewal funds it: 300 to 43200 seconds (12 hours). It
+   * is renewed when half is left, so it keeps running for at least half of this through an outage
+   * of Runtime's control plane. Each renewal holds that much time's credit; what it does not use
+   * is released. Default: its first lease, usually 1800.
+   */
+  public CreateSandbox leaseSeconds(int seconds) {
+    return set("leaseSeconds", seconds);
+  }
+
+  /**
    * Keep it running until you stop it, while credit lasts, with no idle pause unless
    * idlePauseSeconds asks for one, and keep its disk after a stop, for restart(). Paid only.
    */

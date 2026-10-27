@@ -129,7 +129,8 @@ export type CreateFunction = {
   name?: string;
   /** At most 32 entries, each value at most 256 characters. */
   labels?: Record<string, string>;
-  /** Required, 1 to 1000. Bounds the number of awake copies. */
+  /** Required, 1 to the account's App copies at once (its plan's sandboxes at
+   * once, GET /v1/limits `instance.count`). Bounds the number of awake copies. */
   maxCopies: number;
   /** Required, 1 to 16. */
   vcpu: number;

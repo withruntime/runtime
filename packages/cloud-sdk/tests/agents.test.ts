@@ -26,7 +26,9 @@ const session = (over: Partial<AgentSession> = {}): AgentSession => ({
   result: null,
   sandboxId: null,
   lastSeq: 1,
+  workflowId: null,
   labels: {},
+  overrides: null,
   createdAt: "2025-10-09T08:53:20.000Z",
   startedAt: null,
   endedAt: null,
@@ -93,6 +95,14 @@ test("each method's route, method and body", async () => {
   ]);
   expect(calls[3]!.body).toEqual({ definition: { command: "codex" } });
   expect(calls[5]!.body).toEqual({ input: "hi", key: "customer:1" });
+  await api.start("dev", {
+    input: "hi",
+    overrides: { model: "claude-haiku-5-5", disallowedTools: ["Bash"], maxSessionDollars: 1 },
+  });
+  expect(calls.at(-1)!.body).toEqual({
+    input: "hi",
+    overrides: { model: "claude-haiku-5-5", disallowedTools: ["Bash"], maxSessionDollars: 1 },
+  });
   expect(calls[6]!.body).toEqual({ text: "more" });
   expect(calls[10]!.body).toEqual({ why: "busy" });
 });
@@ -138,6 +148,7 @@ test("the templates and uses are the shared data file's", () => {
     "openai-agents-sdk",
     "review",
     "judge",
+    "browser",
   ]);
   expect(Object.keys(api.uses)).toEqual(["support", "team"]);
 });
@@ -214,6 +225,70 @@ test("asks: the inbox lists with labels as label=key:value, gets one and answers
     label: ["team:infra", "for:marc"],
   });
   expect(calls[2]!.body).toEqual({ option: "Raise to 20 TB", text: "Done." });
+});
+
+test("workflows: run, follow each change with a 30-second wait past the last version, wait for the result, steps and stop", async () => {
+  const flow = (version: number, state = "running", result: string | null = null) => ({
+    id: "w 1",
+    name: "triage",
+    state,
+    reason: state === "running" ? null : "done",
+    result,
+    parentSessionId: null,
+    spec: { agent: "dev", phases: [{ name: "a", input: "{{item}}", each: ["x", "y"] }] },
+    maxSessions: 100,
+    maxConcurrent: 20,
+    maxDollars: 10,
+    started: 2,
+    version,
+    labels: {},
+    phases: [],
+    cost: { dollars: 0, vcpuSeconds: 0, gibSeconds: 0 },
+    createdAt: "2025-10-09T08:53:20.000Z",
+    updatedAt: "2025-10-09T08:53:20.000Z",
+    endedAt: null,
+  });
+  // Each long poll answers the next version; the third has ended.
+  let version = 1;
+  const { api, calls } = fake((call) => {
+    if (call.method === "POST" && call.path === "/v1/agents/workflows") return flow(1);
+    if (call.path.endsWith("/steps")) return { data: [], nextCursor: null };
+    if (call.path.endsWith("/stop")) return flow(9, "stopped");
+    if (call.path === "/v1/agents/workflows") return { data: [flow(1)], nextCursor: null };
+    if (!call.query?.wait) return flow(version);
+    version += 1;
+    return version >= 3 ? flow(version, "done", '["X", "Y"]') : flow(version);
+  });
+  const spec = {
+    agent: "dev",
+    maxConcurrent: 50,
+    phases: [{ name: "a", input: "{{item}}", each: ["x", "y"] }],
+  };
+  const w = await api.workflows.run(spec);
+  expect(w.id).toBe("w 1");
+  expect(calls[0]).toMatchObject({ method: "POST", path: "/v1/agents/workflows", body: spec });
+  const seen: number[] = [];
+  for await (const now of w.follow()) seen.push(now.version);
+  expect(seen).toEqual([2, 3]);
+  const polls = calls.filter((c) => c.query?.wait);
+  expect(polls.map((c) => c.query)).toEqual([
+    { after: 0, wait: 30 },
+    { after: 2, wait: 30 },
+  ]);
+  expect(polls.every((c) => c.path === "/v1/agents/workflows/w%201" && c.timeoutMs === 0)).toBe(
+    true,
+  );
+  version = 1;
+  const ended = await w.wait();
+  expect(ended).toMatchObject({ state: "done", result: '["X", "Y"]' });
+  await w.steps({ state: ["failed"] });
+  await api.workflows.list({ state: ["running"] });
+  await w.stop();
+  expect(calls.slice(-3).map((c) => `${c.method} ${c.path}`)).toEqual([
+    "GET /v1/agents/workflows/w%201/steps",
+    "GET /v1/agents/workflows",
+    "POST /v1/agents/workflows/w%201/stop",
+  ]);
 });
 
 test("anthropic() is the options Anthropic's SDK takes: Runtime's origin with /anthropic, and the key", async () => {

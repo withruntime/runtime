@@ -7,6 +7,7 @@ import json
 import threading
 import types
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import withruntime.e2b as e2b
@@ -20,13 +21,15 @@ METRICS = {
     "latest": {"at": "2026-09-23T10:59:00.000Z", "cpuPercent": 25, "memoryBytes": 1073741824},
     "points": [
         {"at": "2026-09-23T10:58:00.000Z", "cpuPercent": None, "memoryBytes": 900000000},
-        {"at": "2026-09-23T10:59:00.000Z", "cpuPercent": 25, "memoryBytes": 1073741824},
+        {"at": "2026-09-23T10:59:00.000Z", "cpuPercent": 25, "memoryBytes": 1073741824,
+         "diskUsedBytes": 2147483648},
     ],
 }
 
 
 class Stub(BaseHTTPRequestHandler):
     seen: list = []
+    headers_seen: list = []
 
     def log_message(self, *args):
         pass
@@ -41,6 +44,7 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Stub.seen.append(("GET", self.path, None))
+        Stub.headers_seen.append({k.lower(): v for k, v in self.headers.items()})
         if self.path.startswith(f"/v1/sandboxes/{SANDBOX_ID}/metrics"):
             return self.answer(METRICS)
         if self.path.startswith(f"/v1/sandboxes/{SANDBOX_ID}"):
@@ -127,7 +131,24 @@ class ObservabilityTest(unittest.TestCase):
                                          end=datetime.datetime(2026, 9, 23, 12, 0, tzinfo=datetime.timezone.utc))
         self.assertEqual(len(points), 1)
         self.assertEqual((points[0].cpu_used_pct, points[0].cpu_count, points[0].mem_used, points[0].disk_used,
-                          points[0].disk_total), (25, 2, 1073741824, None, 10737418240))
+                          points[0].disk_total), (25, 2, 1073741824, 2147483648, 10737418240))
+
+    def test_calls_carry_the_active_opentelemetry_span(self):
+        # A stand-in for opentelemetry.propagate, which injects the W3C headers
+        # of the active span (and others, which are not sent).
+        from withruntime import _trace
+        parent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+        fake = types.SimpleNamespace(inject=lambda carrier: carrier.update(
+            {"traceparent": parent, "tracestate": "v=1", "baggage": "user=x"}))
+        with mock.patch.object(_trace, "_propagate", fake), mock.patch.object(_trace, "_missing", False):
+            with Runtime(api_key="rk_x", base_url=self.url) as runtime:
+                runtime.sandboxes.get(SANDBOX_ID).metrics()
+        headers = Stub.headers_seen[-1]
+        self.assertEqual((headers.get("traceparent"), headers.get("tracestate"), headers.get("baggage")),
+                         (parent, "v=1", None))
+        # Without OpenTelemetry, nothing is sent.
+        with mock.patch.object(_trace, "_missing", True):
+            self.assertEqual(_trace.trace_headers(), {})
 
 
 if __name__ == "__main__":

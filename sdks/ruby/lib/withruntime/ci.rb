@@ -72,10 +72,13 @@ module WithRuntime
   # created_at, updated_at, started_at and ended_at.
   class CIChecks < Product
     # Checks, newest first. +state+ is any of queued, running, passed, failed,
-    # cancelled; +commit+ is a full sha.
-    def list(repository_id: nil, state: nil, branch: nil, commit: nil, pull_request: nil, limit: nil, cursor: nil)
-      page("/v1/ci/checks", { "repositoryId" => repository_id, "state" => state, "branch" => branch, "commit" => commit,
-                              "pullRequest" => pull_request, "limit" => limit, "cursor" => cursor })
+    # cancelled; +event+ any of push, pull_request, merge_group (GitHub's merge
+    # queue) or rerun; +commit+ is a full sha.
+    def list(repository_id: nil, state: nil, event: nil, branch: nil, commit: nil, pull_request: nil, limit: nil,
+             cursor: nil)
+      page("/v1/ci/checks", { "repositoryId" => repository_id, "state" => state, "event" => event, "branch" => branch,
+                              "commit" => commit, "pullRequest" => pull_request, "limit" => limit,
+                              "cursor" => cursor })
     end
 
     # The check with its +jobs+ in plan order (no log).

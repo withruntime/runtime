@@ -17,6 +17,7 @@ import { NotFoundError, RuntimeError } from "./errors.js";
 import { NETWORK_PRODUCTS, networkProductCommand, type NetworkProduct } from "./network-cli.js";
 import { billingCommand } from "./billing-cli.js";
 import { cliRefusal, describeRecord, newestCpu, productWords, topicHelp } from "./cli-words.js";
+import { outdatedLine } from "./cli-update.js";
 import { envFetch } from "./proxy.js";
 import { logStream, terminalSafe, terminalSafeLines } from "./terminal.js";
 import { VERSION, type RequestOptions } from "./transport.js";
@@ -24,12 +25,13 @@ import type { CreateSandbox, FeedbackKind, OutOfMemory, SandboxInfo, Usage } fro
 import type {
   MetricRange,
   SandboxMetrics,
+  OtelSignal,
   UsageExportPage,
   WebhookEventType,
 } from "./products/observability.js";
 import type { SwitchingSummary, SwitchProvider } from "./products/switching.js";
 import type { LimitedKeyAction } from "./products/api-keys.js";
-import type { SecretRule, SecretScope, SecretUse } from "./products/secrets.js";
+import type { Secret, SecretRule, SecretScope, SecretUse } from "./products/secrets.js";
 import type { Job, JobAlert, UpdateJob } from "./products/jobs.js";
 import type { PlanNow } from "./products/plans.js";
 import type { RoomBooking } from "./products/reservations.js";
@@ -86,15 +88,28 @@ Account
   reservations ls | get <id> | cancel <id>     Your bookings; cancel gives the room back
   secrets set <NAME> --host <host>... [--header <name> [--format '<text {value}>']]
             [--allow '[GET,HEAD] /path/*']...  Store a secret sandboxes use without seeing it; the
-            [--only-label key=value[,k=v]]...  value is read from standard input, never an argument.
-            [--only-sandbox <id>]...           --allow (paid): only these methods and paths get it.
-            [--only-app <app id>]...           --only-label: only sandboxes with those labels (each
-            [--all-sandboxes] [--env <VAR>]    flag one selector, any may match); --only-sandbox:
-                                               only that sandbox; --only-app: every copy of that App,
-                                               any version. A new value keeps the scope;
-                                               --all-sandboxes gives it to every sandbox again.
-                                               --env: the variable sandboxes see it in, if not NAME;
-                                               secrets scoped to different sandboxes may share one
+            [--only-label key=value[,k=v]]...  value is read from standard input or --from-file,
+            [--only-sandbox <id>]...           never an argument. --allow (paid): only these
+            [--only-app <app id>]...           methods and paths get it. --only-label: only
+            [--all-sandboxes] [--env <VAR>]    sandboxes with those labels (each flag one selector,
+            [--expected-version N]             any may match); --only-sandbox: only that sandbox;
+            [--from-file <path>]               --only-app: every copy of that App, any version.
+                                               A new value keeps the scope; --all-sandboxes gives
+                                               it to every sandbox again. --env: the variable
+                                               sandboxes see it in, if not NAME; secrets scoped to
+                                               different sandboxes may share one.
+                                               --expected-version: write only over that version
+                                               (get shows it; 0: only if it does not exist yet)
+  secrets set <NAME> --exposed [--only-sandbox <id>]... [--only-app <app id>]...
+            [--env <VAR>]                      Give the sandboxes and Apps you name by id the value
+            [--expected-version N]             itself, for what is not an HTTPS header (a database
+            [--from-file <path>]               password, an SSH key): up to 64 KiB, several lines,
+                                               read byte for byte. Code in them can read it and
+                                               send it anywhere, and snapshots and forks hold it:
+                                               prefer --host for APIs. A new one needs
+                                               --only-sandbox or --only-app, never labels or every
+                                               sandbox; to change who gets it, set it again.
+                                               The key must be able to run commands in each
   secrets set <NAME> --keep-value [--host <host>]... [--allow '[GET] /path']...
                                                Narrow where it goes without its value: a subset of
                                                its hosts, only requests its rules allow now.
@@ -102,10 +117,11 @@ Account
   secrets set <NAME> --jobs [--host ...]       A copy scheduled jobs put in their environment
                                                (job create --secret NAME); with --host, both
   secrets scope <NAME> --only-label k=v... | --only-sandbox <id>... | --only-app <id>... | --all-sandboxes
-                                               Change which sandboxes get it; no value needed
+                                               Change which sandboxes get it; no value needed.
+                                               Not for --exposed: set it again with its value
   secrets ls [--limit N] [--after NAME] | get <NAME>
-                                               Names, hosts, placeholders and jobs versions, never values;
-                                               by name, a page of N after NAME
+                                               Names, kinds, versions, hosts and placeholders, never
+                                               values; by name, a page of N after NAME
   secrets rotate <NAME>                        A new version of the jobs copy, from standard input
   secrets reveal <NAME> [--version N]          Print the jobs copy's value. The sandboxes' copy is
                                                never readable, by anyone
@@ -152,14 +168,14 @@ Connect
                                                Forward local ports to ports in a sandbox
 
 Observability
-  sandboxes metrics <id> [--range 1h]          CPU and memory over time (15m 1h 6h 24h 7d 30d)
+  sandboxes metrics <id> [--range 1h]          CPU, memory, disk and network over time (15m 1h 6h 24h 7d 30d)
   events [--sandbox <id>] [--type <type>]      Lifecycle events, newest first
   webhooks ls | create <url> [--events a,b] | test <id> | deliveries <id>
            | update <id> [--url u] [--events a,b] [--enable|--disable]
            | rotate-secret <id> [--keep <seconds>] | retry <deliveryId> | rm <id>
                                                Signed lifecycle events POSTed to your URL
-  otel ls | create <endpoint> [--header K=V]... [--signals logs,metrics] | flush <id> | rm <id>
-                                               Events and metrics to an OpenTelemetry endpoint
+  otel ls | create <endpoint> [--header K=V]... [--signals logs,metrics,traces] | flush <id> | rm <id>
+                                               Events, metrics and API call traces to an OpenTelemetry endpoint
 
 Products
   sandboxes  Linux microVMs: exec, shell, files, code, previews, network, desktop, browser
@@ -205,6 +221,9 @@ const SANDBOX_HELP = `runtime sandboxes <command>
          [--idle-pause <seconds>] [--no-auto-wake] [--persistent] [--get-or-create]
          [--user root|sandbox]                                --user root: its commands, processes and
                                                               shells run as root unless one says otherwise
+         [--lease <300-43200>]                                With no time limit, how far ahead each renewal
+                                                              funds it: it runs through a control-plane outage
+                                                              half that long
                                                               Create one; prints its id
   ls [--all] [--label k=v]... [--state running]               List (live ones unless --all)
   get <id>                                                    One sandbox, in full
@@ -240,6 +259,7 @@ const SANDBOX_HELP = `runtime sandboxes <command>
   extend <id> <seconds>                       Move a time limit on (one with none needs nothing)
   update <id> [--name n] [--label k=v]... [--env K[=V]]... [--unset-env K]... [--idle-pause <seconds>] [--auto-wake on|off]
               [--persistent on|off] [--max-total-cost <usd>|none] [--user root|sandbox]
+              [--lease <300-43200>|default]
               [--timeout <60-86400 from now>|0] [--on-timeout pause|stop|delete]
                                               Change its settings; persistent keeps it running until stopped;
                                               --env K alone sends K's value from your own environment,
@@ -498,7 +518,10 @@ function usage(message: string) {
 /** "Unknown command X." and, when one is close, the command that was meant. */
 function unknown(what: string, word: string, choices: readonly string[]) {
   const meant = closest(word, choices);
-  return usage(`Unknown ${what} ${word}.${meant ? ` Did you mean ${meant}?` : ""}`);
+  // Nothing close: say what it may be, when that is a short list.
+  const known =
+    !meant && choices.length && choices.length <= 12 ? ` Use ${choices.join(", ")}.` : "";
+  return usage(`Unknown ${what} ${word}.${meant ? ` Did you mean ${meant}?` : known}`);
 }
 /** The choice a mistyped word most likely meant, or none when nothing is close:
  * one edit away (a swap of two letters counts as one), or two for a word longer
@@ -732,6 +755,7 @@ function describe(info: SandboxInfo): string {
     ...(info.stopReason ? [["stop reason", info.stopReason]] : []),
     ["auto wake", info.autoWake === false ? "off" : "on"],
     ["runs as", info.user === "root" ? "root" : "sandbox user"],
+    ...(info.leaseSeconds ? [["renews", `${info.leaseSeconds} s ahead`]] : []),
     [
       "idle pause",
       info.idlePauseSeconds
@@ -1280,7 +1304,9 @@ export async function run(
         : [
             `Your plan: ${current.name} (${current.planId}), ${current.status.replace("_", " ")}, ${current.interval === "year" ? "yearly" : "monthly"}.`,
             current.status === "trialing" && current.trialEndsAt
-              ? `The trial ends on ${day(current.trialEndsAt)}.`
+              ? current.cancelAtPeriodEnd
+                ? `The trial ends on ${day(current.trialEndsAt)}, cancelled: its card is not charged.`
+                : `The trial ends on ${day(current.trialEndsAt)}, when its card is charged the first period; \`${me} plans cancel\` before then charges nothing.`
               : undefined,
             current.cancelAtPeriodEnd
               ? `It ends on ${day(current.periodEnd)}; \`${me} plans resume\` keeps it.`
@@ -2554,6 +2580,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
           "timeout",
           "on-timeout",
           "user",
+          "lease",
         ],
       );
       const sbx = await get(args.positional[0]);
@@ -2566,6 +2593,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       const onTimeout = flag(args, "on-timeout")
         ? oneOf(args, "on-timeout", ["pause", "stop", "delete"] as const)
         : undefined;
+      const lease = flag(args, "lease");
+      if (lease !== undefined && lease !== "default" && !/^\d+$/.test(lease))
+        throw usage("--lease takes seconds, 300 to 43200, or default.");
       const cost = flag(args, "max-total-cost");
       if (cost !== undefined && cost !== "none" && !/^\d+(\.\d{1,6})?$/.test(cost))
         throw usage("--max-total-cost takes dollars, such as 25 or 2.50, or none.");
@@ -2583,6 +2613,9 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
         ...(onOff("auto-wake") === undefined ? {} : { autoWake: onOff("auto-wake")! }),
         ...(onOff("persistent") === undefined ? {} : { persistent: onOff("persistent")! }),
         ...(flag(args, "user") ? { user: oneOf(args, "user", ["sandbox", "root"] as const) } : {}),
+        ...(lease === undefined
+          ? {}
+          : { leaseSeconds: lease === "default" ? null : Number(lease) }),
         ...(cost === undefined
           ? {}
           : {
@@ -2595,7 +2628,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       };
       if (!Object.keys(settings).length)
         throw usage(
-          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent, --user, --max-total-cost, --timeout or --on-timeout.",
+          "Say what to change: --name, --label, --env, --unset-env, --idle-pause, --auto-wake, --persistent, --user, --lease, --max-total-cost, --timeout or --on-timeout.",
         );
       await sbx.update(settings);
       print(describe(sbx.info), sbx.info);
@@ -2988,9 +3021,6 @@ function attachment(spec: string): { volumeId: string; path: string; mode: "rw" 
   return { volumeId, path, mode };
 }
 
-/** A secret's value, from standard input only, so it never sits in shell
- * history or a process list. Piped: everything, less one trailing newline.
- * A terminal: one line, not shown. */
 /** A pasted secret as the header it becomes: no line breaks (a token copied
  * from a terminal arrives wrapped), no bracketed-paste markers, no space at
  * either end. 13 October 2026: a user's pasted Claude token was refused as
@@ -3003,21 +3033,45 @@ export function cleanSecret(raw: string): string {
     .trim();
 }
 
-async function readSecret(): Promise<string> {
+/** A secret's value, from standard input only, so it never sits in shell
+ * history or a process list. Piped: everything, cleaned as a header's
+ * (`cleanSecret`). A terminal: one line, not shown. `verbatim`, for a real
+ * value the machines get themselves (a PEM key, a JSON file): piped, every
+ * byte as it is; a terminal, every line until Ctrl-D, less the Enter typed
+ * before it. */
+async function readSecret(verbatim = false): Promise<string> {
   const stdin = process.stdin;
   if (!stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of stdin) chunks.push(chunk as Buffer);
-    return cleanSecret(Buffer.concat(chunks).toString("utf8"));
+    const text = Buffer.concat(chunks).toString("utf8");
+    return verbatim ? text : cleanSecret(text);
   }
-  process.stderr.write("Value (not shown), then Enter: ");
+  process.stderr.write(
+    verbatim
+      ? "Value (not shown; several lines are fine), then Ctrl-D: "
+      : "Value (not shown), then Enter: ",
+  );
   stdin.setRawMode(true);
   stdin.resume();
+  // A character split across two reads is joined, not garbled.
+  const decoder = new TextDecoder();
   try {
     return await new Promise<string>((done, fail) => {
       let value = "";
       const onData = (chunk: Buffer) => {
-        for (const char of chunk.toString("utf8")) {
+        for (const char of decoder.decode(chunk, { stream: true })) {
+          if (verbatim && char === "\u0004") {
+            stdin.off("data", onData);
+            process.stderr.write("\n");
+            return done(
+              value.replaceAll("\u001b[200~", "").replaceAll("\u001b[201~", "").replace(/\n$/, ""),
+            );
+          }
+          if (verbatim && (char === "\r" || char === "\n")) {
+            value += "\n";
+            continue;
+          }
           if (char === "\r" || char === "\n") {
             stdin.off("data", onData);
             process.stderr.write("\n");
@@ -3130,13 +3184,14 @@ export async function secretsCommand(
   argv: string[],
   env: NodeJS.ProcessEnv,
   out: Out,
-  /** Tests give the value here; the CLI reads standard input. */
-  read: () => Promise<string> = readSecret,
+  /** Tests give the value here; the CLI reads standard input, `verbatim`
+   * for a real value (--exposed), cleaned as a header's otherwise. */
+  read: (verbatim: boolean) => Promise<string> = readSecret,
 ): Promise<number> {
   const [verb, ...rest] = argv;
   const args = parse(
     rest,
-    ["jobs", "all-sandboxes", "keep-value", "all", "none"],
+    ["jobs", "all-sandboxes", "keep-value", "all", "none", "exposed"],
     [
       "host",
       "header",
@@ -3151,21 +3206,36 @@ export async function secretsCommand(
       "env",
       "limit",
       "after",
+      "expected-version",
+      "from-file",
     ],
   );
   const print = (human: string, value: unknown) =>
     out.write(out.json ? JSON.stringify(value) : human);
+  const kind = (secret: Secret) => (secret.exposed ? "real value" : "added on the way out");
   const rows = (list: SecretUse[]) =>
     list.length
       ? table([
-          ["name", "hosts", "header", "placeholder", "allow", "sandboxes", "jobs"],
+          [
+            "name",
+            "hosts",
+            "header",
+            "placeholder",
+            "allow",
+            "sandboxes",
+            "kind",
+            "version",
+            "jobs",
+          ],
           ...list.map(({ name, sandboxes: secret, jobs }) => [
             secret?.env ? `${name} (as ${secret.env})` : name,
-            secret ? secret.hosts.join(",") : "-",
+            secret?.hosts.length ? secret.hosts.join(",") : "-",
             secret?.header ? `${secret.header}: ${secret.format ?? "{value}"}` : "-",
             secret ? secret.placeholder : "-",
             secret ? ruleText(secret.rules) : "-",
             secret ? scopeText(secret.only) : "-",
+            secret ? kind(secret) : "-",
+            secret?.version ? `v${secret.version}` : "-",
             jobs ? `v${jobs.version}` : "-",
           ]),
         ])
@@ -3191,18 +3261,38 @@ export async function secretsCommand(
     );
     return 0;
   }
-  const jobsOnly = "Only a secret's copy for jobs has versions and can be read back";
+  const jobsOnly = "Only a secret's copy for jobs can be read back";
   if (verb === "get") {
     const found = await (
       await client(env)
     ).secrets.get(need(args.positional[0], "the secret's name"));
-    print(rows([found]), found);
+    const secret = found.sandboxes;
+    const lines: string[][] = [["name", found.name]];
+    if (secret)
+      lines.push(
+        ["kind", kind(secret)],
+        ["version", secret.version ? String(secret.version) : "-"],
+        ["variable", secret.env ?? secret.name],
+        ["hosts", secret.hosts.length ? secret.hosts.join(", ") : "-"],
+        ...(secret.header ? [["header", `${secret.header}: ${secret.format ?? "{value}"}`]] : []),
+        ...(secret.rules?.length ? [["allow", ruleText(secret.rules)]] : []),
+        ["sandboxes", scopeText(secret.only)],
+        ["placeholder", secret.placeholder],
+        ["size", `${secret.valueBytes} bytes`],
+        ["updated", secret.updatedAt],
+      );
+    else lines.push(["sandboxes", "none: a copy for jobs only"]);
+    lines.push(["jobs", found.jobs ? `v${found.jobs.version}` : "-"]);
+    print(table(lines), found);
     return 0;
   }
   if (verb === "set" || verb === "rotate") {
     const name = need(args.positional[0], "the secret's name, such as OPENAI_API_KEY");
     const hosts = args.flags.get("host") ?? [];
     const jobs = verb === "rotate" || has(args, "jobs");
+    const exposed = has(args, "exposed");
+    const expectedVersion = integer(args, "expected-version");
+    const fromFile = flag(args, "from-file");
     if (
       verb === "rotate" &&
       (hosts.length ||
@@ -3212,16 +3302,21 @@ export async function secretsCommand(
         args.flags.has("only-sandbox") ||
         args.flags.has("only-app") ||
         args.flags.has("all-sandboxes") ||
-        args.flags.has("env"))
+        args.flags.has("env") ||
+        args.flags.has("exposed") ||
+        args.flags.has("expected-version"))
     )
       throw usage(
-        `rotate replaces the copy for jobs. ${jobsOnly}; to change the sandboxes' copy, set it again with --host.`,
+        `rotate replaces the copy for jobs. ${jobsOnly}; to change the sandboxes' copy, set it again with --host or --exposed.`,
       );
     if (verb === "set" && has(args, "keep-value")) {
       // Narrowing needs no value: it only takes places away (secrets.narrow).
       if (
         jobs ||
         args.flags.has("value") ||
+        args.flags.has("from-file") ||
+        args.flags.has("exposed") ||
+        args.flags.has("expected-version") ||
         args.flags.has("header") ||
         args.flags.has("format") ||
         args.flags.has("only-label") ||
@@ -3253,40 +3348,38 @@ export async function secretsCommand(
       );
       return 0;
     }
-    if (!hosts.length && !jobs)
+    if (exposed) {
+      // A real value goes to the machines as it is: nothing the proxy does
+      // with a value applies to it (the API refuses each too).
+      const proxyOnly = ["host", "header", "format", "allow"].filter((f) => args.flags.has(f));
+      if (proxyOnly.length)
+        throw usage(
+          `A real value (--exposed) is given to the machines as it is, so it takes none of ${proxyOnly.map((f) => `--${f}`).join(", ")}: they are for a secret added to HTTPS requests on the way out.`,
+        );
+      if (jobs)
+        throw usage(
+          "--exposed and --jobs are two separate copies, each with its own version: store them with two commands.",
+        );
+      // Code in a machine can read a real value, so it goes only to the
+      // sandboxes and Apps named by id (the API refuses the rest too). A
+      // replacement may name none: it keeps the scope it has.
+      if (args.flags.has("only-label") || args.flags.has("all-sandboxes"))
+        throw usage(
+          "A real value (--exposed) goes only to the sandboxes and Apps you name by id, with --only-sandbox and --only-app: code in them can read it, so never to every sandbox (--all-sandboxes) or by label (--only-label).",
+        );
+    }
+    if (!hosts.length && !jobs && !exposed)
       throw usage(
-        "Give --host once for each host the value may go to, such as --host api.openai.com, and/or --jobs to let scheduled jobs use it.",
+        "Give --host once for each host the value may go to, such as --host api.openai.com; or --exposed to give the machines the value itself (a database password, an SSH key); and/or --jobs to let scheduled jobs use it.",
+      );
+    if (expectedVersion !== undefined && !hosts.length && !exposed)
+      throw usage(
+        `--expected-version is the version of the sandboxes' copy (\`${me} secrets get NAME\` shows it), and this stores only the copy for jobs.`,
       );
     if (args.flags.has("value"))
       throw usage(
-        'The value is read from standard input, never an argument: printf %s "$KEY" | runtime secrets set NAME --host ...',
+        'The value is read from standard input or --from-file, never an argument: printf %s "$KEY" | runtime secrets set NAME --host ...',
       );
-    const value = await read();
-    if (!value)
-      throw usage(
-        'The value is empty. Pipe it in: printf %s "$KEY" | runtime secrets set NAME --host ...; or, to narrow its hosts and rules without it, add --keep-value.',
-      );
-    const runtime = await client(env);
-    if (verb === "rotate") {
-      const rotated = await runtime.secrets.rotate(name, value);
-      print(
-        `Rotated ${name} for jobs to version ${rotated.version}. Runs bound to the old version are refused it.`,
-        rotated,
-      );
-      return 0;
-    }
-    if (!hosts.length) {
-      if (args.flags.has("env"))
-        throw usage(
-          "--env names the variable sandboxes see the secret in, so it needs --host; a job names its variable on jobs create (--secret NAME=VAR).",
-        );
-      const saved = await runtime.secrets.set(name, { value, jobs: true });
-      print(
-        `Stored ${name} for jobs, version ${saved.jobs.version}. Bind it: ${me} jobs create ... --secret ${name}`,
-        saved,
-      );
-      return 0;
-    }
     const header = flag(args, "header");
     const format = flag(args, "format");
     const variable = flag(args, "env");
@@ -3298,6 +3391,64 @@ export async function secretsCommand(
       has(args, "all-sandboxes"),
       args.flags.get("only-app"),
     );
+    // A real value is kept byte for byte (a PEM key's lines, a JSON file);
+    // any other is cleaned as the header it becomes.
+    let value: string;
+    if (fromFile !== undefined) {
+      const text = await readFile(fromFile, "utf8").catch((error: NodeJS.ErrnoException) => {
+        throw usage(`--from-file could not read ${fromFile}: ${error.code ?? error.message}.`);
+      });
+      value = exposed ? text : cleanSecret(text);
+    } else value = await read(exposed);
+    if (!value)
+      throw usage(
+        exposed
+          ? "The value is empty. Pipe it in, or name a file: runtime secrets set NAME --exposed --from-file key.pem"
+          : 'The value is empty. Pipe it in: printf %s "$KEY" | runtime secrets set NAME --host ...; or, to narrow its hosts and rules without it, add --keep-value.',
+      );
+    const runtime = await client(env);
+    if (exposed) {
+      const saved = await runtime.secrets.set(name, {
+        value,
+        exposed: true,
+        ...(only ? { only } : {}),
+        ...(variable ? { env: variable } : {}),
+        ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+      });
+      const variableName = saved.env ?? saved.name;
+      print(
+        [
+          `Stored ${saved.name}, version ${saved.version}. Only these get its value in ${variableName}: ${scopeText(saved.only)}.`,
+          `In a command's environment, ${saved.placeholder} becomes the value too, so DATABASE_URL=postgres://app:${saved.placeholder}@db/app works.`,
+          "Code in the sandbox can read the value and send it anywhere, and it is in the sandbox's memory, so in its snapshots and forks.",
+          ...(saved.enforced
+            ? []
+            : ["A host is catching up; running sandboxes have it within a minute."]),
+        ].join("\n"),
+        saved,
+      );
+      return 0;
+    }
+    if (verb === "rotate") {
+      const rotated = await runtime.secrets.rotate(name, value);
+      print(
+        `Rotated ${name} for jobs to version ${rotated.version}. Runs bound to the old version are refused it.`,
+        rotated,
+      );
+      return 0;
+    }
+    if (!hosts.length) {
+      if (args.flags.has("env"))
+        throw usage(
+          "--env names the variable sandboxes see the secret in, so it needs --host or --exposed; a job names its variable on jobs create (--secret NAME=VAR).",
+        );
+      const saved = await runtime.secrets.set(name, { value, jobs: true });
+      print(
+        `Stored ${name} for jobs, version ${saved.jobs.version}. Bind it: ${me} jobs create ... --secret ${name}`,
+        saved,
+      );
+      return 0;
+    }
     const saved = await runtime.secrets.set(name, {
       value,
       hosts,
@@ -3306,6 +3457,7 @@ export async function secretsCommand(
       ...(rules ? { rules } : {}),
       ...(only ? { only } : {}),
       ...(variable ? { env: variable } : {}),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       ...(jobs ? { jobs: true as const } : {}),
     });
     const sees = `${saved.env ?? saved.name}=${saved.placeholder}`;
@@ -5425,6 +5577,7 @@ const CREATE_VALUES = [
   "volume",
   "env",
   "user",
+  "lease",
 ];
 /** Dollars from the command line as integer microdollars: 25, 2.50 or 0.000001. */
 function usdMicros(args: Args, name: string): number | undefined {
@@ -5516,6 +5669,7 @@ function createInput(args: Args, env: NodeJS.ProcessEnv): CreateSandbox & { wait
       : {}),
     ...(has(args, "no-auto-wake") ? { autoWake: false } : {}),
     ...(flag(args, "user") ? { user: oneOf(args, "user", ["sandbox", "root"] as const) } : {}),
+    ...(integer(args, "lease") !== undefined ? { leaseSeconds: integer(args, "lease")! } : {}),
     ...(has(args, "persistent") ? { persistent: true } : {}),
     ...(has(args, "get-or-create") ? { getOrCreate: true } : {}),
     ...(has(args, "trial")
@@ -5687,9 +5841,14 @@ if (
     (code) => {
       process.exitCode = code;
     },
-    (error: unknown) => {
+    async (error: unknown) => {
       out.error(describeError(error, out.json));
       process.exitCode = 1;
+      // A refused option or command may be one a newer CLI has.
+      if (!out.json && error instanceof RuntimeError && error.code === "usage") {
+        const line = await outdatedLine({ env: process.env });
+        if (line) out.error(line);
+      }
     },
   );
 }
@@ -5710,6 +5869,16 @@ function spark(values: Array<number | null>): string {
   return out.join("");
 }
 const mib = (bytes: number) => `${Math.round(bytes / 1_048_576).toLocaleString("en-US")} MiB`;
+/** A rate's bytes in the largest unit under 1,024 of it: B, KiB, MiB, GiB. */
+const bytes = (value: number) => {
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let at = 0;
+  while (value >= 1024 && at < units.length - 1) {
+    value /= 1024;
+    at++;
+  }
+  return `${at === 0 ? Math.round(value) : value.toFixed(value < 10 ? 1 : 0)} ${units[at]}`;
+};
 function metricsText(m: SandboxMetrics): string {
   const waiting = (value: number | null | undefined) =>
     value == null ? "not measured" : `${value}%`;
@@ -5726,6 +5895,19 @@ function metricsText(m: SandboxMetrics): string {
   const latest = m.state === "running" ? m.latest : null;
   const still = m.state === "running" ? null : `none: it is ${m.state}`;
   const cpuNow = newestCpu(m);
+  const perSecond = (value: number | null | undefined) =>
+    value == null ? "not measured" : `${bytes(value)}/s`;
+  const ioHistory = (
+    field:
+      | "diskReadBytesPerSecond"
+      | "diskWriteBytesPerSecond"
+      | "networkReceivedBytesPerSecond"
+      | "networkSentBytesPerSecond",
+  ) =>
+    m.points.some((point) => point[field] != null)
+      ? spark(m.points.map((point) => point[field] ?? null))
+      : "not measured";
+  const used = latest?.diskUsedBytes;
   return [
     table([
       ["state", m.state],
@@ -5742,6 +5924,20 @@ function metricsText(m: SandboxMetrics): string {
       ],
       ["cpu wait now", still ?? waiting(latest?.cpuWaitPercent)],
       ["memory stalls now", still ?? waiting(latest?.memoryStallPercent)],
+      [
+        "disk now",
+        still ?? (used == null ? "not measured" : `${mib(used)} of ${mib(m.diskLimitBytes)} used`),
+      ],
+      [
+        "disk i/o now",
+        still ??
+          `read ${perSecond(latest?.diskReadBytesPerSecond)}, write ${perSecond(latest?.diskWriteBytesPerSecond)}`,
+      ],
+      [
+        "network now",
+        still ??
+          `in ${perSecond(latest?.networkReceivedBytesPerSecond)}, out ${perSecond(latest?.networkSentBytesPerSecond)}`,
+      ],
       [`cpu, ${m.range}`, m.points.length ? `${spark(cpu)}  peak ${peak}%` : "no readings"],
       [`cpu wait, ${m.range}`, waitingHistory("cpuWaitPercent")],
       [`memory stalls, ${m.range}`, waitingHistory("memoryStallPercent")],
@@ -5751,6 +5947,10 @@ function metricsText(m: SandboxMetrics): string {
           ? `${spark(memory)}  peak ${mib(Math.max(...m.points.map((p) => p.memoryPeakBytes)))}`
           : "no readings",
       ],
+      [`disk read, ${m.range}`, ioHistory("diskReadBytesPerSecond")],
+      [`disk write, ${m.range}`, ioHistory("diskWriteBytesPerSecond")],
+      [`network in, ${m.range}`, ioHistory("networkReceivedBytesPerSecond")],
+      [`network out, ${m.range}`, ioHistory("networkSentBytesPerSecond")],
     ]),
   ].join("\n");
 }
@@ -5914,7 +6114,7 @@ async function otelCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pr
   const signals = () =>
     flag(args, "signals")
       ?.split(",")
-      .map((s) => s.trim()) as Array<"logs" | "metrics"> | undefined;
+      .map((s) => s.trim()) as OtelSignal[] | undefined;
   const row = (x: {
     id: string;
     endpoint: string;
@@ -5922,17 +6122,27 @@ async function otelCommand(argv: string[], env: NodeJS.ProcessEnv, out: Out): Pr
     signals: string[];
     lastSuccessAt: string | null;
     lastError: string | null;
-  }) => [
-    x.id,
-    x.endpoint,
-    x.enabled ? "on" : "off",
-    x.signals.join(","),
-    x.lastError
-      ? `last error: ${x.lastError}`
-      : x.lastSuccessAt
-        ? `sent ${x.lastSuccessAt}`
-        : "not sent yet",
-  ];
+    tracesLastSuccessAt?: string | null;
+    tracesLastError?: string | null;
+  }) => {
+    // Logs and metrics, and traces, each keep their own health: one failing
+    // is shown whatever the other does.
+    const errors = [
+      x.lastError && `last error: ${x.lastError}`,
+      x.tracesLastError && `last traces error: ${x.tracesLastError}`,
+    ].filter(Boolean);
+    const sent = [x.lastSuccessAt, x.tracesLastSuccessAt ?? null]
+      .filter((at): at is string => at !== null)
+      .sort()
+      .at(-1);
+    return [
+      x.id,
+      x.endpoint,
+      x.enabled ? "on" : "off",
+      x.signals.join(","),
+      errors.length ? errors.join("; ") : sent ? `sent ${sent}` : "not sent yet",
+    ];
+  };
   switch (verb) {
     case "ls":
     case "list": {

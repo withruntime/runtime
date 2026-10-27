@@ -109,6 +109,70 @@ test("browsers screenshot opens the URL and writes the image to --out", async ()
   );
 });
 
+test("browsers run starts a run, prints each step as it comes, saves its pages and ends with the answer", async () => {
+  const RUN = "66666666-6666-4666-8666-666666666666";
+  const dir = join(mkdtempSync(join(tmpdir(), "run-")), "frames");
+  let stepsRead = 0;
+  const route = (state: string, extra: Record<string, unknown>) => (sent: Sent) => {
+    if (sent.method === "POST" && sent.path === "/v1/browsers/runs")
+      return { id: RUN, state: "queued", steps: 0 };
+    if (sent.path === `/v1/browsers/runs/${RUN}/steps`)
+      return stepsRead++ === 0
+        ? {
+            data: [
+              { n: 0, seq: 2, url: "https://example.com/", goal: "Open it", frame: "anBn" },
+              { n: 1, seq: 3, url: "https://example.com/", goal: "Read the title", frame: null },
+            ],
+            after: 3,
+            ended: false,
+          }
+        : { data: [], after: 3, ended: true };
+    if (sent.path === `/v1/browsers/runs/${RUN}`) return { id: RUN, state, ...extra };
+    return undefined;
+  };
+  await withStub(route("done", { output: "Example Domain" }), async (lines, sent) => {
+    expect(
+      await run(
+        [
+          "browsers",
+          "run",
+          "Find the title",
+          "--url",
+          "https://example.com",
+          "--max-steps",
+          "5",
+          "--domain",
+          "example.com",
+          "--frames",
+          dir,
+        ],
+        env,
+        out(lines),
+      ),
+    ).toBe(0);
+    expect(sent[0]!.body).toEqual({
+      task: "Find the title",
+      startUrl: "https://example.com",
+      maxSteps: 5,
+      allowedDomains: ["example.com"],
+    });
+    expect(lines).toContain("ERR Step 0: Open it (https://example.com/)");
+    expect(lines).toContain("ERR Step 1: Read the title (https://example.com/)");
+    expect(lines.at(-1)).toBe("Example Domain");
+    expect(readFileSync(join(dir, "step-000.jpg"), "utf8")).toBe("jpg");
+  });
+  stepsRead = 0;
+  await withStub(
+    route("failed", { error: "Store your key as the egress secret ANTHROPIC_API_KEY." }),
+    async (lines) => {
+      expect(await run(["browsers", "run", "Find", "the", "title"], env, out(lines))).toBe(1);
+      expect(lines.at(-1)).toBe(
+        `ERR The run failed: Store your key as the egress secret ANTHROPIC_API_KEY. (${RUN})`,
+      );
+    },
+  );
+});
+
 test("desktops open and screenshot go to the desktop's own routes", async () => {
   const file = join(mkdtempSync(join(tmpdir(), "shot-")), "screen.png");
   await withStub(

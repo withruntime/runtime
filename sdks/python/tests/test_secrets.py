@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
-from withruntime import AsyncRuntime, NotFoundError, Runtime
+from withruntime import AsyncRuntime, InvalidRequestError, NotFoundError, Runtime
 
 SECRET = {
     "name": "OPENAI_API_KEY",
@@ -18,6 +18,8 @@ SECRET = {
     "createdAt": "2026-09-23T10:00:00.000Z",
     "updatedAt": "2026-09-23T10:00:00.000Z",
 }
+# A real-value secret: the sandboxes get the value itself, so it has no hosts.
+EXPOSED = {**SECRET, "name": "DB_PASSWORD", "hosts": [], "exposed": True, "version": 2}
 
 
 class Stub(BaseHTTPRequestHandler):
@@ -26,9 +28,9 @@ class Stub(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def answer(self, value):
+    def answer(self, value, status=200):
         data = json.dumps(value).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(data)))
         self.end_headers()
@@ -40,6 +42,10 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         Stub.seen.append((self.command, self.path, None))
+        if self.path == "/v1/egress-secrets/MISSING":
+            return self.answer({"error": {"code": "not_found", "message": "No secret named MISSING."}}, 404)
+        if self.path.startswith("/v1/egress-secrets/"):
+            return self.answer(EXPOSED)
         # The jobs copies: none here.
         self.answer([] if self.path.startswith("/v1/secrets") else {"secrets": [SECRET]})
 
@@ -182,6 +188,51 @@ class SecretsTest(unittest.TestCase):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             runtime.secrets.set("K", value="v", hosts=["a.example.com"])
         self.assertEqual(Stub.seen[0][2], {"value": "v", "hosts": ["a.example.com"]})
+
+    def test_exposed_sends_no_hosts_and_expected_version_is_sent_sync_and_async(self):
+        pem = "-----BEGIN FAKE KEY-----\nAAAA\n-----END FAKE KEY-----\n"
+        # A real value goes only to the sandboxes and Apps named by id.
+        worker = "5d2c8a1e-7b3f-4c6d-9e0a-1f2b3c4d5e6f"
+        app = "0b6f3c1e-2d4a-4e5f-9a7b-8c9d0e1f2a3b"
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.secrets.set("DEPLOY_KEY", value=pem, exposed=True, env="SSH_KEY", only={"sandboxes": [worker]})
+            runtime.secrets.set("OPENAI_API_KEY", value="fake-api-key", hosts=["api.openai.com"], expected_version=3)
+            with self.assertRaises(InvalidRequestError):
+                runtime.secrets.set("NOWHERE", value="fake-db-password")
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                await runtime.secrets.set("DB_PASSWORD", value="fake-db-password", exposed=True,
+                                          only={"apps": [app]}, expected_version=0)
+
+        asyncio.run(go())
+        self.assertEqual(Stub.seen, [
+            ("PUT", "/v1/egress-secrets/DEPLOY_KEY",
+             {"value": pem, "only": {"sandboxes": [worker]}, "env": "SSH_KEY", "exposed": True}),
+            ("PUT", "/v1/egress-secrets/OPENAI_API_KEY",
+             {"value": "fake-api-key", "hosts": ["api.openai.com"], "expectedVersion": 3}),
+            ("PUT", "/v1/egress-secrets/DB_PASSWORD",
+             {"value": "fake-db-password", "only": {"apps": [app]}, "exposed": True, "expectedVersion": 0}),
+        ])
+
+    def test_get_reads_one_secret_by_name_sync_and_async(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            found = runtime.secrets.get("DB_PASSWORD")
+            with self.assertRaises(NotFoundError):
+                runtime.secrets.get("MISSING")
+
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+                return await runtime.secrets.get("A B")
+
+        self.assertEqual(asyncio.run(go())["sandboxes"], EXPOSED)
+        self.assertEqual(found, {"name": "DB_PASSWORD", "sandboxes": EXPOSED, "jobs": None})
+        self.assertEqual((found["sandboxes"]["version"], found["sandboxes"]["exposed"]), (2, True))
+        self.assertEqual([seen[:2] for seen in Stub.seen], [
+            ("GET", "/v1/egress-secrets/DB_PASSWORD"), ("GET", "/v1/secrets?limit=100"),
+            ("GET", "/v1/egress-secrets/MISSING"), ("GET", "/v1/secrets?limit=100"),
+            ("GET", "/v1/egress-secrets/A%20B"), ("GET", "/v1/secrets?limit=100"),
+        ])
 
 
 class UpstreamProxyStub(BaseHTTPRequestHandler):

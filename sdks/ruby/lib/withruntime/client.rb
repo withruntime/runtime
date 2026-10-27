@@ -25,7 +25,7 @@ module WithRuntime
   class Client
     attr_reader :transport, :sandboxes, :snapshots, :images, :volumes, :secrets, :reservations, :limits, :jobs, :emails, :referrals, :plans,
                 :switching, :events, :webhooks, :otel, :audit, :feedback, :support, :domains, :ports, :ips, :networks, :sso, :mcp, :agents,
-                :apps, :functions, :builds, :ci, :containers
+                :apps, :functions, :builds, :ci, :containers, :browsers
 
     # +api_key+: default RUNTIME_API_KEY, then this machine's saved connection.
     # +base_url+: default RUNTIME_API_URL, then https://api.withruntime.com.
@@ -82,6 +82,7 @@ module WithRuntime
       @builds = Builds.new(@transport)
       @ci = CI.new(@transport)
       @containers = Containers.new(@transport)
+      @browsers = Browsers.new(@transport)
     end
 
     # Renamed on 6 October 2026, one plural word per product: each old name is the product it became, with a warning,

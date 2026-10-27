@@ -119,7 +119,8 @@ type Plan struct {
 	YearlyFeeMicros *string `json:"yearlyFeeMicros"`
 	// BonusMicros is usage given on top of the fee each month.
 	BonusMicros string `json:"bonusMicros"`
-	// TrialDays is the days of trial, no card; 0 for none.
+	// TrialDays is the days of trial; 0 for none. A trial saves a card and
+	// charges the first period when it ends, unless cancelled before.
 	TrialDays int `json:"trialDays"`
 	// FirstPeriodDouble: the first month on the plan, and the first after an
 	// upgrade to it, holds twice its usage.
@@ -189,7 +190,8 @@ type PlanNow struct {
 	PeriodStart *time.Time `json:"periodStart"`
 	// PeriodEnd is the next fee, or the end of a cancelled plan.
 	PeriodEnd *time.Time `json:"periodEnd"`
-	// TrialEndsAt is when a trial ends; nil outside one.
+	// TrialEndsAt is when a trial ends and its first period is charged; nil
+	// outside one.
 	TrialEndsAt *time.Time `json:"trialEndsAt"`
 	// CancelAtPeriodEnd is true once a cancel takes effect at PeriodEnd.
 	CancelAtPeriodEnd bool `json:"cancelAtPeriodEnd"`

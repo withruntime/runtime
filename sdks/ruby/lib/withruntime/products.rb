@@ -117,7 +117,8 @@ module WithRuntime
   # +runtime.secrets+: a value your sandboxes use without seeing it. Every
   # sandbox of the organization has an environment variable of the secret's
   # name holding a placeholder; the egress proxy puts the value into HTTPS
-  # requests to its hosts. The value is never returned.
+  # requests to its hosts. With +exposed: true+, the sandboxes and Apps its
+  # +only:+ names by id get the value itself instead. The value is never returned.
   class Secrets < Product
     # Stores or replaces a secret for +hosts+ ("api.openai.com", "*.github.com").
     # With +header:+, that header is set on every request to them, +format:+'s
@@ -139,15 +140,36 @@ module WithRuntime
     # variable sandboxes see it in, when not the secret's name. Secrets scoped to different
     # sandboxes may share one, such as one GITHUB_TOKEN per repository; a write that would
     # put two in one sandbox is refused (409). Absent when replacing: the variable it has stays.
-    def set(name, value:, hosts:, header: nil, format: nil, rules: nil, only: nil, github_app: nil, git: nil,
-            api: nil, env: nil)
+    #
+    # +exposed: true+, with no +hosts:+, gives sandboxes the value itself in the variable instead
+    # of a placeholder: for what is not an HTTPS header, such as a database password, an SSH key
+    # or a service account's JSON. The value may then be any text of up to 64 KiB, several lines
+    # included, and it takes no +header:+, +format:+, +rules:+, +github_app:+, +git:+ or +api:+.
+    # It needs +only:+ naming the sandboxes or Apps that get it by id ({ "sandboxes" => [ids] },
+    # { "apps" => [App ids] }), never labels or every sandbox; a replacement may leave +only:+
+    # out to keep the scope it has. Which machines get it changes only with the value: +scope+
+    # is refused for it, so +set+ it again.
+    # Code in the sandbox can read it and send it anywhere, and it can be in the sandbox's
+    # snapshots and forks; for an HTTPS API, prefer +hosts:+. It is not kept: give it on every
+    # write of such a secret. +expected_version:+ writes only if the secret is at that version
+    # (its +version+ from +get+ or +list+; 0: it must not exist yet), or raises 409
+    # version_conflict with the current one in +details["version"]+.
+    def set(name, value:, hosts: nil, header: nil, format: nil, rules: nil, only: nil, github_app: nil, git: nil,
+            api: nil, env: nil, exposed: nil, expected_version: nil)
       body = { "value" => value, "hosts" => hosts, "header" => header, "format" => format, "rules" => rules,
-               "only" => only, "githubApp" => github_app, "git" => git, "api" => api, "env" => env }.compact
+               "only" => only, "githubApp" => github_app, "git" => git, "api" => api, "env" => env,
+               "exposed" => exposed, "expectedVersion" => expected_version }.compact
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}", body: body))
     end
 
+    # One secret by name: its kind (+exposed+), +version+, variable, hosts and placeholder. Never
+    # its value. Raises 404 not_found when there is none.
+    def get(name) = Record.new(@t.json("GET", "/v1/egress-secrets/#{seg(name)}"))
+
     # Changes which sandboxes get a secret, without its value: +{}+ is every sandbox of the
-    # organization again. Returns the secret, with +only+ and +enforced+.
+    # organization again. Returns the secret, with +only+ and +enforced+. Refused (400) for a
+    # real-value secret (+exposed+), whose machines change only with its value: +set+ it again
+    # with +value:+, +exposed: true+ and +only:+.
     def scope(name, only)
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/sandboxes", body: only))
     end
@@ -159,7 +181,7 @@ module WithRuntime
       Record.new(@t.json("PUT", "/v1/egress-secrets/#{seg(name)}/rules", body: body))
     end
 
-    # Names, hosts and placeholders. Never values. With +limit:+ (1 to 100)
+    # Names, kinds, versions, hosts and placeholders. Never values. With +limit:+ (1 to 100)
     # or +after:+, one page by name: the secrets named after +after+; the next
     # page's +after+ is this one's last name. Without, every secret.
     def list(limit: nil, after: nil)
@@ -353,7 +375,8 @@ module WithRuntime
     end
   end
 
-  # +runtime.otel+: events (as logs) and CPU and memory (as metrics) pushed to
+  # +runtime.otel+: events (as logs), CPU, memory, disk and network (as metrics)
+  # and a span for every API call (as traces, with signals including "traces") pushed to
   # an OpenTelemetry endpoint over OTLP/HTTP.
   class Otel < Product
     # +headers+ authenticate to the endpoint and are never shown back.

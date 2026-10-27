@@ -162,7 +162,20 @@ test("ls lists checks newest first with their filters, and refuses a short commi
     async (lines, sent) => {
       expect(
         await run(
-          ["ci", "ls", "--repository", REPO, "--pr", "7", "--state", "failed", "--commit", SHA],
+          [
+            "ci",
+            "ls",
+            "--repository",
+            REPO,
+            "--pr",
+            "7",
+            "--state",
+            "failed",
+            "--commit",
+            SHA,
+            "--event",
+            "merge_group",
+          ],
           env,
           out(lines),
         ),
@@ -173,7 +186,8 @@ test("ls lists checks newest first with their filters, and refuses a short commi
         q.get("pullRequest"),
         q.getAll("state"),
         q.get("commit"),
-      ]).toEqual([REPO, "7", ["failed"], SHA]);
+        q.getAll("event"),
+      ]).toEqual([REPO, "7", ["failed"], SHA, ["merge_group"]]);
       expect(q.get("limit")).toBe("20");
       const text = lines.join("\n");
       expect(text).toContain("#7");
@@ -183,6 +197,7 @@ test("ls lists checks newest first with their filters, and refuses a short commi
   );
   await expect(run(["ci", "ls", "--commit", "abc"], env, out([]))).rejects.toThrow("full sha");
   await expect(run(["ci", "ls", "--state", "faild"], env, out([]))).rejects.toThrow("failed");
+  await expect(run(["ci", "ls", "--event", "merge"], env, out([]))).rejects.toThrow("merge_group");
 });
 
 test("get shows a check's jobs in plan order; logs prints a job's log and where its sandbox is kept", async () => {

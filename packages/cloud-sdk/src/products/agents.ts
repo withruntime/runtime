@@ -76,12 +76,66 @@ export type AgentDefinition = {
   /** Whose memory a session reads: `key` (the default), each session key
    * its own; `agent`, one all its sessions share, never a support agent's. */
   memory?: { scope: "key" | "agent" };
+  /** The model the harness runs (claude-opus-5-5, gpt-5.1-codex,
+   * gemini-3-pro); absent, the harness's default. The harness reads it as
+   * RUNTIME_AGENT_MODEL, and Claude Code, the Claude Agent SDK, Codex,
+   * Gemini CLI and the OpenAI Agents SDK each by their own setting. */
+  model?: string;
+  /** What a session's start may override (`StartAgentSession.overrides`). */
+  sessionOverrides?: AgentSessionOverrideLimits;
+  /** Child sessions its tree may hold open at once, a workflow's steps
+   * from inside it included: 1 to 1000, default 100. */
+  maxChildren?: number;
+  /** A second model a session asks for advice mid-task (`advise` in the
+   * sandbox). Each question and answer is kept in the session's log as a
+   * `note` whose body holds `advice`. */
+  advisor?: AgentAdvisor;
   /** Which tool calls of the harness run, wait for a person, or are
    * refused. Each call is a `tool_call` event in the session's log; one that
    * waits is an ask of the inbox with the options Allow and Deny
    * (`agents.asks.approve`, `agents.asks.deny`), and only that call waits.
    * Absent: every call runs. */
   permissions?: AgentPermissions;
+};
+/** The limits an agent's owner sets on its sessions' overrides. A session
+ * may always narrow its MCP servers and disallow tools. */
+export type AgentSessionOverrideLimits = {
+  /** The models a session may name; absent, any. */
+  models?: string[];
+  /** Whether a session may add to the agent's instructions (`append`, the
+   * default), also replace them (`replace`), or neither (`none`). */
+  instructions?: "append" | "replace" | "none";
+  /** The most vCPU a session may ask for; absent, the agent's `vcpu`. */
+  maxVcpu?: number;
+  /** The most memory a session may ask for; absent, the agent's `memoryMiB`. */
+  maxMemoryMiB?: number;
+  /** The most budget a session may ask for; absent, the agent's `maxSessionDollars`. */
+  maxSessionDollars?: number;
+};
+/** One session's own model, instructions, MCP servers, disallowed tools,
+ * size and budget, within its agent's `sessionOverrides`. Recorded on the
+ * session (`overrides`) and noted in its log. */
+export type AgentSessionOverrides = {
+  /** The model the harness runs for this session. */
+  model?: string;
+  /** Added after the agent's instructions, or in their place with
+   * `instructionsMode: "replace"`; at most 64 KiB with the agent's. */
+  instructions?: string;
+  /** `append` (the default) or `replace`. */
+  instructionsMode?: "append" | "replace";
+  /** Names of the agent's MCP servers this session keeps; `[]` keeps none. */
+  mcp?: string[];
+  /** Tools the harness may not use: Runtime's own (`spawn`, `pr`, `ask`,
+   * `remember`, ...; never `wait`, `reply` or `done`) and the harness's
+   * (Claude Code's `Bash` or `mcp__github`, Gemini CLI's `run_shell_command`). */
+  disallowedTools?: string[];
+  /** At most the agent's `sessionOverrides.maxVcpu`, else its own `vcpu`. */
+  vcpu?: number;
+  /** At most the agent's `sessionOverrides.maxMemoryMiB`, else its own. */
+  memoryMiB?: number;
+  /** This session's budget, its subagents included; at most the agent's
+   * `sessionOverrides.maxSessionDollars`, else its own. */
+  maxSessionDollars?: number;
 };
 /** always_allow: the call runs. always_ask: it waits for a person's Allow or
  * Deny. auto: Runtime reads the call and runs it, refuses it (high_risk) or
@@ -94,6 +148,21 @@ export type AgentPermissions = {
    * (Bash, Edit, apply_patch, run_shell_command, mcp__github__create_issue),
    * an MCP server (mcp:github), or a family (shell, edit, read, web, mcp). */
   tools?: Record<string, AgentPermissionPolicy>;
+};
+export type AgentAdvisor = {
+  /** claude-opus-5-5, gpt-5.5, gemini-3-pro, or an OpenRouter name. */
+  model: string;
+  /** Read from the model's name when left out. */
+  provider?: "anthropic" | "openai" | "google" | "openrouter" | "openai-compatible";
+  /** The egress secret its key is, which must be in `secrets` or `pool`;
+   * the provider's usual one when left out (ANTHROPIC_API_KEY, ...). */
+  secret?: string;
+  /** An OpenAI-compatible endpoint, or another host for the provider's API. */
+  baseUrl?: string;
+  /** Advice a session may ask for: 1 to 200, default 20. */
+  maxCalls?: number;
+  /** The advisor's standing words, at most 16 KiB. */
+  instructions?: string;
 };
 export type Agent = {
   id: string;
@@ -128,6 +197,11 @@ export type AgentSession = {
   sandboxId: string | null;
   lastSeq: number;
   labels: Record<string, string>;
+  /** What its start overrode of its agent's definition, as given; null,
+   * nothing. */
+  overrides: AgentSessionOverrides | null;
+  /** The workflow it is a step of, or null. */
+  workflowId: string | null;
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
@@ -297,6 +371,10 @@ export type ListAgentAsks = {
 /** An option's label, words, or both. */
 export type AnswerAgentAsk = { option?: string; text?: string };
 export type AgentTriggerKind = "slack" | "github" | "schedule" | "webhook";
+/** The link that adds Runtime's Slack app to a workspace. */
+export type SlackInstallLink = { url: string; expiresAt: string };
+/** A Slack workspace added to the account: its id is a slack trigger's `team`. */
+export type SlackTeam = { team: string; name: string | null; botUser: string; installedAt: string };
 /** A trigger's rules, each optional. */
 export type AgentTriggerRules = {
   /** Queue order of its sessions when the agent's maxConcurrent is full:
@@ -342,6 +420,12 @@ export type StartAgentSession = {
    * request, one of your customers (`customer:42`). */
   key?: string;
   labels?: Record<string, string>;
+  /** This session's own model, instructions, MCP servers, disallowed tools,
+   * size and budget, within the agent's `sessionOverrides`: one it does not
+   * allow is refused (`permission_denied`, naming what it allows). Words
+   * that join an open session carry its own overrides or none (else
+   * `conflict`). */
+  overrides?: AgentSessionOverrides;
 };
 export type CreateAgentTrigger = (
   | { kind: "slack"; config: { team: string; channel: string } }
@@ -395,7 +479,8 @@ export type AgentTemplateKey =
   | "claude-agent-sdk"
   | "openai-agents-sdk"
   | "review"
-  | "judge";
+  | "judge"
+  | "browser";
 
 /** A file of an agent's memory (`memory.list`). `scope` is whose: empty for
  * the shared memory, which every session reads (one keeping memory per key
@@ -474,6 +559,9 @@ const CODEX =
 const GEMINI = 'npx -y @google/gemini-cli --yolo -p "$(cat ~/.runtime-agent/start.md)"';
 const REVIEW = "python3 ~/.runtime-agent/runtime-agent review";
 const JUDGE = "python3 ~/.runtime-agent/runtime-agent judge";
+/** A browser run's harness (browser-use on the sandbox's Chromium); its
+ * sessions are started by POST /v1/browsers/runs. */
+const BROWSE = "python3 ~/.runtime-agent/runtime-agent browse";
 
 /** The harnesses (agents-contract.md); tests/agents.test.ts holds them
  * to packages/cloud-guide/agent-templates.json. */
@@ -557,6 +645,21 @@ export const AGENT_TEMPLATES: Readonly<Record<AgentTemplateKey, AgentTemplate>> 
       maxSessionSeconds: 1800,
     },
   },
+  browser: {
+    key: "browser",
+    title: "Browser task",
+    command: BROWSE,
+    apiKeySecret: "ANTHROPIC_API_KEY",
+    apiKeyHost: "api.anthropic.com",
+    subscription: null,
+    definition: {
+      command: BROWSE,
+      secrets: ["ANTHROPIC_API_KEY"],
+      vcpu: 2,
+      memoryMiB: 4096,
+      maxSessionSeconds: 1800,
+    },
+  },
 };
 
 /** A harness by a key read from a file or a flag, or undefined. */
@@ -584,6 +687,109 @@ export const AGENT_USES: Readonly<Record<"support" | "team", AgentUse>> = {
     triggers: ["slack", "github"],
     definition: { template: "team", vcpu: 4, memoryMiB: 8192 },
   },
+};
+
+/** One phase of a workflow. */
+export type AgentWorkflowPhase = {
+  /** A letter, then letters, digits, _ or -; {{<name>}} reads its results. */
+  name: string;
+  /** Its sessions' agent, by id or name; the workflow's when left out. */
+  agent?: string;
+  /** Each session's first words: {{input}}, {{item}}, {{index}} (1-based)
+   * and {{<earlier phase>}} (its results, numbered) are filled in. */
+  input: string;
+  /** A list to fan out over (1 to 1000 items, one session each), or an
+   * earlier phase's results split: `json`, the JSON array in each result;
+   * `lines`, its non-empty lines. Absent: one session. */
+  each?: unknown[] | { from: string; split?: "json" | "lines" };
+  /** With `each.from`: start each item the moment its source session ends. */
+  pipeline?: boolean;
+};
+/** Many sessions in phases, as one piece of work. */
+export type RunAgentWorkflow = {
+  name?: string;
+  /** The agent of every phase that names none. */
+  agent?: string;
+  /** What {{input}} is. */
+  input?: string;
+  labels?: Record<string, string>;
+  /** Sessions it may start in all: 1 to 1000, default 100. */
+  maxSessions?: number;
+  /** Its sessions open at once: 1 to 200, default 20. */
+  maxConcurrent?: number;
+  /** What it may cost in all, in dollars: default 10. */
+  maxDollars?: number;
+  phases: AgentWorkflowPhase[];
+};
+export type AgentWorkflowState = "running" | "done" | "failed" | "stopped";
+export type AgentWorkflow = {
+  id: string;
+  name: string | null;
+  state: AgentWorkflowState;
+  /** Why it ended: done, steps_failed, max_sessions, budget, stopped,
+   * parent_ended, quota, subagent_quota, agent_gone, permission_denied. */
+  reason: string | null;
+  /** Its last phase's result: one session's as it is, several as a JSON
+   * array of their results. */
+  result: string | null;
+  /** The session that ran it from inside its sandbox, or null. */
+  parentSessionId: string | null;
+  spec: RunAgentWorkflow;
+  maxSessions: number;
+  maxConcurrent: number;
+  maxDollars: number;
+  /** Sessions it has started. */
+  started: number;
+  /** Raised at every change. */
+  version: number;
+  labels: Record<string, string>;
+  phases: {
+    name: string;
+    agentId: string;
+    /** Items known so far; final once `ready`. */
+    total: number;
+    ready: boolean;
+    pending: number;
+    running: number;
+    done: number;
+    /** Failed, stopped or skipped. */
+    failed: number;
+  }[];
+  cost: { dollars: number; vcpuSeconds: number; gibSeconds: number };
+  createdAt: string;
+  updatedAt: string;
+  endedAt: string | null;
+};
+export type AgentWorkflowStep = {
+  phase: string;
+  item: number;
+  /** What {{item}} was. */
+  itemText: string | null;
+  state: "pending" | "running" | "done" | "failed" | "stopped" | "skipped";
+  reason: string | null;
+  /** What its session ended with. */
+  result: string | null;
+  sessionId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+};
+/** One workflow, to follow and stop. */
+export type AgentWorkflowHandle = {
+  readonly id: string;
+  /** The workflow as it was when run or read. */
+  readonly workflow: AgentWorkflow;
+  /** The workflow at each change, as it happens, until it has ended. */
+  follow(options?: { after?: number; signal?: AbortSignal }): AsyncGenerator<AgentWorkflow>;
+  /** Until it has ended; answers it then, with its result. */
+  wait(options?: { signal?: AbortSignal }): Promise<AgentWorkflow>;
+  /** Its steps in phase and item order. */
+  steps(
+    query?: { state?: AgentWorkflowStep["state"][]; limit?: number },
+    options?: RequestOptions,
+  ): Promise<Page<AgentWorkflowStep>>;
+  stop(options?: RequestOptions): Promise<AgentWorkflow>;
+  get(options?: RequestOptions): Promise<AgentWorkflow>;
 };
 
 const enc = encodeURIComponent;
@@ -720,6 +926,80 @@ export function agents(t: Transport) {
       listSessions({ ...query, cursor }, options),
     );
   };
+  const getWorkflow = (id: string, options?: RequestOptions) =>
+    t.json<AgentWorkflow>({ method: "GET", path: `/v1/agents/workflows/${enc(id)}`, ...options });
+  async function* followWorkflow(
+    id: string,
+    options: { after?: number; signal?: AbortSignal } = {},
+  ): AsyncGenerator<AgentWorkflow> {
+    let after = options.after ?? 0;
+    for (;;) {
+      options.signal?.throwIfAborted();
+      const now = await t.json<AgentWorkflow>({
+        method: "GET",
+        path: `/v1/agents/workflows/${enc(id)}`,
+        query: { after, wait: 30 },
+        ...(options.signal ? { signal: options.signal } : {}),
+        timeoutMs: 0,
+      });
+      if (now.version > after) {
+        after = now.version;
+        yield now;
+      }
+      if (now.state !== "running") return;
+    }
+  }
+  const listWorkflows = async (
+    query: { state?: AgentWorkflowState[]; cursor?: string; limit?: number } = {},
+    options?: RequestOptions,
+  ): Promise<Page<AgentWorkflow>> => {
+    const page = await t.json<Wire<AgentWorkflow>>({
+      method: "GET",
+      path: "/v1/agents/workflows",
+      query,
+      ...options,
+    });
+    return new Page(page.data, page.nextCursor, (cursor) =>
+      listWorkflows({ ...query, cursor }, options),
+    );
+  };
+  const listSteps = async (
+    id: string,
+    query: { state?: AgentWorkflowStep["state"][]; cursor?: string; limit?: number } = {},
+    options?: RequestOptions,
+  ): Promise<Page<AgentWorkflowStep>> => {
+    const page = await t.json<Wire<AgentWorkflowStep>>({
+      method: "GET",
+      path: `/v1/agents/workflows/${enc(id)}/steps`,
+      query,
+      ...options,
+    });
+    return new Page(page.data, page.nextCursor, (cursor) =>
+      listSteps(id, { ...query, cursor }, options),
+    );
+  };
+  const stopWorkflow = (id: string, options?: RequestOptions) =>
+    t.json<AgentWorkflow>({
+      method: "POST",
+      path: `/v1/agents/workflows/${enc(id)}/stop`,
+      body: {},
+      ...options,
+    });
+  const workflowHandle = (workflow: AgentWorkflow): AgentWorkflowHandle => ({
+    id: workflow.id,
+    workflow,
+    follow: (options) => followWorkflow(workflow.id, options),
+    async wait(options = {}) {
+      let last = await getWorkflow(workflow.id, options);
+      if (last.state !== "running") return last;
+      for await (const now of followWorkflow(workflow.id, { after: last.version, ...options }))
+        last = now;
+      return last;
+    },
+    steps: (query, options) => listSteps(workflow.id, query, options),
+    stop: (options) => stopWorkflow(workflow.id, options),
+    get: (options) => getWorkflow(workflow.id, options),
+  });
   const listAsks = async (
     query: ListAgentAsks = {},
     options?: RequestOptions,
@@ -846,6 +1126,37 @@ export function agents(t: Transport) {
         });
       },
     },
+    /** Many sessions in phases as one piece of work: fanned out over lists
+     * or earlier results, in parallel and in pipelines, under maxSessions,
+     * maxConcurrent and maxDollars, ending with one result. The database
+     * starts each step the moment what it waits on ends; nothing else runs
+     * between steps, so a workflow costs only its sessions. */
+    workflows: {
+      /** Runs it now; answers a handle to follow, wait for and stop. */
+      async run(input: RunAgentWorkflow, options?: RequestOptions): Promise<AgentWorkflowHandle> {
+        return workflowHandle(
+          await t.json<AgentWorkflow>({
+            method: "POST",
+            path: "/v1/agents/workflows",
+            body: input,
+            ...options,
+          }),
+        );
+      },
+      /** One you already have, by its id. */
+      async workflow(id: string, options?: RequestOptions): Promise<AgentWorkflowHandle> {
+        return workflowHandle(await getWorkflow(id, options));
+      },
+      get: getWorkflow,
+      /** The workflow at each change past `after`, as it happens, until it
+       * has ended: each read waits up to 30 seconds for the next change. */
+      follow: followWorkflow,
+      /** Newest first, each with its phases' progress and cost. */
+      list: listWorkflows,
+      steps: listSteps,
+      /** Nothing more of it starts, and its open sessions stop. */
+      stop: stopWorkflow,
+    },
     /** The account's inbox: the questions its agents' sessions need answered
      * to go on, one row per step however many sessions ask it. */
     asks: {
@@ -879,6 +1190,39 @@ export function agents(t: Transport) {
           body: { option: "Deny", ...(message ? { text: message } : {}) },
           ...options,
         }),
+    },
+    /** Runtime's Slack app in your workspaces, for `slack` triggers. */
+    slack: {
+      /** A link that adds Runtime's Slack app to a workspace, good for 15
+       * minutes. Open it in a browser signed in to this account, then
+       * approve the app in Slack; Slack sends the browser back to the
+       * console once it is added. Opened by anyone outside the account, it
+       * adds nothing. */
+      install: (options?: RequestOptions) =>
+        t.json<SlackInstallLink>({
+          method: "POST",
+          path: "/v1/agents/slack/installs",
+          body: {},
+          ...options,
+        }),
+      /** The workspaces added to this account. */
+      teams: async (options?: RequestOptions) =>
+        (
+          await t.json<{ data: SlackTeam[] }>({
+            method: "GET",
+            path: "/v1/agents/slack/teams",
+            ...options,
+          })
+        ).data,
+      /** Removes a workspace: its token is revoked, and its triggers refuse
+       * events until it is added again. */
+      remove: async (team: string, options?: RequestOptions): Promise<void> => {
+        await t.json<unknown>({
+          method: "DELETE",
+          path: `/v1/agents/slack/teams/${enc(team)}`,
+          ...options,
+        });
+      },
     },
     triggers: {
       create: (agent: string, input: CreateAgentTrigger, options?: RequestOptions) =>

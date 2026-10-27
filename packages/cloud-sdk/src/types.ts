@@ -31,6 +31,10 @@ export type SandboxInfo = {
   /** Who its commands, processes and terminals run as when one names no
    * user: "sandbox" (uid 1000) or "root". Absent from APIs before 25 October 2026. */
   user?: "sandbox" | "root";
+  /** With no time limit, how far ahead each renewal funds it, in seconds;
+   * it runs for at least half of this even if Runtime cannot renew it.
+   * Absent from APIs before 25 October 2026. */
+  leaseSeconds?: number;
   /** Runs until stopped while credit lasts, never paused for idleness or a
    * time limit, and its disk is kept after a stop. */
   persistent?: boolean;
@@ -148,6 +152,12 @@ export type CreateSandbox = {
    * "sandbox"; a sandbox made from a snapshot runs as its source did. Files
    * written through `files` stay the sandbox user's. */
   user?: "sandbox" | "root";
+  /** With no time limit, how far ahead each renewal funds it: 300 to 43200
+   * seconds (12 hours). It is renewed when half is left, so it keeps running
+   * for at least half of this through an outage of Runtime's control plane.
+   * Each renewal holds that much time's credit; what it does not use is
+   * released. Default: its first lease, usually 1800. */
+  leaseSeconds?: number;
   /** Keep it running until you stop it, while credit lasts, with no idle
    * pause unless idlePauseSeconds asks for one. Its disk is billed as any
    * sandbox's, and kept after a stop, for restart(), as any sandbox's is.
@@ -482,6 +492,10 @@ export type SandboxSettings = {
   /** Pause after this many seconds with no activity, counted from now; 0
    * never, otherwise 60 to 86400 (a shorter time is raised to 60). */
   idlePauseSeconds?: number;
+  /** With no time limit, how far ahead each renewal funds it: 300 to 43200
+   * seconds; null the default again. A running one is renewed by it within
+   * seconds. */
+  leaseSeconds?: number | null;
   /** Keep it running until you stop it, while credit lasts, and keep its disk
    * after a stop. Paid only. */
   persistent?: boolean;

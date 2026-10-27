@@ -3,8 +3,9 @@
  * (runtime.feedback.submit, `runtime feedback`, or support). */
 /** A product switched off on this deployment, or paused on purpose: the API
  * answers these with 501 (503 from an older server) in fixed words, and
- * retrying cannot change them. host_unavailable and busy pass, and are
- * retried. The API also says so itself (`retryable: false`); this set is for
+ * retrying cannot change them. host_unavailable, busy and secret_withheld (a
+ * host that cannot give a machine its real-value secret right now) pass, and
+ * are retried. The API also says so itself (`retryable: false`); this set is for
  * a server too old to. */
 export const DELIBERATE: ReadonlySet<string> = new Set([
   "unavailable",

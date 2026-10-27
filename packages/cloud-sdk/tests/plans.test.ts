@@ -204,7 +204,10 @@ test("`runtime plans` shows a trial, a yearly plan and auto-upgrade on", async (
       expect(await run(["plans", "ls"], env, out)).toBe(0);
       const text = lines.join("\n");
       expect(text).toContain("Your plan: Team (team), trialing, yearly.");
-      expect(text).toContain("The trial ends on 2026-10-15.");
+      // A trial saved a card: when it is charged, and how to stop it.
+      expect(text).toContain(
+        "The trial ends on 2026-10-15, when its card is charged the first period; `runtime plans cancel` before then charges nothing.",
+      );
       expect(text).toContain("Add-ons: extra-seats x2 (ends 2026-11-01).");
       expect(text).toContain("Auto-upgrade: on;");
       expect(text).not.toContain("Plan usage left");

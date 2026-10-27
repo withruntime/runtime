@@ -177,14 +177,33 @@ unused.
   public repository.
 - At most `maxRunning` runners at the same time (default 10, up to 100). More jobs
   wait their turn, oldest first.
-- A job runs at most 6 hours, as on GitHub's own machines.
+- A job runs up to 24 hours on a paid plan or with credit, and up to 6
+  hours otherwise, as on GitHub's own machines. This is the account's
+  `sandbox.job_seconds` limit, counted from when the job's runner starts.
+  `GET /v1/actions` returns it as `jobLimitSeconds`, and `GET /v1/limits`
+  lists it with the account's other limits.
+- Each job sets its own limit with `timeout-minutes`, up to the account's.
+  GitHub enforces it on the runner and defaults it to 360 minutes, so a job
+  that needs more than 6 hours sets it:
+
+  ```yaml
+  jobs:
+    soak:
+      runs-on: runtime-8cpu
+      timeout-minutes: 1440 # 24 hours
+  ```
+
+  A job that reaches the account's limit has its runner stopped, and its
+  `reason` says so. Billing is by the second, as for any job.
+
 - A runner no job came to within 30 minutes is removed.
 
 ## See what ran
 
 `GET /v1/actions/jobs` lists the runners started for your jobs, newest
 first: the repository, workflow and job, the size, its state, how the job
-ended on GitHub, and why any did not start. The console's GitHub Actions
+ended on GitHub, the time limit its runner started with (`limitSeconds`),
+and why any did not start. The console's GitHub Actions
 page shows the same list.
 
 | State       | What it means                                                           |

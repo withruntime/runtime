@@ -5,11 +5,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code runtime.agents().templates()}: seven harnesses, each usable for either of two uses.
+ * {@code runtime.agents().templates()}: eight harnesses, each usable for either of two uses.
  *
  * <p>A harness is what the session's sandbox runs: claude-code, codex, gemini-cli,
  * claude-agent-sdk, openai-agents-sdk, review (a CI/CD agent step's reviewer, on a pool of
- * Claude accounts), or judge (an agent step held to its instructions alone). A use is what the agent is for: support (your customers,
+ * Claude accounts), judge (an agent step held to its instructions alone), or browser (a browser run, started by
+ * POST /v1/browsers/runs). A use is what the agent is for: support (your customers,
  * driven by your own app: one session per end customer under your own key such as customer:42,
  * paused between their messages) or team (your team: from Slack and
  * GitHub, one session per task). {@link #definition(String, String)} merges the two into a
@@ -84,6 +85,17 @@ public final class AgentTemplates {
             "api.anthropic.com",
             "a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block",
             judging));
+    String browse = "python3 ~/.runtime-agent/runtime-agent browse";
+    Map<String, Object> browsing = new LinkedHashMap<>();
+    browsing.put("command", browse);
+    browsing.put("secrets", List.of("ANTHROPIC_API_KEY"));
+    browsing.put("vcpu", 2);
+    browsing.put("memoryMiB", 4096);
+    browsing.put("maxSessionSeconds", 1800);
+    templates.put(
+        "browser",
+        new Template(
+            "browser", "Browser task", browse, "ANTHROPIC_API_KEY", "api.anthropic.com", null, browsing));
     Map<String, Object> support = new LinkedHashMap<>();
     support.put("template", "support");
     support.put("vcpu", 1);

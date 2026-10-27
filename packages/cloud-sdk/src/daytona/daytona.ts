@@ -738,7 +738,7 @@ function refuseCreate(params: CreateSandboxBaseParams & { resources?: Resources 
     [
       "otelEndpointOverride",
       "Sending sandbox telemetry elsewhere (otelEndpointOverride)",
-      "Remove it: runtime.otel.create() exports every sandbox's events and CPU and memory metrics over OTLP/HTTP.",
+      "Remove it: runtime.otel.create() exports the account's events, every sandbox's CPU, memory, disk and network metrics and, with the traces signal, a span for every API call over OTLP/HTTP.",
     ],
   ];
   for (const [field, feature, alternative] of refusals)

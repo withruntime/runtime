@@ -26,6 +26,8 @@ type AgentService struct {
 	Sessions *AgentSessionService
 	// Triggers start sessions from Slack, GitHub, a schedule or a webhook.
 	Triggers *AgentTriggerService
+	// Slack is Runtime's Slack app in your workspaces, for slack triggers.
+	Slack *AgentSlackService
 	// Templates are ready definitions for the harnesses Runtime knows, and
 	// the presets for the two uses (your customers, your team).
 	Templates *AgentTemplateService
@@ -35,6 +37,9 @@ type AgentService struct {
 	// Asks is the account's inbox: what its sessions need answered to go
 	// on, one row per step however many sessions ask it.
 	Asks *AgentAskService
+	// Workflows run many sessions in phases, fanned out and pipelined,
+	// with limits and a cost cap.
+	Workflows *AgentWorkflowService
 }
 
 // AnthropicOptions is Claude Managed Agents' API on Runtime: the base URL
@@ -62,9 +67,11 @@ func newAgentService(c *Client) *AgentService {
 		c:         c,
 		Sessions:  &AgentSessionService{c: c},
 		Triggers:  &AgentTriggerService{c: c},
+		Slack:     &AgentSlackService{c: c},
 		Templates: &AgentTemplateService{},
 		Memory:    &AgentMemoryService{c: c},
 		Asks:      &AgentAskService{c: c},
+		Workflows: &AgentWorkflowService{c: c},
 	}
 }
 
@@ -115,14 +122,94 @@ type AgentDefinition struct {
 	// than 0, at most 100000, default 100): past it, it starts nothing new
 	// (402 budget_reached) until the next day.
 	MaxDayDollars float64 `json:"maxDayDollars,omitempty"`
+	// MaxChildren is how many sessions one session's harness may start
+	// (1 to 1000, default 100).
+	MaxChildren int `json:"maxChildren,omitempty"`
+	// Advisor is a model its sessions may ask for advice with the advise
+	// tool; each call is kept in the session's log as a note.
+	Advisor *AgentAdvisor `json:"advisor,omitempty"`
 	// Template is the use it was made for: "support" or "team".
 	Template string `json:"template,omitempty"`
+	// Model is the model the harness runs (such as claude-opus-5-5); empty,
+	// the harness's default. The harness reads it as RUNTIME_AGENT_MODEL,
+	// and Claude Code, the Claude Agent SDK, Codex, Gemini CLI and the
+	// OpenAI Agents SDK each by their own setting.
+	Model string `json:"model,omitempty"`
+	// SessionOverrides is what a session's start may override
+	// (StartAgentOptions.Overrides); nil, the defaults.
+	SessionOverrides *AgentSessionOverrideLimits `json:"sessionOverrides,omitempty"`
 	// Permissions say which tool calls of the harness run, wait for a
 	// person, or are refused; nil: every call runs.
 	Permissions *AgentPermissions `json:"permissions,omitempty"`
 	// Extra holds fields newer than this SDK: kept when read, sent when
 	// written, so a definition read and written back loses nothing.
 	Extra map[string]any `json:"-"`
+}
+
+// AgentSessionOverrideLimits are the limits an agent's owner sets on its
+// sessions' overrides. A session may always narrow its MCP servers and
+// disallow tools.
+type AgentSessionOverrideLimits struct {
+	// Models a session may name; nil, any.
+	Models []string `json:"models,omitempty"`
+	// Instructions is "append" (the default: a session adds to the agent's),
+	// "replace" (it may also replace them) or "none".
+	Instructions string `json:"instructions,omitempty"`
+	// MaxVCPU, MaxMemoryMiB and MaxSessionDollars are the most a session may
+	// ask for; zero, the agent's own.
+	MaxVCPU           int     `json:"maxVcpu,omitempty"`
+	MaxMemoryMiB      int     `json:"maxMemoryMiB,omitempty"`
+	MaxSessionDollars float64 `json:"maxSessionDollars,omitempty"`
+}
+
+// AgentSessionOverrides are one session's own model, instructions, MCP
+// servers, disallowed tools, size and budget, within its agent's
+// SessionOverrides. They are recorded on the session (Overrides) and noted
+// in its log. Fields left empty are not sent.
+type AgentSessionOverrides struct {
+	Model string `json:"model,omitempty"`
+	// Instructions are added after the agent's, or in their place with
+	// InstructionsMode "replace".
+	Instructions     string `json:"instructions,omitempty"`
+	InstructionsMode string `json:"instructionsMode,omitempty"`
+	// MCP names the agent's MCP servers the session keeps; nil keeps them
+	// all, an empty non-nil slice none.
+	MCP []string `json:"mcp,omitempty"`
+	// DisallowedTools are tools the harness may not use: Runtime's own
+	// ("spawn", "pr", ...; never wait, reply or done) and the harness's
+	// ("Bash", "mcp__github").
+	DisallowedTools   []string `json:"disallowedTools,omitempty"`
+	VCPU              int      `json:"vcpu,omitempty"`
+	MemoryMiB         int      `json:"memoryMiB,omitempty"`
+	MaxSessionDollars float64  `json:"maxSessionDollars,omitempty"`
+}
+
+// MarshalJSON sends MCP when it is set, even empty (keep no server).
+func (o AgentSessionOverrides) MarshalJSON() ([]byte, error) {
+	type fields AgentSessionOverrides
+	if o.MCP == nil || len(o.MCP) > 0 {
+		return json.Marshal(fields(o))
+	}
+	body, err := withExtra(fields(o), map[string]any{"mcp": []string{}})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(body)
+}
+
+// AgentAdvisor is a stronger or different model a session asks for advice.
+// Provider is inferred from Model when empty (anthropic, openai, google,
+// openrouter, or openai-compatible with BaseURL); Secret is the egress
+// secret holding its key, that provider's usual one (ANTHROPIC_API_KEY,
+// OPENAI_API_KEY, ...) when empty, and must be among Secrets or Pool.
+type AgentAdvisor struct {
+	Model    string `json:"model"`
+	Provider string `json:"provider,omitempty"`
+	Secret   string `json:"secret,omitempty"`
+	BaseURL  string `json:"baseUrl,omitempty"`
+	// MaxCalls caps the advise calls of one session (1 to 200, default 20).
+	MaxCalls     int    `json:"maxCalls,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // AgentPermissions hold tool calls for a person. Each call is a tool_call
@@ -194,7 +281,8 @@ func (d *AgentDefinition) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for _, known := range []string{"command", "from", "vcpu", "memoryMiB", "instructions", "env", "secrets", "pool", "mcp",
-		"volumes", "idlePauseSeconds", "maxSessionSeconds", "maxConcurrent", "maxSessionDollars", "maxDayDollars", "template", "permissions"} {
+		"volumes", "idlePauseSeconds", "maxSessionSeconds", "maxConcurrent", "maxSessionDollars", "maxDayDollars", "template",
+		"model", "sessionOverrides", "maxChildren", "advisor", "permissions"} {
 		delete(all, known)
 	}
 	fields.Extra = nil
@@ -257,9 +345,12 @@ type AgentSessionInfo struct {
 	SandboxID *string           `json:"sandboxId"`
 	LastSeq   int64             `json:"lastSeq"`
 	Labels    map[string]string `json:"labels"`
-	CreatedAt time.Time         `json:"createdAt"`
-	StartedAt *time.Time        `json:"startedAt"`
-	EndedAt   *time.Time        `json:"endedAt"`
+	// Overrides is what its start overrode of its agent's definition; nil,
+	// nothing.
+	Overrides *AgentSessionOverrides `json:"overrides"`
+	CreatedAt time.Time              `json:"createdAt"`
+	StartedAt *time.Time             `json:"startedAt"`
+	EndedAt   *time.Time             `json:"endedAt"`
 	// ParentSessionID is the session that spawned it; nil for a top session.
 	ParentSessionID *string `json:"parentSessionId"`
 	// RootSessionID is the top of its tree: its own ID for a top session.
@@ -282,6 +373,8 @@ type AgentSessionInfo struct {
 	StopWhy *string `json:"stopWhy"`
 	// DeletedAt is set once its history was deleted (Sessions.Delete).
 	DeletedAt *time.Time `json:"deletedAt"`
+	// WorkflowID is the workflow that started it as one of its steps.
+	WorkflowID *string `json:"workflowId"`
 }
 
 // AgentCost is what a session (or its tree) has used.
@@ -552,6 +645,11 @@ type StartAgentOptions struct {
 	// instead of starting another.
 	Key    string
 	Labels map[string]string
+	// Overrides give this session its own model, instructions, MCP servers,
+	// disallowed tools, size and budget within the agent's
+	// SessionOverrides: one it does not allow is refused (403
+	// permission_denied, naming what it allows).
+	Overrides *AgentSessionOverrides
 	// IdempotencyKey: made for you when empty.
 	IdempotencyKey string
 }
@@ -621,6 +719,9 @@ func (s *AgentService) Start(ctx context.Context, agent, input string, opts *Sta
 	}
 	if opts.Labels != nil {
 		body["labels"] = opts.Labels
+	}
+	if opts.Overrides != nil {
+		body["overrides"] = opts.Overrides
 	}
 	var out struct {
 		Session AgentSessionInfo `json:"session"`
@@ -1062,6 +1163,45 @@ func (s *AgentTriggerService) Delete(ctx context.Context, id string) error {
 
 func triggerPath(id string) string { return "/v1/agents/triggers/" + url.PathEscape(id) }
 
+// AgentSlackService is client.Agents.Slack: Runtime's Slack app in your
+// workspaces. Add it with Install's link; a slack trigger then names a
+// workspace's Team and a channel the app is in.
+type AgentSlackService struct{ c *Client }
+
+// SlackInstallLink adds Runtime's Slack app to a workspace until ExpiresAt.
+type SlackInstallLink struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+// SlackTeam is a Slack workspace added to the account: Team is a slack
+// trigger's team.
+type SlackTeam struct {
+	Team        string  `json:"team"`
+	Name        *string `json:"name"`
+	BotUser     string  `json:"botUser"`
+	InstalledAt string  `json:"installedAt"`
+}
+
+// Install answers a link that adds Runtime's Slack app to a workspace, good
+// for 15 minutes. Open it as a person who may add apps to the workspace;
+// Slack sends them back to the console once it is added.
+func (s *AgentSlackService) Install(ctx context.Context) (*SlackInstallLink, error) {
+	var out SlackInstallLink
+	return &out, s.c.do(ctx, &call{method: http.MethodPost, path: "/v1/agents/slack/installs", body: map[string]any{}}, &out)
+}
+
+// Teams lists the workspaces added to the account.
+func (s *AgentSlackService) Teams(ctx context.Context) ([]SlackTeam, error) {
+	return productList[SlackTeam](ctx, s.c, "/v1/agents/slack/teams", nil)
+}
+
+// Remove removes a workspace: its token is revoked, and its triggers refuse
+// events until it is added again.
+func (s *AgentSlackService) Remove(ctx context.Context, team string) error {
+	return s.c.do(ctx, &call{method: http.MethodDelete, path: "/v1/agents/slack/teams/" + url.PathEscape(team)}, nil)
+}
+
 // nextPage reads one {data, nextCursor} page of path, and wires Next to read the
 // one after it with the same query.
 func nextPage[T any](ctx context.Context, c *Client, path string, query url.Values, cursor string) (*Page[T], error) {
@@ -1206,7 +1346,7 @@ func unknownTemplate(what, key string) *Error {
 		Code:    "invalid_request",
 		Status:  400,
 		Message: fmt.Sprintf("No agent %s is named %q.", what, key),
-		Hint:    "Templates are claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review and judge; uses are support and team.",
+		Hint:    "Templates are claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge and browser; uses are support and team.",
 	}
 }
 
@@ -1218,6 +1358,7 @@ func agentTemplates() []AgentTemplate {
 	python := "python3 ~/agent.py"
 	review := "python3 ~/.runtime-agent/runtime-agent review"
 	judge := "python3 ~/.runtime-agent/runtime-agent judge"
+	browse := "python3 ~/.runtime-agent/runtime-agent browse"
 	return []AgentTemplate{
 		{
 			Key: "claude-code", Title: "Claude Code", Command: claudeCode,
@@ -1258,6 +1399,11 @@ func agentTemplates() []AgentTemplate {
 			APIKeySecret: "ANTHROPIC_API_KEY", APIKeyHost: "api.anthropic.com",
 			Subscription: text("a token per account, as for review: `runtime secrets set CLAUDE_1` scoped to api.anthropic.com for each, then name them all in pool; its instructions are the rules that block"),
 			Definition:   AgentDefinition{Command: judge, Pool: []string{"ANTHROPIC_API_KEY"}, VCPU: 2, MemoryMiB: 2048, MaxSessionSeconds: 1800},
+		},
+		{
+			Key: "browser", Title: "Browser task", Command: browse,
+			APIKeySecret: "ANTHROPIC_API_KEY", APIKeyHost: "api.anthropic.com",
+			Definition: AgentDefinition{Command: browse, Secrets: []string{"ANTHROPIC_API_KEY"}, VCPU: 2, MemoryMiB: 4096, MaxSessionSeconds: 1800},
 		},
 	}
 }

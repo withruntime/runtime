@@ -1,8 +1,9 @@
 import type { Sandbox } from "../sandbox.js";
 import type { RequestOptions, Transport } from "../transport.js";
 
-/* Observability: a sandbox's CPU and memory over time, the account's
- * lifecycle events, webhooks, and OpenTelemetry export.
+/* Observability: a sandbox's CPU, memory, disk and network over time, the
+ * account's lifecycle events, webhooks, and OpenTelemetry export of logs,
+ * metrics and traces.
  *
  *   const m = await sbx.metrics({ range: "1h" });
  *   const hook = await runtime.webhooks.create({ url: "https://example.com/hooks/runtime" });
@@ -29,6 +30,21 @@ export type MetricPoint = {
   memoryPeakBytes: number;
   /** Host readings in the bucket. */
   samples: number;
+  /** Average bytes used on the root file system, as `df /` in the sandbox
+   * reports; null where no reading carries it. Older servers omit it. */
+  diskUsedBytes?: number | null;
+  /** Bytes read from and written to the sandbox's disks per second, as its
+   * kernel counts them; null where unmeasured. */
+  diskReadBytesPerSecond?: number | null;
+  diskWriteBytesPerSecond?: number | null;
+  /** Read and write operations completed per second. */
+  diskReadOpsPerSecond?: number | null;
+  diskWriteOpsPerSecond?: number | null;
+  /** Bytes received and sent per second over the network: what came back on
+   * the sandbox's connections, and what it sent on them and served through
+   * preview links, custom domains and TCP ports. */
+  networkReceivedBytesPerSecond?: number | null;
+  networkSentBytesPerSecond?: number | null;
 };
 export type SandboxMetrics = {
   sandboxId: string;
@@ -127,7 +143,7 @@ export type OtelExport = {
   endpoint: string;
   /** Header names only; values are never shown back. */
   headerNames: string[];
-  signals: Array<"logs" | "metrics">;
+  signals: OtelSignal[];
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -137,7 +153,20 @@ export type OtelExport = {
   failures: number;
   exportedEvents: number;
   exportedPoints: number;
+  /** Spans that arrived at the endpoint ("traces"). */
+  exportedSpans?: number;
+  /** The span pushes' own health. `lastAttemptAt`, `lastSuccessAt`,
+   * `lastError` and `failures` describe logs and metrics only. */
+  tracesLastAttemptAt?: string | null;
+  tracesLastSuccessAt?: string | null;
+  tracesLastError?: string | null;
+  tracesFailures?: number;
 };
+/** "logs": events as log records. "metrics": CPU, memory, disk and network.
+ * "traces": a span for every API call, a child of the caller's span when the
+ * call carried a W3C traceparent (the SDK sends the active OpenTelemetry
+ * context's). */
+export type OtelSignal = "logs" | "metrics" | "traces";
 type List<T> = { data: T[]; nextCursor: string | null };
 
 export type UsageExportQuery = { since: string; until: string; cursor?: string; limit?: number };
@@ -277,7 +306,7 @@ export function otel(t: Transport) {
         endpoint: string;
         /** For the endpoint's authentication; never shown back. */
         headers?: Record<string, string>;
-        signals?: Array<"logs" | "metrics">;
+        signals?: OtelSignal[];
       },
       options?: RequestOptions,
     ) => t.json<OtelExport>({ method: "POST", path: "/v1/otel-exports", body: input, ...options }),
@@ -290,7 +319,7 @@ export function otel(t: Transport) {
       patch: {
         endpoint?: string;
         headers?: Record<string, string>;
-        signals?: Array<"logs" | "metrics">;
+        signals?: OtelSignal[];
         enabled?: boolean;
       },
       options?: RequestOptions,

@@ -12,7 +12,9 @@ module WithRuntime
   # A build: id, name, labels, repository_id, ref, branch, commit, state
   # (queued, fetching, building, deploying, succeeded, failed, cancelled,
   # superseded), reason, timings (milliseconds per step once done, or nil),
-  # output_snapshot_id, error, created_at, updated_at and deleted_at.
+  # output_snapshot_id, framework (detected for the commands the repository
+  # leaves unset: nextjs, vite, fastapi, rails, go, docker, ...; or nil),
+  # error, created_at, updated_at and deleted_at.
   class Builds < Product
     TERMINAL = %w[succeeded failed cancelled superseded].freeze
     # Reconnections in a row with no new line before a follow gives up.

@@ -18,6 +18,7 @@ const info: Build = {
   reason: null,
   timings: null,
   outputSnapshotId: null,
+  framework: null,
   createdAt: 1,
   updatedAt: 1,
   deletedAt: null,

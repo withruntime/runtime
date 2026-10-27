@@ -12,7 +12,8 @@
 #         print(event["kind"], event["body"].get("text"))
 #
 # The account's inbox of what its sessions ask: ``runtime.agents.asks.list()``
-# and ``.answer()``.
+# and ``.answer()``. Many sessions in phases, fanned out and pipelined, with
+# limits and a cost cap: ``runtime.agents.workflows.run(spec)``.
 from __future__ import annotations
 
 import copy
@@ -27,6 +28,8 @@ from .._errors import InvalidRequestError, RuntimeError
 
 # A session has ended once it is one of these; it never changes again.
 SESSION_ENDED = ("done", "failed", "stopped")
+# A workflow has ended once it is one of these; it never changes again.
+WORKFLOW_ENDED = ("done", "failed", "stopped")
 # How long one read of a session's log waits on the server for a new event.
 EVENTS_WAIT_SECONDS = 30
 
@@ -48,6 +51,27 @@ class AgentCost(TypedDict):
     gibSeconds: float
 
 
+class AgentSessionOverrides(TypedDict, total=False):
+    """One session's own model, instructions, MCP servers, disallowed tools,
+    size and budget, within its agent's ``sessionOverrides`` (the limits its
+    owner sets in the definition: ``models``, ``instructions`` append,
+    replace or none, ``maxVcpu``, ``maxMemoryMiB``, ``maxSessionDollars``).
+
+    ``instructions`` are added after the agent's, or in their place with
+    ``instructionsMode`` ``"replace"``. ``mcp``: names of the agent's MCP
+    servers the session keeps. ``disallowedTools``: tools the harness may
+    not use, Runtime's own (``spawn``, ``pr``, ...; never ``wait``,
+    ``reply`` or ``done``) and the harness's (``Bash``, ``mcp__github``)."""
+    model: str
+    instructions: str
+    instructionsMode: str
+    mcp: list[str]
+    disallowedTools: list[str]
+    vcpu: int
+    memoryMiB: int
+    maxSessionDollars: float
+
+
 class AgentSessionRecord(TypedDict):
     """A session as the API answers it. Times are ISO 8601 strings.
 
@@ -63,7 +87,8 @@ class AgentSessionRecord(TypedDict):
     ``cost`` (this session's so far) and ``treeCost`` (it and every session
     under it). Its storage: ``historyBytes`` (its log) and
     ``attachmentBytes`` (its files and screenshots). ``deletedAt`` is set
-    once its history was deleted (``sessions.delete``)."""
+    once its history was deleted (``sessions.delete``). ``workflowId``: the
+    workflow that started it as one of its steps, or None."""
     id: str
     agentId: str
     agentVersion: int
@@ -75,6 +100,7 @@ class AgentSessionRecord(TypedDict):
     sandboxId: Optional[str]
     lastSeq: int
     labels: dict[str, str]
+    overrides: Optional[AgentSessionOverrides]
     createdAt: str
     startedAt: Optional[str]
     endedAt: Optional[str]
@@ -87,6 +113,7 @@ class AgentSessionRecord(TypedDict):
     attachmentBytes: int
     stopWhy: Optional[str]
     deletedAt: Optional[str]
+    workflowId: Optional[str]
 
 
 def _agent(record: dict[str, Any]) -> dict[str, Any]:
@@ -381,6 +408,127 @@ class AsyncAgentAsks:
         return await self.answer(ask_id, "Deny", text=message, idempotency_key=idempotency_key)
 
 
+class AsyncAgentWorkflow:
+    """One workflow: its record in ``workflow`` ({id, name, state, reason,
+    result, parentSessionId, spec, maxSessions, maxConcurrent, maxDollars,
+    started, version, labels, phases, cost, createdAt, updatedAt, endedAt}),
+    each of ``phases`` {name, agentId, total, ready, pending, running, done,
+    failed}. ``version`` increases on every change."""
+
+    def __init__(self, t: Any, workflow: dict[str, Any]) -> None:
+        self._t = t
+        self.workflow: dict[str, Any] = workflow
+        self.id: str = workflow["id"]
+
+    def __repr__(self) -> str:
+        return f"AsyncAgentWorkflow(id={self.id!r}, state={self.state!r})"
+
+    @property
+    def state(self) -> str:
+        """running, done, failed or stopped, as last read."""
+        return self.workflow["state"]
+
+    @property
+    def ended(self) -> bool:
+        return self.state in WORKFLOW_ENDED
+
+    def _path(self, tail: str = "") -> str:
+        return f"/v1/agents/workflows/{_enc(self.id)}{tail}"
+
+    async def refresh(self) -> dict[str, Any]:
+        """Read the workflow again."""
+        self.workflow = await self._t.json("GET", self._path())
+        return self.workflow
+
+    async def follow(self, *, after: int = 0) -> AsyncIterator[dict[str, Any]]:
+        """``async for`` each change after version ``after`` (0: from the
+        start), as it happens: a phase's progress, a step's end, its result.
+        Each read waits up to 30 seconds on the server for a change; the loop
+        ends once the workflow has ended."""
+        while True:
+            now = await self._t.json("GET", self._path(), query={"after": after, "wait": EVENTS_WAIT_SECONDS})
+            if int(now["version"]) > after:
+                after = int(now["version"])
+                self.workflow = now
+                yield now
+            if now["state"] not in ("running",):
+                self.workflow = now
+                return
+
+    async def wait(self) -> dict[str, Any]:
+        """Return the workflow once it has ended (a failed one is returned,
+        not raised: read ``reason``), its ``result`` set: one step's result
+        as it is, or a JSON array of the last phase's results."""
+        await self.refresh()
+        if self.ended:
+            return self.workflow
+        async for _ in self.follow(after=int(self.workflow["version"])):
+            pass
+        return self.workflow
+
+    async def steps(self, *, state: Optional[Union[str, list[str]]] = None, cursor: Optional[str] = None,
+                    limit: Optional[int] = None) -> AsyncPage:
+        """Its steps in phase and item order: {phase, item, itemText, state,
+        reason, result, sessionId, createdAt, startedAt, endedAt}. ``state``:
+        pending, running, done, failed, stopped or skipped. ``async for``
+        walks every page."""
+        from .._async_client import AsyncPage
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", self._path("/steps"),
+                                      query={"state": state, "cursor": at, "limit": limit})
+            return AsyncPage(body["data"], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+    async def stop(self) -> dict[str, Any]:
+        """Stop it: nothing more starts, and its open sessions are asked to
+        stop. An ended workflow is returned as it is."""
+        self.workflow = await self._t.json("POST", self._path("/stop"), body={})
+        return self.workflow
+
+
+class AsyncAgentWorkflows:
+    """``runtime.agents.workflows``: many sessions in phases. A workflow is
+    data, not code: each phase names an ``agent`` (or uses the workflow's),
+    an ``input`` template (``{{input}}``, ``{{item}}``, ``{{index}}``, and
+    ``{{<phase>}}`` for an earlier phase's results) and ``each``, a list of
+    items (1 to 1000) or ``{"from": "<phase>", "split": "json" | "lines"}``
+    to fan out over an earlier phase's result. A phase waits for every phase
+    before it, unless ``pipeline`` is true: then each item starts as soon as
+    its own item in the source phase ends. ``maxSessions`` (100 unless set,
+    at most 1000), ``maxConcurrent`` (20, at most 200) and ``maxDollars``
+    (10, at most 10000) bound it; it fails with reason ``budget`` at the
+    cap."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    async def run(self, spec: dict[str, Any], *, idempotency_key: Optional[str] = None) -> AsyncAgentWorkflow:
+        """Run it now: {agent?, name?, input?, phases, maxSessions?,
+        maxConcurrent?, maxDollars?, labels?}. Returns a handle to follow,
+        wait for and stop. An invalid spec is refused with
+        InvalidRequestError, its ``details`` naming the field."""
+        body = await self._t.json("POST", "/v1/agents/workflows", body=spec, idempotency_key=idempotency_key)
+        return AsyncAgentWorkflow(self._t, body)
+
+    async def get(self, workflow_id: str) -> AsyncAgentWorkflow:
+        """One workflow by id."""
+        body = await self._t.json("GET", f"/v1/agents/workflows/{_enc(workflow_id)}")
+        return AsyncAgentWorkflow(self._t, body)
+
+    async def list(self, *, state: Optional[Union[str, list[str]]] = None, cursor: Optional[str] = None,
+                   limit: Optional[int] = None) -> AsyncPage:
+        """Workflows, newest first, in a ``state`` if given. ``async for``
+        walks every page."""
+        from .._async_client import AsyncPage
+
+        async def fetch(at: Optional[str]) -> AsyncPage:
+            body = await self._t.json("GET", "/v1/agents/workflows",
+                                      query={"state": state, "cursor": at, "limit": limit})
+            return AsyncPage(body["data"], body.get("nextCursor"), fetch)
+        return await fetch(cursor)
+
+
 class AsyncAgentTriggers:
     """``runtime.agents.triggers``: what starts or feeds an agent's sessions
     besides the API. Kinds and their config: ``slack`` {team, channel};
@@ -471,6 +619,31 @@ class AsyncAgentTriggers:
         await self._t.json("DELETE", f"/v1/agents/triggers/{_enc(trigger_id)}")
 
 
+class AsyncAgentSlack:
+    """``runtime.agents.slack``: Runtime's Slack app in your workspaces, for
+    ``slack`` triggers. Add it with ``install``'s link; a ``slack`` trigger
+    then names a workspace's ``team`` and a channel the app is in."""
+
+    def __init__(self, t: Any) -> None:
+        self._t = t
+
+    async def install(self) -> dict[str, Any]:
+        """{url, expiresAt}: a link that adds Runtime's Slack app to a
+        workspace, good for 15 minutes. Open it as a person who may add apps
+        to the workspace; Slack sends them back to the console once added."""
+        return await self._t.json("POST", "/v1/agents/slack/installs", body={})
+
+    async def teams(self) -> list[dict[str, Any]]:
+        """The workspaces added to this account: {team, name, botUser, installedAt}."""
+        body = await self._t.json("GET", "/v1/agents/slack/teams")
+        return body["data"]
+
+    async def remove(self, team: str) -> None:
+        """Remove a workspace: its token is revoked, and its triggers refuse
+        events until it is added again."""
+        await self._t.json("DELETE", f"/v1/agents/slack/teams/{_enc(team)}")
+
+
 class AsyncAgentMemory:
     """``runtime.agents.memory``: an agent's built-in memory, text files its
     sessions keep across sessions and search. A ``scope`` is whose: ``""``
@@ -533,7 +706,9 @@ class AsyncAgents:
         self._t = t
         self.sessions = AsyncAgentSessions(t)
         self.triggers = AsyncAgentTriggers(t)
+        self.slack = AsyncAgentSlack(t)
         self.asks = AsyncAgentAsks(t)
+        self.workflows = AsyncAgentWorkflows(t)
         self.memory = AsyncAgentMemory(t)
         self.templates = AgentTemplates()
 
@@ -558,7 +733,11 @@ class AsyncAgents:
         ``volumes``, ``network`` ({internet, allow}: with allow, each
         session's sandbox reaches only those hosts, held by its network rules
         from its first packet), ``idlePauseSeconds``, ``maxSessionSeconds``,
-        ``maxConcurrent``, ``maxSessionDollars`` (more than 0, at most 10000,
+        ``maxConcurrent``, ``maxChildren`` (1 to 1000, 100 unless set: the
+        sessions one session's harness may start), ``advisor`` ({model,
+        provider?, secret?, baseUrl?, maxCalls?, instructions?}: a model its
+        sessions may ask for advice with the ``advise`` tool, each call kept in
+        the log as a note), ``maxSessionDollars`` (more than 0, at most 10000,
         5 unless set: the session and every session under it, the root's
         covering its tree; a tree at it stops with reason ``budget``),
         ``maxDayDollars`` (more than 0, at most 100000, 100 unless set: the
@@ -602,15 +781,20 @@ class AsyncAgents:
 
     async def start(self, agent: str, input: str, *, key: Optional[str] = None,
                     labels: Optional[dict[str, str]] = None,
+                    overrides: Optional[AgentSessionOverrides] = None,
                     idempotency_key: Optional[str] = None) -> AsyncAgentSession:
         """Start a session of ``agent`` (id or name) with ``input`` as its
         first words. With ``key``, your own name for the conversation (a Slack
         thread, a pull request, one of your customers such as ``customer:42``),
         words join the open session with that key rather than start a second;
-        the handle's ``joined`` says which happened. Too many open sessions are
+        the handle's ``joined`` says which happened. ``overrides`` gives this
+        session its own model, instructions, MCP servers, disallowed tools,
+        size and budget (AgentSessionOverrides) within the agent's
+        ``sessionOverrides``: one it does not allow is refused with
+        PermissionDeniedError naming what it allows. Too many open sessions are
         refused with RateLimitError ``quota_exceeded``, an agent at its day's
         budget with ``budget_reached`` (402)."""
         body = await self._t.json("POST", f"/v1/agents/{_enc(agent)}/sessions",
-                                  body=_fields(input=input, key=key, labels=labels),
+                                  body=_fields(input=input, key=key, labels=labels, overrides=overrides),
                                   idempotency_key=idempotency_key)
         return AsyncAgentSession(self._t, body["session"], bool(body.get("joined")), body.get("seq"))

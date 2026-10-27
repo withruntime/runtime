@@ -43,7 +43,9 @@ the reviewer and rule-checker of [CI/CD agent steps](./ci#agent-steps). An
 agent also takes any field of its definition: `command`, `from`, `vcpu`,
 `memoryMiB`, `instructions` or `instructionsFile`, `env`, `secrets`, `pool`,
 `mcp`, `volumes`, `idlePauseSeconds`, `maxSessionSeconds`, `maxConcurrent`,
-`maxSessionDollars`, `maxDayDollars` and `memory`. Your values override the
+`maxSessionDollars`, `maxDayDollars`, `memory`, `model` and `sessionOverrides`
+(what a session's start may override: [per-session
+overrides](./agents#per-session-overrides)). Your values override the
 template's. For example, `secrets: [CLAUDE_CODE_OAUTH_TOKEN]` uses your
 subscription's token in place of the API key. Without a size, an agent has 4
 vCPU and 8 GiB.

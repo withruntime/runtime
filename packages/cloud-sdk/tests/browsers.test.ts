@@ -338,3 +338,78 @@ describe("managed browsers", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("browser runs", () => {
+  const RUN = "6a0b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d";
+  const run = (state: string, extra: Record<string, unknown> = {}) => ({
+    id: RUN,
+    state,
+    task: "Find the title",
+    model: "claude-sonnet-5-5",
+    output: null,
+    error: null,
+    steps: 0,
+    ...extra,
+  });
+  const step = (n: number, seq: number) => ({ n, seq, url: "https://example.com/", frame: null });
+
+  test("run starts one and follows its steps by long poll until it ends, then reads it", async () => {
+    const { api, calls } = fake((call) => {
+      if (call.method === "POST") return run("queued");
+      if (call.path.endsWith("/steps")) {
+        const after = (call.query as { after: number }).after;
+        if (after === 0) return { data: [step(0, 2), step(1, 3)], after: 3, ended: false };
+        return { data: [], after, ended: true };
+      }
+      const reads = calls.filter((c) => c.method === "GET" && !c.path.endsWith("/steps"));
+      return reads.length === 1
+        ? run("running")
+        : run("done", { output: "Example Domain", steps: 1 });
+    });
+    const done = await api.run("Find the title");
+    expect(done).toMatchObject({ state: "done", output: "Example Domain" });
+    expect(calls.map((c) => [c.method, c.path, c.body ?? c.query])).toEqual([
+      ["POST", "/v1/browsers/runs", { task: "Find the title" }],
+      ["GET", `/v1/browsers/runs/${RUN}`, undefined],
+      ["GET", `/v1/browsers/runs/${RUN}/steps`, { after: 0, wait: 30, frames: false }],
+      ["GET", `/v1/browsers/runs/${RUN}/steps`, { after: 3, wait: 30, frames: false }],
+      ["GET", `/v1/browsers/runs/${RUN}`, undefined],
+    ]);
+    // A long poll is never cut by the client's own timeout.
+    expect(calls[2]!.timeoutMs).toBe(0);
+  });
+
+  test("runs: create sends exactly its fields; get, list, steps and stop go to their routes", async () => {
+    const { api, calls } = fake((call) =>
+      call.path === "/v1/browsers/runs" && call.method === "GET"
+        ? { data: [run("done")], nextCursor: null }
+        : call.path.endsWith("/steps")
+          ? { data: [], after: 0, ended: true }
+          : run("queued"),
+    );
+    const input = {
+      task: "Sign in and read the invoice total",
+      startUrl: "https://example.com/login",
+      model: "gpt-5",
+      maxSteps: 12,
+      allowedDomains: ["example.com"],
+      labels: { team: "billing" },
+    };
+    await api.runs.create(input);
+    await api.runs.get(RUN);
+    expect((await api.runs.list({ limit: 5 })).data[0]!.state).toBe("done");
+    await api.runs.steps(RUN, { after: 4, frames: true });
+    await api.runs.stop(RUN);
+    expect(calls.map((c) => [c.method, c.path, c.body ?? c.query])).toEqual([
+      ["POST", "/v1/browsers/runs", input],
+      ["GET", `/v1/browsers/runs/${RUN}`, undefined],
+      ["GET", "/v1/browsers/runs", { limit: 5 }],
+      ["GET", `/v1/browsers/runs/${RUN}/steps`, { after: 4, frames: true }],
+      ["POST", `/v1/browsers/runs/${RUN}:stop`, {}],
+    ]);
+    // A run that has ended is answered without a wait.
+    const { api: ended, calls: once } = fake(() => run("failed", { error: "no key" }));
+    expect((await ended.runs.wait(RUN)).error).toBe("no key");
+    expect(once).toHaveLength(1);
+  });
+});

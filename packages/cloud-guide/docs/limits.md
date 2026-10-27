@@ -175,6 +175,14 @@ The two storage limits count every region together.
 | Dedicated outbound addresses (`address.count`)                | Needs credit          | 2                                                       |
 | Private networks (`tunnel.count`)                             | Needs a kept top-up   | 1                                                       |
 
+<!-- launch: actions -->
+
+A GitHub Actions job runs at most 6 hours without credit, and at most 24 hours
+with credit or on a paid plan: `sandbox.job_seconds`, in seconds. A job sets
+less with `timeout-minutes` ([GitHub Actions](./actions#limits)).
+
+<!-- /launch: actions -->
+
 <!-- launch: agents -->
 
 | Limit (`details.limit`)                             | Without credit | With credit |
@@ -184,10 +192,11 @@ The two storage limits count every region together.
 | Agent triggers (`agent-trigger.count`)              | 100            | 100         |
 
 An agent session's sandbox also counts toward the sandbox rows above. A session
-tree is at most 3 levels deep, with at most 20 open children
-([subagents](./agents#subagents)). A trigger past the account's 100 is refused
-with `quota_exceeded` ("The account's triggers are at its limit."). Remove one
-you no longer need first.
+tree is at most 3 levels deep, with at most `maxChildren` open children: 100
+unless the agent sets it, up to 1,000 ([subagents](./agents#subagents)). A
+[workflow](./agents#workflows) runs at most 1,000 sessions, 200 at once. A
+trigger past the account's 100 is refused with `quota_exceeded` ("The
+account's triggers are at its limit."). Remove one you no longer need first.
 
 <!-- /launch: agents -->
 
@@ -234,9 +243,9 @@ counts toward neither. Until then, a connect is refused with `product_in_beta`:
 organization's CI/CD limits. Ask Runtime support to join it." A connect past its
 repository limit is refused with `quota_exceeded`: "This account is at its limit
 of connected CI/CD repositories (ci-repository.count). Disconnect one it no
-longer checks, or write to support@withruntime.com to raise the limit." A job
-runs at most 6 hours (a step's `timeout:`, 6 hours by default), on a machine
-of 2 to 16 vCPUs with 4 GiB of memory per vCPU ([CI/CD](./ci)).
+longer checks, or write to support@withruntime.com to raise the limit." A check
+and each run of a step take at most 6 hours (`timeout:`, 21600 seconds), on a
+machine of 2 to 16 vCPUs with {{ci-gib-per-vcpu}} of memory each ([CI/CD](./ci)).
 
 <!-- /launch: ci -->
 
@@ -309,33 +318,38 @@ Each is refused with its own message. Support can raise most of them.
 | OpenTelemetry exports                      | 3                                                                                                          |
 | Watches sending file changes at once       | 16                                                                                                         |
 | Image builds at once                       | 1 without credit, 4 with                                                                                   |
+| Open files a process (`ulimit -n`)         | 65,536; a process raises it to 1,048,576 without root                                                      |
 | New connections to one site                | 20 a second a sandbox, 100 an account on one server ([outbound traffic](./egress#connections-to-one-site)) |
 
 <!-- launch: apps -->
 
 ## Apps
 
-Apps need credit on the account. An account with credit has these limits:
+Apps need credit on the account. An App's copy is a machine, as a sandbox is,
+so the account's App copies at once follow its plan's sandboxes at once:
 
-| Limit (`details.limit`)                                                     | With credit |
-| --------------------------------------------------------------------------- | ----------- |
-| App copies at once across its Apps, frozen ones included (`instance.count`) | 20          |
-| Apps (`app.count`)                                                          | 10          |
+| Limit (`details.limit`)                                                     | Free | Pro | Pro Max | Scale | Enterprise |
+| --------------------------------------------------------------------------- | ---- | --- | ------- | ----- | ---------- |
+| App copies at once across its Apps, frozen ones included (`instance.count`) | 2    | 100 | 250     | 500   | 2,000      |
+
+Each add-on of 50 more sandboxes at once adds 50 App copies too. An account
+with credit and no plan has 100 App copies at once and 10 Apps (`app.count`).
 
 An account without credit cannot create an App. The refusal says to add
 credit.
 
 Each App:
 
-| Limit                   | Number                                                       |
-| ----------------------- | ------------------------------------------------------------ |
-| A copy's size           | 1 to {{max-vcpu}} vCPUs, 128 MiB to {{max-memory}} of memory |
-| `maxCopies`             | 1,000, and no more than the account's copies together        |
-| `concurrency`           | 1 to 10,000 requests a copy                                  |
-| `spares`                | 0 to 16                                                      |
-| Environment             | 256 names, 64 KiB of names and values                        |
-| A deploy's health check | 120 seconds                                                  |
-| Saved copies            | The live and the previous version                            |
+| Limit                   | Number                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| A copy's size           | 1 to {{max-vcpu}} vCPUs, 128 MiB to {{max-memory}} of memory              |
+| `maxCopies`             | No more than the account's App copies at once                             |
+| `concurrency`           | 1 to 10,000 requests a copy                                               |
+| A request               | No total time limit; the response head within 900 s (100 s with `cdn` on) |
+| `spares`                | 0 to 16                                                                   |
+| Environment             | 256 names, 64 KiB of names and values                                     |
+| A deploy's health check | 120 seconds                                                               |
+| Saved copies            | The live and the previous version                                         |
 
 <!-- /launch: apps -->
 

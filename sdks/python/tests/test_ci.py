@@ -122,7 +122,7 @@ class CiTest(unittest.TestCase):
                                                  state=["connected"], limit=1)
             disconnected = runtime.ci.repositories.disconnect(REPO_ID)
             checks = runtime.ci.checks.list(repository_id=REPO_ID, state=["failed", "queued"], branch="main",
-                                            commit="a" * 40, pull_request=12, limit=5)
+                                            commit="a" * 40, pull_request=12, event=["merge_group"], limit=5)
             check = runtime.ci.checks.get(CHECK_ID)
             job = runtime.ci.jobs.get(JOB_ID)
             tests = runtime.ci.tests.list(REPO_ID, quarantined=True, limit=10)
@@ -145,7 +145,7 @@ class CiTest(unittest.TestCase):
         self.assertTrue(Stub.seen[2][4])
         self.assertEqual(Stub.seen[3][2], {"repositoryId": [REPO_ID], "state": ["failed", "queued"],
                                            "branch": ["main"], "commit": ["a" * 40], "pullRequest": ["12"],
-                                           "limit": ["5"]})
+                                           "event": ["merge_group"], "limit": ["5"]})
         self.assertEqual(Stub.seen[6][2], {"repositoryId": [REPO_ID], "quarantined": ["true"], "limit": ["10"]})
 
     def test_set_undo_turns_a_repositorys_undo_on_and_off(self):

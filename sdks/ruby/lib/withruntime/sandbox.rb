@@ -152,7 +152,9 @@ module WithRuntime
     end
 
     # Changes name, labels, auto_wake, user ("sandbox" or "root": who later
-    # commands run as when one names no user), idle_pause_seconds, persistent or
+    # commands run as when one names no user), lease_seconds (with no time
+    # limit, how far ahead each renewal funds it, 300 to 43200),
+    # idle_pause_seconds, persistent or
     # max_total_cost_micros; fields left out stay as they are, and
     # +max_total_cost_micros: :remove+ removes the cap.
     def update(idempotency_key: nil, **settings)

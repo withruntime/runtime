@@ -59,6 +59,7 @@ From then on, these start a check:
 
 - a push to any branch (tags and deletes start nothing);
 - a pull request opened, reopened, pushed to or marked ready for review;
+- a group of GitHub's merge queue ([GitHub's merge queue](#githubs-merge-queue));
 - a re-run requested on GitHub.
 
 A newer push to the same branch or pull request replaces a check still running. Its machines are freed immediately, because the newer commit includes the older one. On the production branch, newer pushes can keep a check from reaching a verdict. Once they have kept it without a verdict for 20 minutes, the check running then is kept and finishes. So merges faster than a check never leave the branch unjudged.
@@ -69,7 +70,8 @@ A check runs code only from the repository's own people:
 
 - a push by someone GitHub says can write to the repository;
 - a push by a GitHub App the repository trusts (see below);
-- a pull request from one of the repository's own branches, once one of the above has pushed its head commit.
+- a pull request from one of the repository's own branches, once one of the above has pushed its head commit;
+- a group of GitHub's merge queue that holds only such pull requests ([GitHub's merge queue](#githubs-merge-queue)).
 
 Anything else waits unrun. A `runtime` check run on GitHub says why. This covers a fork's pull request, a push by someone who can only read, and a push by an App the repository does not trust. A waiting check never passes branch protection. A repository holds at most 20 waiting checks. A waiting check that waits longer than 7 days ends.
 
@@ -115,7 +117,7 @@ Every repository's response includes its `trustedApps`, sorted. The same update 
 
 ## Steps found for you
 
-If there is no `runtime.yml`, Runtime reads the repository root:
+If there is no `runtime.yml` and no other CI's pipeline file ([Move from another CI](#move-from-another-ci)), Runtime reads the repository root:
 
 | Found                                  | Setup                                                  | Steps                                                      |
 | -------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
@@ -371,35 +373,75 @@ A step with `split` runs each of its files as a task of its own. Files are dealt
 
 Only the files a change can make fail will run. Runtime reads what each test file reads from the repository. That includes its imports (TypeScript and JavaScript, Python, Go packages, Rust crates). It also includes the files and folders its code names, the scripts it runs, and its package's test setup. A file whose reads the change leaves alone keeps the pass it had on the production branch or an earlier push. It runs on no machine (see [Passed before](#passed-before)). A part with nothing left to run passes immediately, on no machine.
 
-## Move from GitHub Actions or CircleCI
+## Move from another CI
 
-`runtime ci import` reads the folder's `.github/workflows/*.yml` and `.circleci/config.yml`. It prints them as one `runtime.yml`. `--write` writes the file instead. It never overwrites a `runtime.yml` already there, unless you add `--force`. The command needs no key and sends nothing. It only reads and writes files.
+Connect the repository. Nothing else changes. If the repository has no `runtime.yml`, each check runs the pipeline file of the CI you use now, as that file is written:
+
+| CI         | File                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CircleCI   | `.circleci/config.yml`                                                                                                                                   |
+| GitLab CI  | `.gitlab-ci.yml`, with the files its `include: local:` names                                                                                             |
+| Buildkite  | `.buildkite/pipeline.yml`, or `buildkite.yml`                                                                                                            |
+| Harness CI | the first pipeline under `.harness/` (`pipeline:` and its `stages:`), among the first 16 YAML files: those in a `pipelines/` folder, then the shallowest |
+
+```bash no-run
+npx withruntime ci connect acme/web   # the next push is checked from .gitlab-ci.yml
+```
+
+Each job of the pipeline is a step of the check, on a machine of its own. A matrix cell and each copy of a parallel job are one step each. A job waits for the jobs it waits for there: CircleCI's `requires`, GitLab's earlier stages or `needs`, Buildkite's `wait` and `depends_on`, and Harness's earlier stages. A job runs in its image: `docker:` in CircleCI, `image:` in GitLab, the docker plugin in Buildkite, and each step's `image` in Harness. One container is kept for the whole job, so what one step installs is there for the next. The checkout is at its own path, and at CircleCI's `working_directory`. The container runs as root, with the image's `HOME`. Its services run beside it: CircleCI's other `docker:` images, GitLab's `services:`, and Harness's `Background` steps. They listen on `localhost` and are also reached by their names and aliases. A job starts once each port its services expose accepts connections, after 60 seconds at most. Every image is pulled once into the warm machine, so a check's jobs start with them in place.
+
+What carries over:
+
+| From                                                                                                                                             | On Runtime                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Variables in the file: `environment:`, `variables:` (with `inherit:`), `env:`, `envVariables`                                                    | set for the job; GitLab's job variables are given to its services too                                                                                                                              |
+| The CI's own variables                                                                                                                           | `CI`, `CIRCLE_SHA1`, `CIRCLE_BRANCH`, `CI_COMMIT_SHA`, `CI_COMMIT_REF_SLUG`, `CI_PIPELINE_SOURCE`, `BUILDKITE_COMMIT`, `BUILDKITE_BRANCH`, `DRONE_COMMIT_SHA`, and others, from the commit checked |
+| CircleCI `commands:`, parameters, executors, `pre-steps` and `post-steps`, `when` steps                                                          | inlined, `<< parameters.x >>`, `<< pipeline.git.branch >>` and `<< matrix.x >>` filled in                                                                                                          |
+| CircleCI orbs `circleci/node`, `circleci/python`, `circleci/go` and `circleci/ruby`, and orbs defined in the file                                | their commands, executors and jobs                                                                                                                                                                 |
+| GitLab `include: local:`, `extends:`, `default:`, anchors, `!reference`                                                                          | merged as GitLab merges them                                                                                                                                                                       |
+| GitLab `rules:`, `only:`, `except:`, `workflow: rules:`; Buildkite `if:` and `branches:`; Harness `when: condition:`; CircleCI branch `filters:` | judged on the machine when the job starts. A job they rule out passes and says why                                                                                                                 |
+| `parallelism:` / `parallel:`, and `circleci tests glob`, `circleci tests split`                                                                  | one step for each copy, told its index (`CIRCLE_NODE_INDEX`, `CI_NODE_INDEX`, `BUILDKITE_PARALLEL_JOB`)                                                                                            |
+| Buildkite's docker-compose plugin (`run:`, `build:`, `config:`)                                                                                  | `docker compose run` of the service                                                                                                                                                                |
+| `buildkite-agent annotate` and `meta-data`                                                                                                       | printed to the log, and kept within the step                                                                                                                                                       |
+| `after_script`, `when: always`, `allow_failure`, `soft_fail`                                                                                     | as there                                                                                                                                                                                           |
+| `timeout:`, `timeout_in_minutes`, `resource_class`, GitLab's `saas-linux-*` tags                                                                 | the step's `timeout:` and machine                                                                                                                                                                  |
+| CircleCI's `{{ checksum "…" }}` and GitLab's `cache: key: files:`                                                                                | `cache:`: the files that key the warm machine                                                                                                                                                      |
+
+A pull request's check runs a GitLab job when its rules allow it in a branch pipeline or in a merge request pipeline. The job gets the variables of the pipeline that allowed it: `CI_COMMIT_BRANCH` in a branch pipeline, and `CI_MERGE_REQUEST_IID` in a merge request pipeline. A push to a branch is a branch pipeline. Every step also gets `RUNTIME_CI_PULL_REQUEST`, the pull request's number, which is unset on a push.
+
+The following do not run. Each one is reported in a `::warning::` line at the start of its job. The warnings appear in the check's summary on GitHub and in the job's log. A check never fails because of them:
+
+- **Jobs that need something a check does not have.** These are macOS and Windows jobs, manual jobs, approval holds and `block` steps, and the jobs after them. Deploys do not run either. These are CircleCI `deploy:` steps, GitLab jobs with an `environment:`, Harness Deployment stages, and triggers of other pipelines. Jobs, stages and steps with a name that contains a word starting with "deploy" (such as `deploy-prod` or `Deploy to production`) do not run either. Each one passes and says why. To deploy from CI/CD, use [`deploy:`](#deploy) in a `runtime.yml`.
+- **Secrets and settings kept by the other CI.** These are CircleCI contexts and project variables, GitLab CI/CD variables, Buildkite agent hooks, and Harness secrets. The warning names each variable that the scripts read and the file does not set. In the job, these variables are empty.
+- **Files passed between jobs.** These are workspaces, artifacts and `buildkite-agent artifact download`. A job that reads files another job built has to build them itself. Test results and artifacts are not uploaded. The job's log is kept.
+- **Orbs and plugins from a registry.** Other orbs' commands, and Buildkite plugins other than docker and docker-compose, are named and skipped. GitLab includes from templates, other projects, components and URLs are named and not read. Copy what they define into the repository.
+- **Scheduled pipelines.** CircleCI scheduled workflows do not run. `rules: changes:` is treated as matching, because a check already runs only what the change reaches.
+
+A pipeline file is read within the same limits as a `runtime.yml`: at most 64 jobs, counting each matrix cell and parallel copy. Each file it includes is at most 512 KiB. Read in full, with aliases, CircleCI commands and parameters, and GitLab `extends:` and `!reference` filled in, a pipeline is at most 500,000 values. A value is a mapping, a list or a scalar, and each 64 bytes of text counts as one more. Text filled in from parameters or matrix values is at most 512 KiB. A file past a limit fails the check before any machine is made, and the error names the limit.
+
+To take over the pipeline yourself, write a `runtime.yml`. A repository with one is checked from that file only. `runtime ci import` writes a GitHub Actions workflow or a CircleCI config as a `runtime.yml`. It needs no key and sends nothing. To keep a GitHub Actions workflow as it is, change one line, `runs-on: runtime` ([GitHub Actions](./actions)).
 
 ```bash no-run
 npx withruntime ci import            # print it
 npx withruntime ci import --write    # write runtime.yml
-npx withruntime ci connect acme/web  # then push it and connect
 ```
 
-What it carries over:
+What the import carries over from GitHub Actions:
 
 | From                                                                                                 | To                                                                                  |
 | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| A job (GitHub) or a workflow's job (CircleCI)                                                        | a step, run on its own machine                                                      |
-| `needs:` / `requires:`                                                                               | `needs:`                                                                            |
+| A job                                                                                                | a step, run on its own machine                                                      |
+| `needs:`                                                                                             | `needs:`                                                                            |
 | A `strategy.matrix`, with `include` and `exclude`                                                    | a step for each Linux cell; cells that differ only in a tool's version are one step |
 | `run:` steps, each in a shell of its own                                                             | one script, each in a subshell, with `set -e`                                       |
 | `npm ci`, `pip install -r …`, `go mod download` and other installs of the project's own dependencies | `setup:`, run once and kept in the warm machine                                     |
-| `actions/cache` keys' `hashFiles(…)`, CircleCI's `{{ checksum "…" }}`                                | `cache:`                                                                            |
-| `env:` / `environment:`                                                                              | `env:`; a step's own as `export` lines in its subshell                              |
-| `services:`, CircleCI's extra `docker:` images                                                       | `docker run -d` at the start of the step                                            |
+| `actions/cache` keys' `hashFiles(…)`                                                                 | `cache:`                                                                            |
+| `env:`                                                                                               | `env:`; a step's own as `export` lines in its subshell                              |
+| `services:`                                                                                          | `docker run -d` at the start of the step                                            |
 | `working-directory:`                                                                                 | a `cd`                                                                              |
-| CircleCI `commands:` without parameters, `resource_class`                                            | inlined; `2cpu` to `16cpu`                                                          |
 | `${{ matrix.* }}`, `${{ github.sha }}`, `${{ github.ref_name }}`, `${{ env.* }}`                     | filled in, or `$RUNTIME_CI_COMMIT` and `$RUNTIME_CI_BRANCH`                         |
 
-The command never carries over the following. Each one is named in a note at the top of the file and in the command's output. Secrets: `${{ secrets.* }}`. A value that needs a secret is left out. Nothing secret is written into the file. Marketplace actions and orbs, other than checkout, setup and cache. A `# was:` line marks where each one was. Uploads and workspaces. `if:` conditions. macOS and Windows jobs. Scheduled workflows and approval holds. `actions/checkout` and the `setup-*` actions need no step. A machine has the commit checked out, with Node, Bun, Python, git and a C compiler. Install anything else in `setup`. A service started by `docker run` has no health check. Wait for it in the step, as its health check did.
-
-To keep a workflow as it is, run its jobs on Runtime by changing one line: `runs-on: runtime` ([GitHub Actions](./actions)).
+The import never carries over the following. Each one is named in a note at the top of the file and in the command's output. Secrets: `${{ secrets.* }}`. A value that needs a secret is left out. Nothing secret is written into the file. Marketplace actions and orbs, other than checkout, setup and cache. A `# was:` line marks where each one was. Uploads and workspaces. `if:` conditions. macOS and Windows jobs. Scheduled workflows and approval holds. `actions/checkout` and the `setup-*` actions need no step. A machine has the commit checked out, with Node, Bun, Python, git and a C compiler. Install anything else in `setup`. A service started by `docker run` has no health check. Wait for it in the step, as its health check did.
 
 ## Move from Google Cloud Build or AWS CodeBuild
 
@@ -639,6 +681,35 @@ Your production branch's own checks are never judged this way. Main stays red un
 A merge never waits for a check. Your production branch's checks run as a pipeline. One check sets up at a time. The next check starts on the newest commit as soon as the one before begins its tests. So a verdict comes every setup's length, not every whole check's length. Nothing cancels a check once it starts, however many merges land meanwhile. Merges that land while one sets up wait together for the next check. That check covers every one of them. A pass covers every commit up to the one it checked. A release only moves forward. An older check that passes late never moves it back. A branch whose config has `deploy:` entries runs one check at a time. So its deploys go out in commit order.
 
 Overlapping checks of main never run the same job twice. A newer check may plan a job whose files an older check of main is running right now. The key is the same: the same bytes of everything it reads. The newer check waits for that run instead of starting its own. When the older run ends, the newer check uses what passed. It runs only what did not pass. So several checks at the same time cost about one check, plus what each newer commit changed. A job waits at most 20 minutes before it runs its files itself.
+
+## GitHub's merge queue
+
+Turn on GitHub's merge queue for your production branch, and require the `runtime` check in the branch's rule. Set the queue's merge method to **Merge commit**. Each group that GitHub makes is then checked as one commit: your production branch with the queued pull requests merged in. The `runtime` check run is posted on the group's commit, and GitHub merges the group when it passes. When GitHub drops a group, because a pull request left the queue or one ahead of it did, its check is cancelled immediately and its machines are deleted. GitHub's merge of a group whose check passed is checked as your production branch's push, as every merge is.
+
+A group's check starts from your production branch's warm machine. Each job that passed before on the same files is not run again, whether it passed in the pull request's own check or in your production branch's ([passed before](#passed-before)). A group of one pull request holds the same files as that pull request's own check, whose files are its merge into the same base. So when the pull request passed on the newest production branch, and that branch's check of its base passed, its group runs no job again. Only the jobs whose files the group changed run, such as the jobs that read the files of a pull request ahead of it.
+
+A group runs only code from the repository's own people, as a pull request does ([whose code runs](#whose-code-runs)). CI/CD reads from GitHub the commits the group stacked on its base. Each one must merge a pull request's head, and each head must be a commit that a check of a pull request from one of the repository's own branches ran as code from the repository's own people. The last one must be the pull request that GitHub names in the group's branch (`gh-readonly-queue/main/pr-<number>-<commit>`). Otherwise the group waits unrun. Its `runtime` check run concludes `action_required` and says why. A group made by squash or rebase always waits this way, because none of its commits is a head that a check ran. The group's base must also be known to hold only such code: a commit of your production branch that CI/CD checked as a push, or a group that runs. Until it is, or until a head the group merged has been checked, the group waits and GitHub is told nothing. It starts as soon as that is known, in whatever order GitHub's events arrive. A group that waits for room under your account's `check` count starts when another check ends. So before you turn on the merge queue, let CI/CD check your production branch's newest commit, which any push or merge does. A fork's pull request never runs through the merge queue. To merge one, push its commit to a branch of the repository and queue that pull request.
+
+Runtime's GitHub App reads the merge queue with the **Merge queues** permission. If your installation predates it, an owner of the GitHub account accepts the new permission once, on the installation's settings page on GitHub.
+
+In the console, the API, the SDKs and the CLI, a group's check has the event `merge_group`. Its `branch` is the group's branch, its `pullRequest` is the pull request GitHub names, and its `baseCommit` is the commit the group was merged onto. To list a repository's merge queue checks, filter by `event`:
+
+```bash no-run
+curl "https://api.withruntime.com/v1/ci/checks?repositoryId=${REPOSITORY_ID}&event=merge_group" \
+  -H "authorization: Bearer $RUNTIME_API_KEY"
+```
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+const groups = await runtime.ci.checks.list({ event: ["merge_group"], limit: 20 });
+for (const check of groups.data) console.log(check.branch, check.pullRequest, check.state);
+```
+
+```bash no-run
+npx withruntime ci checks --event merge_group
+```
 
 ## Undo a failing production branch
 

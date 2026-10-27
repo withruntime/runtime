@@ -1,6 +1,7 @@
 """GENERATED from _async_products/observability.py by scripts/generate_sync.py. Do not edit."""
-# Observability: a sandbox's CPU and memory over time, the account's lifecycle
-# events, webhooks, and OpenTelemetry export.
+# Observability: a sandbox's CPU, memory, disk and network over time, the
+# account's lifecycle events, webhooks, and OpenTelemetry export of logs,
+# metrics and traces.
 #
 #     m = sbx.metrics(range="1h")
 #     hook = runtime.webhooks.create(url="https://example.com/hooks/runtime")
@@ -17,7 +18,9 @@ def _drop_none(values: dict[str, Any]) -> dict[str, Any]:
 
 class Metrics:
     """``sbx.metrics(range="1h")``: the sandbox's measured CPU (percent of
-    its vCPUs, and cores) and resident memory over ``range`` (15m, 1h, 6h, 24h,
+    its vCPUs, and cores), resident memory, disk used (``diskUsedBytes``), disk
+    reads and writes and network bytes per second (``diskReadBytesPerSecond``,
+    ``networkSentBytesPerSecond`` and so on) over ``range`` (15m, 1h, 6h, 24h,
     7d or 30d), and ``latest``, its newest reading."""
 
     def __init__(self, t: Any, sandbox: Any) -> None:
@@ -105,7 +108,10 @@ class Otel:
     def create(self, *, endpoint: str, headers: Optional[dict[str, str]] = None,
                      signals: Optional[list[str]] = None, idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """``endpoint`` is the OTLP/HTTP base URL, as OTEL_EXPORTER_OTLP_ENDPOINT.
-        ``headers`` authenticate to it and are never shown back."""
+        ``headers`` authenticate to it and are never shown back. ``signals``:
+        any of "logs", "metrics" and "traces" (a span for every API call, a
+        child of your active OpenTelemetry span when you use OpenTelemetry);
+        "logs" and "metrics" when omitted."""
         return self._t.json("POST", "/v1/otel-exports", body=_drop_none(
             {"endpoint": endpoint, "headers": headers, "signals": signals}), idempotency_key=idempotency_key)
 

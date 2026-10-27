@@ -183,7 +183,7 @@ module WithRuntime
       super(transport, path, %w[failed deleted live])
     end
 
-    # Creates one waiting for its first version: +max_copies:+ (1 to 1000),
+    # Creates one waiting for its first version: +max_copies:+ (1 to the account's App copies at once, its plan's sandboxes at once),
     # +vcpu:+ (1 to 16) and +memory_mib:+ (128 to 65536) are required;
     # +concurrency:+, +spares:+, +port:+ (8080), +health_path:+, +cdn:+ (true: Cloudflare's CDN in
     # front of its addresses; false sends visitors straight to Runtime's routers,

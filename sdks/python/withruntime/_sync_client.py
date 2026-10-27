@@ -37,6 +37,7 @@ from ._renamed import renamed
 from ._unpack import Unpacker
 from ._ws import SyncWebSocket as WebSocket
 from ._tunnel import PortForward
+from ._trace import trace_headers
 from ._tunnel import sync_open_forward as open_forward
 from ._version import VERSION
 from ._sync_products.watch import Watches, WatchHandle
@@ -269,6 +270,7 @@ class _Transport:
             headers["Idempotency-Key"] = key
         if wait:
             headers["Prefer"] = f"wait={min(120, int(wait))}"
+        headers.update(trace_headers())
         return headers
 
     def send(self, method: str, path: str, *, query: Optional[dict[str, Any]] = None, body: Any = None,
@@ -509,7 +511,7 @@ class _Transport:
 #: tests/create-types.test.ts holds this list to the API's own schema.
 _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
-    "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "user", "persistent", "max_total_cost_micros",
+    "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "user", "lease_seconds", "persistent", "max_total_cost_micros",
     "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "volumes",
     "env", "tailscale", "secrets",
 )
@@ -1466,6 +1468,9 @@ class Machine:
         started afterwards get the change), ``auto_wake`` (a request wakes it when paused),
         ``user`` (``"root"`` or ``"sandbox"``: who later commands, processes
         and terminals run as when one names no user),
+        ``lease_seconds`` (with no time limit, how far ahead each renewal funds
+        it, 300 to 43200; None the default again: it keeps running for at
+        least half of it through an outage of Runtime's control plane),
         ``idle_pause_seconds`` (pause after this long with no activity, counted
         from now; 0 never, otherwise 60 to 86400, a shorter time raised to 60;
         a new sandbox has 300),

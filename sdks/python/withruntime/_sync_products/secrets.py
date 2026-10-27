@@ -14,6 +14,12 @@
 #     runtime.secrets.set("DB_PASSWORD", value=password, jobs=True)
 #
 # keeps a copy scheduled jobs can bind: runtime.jobs.create(..., secrets=[...]).
+#
+#     runtime.secrets.set("DATABASE_PASSWORD", value=password, exposed=True,
+#                               only={"sandboxes": [sandbox_id]})
+#
+# gives those sandboxes the value itself instead of a placeholder, for what is
+# not an HTTPS header: a database password, an SSH key.
 from __future__ import annotations
 
 from typing import Any, Optional, TypedDict
@@ -112,6 +118,8 @@ class Secrets:
     """``runtime.secrets``: one secret by name, kept where its value may go.
     With ``hosts``, sandboxes see a placeholder and the egress proxy adds the
     value on HTTPS to those hosts; that copy is never readable. With
+    ``exposed=True`` instead of ``hosts``, the sandboxes and Apps ``only``
+    names by id get the value itself. With
     ``jobs=True``, a copy scheduled jobs put into their run's environment; that
     copy belongs to the person whose key stored it, holds up to 64 KiB, is
     versioned, and can be read back with ``reveal``."""
@@ -186,7 +194,7 @@ class Secrets:
                   format: Optional[str] = None, rules: Optional[list[SecretRule]] = None,
                   only: Optional[SecretScope] = None, github_app: Optional[SecretGithubApp] = None,
                   git: Optional[SecretGit] = None, api: Optional[SecretApiPolicy] = None, env: Optional[str] = None,
-                  jobs: bool = False,
+                  exposed: bool = False, expected_version: Optional[int] = None, jobs: bool = False,
                   idempotency_key: Optional[str] = None) -> dict[str, Any]:
         """Store or replace a secret. ``value`` is visible ASCII and spaces, at
         most 8 KiB. ``hosts`` are names or ``*.domain``. ``header`` (with
@@ -221,16 +229,38 @@ class Secrets:
         as one GITHUB_TOKEN per repository; a write that would put two in one
         sandbox is refused (409). Absent when replacing: the variable it has stays.
 
+        ``exposed=True``, with no ``hosts``, gives sandboxes the value itself in
+        the variable instead of a placeholder: for what is not an HTTPS header,
+        such as a database password, an SSH key or a service account's JSON.
+        The value may then be any text of up to 64 KiB, several lines included,
+        and it takes no ``header``, ``format``, ``rules``, ``github_app``,
+        ``git`` or ``api``. It needs ``only`` naming the sandboxes or Apps that
+        get it by id (``{"sandboxes": [...]}``, ``{"apps": [...]}``), never
+        labels or every sandbox; a replacement may leave ``only`` out to keep
+        the scope it has. Which machines get it changes only with the value:
+        ``scope`` is refused for it, so ``set`` it again. Code in the sandbox
+        can read it and send it anywhere, and it can be in the sandbox's
+        snapshots and forks; for an HTTPS API, prefer ``hosts``. It is not
+        kept: give it on every write of such a secret.
+
+        ``expected_version`` writes only if the secret is at that version (its
+        ``version`` from ``get`` or ``list``; 0: it must not exist yet), or
+        raises ``ConflictError`` (``version_conflict``, with the current one in
+        ``details["version"]``). Each new value adds one to the version.
+
         ``jobs=True`` also keeps a copy scheduled jobs can use (up to 64 KiB of
         UTF-8 without ``hosts``); setting it again rotates it. With both, a jobs
         copy that fails after the sandboxes' copy is stored raises
         ``SecretPartlyStoredError``, and the same call again finishes it."""
-        if not hosts and not jobs:
-            raise InvalidRequestError("Say where the value may go: hosts for sandboxes, jobs=True for scheduled "
-                                      "jobs, or both.", code="invalid_request", details={"field": "hosts"})
+        if not hosts and not exposed and not jobs:
+            raise InvalidRequestError("Say where the value may go: hosts for sandboxes, exposed=True to give "
+                                      "sandboxes the value itself, jobs=True for scheduled jobs, or both.",
+                                      code="invalid_request", details={"field": "hosts"})
         saved: Optional[dict[str, Any]] = None
-        if hosts:
-            body: dict[str, Any] = {"value": value, "hosts": hosts}
+        if hosts or exposed:
+            body: dict[str, Any] = {"value": value}
+            if hosts:
+                body["hosts"] = hosts
             if header is not None:
                 body["header"] = header
             if format is not None:
@@ -247,6 +277,10 @@ class Secrets:
                 body["api"] = api
             if env is not None:
                 body["env"] = env
+            if exposed:
+                body["exposed"] = True
+            if expected_version is not None:
+                body["expectedVersion"] = expected_version
             part = f"{idempotency_key}:sandboxes"[:128] if idempotency_key and jobs else idempotency_key
             saved = self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}", body=body,
                                        idempotency_key=part)
@@ -268,7 +302,9 @@ class Secrets:
     def scope(self, name: str, only: SecretScope) -> dict[str, Any]:
         """Changes which sandboxes get a secret, without its value: ``{}`` is
         every sandbox of the organization again. Returns the secret, with
-        ``only`` and ``enforced``."""
+        ``only`` and ``enforced``. Refused (400) for a real-value secret
+        (``exposed``), whose machines change only with its value: ``set`` it
+        again with ``value``, ``exposed=True`` and ``only``."""
         return self._t.json("PUT", f"/v1/egress-secrets/{quote(name, safe='')}/sandboxes", body=only)
 
     def narrow(self, name: str, *, hosts: Optional[list[str]] = None,
@@ -314,10 +350,23 @@ class Secrets:
         return [by_name[k] for k in sorted(by_name)]
 
     def get(self, name: str) -> dict[str, Any]:
-        """One secret by name, with where its value may go."""
-        for entry in self.all():
-            if entry["name"] == name:
-                return entry
+        """One secret by name, with where its value may go: ``{"name",
+        "sandboxes", "jobs"}``, each copy or None. The sandboxes' copy carries
+        its ``version`` (pass it to ``set`` as ``expected_version``) and
+        ``exposed``; never its value."""
+        sandboxes: Optional[dict[str, Any]] = None
+        try:
+            sandboxes = self._t.json("GET", f"/v1/egress-secrets/{quote(name, safe='')}")
+        except NotFoundError:
+            pass
+        try:
+            live = self._live(name)
+        except RuntimeError as error:
+            if not _unavailable(error):
+                raise
+            live = None
+        if sandboxes is not None or live is not None:
+            return {"name": name, "sandboxes": sandboxes, "jobs": live}
         raise NotFoundError(f"No secret named {name}.", code="not_found", status=404,
                             hint="List them with runtime.secrets.all().")
 

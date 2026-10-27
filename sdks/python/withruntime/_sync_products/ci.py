@@ -77,14 +77,17 @@ class CiChecks:
 
     def list(self, *, repository_id: Optional[str] = None, state: Optional[list[str]] = None,
                    branch: Optional[str] = None, commit: Optional[str] = None,
-                   pull_request: Optional[int] = None, limit: Optional[int] = None,
+                   pull_request: Optional[int] = None, event: Optional[list[str]] = None,
+                   limit: Optional[int] = None,
                    cursor: Optional[str] = None) -> Page:
         """Checks, newest first. ``state`` is any of ``queued``, ``running``,
-        ``passed``, ``failed``, ``cancelled``; ``commit`` is a full sha.
+        ``passed``, ``failed``, ``cancelled``; ``event`` is any of ``push``,
+        ``pull_request``, ``merge_group`` (GitHub's merge queue) or ``rerun``;
+        ``commit`` is a full sha.
         ``for`` walks every page."""
         from .._sync_client import Page
         query = {"repositoryId": repository_id, "state": state, "branch": branch, "commit": commit,
-                 "pullRequest": pull_request, "limit": limit}
+                 "pullRequest": pull_request, "event": event, "limit": limit}
 
         def fetch(at: Optional[str]) -> Page:
             body = self._t.json("GET", "/v1/ci/checks", query={**query, "cursor": at})

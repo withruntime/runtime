@@ -122,7 +122,8 @@ type CreateAppOptions struct {
 	// MinCopies is how many copies an App keeps awake: 0 unless set, no
 	// greater than MaxCopies. Only Apps have it: leave it nil for a Function.
 	MinCopies *int `json:"minCopies,omitempty"`
-	// MaxCopies is required, 1 to 1000: the bound on awake copies.
+	// MaxCopies is required, 1 to the account's App copies at once (its plan's
+	// sandboxes at once): the bound on awake copies.
 	MaxCopies int `json:"maxCopies"`
 	// VCPU is required, 1 to 16.
 	VCPU int `json:"vcpu"`

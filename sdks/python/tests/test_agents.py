@@ -80,6 +80,8 @@ class Stub(BaseHTTPRequestHandler):
     states: list = []
     # When set, what a read of one session answers.
     record = None
+    # The version a read of the workflow answers; each long poll adds one.
+    version = 1
     # The server of the test now running.
     live = None
 
@@ -120,6 +122,16 @@ class Stub(BaseHTTPRequestHandler):
             if method == "DELETE":
                 return self.answer({"deleted": True})
             return self.answer({**MEMORY, "content": "tea, no sugar"})
+        if path == "/v1/agents/slack/installs":
+            return self.answer({"url": "https://withruntime.com/api/account/agents/slack/start?install=s",
+                                "expiresAt": "2026-10-26T17:15:00.000Z"}, 201)
+        if path == "/v1/agents/slack/teams":
+            return self.answer({"data": [{"team": "T0ACME", "name": "Acme", "botUser": "U0BOT",
+                                          "installedAt": "2026-10-26T17:00:00.000Z"}]})
+        if path.startswith("/v1/agents/slack/teams/"):
+            return self.answer({"team": path.rsplit("/", 1)[1], "removed": True})
+        if path.startswith("/v1/agents/workflows"):
+            return self.workflow_route(method, path, query)
         if path == "/v1/agents/asks":
             return self.answer({"data": [ASK], "nextCursor": None})
         if path.startswith("/v1/agents/asks/"):
@@ -179,7 +191,38 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer(AGENT, 201 if method == "POST" else 200)
         self.answer({"error": {"code": "not_found", "message": "no"}}, 404)
 
+    def workflow_route(self, method, path, query):
+        base = f"/v1/agents/workflows/{WORKFLOW_ID}"
+        if path == "/v1/agents/workflows":
+            return self.answer(workflow(1), 201) if method == "POST" else self.answer(
+                {"data": [workflow(1)], "nextCursor": None})
+        if path == f"{base}/steps":
+            return self.answer({"data": [STEP], "nextCursor": None})
+        if path == f"{base}/stop":
+            return self.answer(workflow(9, "stopped"))
+        if "wait" not in query:
+            return self.answer(workflow(Stub.version))
+        # Each long poll answers the next version; the third has ended.
+        Stub.version += 1
+        return self.answer(workflow(Stub.version, "done", '["X", "Y"]') if Stub.version >= 3
+                           else workflow(Stub.version))
+
     do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = handle_any
+
+
+WORKFLOW_ID = "55555555-5555-4555-8555-555555555555"
+STEP = {"phase": "fix", "item": 0, "itemText": "a.ts", "state": "done", "reason": "done", "result": "ok",
+        "sessionId": CHILD_ID, "createdAt": "2026-10-18T00:00:00Z", "startedAt": None, "endedAt": None}
+
+
+def workflow(version, state="running", result=None):
+    return {"id": WORKFLOW_ID, "name": "triage", "state": state, "reason": None if state == "running" else "done",
+            "result": result, "parentSessionId": None, "spec": {}, "maxSessions": 100, "maxConcurrent": 20,
+            "maxDollars": 10, "started": 2, "version": version, "labels": {},
+            "phases": [{"name": "fix", "agentId": AGENT_ID, "total": 2, "ready": True, "pending": 0,
+                        "running": 0, "done": 2, "failed": 0}],
+            "cost": {"dollars": 0, "vcpuSeconds": 0, "gibSeconds": 0}, "createdAt": "2026-10-18T00:00:00Z",
+            "updatedAt": "2026-10-18T00:00:00Z", "endedAt": None}
 
 
 ASK = {"id": "ask-1", "step": "bucket-cap", "question": "Raise the cap?", "options": [{"label": "Raise"}],
@@ -201,6 +244,7 @@ class AgentsTest(unittest.TestCase):
         Stub.seen, Stub.mode, Stub.pages, Stub.states = [], "ok", [{"data": [], "ended": True}], []
         Stub.auth = []
         Stub.record = None
+        Stub.version = 1
 
     def tearDown(self):
         self.server.shutdown()
@@ -238,6 +282,7 @@ class AgentsTest(unittest.TestCase):
             self.assertEqual((started.id, started.state, started.joined, started.seq), (SESSION_ID, "queued", False, 1))
             joined = runtime.agents.start(AGENT_ID, "Hello", key="customer:42")
             self.assertTrue(joined.joined)
+            runtime.agents.start("dev", "Summarize", overrides={"model": "claude-haiku-5-5", "disallowedTools": ["Bash"]})
             self.assertEqual(started.send("More words", idempotency_key="words-1"), 7)
             self.assertEqual(started.stop()["state"], "stopped")
             self.assertTrue(started.ended)
@@ -249,15 +294,18 @@ class AgentsTest(unittest.TestCase):
         base = f"/v1/agents/sessions/{SESSION_ID}"
         self.assertEqual(self.routes(), [
             ("POST", "/v1/agents/dev/sessions"), ("POST", f"/v1/agents/{AGENT_ID}/sessions"),
+            ("POST", "/v1/agents/dev/sessions"),
             ("POST", f"{base}/messages"), ("POST", f"{base}/stop"), ("GET", base),
             ("GET", "/v1/agents/sessions"), ("GET", "/v1/agents/sessions"), ("DELETE", base)])
         self.assertEqual(Stub.seen[0][3], {"input": "Fix the test", "labels": {"pr": "7"}})
         self.assertEqual(Stub.seen[0][4], "start-1")
         self.assertEqual(Stub.seen[1][3], {"input": "Hello", "key": "customer:42"})
-        self.assertEqual(Stub.seen[2][3], {"text": "More words"})
-        self.assertEqual(Stub.seen[2][4], "words-1")
-        self.assertEqual(Stub.seen[5][2], {"agent": ["dev"], "state": ["running"]})
-        self.assertEqual(Stub.seen[6][2], {"agent": ["dev"], "state": ["running"], "cursor": ["page-2"]})
+        self.assertEqual(Stub.seen[2][3], {"input": "Summarize",
+                                           "overrides": {"model": "claude-haiku-5-5", "disallowedTools": ["Bash"]}})
+        self.assertEqual(Stub.seen[3][3], {"text": "More words"})
+        self.assertEqual(Stub.seen[3][4], "words-1")
+        self.assertEqual(Stub.seen[6][2], {"agent": ["dev"], "state": ["running"]})
+        self.assertEqual(Stub.seen[7][2], {"agent": ["dev"], "state": ["running"], "cursor": ["page-2"]})
         self.assertTrue(all(s[4] for s in Stub.seen if s[0] != "GET"))
 
     def test_children_and_tree_lists_read_by_parent_root_and_deleted(self):
@@ -385,6 +433,25 @@ class AgentsTest(unittest.TestCase):
         query = Stub.seen[0][2]
         self.assertEqual((query["state"], query["label"]), (["open", "expired"], ["team:infra"]))
 
+    def test_a_workflow_runs_is_followed_by_version_with_a_long_poll_and_lists_its_steps(self):
+        spec = {"agent": "dev", "phases": [{"name": "fix", "input": "Fix {{item}}", "each": ["a.ts", "b.ts"]}]}
+        with self.client() as runtime:
+            flow = runtime.agents.workflows.run(spec, idempotency_key="wf-1")
+            self.assertEqual((flow.id, flow.state), (WORKFLOW_ID, "running"))
+            self.assertEqual([w["version"] for w in flow.follow()], [2, 3])
+            self.assertEqual((flow.state, flow.workflow["result"]), ("done", '["X", "Y"]'))
+            Stub.version = 1
+            self.assertEqual(runtime.agents.workflows.get(WORKFLOW_ID).wait()["state"], "done")
+            self.assertEqual([x["itemText"] for x in flow.steps(state="done")], ["a.ts"])
+            self.assertEqual([w["id"] for w in runtime.agents.workflows.list(state=["running"])], [WORKFLOW_ID])
+            self.assertEqual(flow.stop()["state"], "stopped")
+        base = f"/v1/agents/workflows/{WORKFLOW_ID}"
+        self.assertEqual(Stub.seen[0][3], spec)
+        self.assertEqual(Stub.seen[0][4], "wf-1")
+        polls = [s[2] for s in Stub.seen if "wait" in s[2]]
+        self.assertEqual(polls[:2], [{"after": ["0"], "wait": ["30"]}, {"after": ["2"], "wait": ["30"]}])
+        self.assertEqual(self.routes()[-3:], [
+            ("GET", f"{base}/steps"), ("GET", "/v1/agents/workflows"), ("POST", f"{base}/stop")])
     def test_a_held_tool_call_is_approved_or_denied_with_its_message(self):
         with self.client() as runtime:
             self.assertEqual(runtime.agents.asks.approve("ask-1")["answer"], {"option": "Allow"})
@@ -415,6 +482,15 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(Stub.seen[3][2], {"state": ["held"]})
         self.assertEqual(Stub.auth[2], "Bearer rtat_secret_1234567890")
         self.assertEqual(Stub.auth[1], "Bearer rk_test")
+
+    def test_slack_install_teams_and_remove_call_their_routes(self):
+        with self.client() as runtime:
+            self.assertIn("/api/account/agents/slack/start", runtime.agents.slack.install()["url"])
+            self.assertEqual([w["team"] for w in runtime.agents.slack.teams()], ["T0ACME"])
+            self.assertIsNone(runtime.agents.slack.remove("T0ACME"))
+        self.assertEqual(self.routes(), [
+            ("POST", "/v1/agents/slack/installs"), ("GET", "/v1/agents/slack/teams"),
+            ("DELETE", "/v1/agents/slack/teams/T0ACME")])
 
     def test_every_memory_verb_calls_its_route_with_the_scope_in_the_query(self):
         with self.client() as runtime:
@@ -465,7 +541,7 @@ class AgentsTest(unittest.TestCase):
         with self.client() as runtime:
             templates = runtime.agents.templates
             self.assertEqual(list(templates), ["claude-code", "codex", "gemini-cli", "claude-agent-sdk",
-                                               "openai-agents-sdk", "review", "judge"])
+                                               "openai-agents-sdk", "review", "judge", "browser"])
             # The reviewer's model keys are its pool of Claude accounts.
             self.assertEqual(templates.definition("review")["pool"], ["ANTHROPIC_API_KEY"])
             self.assertEqual(templates.definition("review", "team")["vcpu"], 4)
@@ -528,6 +604,16 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual([s[2] for s in Stub.seen if s[1] == "/v1/agents/sessions"][2:],
                          [{"parent": [SESSION_ID]}, {"parent": [SESSION_ID], "cursor": ["page-2"]}])
         self.assertEqual(Stub.seen[0][3]["definition"]["template"], "team")
+
+    def test_an_async_workflow_follows_and_waits_the_same_way(self):
+        async def go():
+            async with AsyncRuntime(api_key="rk_test", base_url=self.url, max_retries=2) as runtime:
+                flow = await runtime.agents.workflows.run({"agent": "dev", "phases": []})
+                versions = [w["version"] async for w in flow.follow()]
+                steps = await (await flow.steps()).to_list()
+                return versions, (await flow.wait())["result"], steps
+        versions, result, steps = asyncio.run(go())
+        self.assertEqual((versions, result, steps), ([2, 3], '["X", "Y"]', [STEP]))
 
 
 if __name__ == "__main__":

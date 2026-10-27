@@ -42,7 +42,8 @@ module WithRuntime
   # +state+ (queued, running, waiting, done, failed or stopped), +reason+
   # (why it ended; among others "budget", "parent_ended", and "deleted" on a
   # deleted record), +result+, +sandbox_id+, +last_seq+, +labels+,
-  # +created_at+, +started_at+, +ended_at+.
+  # +overrides+ (what its start overrode of its agent's definition, as given,
+  # or nil), +created_at+, +started_at+, +ended_at+.
   #
   # Its tree: +parent_session_id+ (nil for a top session), +root_session_id+
   # (itself for a top session) and +depth+ (0 to 3). Its use: +cost+ (this
@@ -51,7 +52,8 @@ module WithRuntime
   # session is deleted) and +attachment_bytes+ (its files and screenshots).
   # +stop_why+ is why a stop was asked ("stopped", "budget" or
   # "parent_ended") or nil, and +deleted_at+ is set once its history was
-  # deleted (+sessions.delete+).
+  # deleted (+sessions.delete+). +workflow_id+ is the workflow that started
+  # it as one of its steps, or nil.
   class AgentSessionInfo < Record
     def cost = AgentCost.new(self["cost"])
     def tree_cost = AgentCost.new(self["treeCost"])
@@ -95,18 +97,24 @@ module WithRuntime
   # its tree; a tree at it stops, reason "budget"), +max_day_dollars+ (more
   # than 0, at most 100000, 100 unless set: the agent's sessions started that
   # UTC day; an agent at it starts nothing new, +budget_reached+
-  # (402), until the next day) and +template+ ("support" or
-  # "team").
+  # (402), until the next day), +max_children+ (1 to 1000, 100 unless set:
+  # the sessions one session's harness may start), +advisor+ ({ model:,
+  # provider:, secret:, base_url:, max_calls:, instructions: }, all but
+  # +model+ optional: a model its sessions may ask for advice with the
+  # advise tool, each call kept in the log as a note) and +template+
+  # ("support" or "team").
   class Agents < Product
-    attr_reader :sessions, :triggers, :templates, :memory, :asks
+    attr_reader :sessions, :triggers, :slack, :templates, :memory, :asks, :workflows
 
     def initialize(transport)
       super
       @sessions = AgentSessions.new(transport)
       @triggers = AgentTriggers.new(transport)
+      @slack = AgentSlack.new(transport)
       @templates = AgentTemplates.new
       @memory = AgentMemory.new(transport)
       @asks = AgentAsks.new(transport)
+      @workflows = AgentWorkflows.new(transport)
     end
 
     # Claude Managed Agents' API on Runtime: the options Anthropic's Ruby SDK
@@ -146,10 +154,16 @@ module WithRuntime
     # Starts a session with +input+, its first words. With +key:+, your own
     # name for the conversation (a Slack thread, a pull request, one of your
     # customers such as "customer:42"), words with the same key join the open
-    # session instead of starting a second; +session.joined+ says so. An agent
-    # at its day's budget is refused +budget_reached+ (402).
-    def start(agent, input, key: nil, labels: nil, idempotency_key: nil)
-      body = Fields.body(input: input, key: key, labels: labels)
+    # session instead of starting a second; +session.joined+ says so.
+    # +overrides:+ gives this session its own model, instructions, MCP
+    # servers, disallowed tools, size and budget within the agent's
+    # +sessionOverrides+ ({ model:, instructions:, instructions_mode:
+    # "replace", mcp: [names], disallowed_tools: ["Bash", "spawn"], vcpu:,
+    # memory_mib:, max_session_dollars: }); one it does not allow is refused
+    # +permission_denied+ (403), naming what it allows. An agent at its day's
+    # budget is refused +budget_reached+ (402).
+    def start(agent, input, key: nil, labels: nil, overrides: nil, idempotency_key: nil)
+      body = Fields.body(input: input, key: key, labels: labels, overrides: overrides)
       answer = @t.json("POST", "/v1/agents/#{seg(agent)}/sessions", body: body, key: idempotency_key)
       AgentSession.new(@t, answer["session"], joined: answer["joined"] == true, seq: answer["seq"])
     end
@@ -411,6 +425,23 @@ module WithRuntime
     end
   end
 
+  # +runtime.agents.slack+: Runtime's Slack app in your workspaces. Add it with
+  # +install+'s link; a slack trigger then names a workspace's +team+ and a
+  # channel the app is in.
+  class AgentSlack < Product
+    # A link that adds Runtime's Slack app to a workspace, good for 15
+    # minutes: +url+ and +expires_at+. Open it as a person who may add apps
+    # to the workspace; Slack sends them back to the console once it is added.
+    def install = Record.new(@t.json("POST", "/v1/agents/slack/installs", body: {}))
+
+    # The workspaces added to this account: +team+, +name+, +bot_user+, +installed_at+.
+    def teams = @t.json("GET", "/v1/agents/slack/teams")["data"].map { |row| Record.new(row) }
+
+    # Removes a workspace: its token is revoked, and its triggers refuse
+    # events until it is added again.
+    def remove(team) = @t.json("DELETE", "/v1/agents/slack/teams/#{seg(team)}") && nil
+  end
+
   # +runtime.agents.asks+: the account's inbox, the questions its agents'
   # sessions need answered to go on. Each has +why+ it matters, +options+
   # ({label, detail}), a recommended +pick+ and maybe an expiry. Asks of
@@ -456,6 +487,125 @@ module WithRuntime
     def asks_page(query, cursor)
       body = @t.json("GET", "/v1/agents/asks", query: query.merge("cursor" => cursor))
       Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| asks_page(query, after) }
+    end
+  end
+
+  # +runtime.agents.workflows+: many sessions in phases. A workflow is data,
+  # not code: each phase names an +agent+ (or uses the workflow's), an
+  # +input+ template ({{input}}, {{item}}, {{index}}, and {{<phase>}} for an
+  # earlier phase's results) and +each+, a list of items (1 to 1000) or
+  # { from: "<phase>", split: "json" | "lines" } to fan out over an earlier
+  # phase's result. A phase waits for every phase before it, unless
+  # +pipeline+ is true: then each item starts as soon as its own item in the
+  # source phase ends. +max_sessions+ (100 unless set, at most 1000),
+  # +max_concurrent+ (20, at most 200) and +max_dollars+ (10, at most 10000)
+  # bound it; at the cap it fails with reason "budget".
+  #
+  #   flow = runtime.agents.workflows.run(agent: "dev", phases: [
+  #     { name: "fix", input: "Fix {{item}}", each: %w[a.ts b.ts] }
+  #   ])
+  #   flow.follow { |w| puts w.phases.map { |p| "#{p.name} #{p.done}/#{p.total}" } }
+  #   puts flow.wait.result
+  class AgentWorkflows < Product
+    # Runs it now and answers an AgentWorkflow to follow, wait for and stop.
+    # An invalid spec is refused (InvalidRequestError), its details naming
+    # the field.
+    def run(spec = nil, idempotency_key: nil, **fields)
+      body = Fields.convert(spec || fields)
+      AgentWorkflow.new(@t, @t.json("POST", "/v1/agents/workflows", body: body, key: idempotency_key))
+    end
+
+    def get(id) = AgentWorkflow.new(@t, @t.json("GET", "/v1/agents/workflows/#{seg(id)}"))
+
+    # The first page, newest first, in a +state+ (one or a list) if given;
+    # +each+ walks every page.
+    def list(state: nil, cursor: nil, limit: nil) = workflows_page({ "state" => state, "limit" => limit }, cursor)
+
+    private
+
+    def workflows_page(query, cursor)
+      body = @t.json("GET", "/v1/agents/workflows", query: query.merge("cursor" => cursor))
+      Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| workflows_page(query, after) }
+    end
+  end
+
+  # One workflow. +info+: +id+, +name+, +state+ (running, done, failed or
+  # stopped), +reason+, +result+ (one step's result as it is, or a JSON
+  # array of the last phase's results), +parent_session_id+, +spec+, its
+  # limits, +started+, +version+ (one more on every change), +labels+,
+  # +phases+ (each +name+, +agent_id+, +total+, +ready+, +pending+,
+  # +running+, +done+, +failed+), +cost+ and its times.
+  class AgentWorkflow
+    POLL_SECONDS = AgentSession::POLL_SECONDS
+    POLL_MARGIN = AgentSession::POLL_MARGIN
+
+    attr_reader :info
+
+    def initialize(transport, info)
+      @t = transport
+      @info = Record.new(info)
+    end
+
+    def id = @info["id"]
+    def state = @info["state"]
+    def ended? = state != "running"
+    def result = @info["result"]
+
+    # Reads it again.
+    def refresh
+      @info = Record.new(@t.json("GET", path))
+      self
+    end
+
+    # Each change after version +after+ (0: from the start) as it happens;
+    # without a block, an Enumerator. Waits on the server and ends once the
+    # workflow has ended.
+    def follow(after: 0)
+      return enum_for(:follow, after: after) unless block_given?
+
+      loop do
+        now = poll(after)
+        @info = now
+        if now["version"] > after
+          after = now["version"]
+          yield now
+        end
+        return nil if ended?
+      end
+    end
+
+    # The workflow once it has ended; a failed one is returned, not raised.
+    # Waits on the server, with no polling.
+    def wait
+      refresh
+      @info = poll(@info["version"]) until ended?
+      @info
+    end
+
+    # The first page of its steps in phase and item order: +phase+, +item+,
+    # +item_text+, +state+ (pending, running, done, failed, stopped or
+    # skipped), +reason+, +result+, +session_id+ and times.
+    def steps(state: nil, cursor: nil, limit: nil) = steps_page({ "state" => state, "limit" => limit }, cursor)
+
+    # Stops it: nothing more starts, and its open sessions are asked to stop.
+    def stop
+      @info = Record.new(@t.json("POST", path("/stop"), body: {}))
+    end
+
+    def inspect = "#<#{self.class.name} #{id} #{state}>"
+
+    private
+
+    def path(suffix = "") = "/v1/agents/workflows/#{Transport.segment(id)}#{suffix}"
+
+    def poll(after)
+      Record.new(@t.json("GET", path, query: { "after" => after, "wait" => POLL_SECONDS },
+                                      timeout: [@t.timeout, POLL_SECONDS + POLL_MARGIN].max))
+    end
+
+    def steps_page(query, cursor)
+      body = @t.json("GET", path("/steps"), query: query.merge("cursor" => cursor))
+      Page.new(body["data"].map { |item| Record.new(item) }, body["nextCursor"]) { |after| steps_page(query, after) }
     end
   end
 
@@ -526,7 +676,7 @@ module WithRuntime
   # for either use, and the two uses. +review+ is a CI/CD agent step's
   # reviewer, on a +pool+ of Claude accounts.
   #
-  #   runtime.agents.templates.map(&:key)   # claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge
+  #   runtime.agents.templates.map(&:key)   # claude-code, codex, gemini-cli, claude-agent-sdk, openai-agents-sdk, review, judge, browser
   #   runtime.agents.templates["codex"].api_key_secret
   #   runtime.agents.templates.uses["support"].session_key
   #   runtime.agents.templates.definition("claude-code", use: "support")
@@ -629,6 +779,21 @@ module WithRuntime
             "pool" => ["ANTHROPIC_API_KEY"],
             "vcpu" => 2,
             "memoryMiB" => 2048,
+            "maxSessionSeconds" => 1800
+          }
+        },
+        "browser" => {
+          "key" => "browser",
+          "title" => "Browser task",
+          "command" => "python3 ~/.runtime-agent/runtime-agent browse",
+          "apiKeySecret" => "ANTHROPIC_API_KEY",
+          "apiKeyHost" => "api.anthropic.com",
+          "subscription" => nil,
+          "definition" => {
+            "command" => "python3 ~/.runtime-agent/runtime-agent browse",
+            "secrets" => ["ANTHROPIC_API_KEY"],
+            "vcpu" => 2,
+            "memoryMiB" => 4096,
             "maxSessionSeconds" => 1800
           }
         }

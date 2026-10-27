@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket, untrustedCertificate } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.37.0";
+export const VERSION = "0.45.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -106,6 +106,45 @@ export type Call = RequestOptions & {
    * for capacity never spends the caller's own `timeoutMs`. */
   extendDeadline?: (ms: number) => void;
 };
+
+/** The W3C trace context of the caller's active OpenTelemetry span, when the
+ * program uses OpenTelemetry for JavaScript: version 1 of @opentelemetry/api
+ * keeps its registered context manager and propagator on globalThis under
+ * this symbol, so the SDK reads them without depending on the package. With
+ * it, Runtime's span of the call (an export with "traces") is a child of the
+ * caller's, in the caller's own trace. Nothing without OpenTelemetry, and
+ * never a reason for a call to fail. */
+const OTEL_API = Symbol.for("opentelemetry.js.api.1");
+type OtelGlobal = {
+  context?: { active?(): unknown };
+  propagation?: {
+    inject?(
+      context: unknown,
+      carrier: Record<string, string>,
+      setter: { set(carrier: Record<string, string>, key: string, value: string): void },
+    ): void;
+  };
+};
+export function traceHeaders(): Record<string, string> {
+  try {
+    const otel = (globalThis as Record<symbol, OtelGlobal | undefined>)[OTEL_API];
+    const active = otel?.context?.active?.();
+    if (!active || !otel?.propagation?.inject) return {};
+    const carrier: Record<string, string> = {};
+    otel.propagation.inject(active, carrier, {
+      set: (into, key, value) => {
+        into[key.toLowerCase()] = String(value);
+      },
+    });
+    const headers: Record<string, string> = {};
+    for (const name of ["traceparent", "tracestate"])
+      if (typeof carrier[name] === "string" && carrier[name].length <= 512)
+        headers[name] = carrier[name];
+    return headers;
+  } catch {
+    return {};
+  }
+}
 
 /** How long an answer that ran nothing (NOTHING_RAN) is retried for a call
  * that has no deadline of its own. */
@@ -374,6 +413,7 @@ export class Transport {
           : { "content-type": "application/json" }),
       ...(key ? { "idempotency-key": key } : {}),
       ...(call.wait ? { prefer: `wait=${Math.min(120, Math.ceil(call.wait))}` } : {}),
+      ...traceHeaders(),
     };
   }
 

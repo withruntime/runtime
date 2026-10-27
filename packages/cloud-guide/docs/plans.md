@@ -15,8 +15,13 @@ A plan is a monthly fee that comes back as usage:
 - **Twice in the first month.** A plan's first month, and the first month
   after you move up to it, holds twice its usage.
 - **Yearly.** A plan with a yearly price costs ten months' fee for twelve.
-- **A trial.** A plan with a trial can be tried free for its days, once per
-  person, without a card, from the console.
+- **A trial.** A plan with a trial can be tried for its days, once per
+  person, from the console. Starting it saves a card on Stripe's checkout
+  page and charges nothing. When the trial ends, the card is charged the
+  plan's first period, which holds twice its usage, unless you cancel before.
+  Cancelling during the trial ends it with its days, and nothing is charged.
+  Choosing a plan during the trial ends the trial and charges that plan
+  immediately.
 - **Higher limits, more features, more support.** A plan raises limits, such
   as how many sandboxes run at the same time. It turns on features such as single sign-on,
   roles and the audit log. It sets your support: docs, the support agent, a
@@ -36,8 +41,8 @@ A plan is a monthly fee that comes back as usage:
   month is charged, prorated. Moving down, or cancelling, takes effect at the
   end of the period you paid for. You keep the plan until then. You can
   take a cancel back before then.
-- **The card.** A paid plan keeps a card on file. While the plan is active,
-  you can replace the card but not remove it. Bought credit pays the fee only
+- **The card.** A paid plan, or a trial, keeps a card on file. While the plan
+  or the trial is active, you can replace the card but not remove it. Bought credit pays the fee only
   when there is no card. Given credit never pays a fee.
 - **Moving up by itself.** An owner can let the account move to the plan that
   lifts a limit when the limit refuses something. This is off unless an owner turns
@@ -52,7 +57,7 @@ It names the plan that includes it the same way.
 Only an owner, admin or billing member, or a key one of them made, can choose,
 change or cancel a plan or its add-ons. Only an owner turns moving up by
 itself on or off. Any key of the organization can read them. A person, signed in,
-starts a first plan and a trial.
+starts a first plan and a trial, on Stripe's checkout page.
 
 ## Read the plans and yours
 

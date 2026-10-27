@@ -2,10 +2,10 @@
 
 See what a sandbox is doing. Get notified when it changes. Send both to the tools you already use.
 
-- **Metrics.** The CPU and memory of every running sandbox, over time, measured by its host. You can see them on the sandbox's page in your account. You can also get them from the API, the SDKs, the CLI and MCP.
+- **Metrics.** The CPU, memory, disk use, disk I/O and network traffic of every running sandbox, over time. You can see them on the sandbox's page in your account. You can also get them from the API, the SDKs, the CLI and MCP.
 - **Events.** Every lifecycle change for a sandbox, snapshot or volume. Examples: created, running, paused, woken, stopped, or a start that failed.
 - **Webhooks.** Those events are sent as POSTs to your URL. Each is signed and retried for about three days. You get a delivery log and a test send.
-- **OpenTelemetry export.** Events are pushed as logs. CPU and memory are pushed as metrics. The push uses OTLP/HTTP. Targets include Grafana, Honeycomb, Datadog, New Relic, an OpenTelemetry Collector, or any OTLP endpoint.
+- **OpenTelemetry export.** Events are pushed as logs. Each sandbox's readings are pushed as metrics. Every API call can be pushed as a trace span. The push uses OTLP/HTTP. Targets include Grafana, Honeycomb, Datadog, New Relic, an OpenTelemetry Collector, or any OTLP endpoint.
 
 None of it costs anything extra.
 
@@ -34,20 +34,29 @@ npx withruntime sandboxes metrics <id> --range 6h
 
 What you get:
 
-| Field                | Meaning                                                                     |
-| -------------------- | --------------------------------------------------------------------------- |
-| `cpuPercent`         | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)              |
-| `cpuCores`           | The same as a number of cores                                               |
-| `cpuPeakPercent`     | The busiest interval between two readings inside the bucket                 |
-| `cpuWaitPercent`     | Measured wall time ready to run while waiting for a processor, as a percent |
-| `memoryStallPercent` | Measured wall time with a thread waiting for memory, as a percent           |
-| `memoryBytes`        | Memory the sandbox's machine holds, as its host measures it                 |
-| `memoryPeakBytes`    | The most it held inside the bucket                                          |
-| `latest`             | The newest reading while the sandbox runs; null when it is not running      |
+| Field                                               | Meaning                                                                                                        |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `cpuPercent`                                        | CPU in use, as a percent of all the sandbox's vCPUs (0 to 100)                                                 |
+| `cpuCores`                                          | The same as a number of cores                                                                                  |
+| `cpuPeakPercent`                                    | The busiest interval between two readings inside the bucket                                                    |
+| `cpuWaitPercent`                                    | Measured wall time ready to run while waiting for a processor, as a percent                                    |
+| `memoryStallPercent`                                | Measured wall time with a thread waiting for memory, as a percent                                              |
+| `memoryBytes`                                       | Memory the sandbox's machine holds, as its host measures it                                                    |
+| `memoryPeakBytes`                                   | The most it held inside the bucket                                                                             |
+| `diskUsedBytes`                                     | Bytes used on the root file system, as `df /` in the sandbox reports                                           |
+| `diskReadBytesPerSecond`, `diskWriteBytesPerSecond` | Bytes read from and written to the sandbox's disks, per second                                                 |
+| `diskReadOpsPerSecond`, `diskWriteOpsPerSecond`     | Read and write operations completed, per second                                                                |
+| `networkReceivedBytesPerSecond`                     | Bytes received over the sandbox's connections, per second                                                      |
+| `networkSentBytesPerSecond`                         | Bytes sent over its connections and served through its preview links, custom domains and TCP ports, per second |
+| `latest`                                            | The newest reading while the sandbox runs; null when it is not running                                         |
+
+The response also has `memoryLimitBytes` and `diskLimitBytes`, the sandbox's memory and disk sizes.
 
 CPU is measured, not estimated. It is the machine's CPU time between two readings of its host. The bill uses the same readings. The host reads every running sandbox at least every half minute. A paused or stopped sandbox uses nothing, so it has no new readings. `latest` is null, and its earlier readings stay in `points`.
 
 CPU wait and memory stalls use the differences between complete readings of the same run. Each is weighted by the time measured. A first reading, a missing counter or a counter reset returns null. It does not report no waiting. The same fields are in `points` and `latest`. Older servers can omit them.
+
+Disk use and disk I/O are counted by the sandbox's own kernel. So they include reads served from the host's page cache, which the host cannot see. Network traffic is counted by the host's network proxy, in both directions. It covers every connection the sandbox opens and every request it serves. Rates are per second of the time the bucket's readings cover. A reading the sandbox did not answer in time returns null, not zero. So does a reading from before these fields existed.
 
 `range` picks the window, and the bucket that each point sums:
 
@@ -62,7 +71,7 @@ CPU wait and memory stalls use the differences between complete readings of the 
 
 Each reading is kept 24 hours. Hourly averages and peaks are kept 30 days.
 
-In your account, [Sandboxes](https://withruntime.com/account/sandboxes) shows each sandbox's CPU and memory now. Home draws a trace of each running sandbox. A sandbox's own page charts CPU, with its events marked on the chart. Its Activity tab charts CPU, memory, CPU wait and memory stalls over any of the ranges above. The tab updates while the sandbox runs. It also lists the sandbox's commands and what happened to it. Once the sandbox has stopped, its page shows its whole life. That is CPU and memory from start to stop, and a timeline of its events and commands. CPU wait is time ready to run while waiting for a processor. A memory stall is time with a thread waiting for memory. A first reading, a missing counter or a counter reset shows as not measured. It never shows as no waiting.
+In your account, [Sandboxes](https://withruntime.com/account/sandboxes) shows each sandbox's CPU and memory now. Home draws a trace of each running sandbox. A sandbox's own page charts CPU, with its events marked on the chart. Its Activity tab charts CPU, memory, CPU wait, memory stalls, disk used, disk reads and writes, and network in and out over any of the ranges above. The tab updates while the sandbox runs. It also lists the sandbox's commands and what happened to it. Once the sandbox has stopped, its page shows its whole life. That is CPU and memory from start to stop, and a timeline of its events and commands. CPU wait is time ready to run while waiting for a processor. A memory stall is time with a thread waiting for memory. A first reading, a missing counter or a counter reset shows as not measured. It never shows as no waiting.
 
 ## Account API calls
 
@@ -367,7 +376,7 @@ Webhook URLs must use HTTPS on the public internet. A URL that names a private, 
 
 ## OpenTelemetry export
 
-An export pushes new events as OTLP log records. It pushes each sandbox's readings as OTLP metrics. This happens about every 30 seconds. The target is any endpoint that takes OTLP over HTTP with JSON. The export starts from the moment you make it.
+An export pushes new events as OTLP log records. It pushes each sandbox's readings as OTLP metrics. This happens about every 30 seconds. If you ask for traces, it also pushes every API call as an OTLP span, within about a second. The target is any endpoint that takes OTLP over HTTP with JSON. The export starts from the moment you make it.
 
 ```ts check
 import { Runtime } from "withruntime";
@@ -383,23 +392,62 @@ await runtime.otel.create({
 npx withruntime otel create https://api.honeycomb.io --header x-honeycomb-team=<key>
 ```
 
-- `endpoint` is the OTLP/HTTP base URL, as in `OTEL_EXPORTER_OTLP_ENDPOINT`. Logs go to `<endpoint>/v1/logs`. Metrics go to `<endpoint>/v1/metrics`.
+- `endpoint` is the OTLP/HTTP base URL, as in `OTEL_EXPORTER_OTLP_ENDPOINT`. Logs go to `<endpoint>/v1/logs`. Metrics go to `<endpoint>/v1/metrics`. Spans go to `<endpoint>/v1/traces`.
 - `headers` authenticate you to the endpoint. You can set up to 10. They are stored where only the sender reads them, and they are never shown again.
-- `signals` is `["logs", "metrics"]` by default. Send only one of them if you prefer.
+- `signals` is `["logs", "metrics"]` by default. Add `"traces"` for API call spans. You can also send any one or two of the three.
 
-The metrics are gauges, one resource per sandbox with `runtime.sandbox.id`, `runtime.sandbox.name`, `runtime.sandbox.vcpu` and `cloud.region`:
+The metrics have one resource per sandbox with `runtime.sandbox.id`, `runtime.sandbox.name`, `runtime.sandbox.vcpu` and `cloud.region`. The first six are gauges. The I/O metrics are delta sums: each point is the amount since the reading before it (`startTimeUnixNano`). They are split by the OpenTelemetry attributes `disk.io.direction` (`read`, `write`) and `network.io.direction` (`receive`, `transmit`):
 
-| Metric                            | Unit    | Meaning                               |
-| --------------------------------- | ------- | ------------------------------------- |
-| `runtime.sandbox.cpu.utilization` | `1`     | CPU in use as a fraction of its vCPUs |
-| `runtime.sandbox.cpu.usage`       | `{cpu}` | Cores in use                          |
-| `runtime.sandbox.memory.usage`    | `By`    | Memory its machine holds              |
-| `runtime.sandbox.memory.limit`    | `By`    | Its memory size                       |
+| Metric                            | Unit          | Meaning                                        |
+| --------------------------------- | ------------- | ---------------------------------------------- |
+| `runtime.sandbox.cpu.utilization` | `1`           | CPU in use as a fraction of its vCPUs          |
+| `runtime.sandbox.cpu.usage`       | `{cpu}`       | Cores in use                                   |
+| `runtime.sandbox.memory.usage`    | `By`          | Memory its machine holds                       |
+| `runtime.sandbox.memory.limit`    | `By`          | Its memory size                                |
+| `runtime.sandbox.disk.usage`      | `By`          | Bytes used on its root file system             |
+| `runtime.sandbox.disk.limit`      | `By`          | Its disk size                                  |
+| `runtime.sandbox.disk.io`         | `By`          | Bytes read and written, by `disk.io.direction` |
+| `runtime.sandbox.disk.operations` | `{operation}` | Reads and writes completed                     |
+| `runtime.sandbox.network.io`      | `By`          | Bytes received and sent                        |
+
+A reading the sandbox did not answer carries no disk or network points. The next measured one covers only its own interval.
 
 Each log record's body is the event type. Its attributes are `event.name`, `event.id` and the resource's fields. Examples are `runtime.sandbox.state`, `runtime.sandbox.stop_reason` and `runtime.sandbox.label.<key>`. A failure (`start_failed`, `wake_failed`, `recovery_failed`, `failed`) is logged at WARN. The rest are logged at INFO.
 
 A push that fails is retried. It waits 30 seconds, then doubles the wait, up to an hour. It sends from where it stopped. `runtime.otel.get(id)` shows `lastSuccessAt`, `lastError` and how much it has sent. `runtime.otel.flush(id)` pushes now. An account can have three exports.
 
+### Traces
+
+With `"traces"` in `signals`, every call your account makes to the API is a span. That includes creates, commands, file reads and writes, pauses, wakes and snapshots, whether they succeed or are refused.
+
+```ts check
+import { Runtime } from "withruntime";
+
+const runtime = new Runtime();
+await runtime.otel.create({
+  endpoint: "https://api.honeycomb.io",
+  headers: { "x-honeycomb-team": process.env.HONEYCOMB_KEY ?? "" },
+  signals: ["logs", "metrics", "traces"],
+});
+```
+
+Each span is a `SERVER` span named for the route, such as `POST /v1/sandboxes/{id}:exec`. It is timed from when the request arrived to when it was answered. It has the OpenTelemetry HTTP attributes `http.request.method`, `http.route`, `http.response.status_code`, `url.path`, `url.scheme` and `server.address`, and `error.type` for a 5xx response. It also has these:
+
+| Attribute             | Meaning                                                |
+| --------------------- | ------------------------------------------------------ |
+| `runtime.operation`   | The operation, such as `sandboxes.exec`                |
+| `runtime.request.id`  | The request's ID, as in the `x-request-id` header      |
+| `runtime.error.code`  | The error code of a 4xx or 5xx response                |
+| `runtime.resource.id` | The sandbox, snapshot or other resource the call names |
+| `runtime.sandbox.id`  | The sandbox, for a call under `/v1/sandboxes/{id}`     |
+| `runtime.client`      | The SDK or tool that made the call, with its version   |
+
+A 5xx response sets the span's status to `ERROR`. A 4xx response is an error in your request, not in the server, so it leaves the status unset, as the HTTP conventions say.
+
+**Your own trace.** A call that carries a W3C `traceparent` header is a child of that span. So Runtime's spans appear inside your own traces. The TypeScript and Python SDKs send the header for you when OpenTelemetry is set up in your process (`@opentelemetry/api`, or `opentelemetry-api` for Python) and a span is active. For example, a `Sandbox.create()` or `sbx.exec()` inside your own `startActiveSpan` shows as its child. No other setting is needed, and without an active span the SDKs send no header. A call that its caller did not sample (`traceparent` flags `00`) is not exported.
+
+Spans are sent in batches as each call is answered, within about a second. If an endpoint refuses a batch, or does not answer within 2 seconds, that batch is lost, as with an OpenTelemetry SDK's exporter. That export's spans are then dropped for 5 seconds, doubling up to 5 minutes while its endpoint keeps failing, and sending resumes after the first success. Each export is separate: another export of the same account keeps receiving every span. Spans that cannot be held because the endpoint falls behind are also dropped and reported. `tracesLastError` says why, and `exportedSpans` counts what arrived. Spans have their own `tracesLastAttemptAt`, `tracesLastSuccessAt`, `tracesLastError` and `tracesFailures`. `lastSuccessAt`, `lastError` and `failures` describe logs and metrics only, so one signal's failure never hides behind another's success.
+
 ## MCP
 
-`runtime_sandboxes_metrics` reads a sandbox's CPU, memory, CPU wait and memory stalls. `runtime_events_list` reads its events. `runtime_webhooks_manage` and `runtime_otel_manage` list, create, test and change webhooks and exports.
+`runtime_sandboxes_metrics` reads a sandbox's CPU, memory, CPU wait, memory stalls, disk and network. `runtime_events_list` reads its events. `runtime_webhooks_manage` and `runtime_otel_manage` list, create, test and change webhooks and exports.

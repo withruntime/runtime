@@ -246,6 +246,35 @@ public final class AgentDefinition {
     return view().getDouble("maxDayDollars");
   }
 
+  /** Sessions one session's harness may start: 1 to 1000, 100 unless set. */
+  public AgentDefinition maxChildren(int sessions) {
+    return set("maxChildren", sessions);
+  }
+
+  public Integer maxChildren() {
+    return integer("maxChildren");
+  }
+
+  /**
+   * A stronger or different model its sessions may ask for advice with the advise tool, each call
+   * kept in the session's log as a note. The provider is inferred from the model's name; the key is
+   * that provider's usual egress secret (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...), which must be
+   * among the secrets or the pool. {@link #advisor(Map)} sets the rest: provider, secret, baseUrl,
+   * maxCalls (1 to 200, 20 unless set) and instructions.
+   */
+  public AgentDefinition advisor(String model) {
+    return set("advisor", Map.of("model", model));
+  }
+
+  public AgentDefinition advisor(Map<String, ?> advisor) {
+    return set("advisor", advisor);
+  }
+
+  /** {@code model}, {@code provider}, {@code secret} and the rest, or null. */
+  public JsonObject advisor() {
+    return view().getObject("advisor");
+  }
+
   /** The use it was made for: support or team (see {@link AgentTemplates}). */
   public AgentDefinition template(String use) {
     return set("template", use);
@@ -253,6 +282,33 @@ public final class AgentDefinition {
 
   public String template() {
     return view().getString("template");
+  }
+
+  /**
+   * The model the harness runs, such as claude-opus-5-5; unset, the harness's default. The harness
+   * reads it as RUNTIME_AGENT_MODEL, and Claude Code, the Claude Agent SDK, Codex, Gemini CLI and
+   * the OpenAI Agents SDK each by their own setting.
+   */
+  public AgentDefinition model(String model) {
+    return set("model", model);
+  }
+
+  public String model() {
+    return view().getString("model");
+  }
+
+  /**
+   * What a session's start may override ({@link AgentSessionOverrides}): {@code models} (a list;
+   * unset, any), {@code instructions} (append, the default; replace; or none), and {@code maxVcpu},
+   * {@code maxMemoryMiB} and {@code maxSessionDollars} (the most a session may ask for; unset, the
+   * agent's own). A session may always narrow its MCP servers and disallow tools.
+   */
+  public AgentDefinition sessionOverrides(Map<String, ?> limits) {
+    return set("sessionOverrides", limits == null ? null : new LinkedHashMap<>(limits));
+  }
+
+  public JsonObject sessionOverrides() {
+    return view().getObject("sessionOverrides");
   }
 
   /** A new definition: this one with other's fields over it (a shallow merge, other's win). */

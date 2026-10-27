@@ -19,6 +19,7 @@ from .agents import AsyncAgents
 from .apps import AsyncApps, AsyncFunctions
 from .audit import AsyncAudit
 from .browser import AsyncBrowser
+from .browsers import AsyncBrowsers
 from .builds import AsyncBuilds
 from .ci import AsyncCi
 from .containers import AsyncContainers
@@ -54,6 +55,7 @@ CLIENT["builds"] = AsyncBuilds
 CLIENT["ci"] = AsyncCi
 CLIENT["containers"] = AsyncContainers
 CLIENT["agents"] = AsyncAgents
+CLIENT["browsers"] = AsyncBrowsers
 CLIENT["referrals"] = AsyncReferrals
 CLIENT["plans"] = AsyncPlans
 CLIENT["billing"] = AsyncBilling
