@@ -258,7 +258,12 @@ runtime networks private off                    # open connections are cut withi
   it turns this on. A connection from a sandbox without credit is refused with
   `private-network-paid-only`. A sandbox with its internet off also reaches no
   other sandbox.
-- **Not billed:** these connections are not outbound traffic.
+- **Not billed, and not limited as uploads:** these connections are not
+  outbound traffic. They do not count toward a sandbox's upload speed limits or
+  its daily network amount. Each sandbox can be reached for 100 GiB a day, in
+  and out together, from all of its callers. Past that, new connections to it
+  return `429` with `X-Runtime-Egress: private-network-quota-exhausted` until the
+  window ends.
 
 From the SDKs, `runtime.networks.private` (MCP: `runtime_networks_private_*`):
 

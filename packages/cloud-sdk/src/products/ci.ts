@@ -122,7 +122,7 @@ export type CiJob = {
   cachedFrom: string | null;
   exitCode: number | null;
   reason: string | null;
-  /** The sandboxes it ran in. A failure's may be kept paused: wake it, or
+  /** The sandboxes it runs or ran in, each listed as soon as it begins the job. A failure's may be kept paused: wake it, or
    * exec in it, with runtime.sandboxes. */
   sandboxIds: string[];
   /** The ID of the job's own GitHub check run (`runtime / <name>`), created

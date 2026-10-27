@@ -68,7 +68,7 @@ public class CiJob extends JsonObject {
   }
 
   /**
-   * The sandboxes it ran in. A failure's may be kept paused: wake it, or exec in it, with the
+   * The sandboxes it runs or ran in, each listed as soon as it begins the job. A failure's may be kept paused: wake it, or exec in it, with the
    * sandbox calls.
    */
   public List<String> sandboxIds() {

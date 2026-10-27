@@ -149,8 +149,9 @@ type CIJob struct {
 	CachedFrom *string `json:"cachedFrom"`
 	ExitCode   *int    `json:"exitCode"`
 	Reason     *string `json:"reason"`
-	// SandboxIDs are the sandboxes it ran in. A failure's may be kept
-	// paused: wake it, or exec in it, with the sandbox calls.
+	// SandboxIDs are the sandboxes it runs or ran in, each listed as soon
+	// as it begins the job. A failure's may be kept paused: wake it, or
+	// exec in it, with the sandbox calls.
 	SandboxIDs []string `json:"sandboxIds"`
 	// GithubCheckRun is the ID of the job's own GitHub check run,
 	// "runtime / <name>", created completed when the job ends; nil while it
