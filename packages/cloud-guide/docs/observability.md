@@ -108,6 +108,7 @@ Every lifecycle change of a sandbox, snapshot or volume is an event. Events are 
 | `sandbox.recovery_failed`    | Its server was lost and it cannot come back; `recovery.reason` says why                                      |
 | `sandbox.files.changed`      | Files changed under a watch that sends to webhooks                                                           |
 | `sandbox.out_of_memory`      | The sandbox ran out of memory and Linux ended a command's program; `outOfMemory` says how many and its size  |
+| `sandbox.oom_kill`           | Linux's out-of-memory killer ended a process in the sandbox; `oomKill` names it, its PID and its memory      |
 | `sandbox.secret_not_applied` | A request carried a secret's placeholder that was not replaced; `secretNotApplied` says which secret and why |
 | `sandbox.network.limited`    | The sandbox met an outbound connection limit; `networkLimited` says which and its figure                     |
 | `snapshot.ready`             | A snapshot finished and can be started from                                                                  |
@@ -190,6 +191,27 @@ Each event carries the resource as it was:
     },
     "command": { "program": "node", "processId": "p-4", "exitCode": -9, "outcome": "exited" },
     "outOfMemory": { "code": "out_of_memory", "processesKilled": 1, "memoryMiB": 512 }
+  }
+}
+```
+
+`sandbox.oom_kill` is sent once for each process that Linux's out-of-memory killer ended in the sandbox, within about a minute. It is sent whether or not the process belonged to a command: a service, a container or a background process counts too. `inCommand` says whether a command or process started through the API ran it. `memoryMiB` is the memory the process used when it was ended. Runtime's own agent is never ended this way, so the sandbox keeps answering:
+
+```json
+{
+  "type": "sandbox.oom_kill",
+  "data": {
+    "sandbox": {
+      "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f",
+      "state": "running",
+      "memoryMiB": 32768
+    },
+    "oomKill": {
+      "process": { "name": "rustc", "pid": 4242, "user": "sandbox", "memoryMiB": 2048 },
+      "inCommand": true,
+      "at": "2026-10-27T22:39:12.000Z",
+      "message": "The sandbox ran out of memory, and Linux's out-of-memory killer ended rustc (pid 4242, using 2048 MiB). Give the sandbox more memory (memoryMiB) or make the program use less."
+    }
   }
 }
 ```

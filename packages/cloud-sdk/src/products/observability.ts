@@ -75,6 +75,7 @@ export type WebhookEventType =
   | "sandbox.recovery_failed"
   | "sandbox.files.changed"
   | "sandbox.out_of_memory"
+  | "sandbox.oom_kill"
   | "sandbox.secret_not_applied"
   | "sandbox.network.limited"
   | "snapshot.ready"

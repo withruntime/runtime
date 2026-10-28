@@ -197,6 +197,18 @@ Only a person can raise a spending limit, on the account's keys page: the member
 who made the key, or an owner or admin. Do not
 create replacements in a loop; the limit counts the last 24 hours.
 
+## A running sandbox refuses commands
+
+Each code below means nothing ran. A retry with the same idempotency key runs the call at most once. The SDKs retry each of them.
+
+| Code                              | Status | What it means                                                                                                                                    | What to do                                                                                                                                 |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `guest_busy`                      | 429    | The sandbox is running as many commands as it can at once                                                                                        | Wait `Retry-After`, then retry. Run fewer commands at once                                                                                 |
+| `sandbox_unreachable`             | 503    | The sandbox's agent did not answer for about ten seconds. When its memory was full shortly before, the message names the process that was killed | Retry. If it repeats, restart the sandbox (`POST /v1/sandboxes/{id}:restart`). A running sandbox reboots from its disk, and its files stay |
+| `sandbox_environment_unavailable` | 503    | The sandbox could not read its environment from its server's network service. The fault is ours, and we are alerted                              | Retry. If it lasts more than a minute, restart the sandbox                                                                                 |
+
+**A sandbox at its memory limit stays reachable.** When the sandbox's programs fill its memory, Linux's out-of-memory killer ends one of them, never Runtime's agent. Commands keep running. Each process killed is recorded as the event `sandbox.oom_kill`, which names the process, its process ID and the memory it used. The event appears on the sandbox's page in the console and in `GET /v1/events?resourceId=<id>`, and is sent to your [webhooks](./observability#events). A command whose own processes were killed also returns `outOfMemory` in its result. Give the sandbox more memory (`memoryMiB`), or make the program use less.
+
 ## The request timed out
 
 **A missing response is not proof that a command failed to run.** Use the same
