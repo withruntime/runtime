@@ -35,6 +35,7 @@ from ._http import NoAnswerStarted, Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
 from ._renamed import renamed
 from ._unpack import Unpacker
+from ._ws import ResumableWebSocket
 from ._ws import SyncWebSocket as WebSocket
 from ._tunnel import PortForward
 from ._trace import trace_headers
@@ -496,10 +497,14 @@ class _Transport:
         finally:
             hold.lend()
 
-    def websocket(self, path: str, query: dict[str, Any]) -> WebSocket:
-        socket = WebSocket(self.origin, path + _query(query), {
-            "Authorization": "Bearer " + self._api_key(), "X-Runtime-Client": f"sdk-python/{VERSION}"})
-        return open_ws(socket)
+    def websocket(self, path: str, query: dict[str, Any]) -> ResumableWebSocket:
+        """A terminal's or tunnel's WebSocket. It resumes across a restart of
+        the API with nothing lost or repeated (_ws.py)."""
+        def connect(resume: Optional[str]) -> WebSocket:
+            socket = WebSocket(self.origin, path + _query({"resume": resume} if resume else query), {
+                "Authorization": "Bearer " + self._api_key(), "X-Runtime-Client": f"sdk-python/{VERSION}"})
+            return open_ws(socket)
+        return ResumableWebSocket(connect).connect()
 
     def close(self) -> None:
         self._http.close()
@@ -963,7 +968,7 @@ class Process:
 class Terminal:
     """An interactive terminal over a WebSocket: write() types, recv() reads."""
 
-    def __init__(self, socket: WebSocket, process_id: Optional[str]) -> None:
+    def __init__(self, socket: ResumableWebSocket, process_id: Optional[str]) -> None:
         self._socket, self.process_id = socket, process_id
         self.exit_code: Optional[int] = None
 

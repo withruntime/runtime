@@ -6,7 +6,8 @@ require "digest"
 module WithRuntime
   # One bounded RFC6455 connection, using the transport's origin, key and proxy rules.
   class WebSocket
-    attr_reader :timeout
+    # The close code the server sent, once it closed.
+    attr_reader :timeout, :close_code
     def initialize(transport, path, query = nil)
       @transport = transport
       @timeout = transport.timeout
@@ -46,7 +47,7 @@ module WithRuntime
       status, fields = headers(deadline)
       accept = [Digest::SHA1.digest(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")].pack("m0")
       unless status.match?(/\AHTTP\/1\.[01] 101 /) && fields["sec-websocket-accept"] == accept && fields["upgrade"].to_s.downcase == "websocket"
-        raise Error.new("The server refused the WebSocket upgrade.", code: "websocket_refused")
+        raise Error.new("The server refused the WebSocket upgrade.", code: "websocket_refused", status: status[/\AHTTP\/1\.[01] (\d{3})/, 1].to_i)
       end
     rescue *Transport::NETWORK_ERRORS => error
       close
@@ -119,7 +120,10 @@ module WithRuntime
           raise Error.new("WebSocket frame exceeds its bound.", code: "stream_overflow")
         end
         data = exact(length, deadline)
-        return nil if op == 8
+        if op == 8
+          @close_code = data.bytesize >= 2 ? data.unpack1("n") : 1005
+          return nil
+        end
         if op == 9
           send_frame(10, data)
           next
@@ -147,6 +151,137 @@ module WithRuntime
       end
     rescue IOError, SystemCallError
       nil
+    end
+  end
+
+  # A terminal's or tunnel's WebSocket that outlives a restart of the API behind it
+  # (packages/cloud/src/api/tunnels.ts, "Hand-off"): on {"type":"restart"} it holds what is
+  # sent and answers; on {"type":"resume"} and close 1012 it opens the socket again with
+  # ?resume=<token>, sends {"type":"replay"} first, then what it held. Output continues from
+  # the byte it stopped at, and the reader sees no close.
+  class ResumableSocket
+    # RFC 6455 close code 1012, Service Restart.
+    SERVICE_RESTART = 1012
+    # How long reconnecting may take: within the token's 30 s, after which the API ends it.
+    RESUME_SECONDS = 25
+    attr_reader :timeout, :resumes, :replays
+    def initialize(transport, path, query = nil)
+      @transport, @path = transport, path
+      @socket = WebSocket.new(transport, path, query)
+      @timeout = @socket.timeout
+      # Orders sends, the restart's answer and the switch to a new socket. close never takes
+      # it, so it can close a socket under a send blocked holding it.
+      @send_lock = Mutex.new
+      @paused, @held, @closed, @resumes, @replays = false, [], false, 0, 0
+    end
+    def now = @socket.now
+    def send_frame(op, bytes)
+      @send_lock.synchronize do
+        raise IOError, "WebSocket closed" if @closed
+        next @held << [op, bytes.b] if @paused
+        @socket.send_frame(op, bytes)
+      end
+    end
+    # The next message the reader sees; the restart's own are not.
+    def read(deadline = nil)
+      loop do
+        socket = @socket
+        message = socket.read(deadline)
+        unless message
+          socket.close
+          token = @token
+          next if token && socket.close_code == SERVICE_RESTART && !@closed && resume(token)
+          said, @said = @said, nil
+          return said
+        end
+        if message[0] == 1 && message[1].bytesize <= 4096
+          reply = begin
+            JSON.parse(message[1])
+          rescue JSON::ParserError
+            nil
+          end
+          if reply.is_a?(Hash) && reply["type"] == "restart"
+            @send_lock.synchronize do
+              @paused = true
+              socket.send_frame(1, JSON.generate(type: "restart"))
+            end
+            next
+          end
+          if reply.is_a?(Hash) && reply["type"] == "resume" && reply["token"]
+            @token, @replay = reply["token"], reply["replay"]
+            next
+          end
+        end
+        return message
+      end
+    end
+    def close
+      @closed = true
+      @attempt&.close
+      # First unblocks a send in flight; then, under its lock, the socket a resume may have
+      # swapped in meanwhile.
+      @socket.close
+      @send_lock.synchronize do
+        @held.clear
+        @socket.close
+      end
+    end
+
+    private
+
+    # Opens the socket again where it stopped; false when it cannot.
+    def resume(token)
+      replay = @replay
+      @token = @replay = nil
+      deadline = now + RESUME_SECONDS
+      wait = 0.05
+      while !@closed && now < deadline
+        socket = nil
+        begin
+          socket = @attempt = WebSocket.new(@transport, @path, { "resume" => token })
+          # A close that came while it opened.
+          break socket.close if @closed
+          # A server that never answers must not hold this past the deadline.
+          message = socket.read(deadline)
+          reply = message && message[0] == 1 ? JSON.parse(message[1]) : nil
+          if reply.is_a?(Hash) && reply["type"] == "ready" && reply["resumed"]
+            return @send_lock.synchronize do
+              if @closed
+                socket.close
+                next false
+              end
+              @socket = socket
+              @resumes += 1
+              if replay && !replay.empty?
+                @replays += 1
+                socket.send_frame(1, JSON.generate(type: "replay", data: replay))
+              end
+              @held.each { |op, bytes| socket.send_frame(op, bytes) }
+              @held.clear
+              @paused = false
+              true
+            end
+          end
+          socket.close
+          if reply.is_a?(Hash) && reply["type"] == "error"
+            # Refused for good (the sandbox stopped, say): the reader reads the error.
+            @said = message
+            return false
+          end
+        rescue Error => error
+          socket&.close
+          # A 4xx other than 429: the token or the sandbox is not good, and asking again
+          # changes nothing.
+          return false if error.status.between?(400, 499) && error.status != 429
+        rescue JSON::ParserError, IOError, SystemCallError
+          socket&.close
+        ensure
+          @attempt = nil
+        end
+        sleep wait
+        wait = [wait * 2, 1].min
+      end
+      false
     end
   end
 
@@ -193,7 +328,7 @@ module WithRuntime
   class Terminal
     attr_reader :process_id, :exit_code
     def initialize(sandbox, **options)
-      @socket = WebSocket.new(sandbox.transport, sandbox.path("/terminal"), Fields.body(options))
+      @socket = ResumableSocket.new(sandbox.transport, sandbox.path("/terminal"), Fields.body(options))
       @buffer = StreamBuffer.new
       deadline = @socket.now + @socket.timeout
       loop do

@@ -391,7 +391,8 @@ Owners and admins read the audit log at
   one Runtime did itself, the entry says why: the sandbox sat idle, it reached
   its time limit, credit ran out, or a spending limit was hit.
 - **Deletions:** volumes, images, snapshots, services and jobs
-- **The account:** created, renamed, suspended and restored
+- **The account:** created, renamed, suspended and restored; the encryption key
+  for its backups created, rotated (the old key made read-only) and destroyed
 - **Single sign-on:** connections added, changed and removed, domains
   verified, single sign-on required or not
 - **Directory sync:** SCIM tokens made and revoked, people your directory

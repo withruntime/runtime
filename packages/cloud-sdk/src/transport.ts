@@ -9,7 +9,7 @@ import {
 import { describeRoute, envFetch, openWebSocket, untrustedCertificate } from "./proxy.js";
 import { warningText } from "./product-renames.js";
 
-export const VERSION = "0.46.2";
+export const VERSION = "0.47.0";
 export const DEFAULT_BASE_URL = "https://api.withruntime.com";
 /** Runtime's API as code inside a Runtime sandbox reaches it: the sandbox's
  * own host sends each request on to DEFAULT_BASE_URL over HTTPS. The API runs
@@ -84,6 +84,9 @@ export type Call = RequestOptions & {
   /** Seconds the server may hold the answer for a long-running result. */
   wait?: number;
   accept?: string;
+  /** Internal: headers of Runtime's own operator calls (the never-park mark,
+   * `runtime sandboxes never-park`), which the API refuses for anyone else. */
+  headers?: Record<string, string>;
   /** Sent as the Bearer token instead of the client's API key: a webhook
    * trigger's secret, which is all its calls carry. */
   bearer?: string;
@@ -403,6 +406,7 @@ export class Transport {
 
   #headers(call: Call, key: string | undefined, apiKey: string): Record<string, string> {
     return {
+      ...call.headers,
       authorization: `Bearer ${apiKey}`,
       accept: call.accept ?? "application/json",
       "x-runtime-client": this.#client,

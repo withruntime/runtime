@@ -226,7 +226,7 @@ Each event carries the resource as it was:
 | `by_address`               | HTTPS went to an IP address, asking for one of the secret's hosts. Use the host name in the URL   |
 | `withheld`                 | HTTPS went to the secret's host, but its server could not add the secret then. Runtime's fault    |
 
-`withheld` is sent for a connection to the secret's host. It is sent whether or not the connection carried the placeholder. Runtime does not read inside a connection that it could not add the secret to. Try again. If it repeats, write to support.
+`withheld` is sent for a connection to the secret's host. It is sent whether or not the connection carried the placeholder. When the server has not heard from Runtime's API within the last minute, a request that carries the placeholder is not sent: it returns `503 Service Unavailable` with `X-Runtime-Egress: secret-not-current` and `Retry-After: 1`, and the connection closes. The next request on a new connection carries the value once the server hears from the API again. When the secret's value cannot be opened on the server, Runtime does not read inside the connection. Try again. If it repeats, write to support.
 
 Runtime does not read inside HTTPS to a host that no secret names. So a placeholder sent there sends no event. Check the host against `npx withruntime secrets ls`.
 

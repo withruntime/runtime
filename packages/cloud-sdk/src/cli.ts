@@ -2634,6 +2634,26 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
       print(describe(sbx.info), sbx.info);
       return 0;
     }
+    case "never-park": {
+      // Runtime's own operator only, so not in the help: the release path's
+      // sandboxes (the release signer's, the agents' hub) are never parked to
+      // make room (Marc, 28 October 2026). The API refuses it for any other
+      // organization, and for a key that is not an owner's, an admin's or
+      // account-wide (20261028190617_cloud_never_park.sql).
+      const args = parse(rest, [], []);
+      const value = args.positional[1];
+      if (args.positional.length !== 2 || (value !== "on" && value !== "off"))
+        throw usage("runtime sandboxes never-park <id> on|off");
+      const sbx = await get(args.positional[0]);
+      const info = await runtime.transport.json<SandboxInfo & { neverPark?: boolean }>({
+        method: "POST",
+        path: `/v1/sandboxes/${encodeURIComponent(sbx.id)}:update`,
+        body: {},
+        headers: { "runtime-never-park": value === "on" ? "true" : "false" },
+      });
+      print(`${sbx.id} never parked: ${info.neverPark === true ? "on" : "off"}`, info);
+      return 0;
+    }
     case "extend": {
       const sbx = await get(rest[0]);
       const seconds = Number(need(rest[1], "seconds, e.g. runtime sandboxes extend <id> 600"));

@@ -7,7 +7,7 @@ module WithRuntime
     def initialize(sandbox)
       @lock, @credit, @send_lock = Mutex.new, ConditionVariable.new, Mutex.new
       @streams, @next, @sent, @credited, @closed = {}, 1, 0, 0, false
-      @socket = WebSocket.new(sandbox.transport, sandbox.path("/tunnel"))
+      @socket = ResumableSocket.new(sandbox.transport, sandbox.path("/tunnel"))
       deadline = @socket.now + @socket.timeout
       loop do
         frame = @socket.read(deadline)

@@ -30,7 +30,7 @@ type tunnelMessage struct {
 // Tunnel multiplexes TCP connections over one authenticated sandbox WebSocket.
 // It is unrelated to Client.Networks.WireGuard, which manages an account's WireGuard network.
 type Tunnel struct {
-	socket         *websocket
+	socket         *resumable
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mu             sync.Mutex
@@ -47,7 +47,7 @@ type Tunnel struct {
 // OpenTunnel opens a session bounded by ctx. Close it when no longer needed.
 func (s *Sandbox) OpenTunnel(ctx context.Context) (*Tunnel, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	ws, err := s.c.websocket(ctx, s.path("/tunnel"), nil)
+	ws, err := s.c.resumable(ctx, s.path("/tunnel"), nil)
 	if err != nil {
 		cancel()
 		return nil, err

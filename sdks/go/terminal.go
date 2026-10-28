@@ -35,7 +35,7 @@ type TerminalOptions struct {
 // Terminal is an interactive terminal over a WebSocket: Write types, Read
 // reads what the terminal prints. Use one reader and one writer at a time.
 type Terminal struct {
-	socket    *websocket
+	socket    *resumable
 	processID string
 	mu        sync.Mutex
 	exitCode  *int
@@ -49,7 +49,7 @@ func (s *Sandbox) Terminal(ctx context.Context, opts *TerminalOptions) (*Termina
 		opts = &TerminalOptions{}
 	}
 	query := setQuery(url.Values{}, "cols", itoa(opts.Cols), "rows", itoa(opts.Rows), "command", opts.Command, "cwd", opts.Cwd, "user", opts.User, "processId", opts.ProcessID)
-	socket, err := s.c.websocket(ctx, s.path("/terminal"), query)
+	socket, err := s.c.resumable(ctx, s.path("/terminal"), query)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +160,7 @@ type websocket struct {
 	reader      *bufio.Reader
 	mu          sync.Mutex
 	closed      bool
+	code        int // the close code the server sent, once it closed
 	closeOnce   sync.Once
 	stopContext func() bool
 }
@@ -284,6 +285,11 @@ func (w *websocket) read() (byte, []byte, error) {
 		case opPong:
 			continue
 		case opClose:
+			if len(payload) >= 2 {
+				w.mu.Lock()
+				w.code = int(binary.BigEndian.Uint16(payload))
+				w.mu.Unlock()
+			}
 			_ = w.Close()
 			return 0, nil, io.EOF
 		case opContinuation:
@@ -295,6 +301,13 @@ func (w *websocket) read() (byte, []byte, error) {
 			return kind, message, nil
 		}
 	}
+}
+
+// closeCode is the code the server closed with, 0 before or without one.
+func (w *websocket) closeCode() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.code
 }
 
 // Closing the underlying connection first also interrupts a blocked write;

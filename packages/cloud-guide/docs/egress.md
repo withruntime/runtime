@@ -79,16 +79,21 @@ Some sites respond to an address that sends them too much traffic with a CAPTCHA
 or a block, for everyone on that address: Google, Bing, DuckDuckGo, Yahoo,
 Yandex, Baidu, Amazon, LinkedIn, Instagram, Facebook, X, TikTok, Zillow,
 Indeed, Walmart, eBay, Booking.com and Airbnb. Your sandboxes on a server
-share its outbound address with other customers, so an account's sandboxes on
-one server open up to 300 new connections an hour to each of these sites from
-it, after a burst of 100. Past that, the server sends them from an address of
-its own for heavy traffic when it has one, and otherwise refuses them with
-`429 Too Many Requests`, `Retry-After: 12` and the header
-`X-Runtime-Egress: rate-limited:guarded-site`. An account that sends from the
-addresses kept for scrapers reaches these sites only from those: on a server
-that has none, its connections to them are refused the same way, with
-`Retry-After: 600`, and its new sandboxes go first to servers that have one.
-A [dedicated outbound address](./networking#dedicated-outbound-addresses) is
+share its outbound addresses with other customers, so each address a server
+sends from for more than one account opens at most 150 new connections an
+hour to each of these sites, after a burst of 50, for all accounts together,
+and at most 100 an hour, after a burst of 30, for any one account. Past its
+limit on its usual address, an account's connections leave from the server's
+address for heavy traffic when it has one, under the same limits there.
+Otherwise they are refused with `429 Too Many Requests`, the header
+`X-Runtime-Egress: rate-limited:guarded-site` and `Retry-After: 36` (the
+account's limit) or `Retry-After: 24` (the address's). An account that sends
+from the addresses kept for scrapers reaches these sites only from those,
+under the same limits: on a server that has none, its connections to them are
+refused the same way, with `Retry-After: 600`, and its new sandboxes go first
+to servers that have one. Reuse connections (HTTP keep-alive) to do more
+within the limits. A
+[dedicated outbound address](./networking#dedicated-outbound-addresses) is
 yours alone and never counted.
 
 ## Signed requests

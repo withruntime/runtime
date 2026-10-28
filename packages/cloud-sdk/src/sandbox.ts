@@ -33,6 +33,7 @@ import type {
 } from "./types.js";
 import { sandboxFactories, type SandboxExtensions } from "./products/index.js";
 import { Tunnel, type PortForward } from "./tunnel.js";
+import { ResumableSocket } from "./resumable.js";
 import { pause } from "./wait.js";
 import type { StreamUploadSource } from "./file-source.js";
 import { Machine, machinePage, requestOnly, type MachineProduct } from "./machine.js";
@@ -405,15 +406,24 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
       onData?: (data: Uint8Array) => void;
     } = {},
   ): Promise<Terminal> {
-    const socket = await this.#t.websocket(`/v1/sandboxes/${enc(this.id)}/terminal`, {
-      cols: options.cols,
-      rows: options.rows,
-      command: options.command,
-      cwd: options.cwd,
-      user: options.user,
-      processId: options.processId,
-    });
-    return Terminal.open(socket, options.onData);
+    const path = `/v1/sandboxes/${enc(this.id)}/terminal`;
+    // Resumes across a restart of the API with nothing lost (resumable.ts).
+    const socket = await ResumableSocket.open((resume) =>
+      this.#t.websocket(
+        path,
+        resume
+          ? { resume }
+          : {
+              cols: options.cols,
+              rows: options.rows,
+              command: options.command,
+              cwd: options.cwd,
+              user: options.user,
+              processId: options.processId,
+            },
+      ),
+    );
+    return Terminal.open(socket as unknown as WebSocket, options.onData);
   }
 
   /** A tunnel into the sandbox: TCP connections to any port on its loopback,
@@ -421,7 +431,11 @@ export class Sandbox extends Machine<SandboxInfo, SandboxSettings, DeletedSandbo
    * internet. `tunnel.connect(5432)` gives one connection;
    * `tunnel.forward(5432)` listens locally (Node and Bun). */
   async tunnel(): Promise<Tunnel> {
-    return Tunnel.open(await this.#t.websocket(`/v1/sandboxes/${enc(this.id)}/tunnel`));
+    const path = `/v1/sandboxes/${enc(this.id)}/tunnel`;
+    const socket = await ResumableSocket.open((resume) =>
+      this.#t.websocket(path, resume ? { resume } : undefined),
+    );
+    return Tunnel.open(socket as unknown as WebSocket);
   }
 
   /** Listens on a local port (the same number unless `localPort` says, 0 for

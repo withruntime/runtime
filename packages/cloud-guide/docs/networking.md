@@ -254,6 +254,16 @@ runtime networks private off                    # open connections are cut withi
   sandbox (10800, 10802 and 10853). TCP only.
 - **A paused sandbox wakes** when a connection reaches it. A stopped one does
   not: start it first.
+- **A new sandbox is reachable immediately** after it starts running, and can
+  connect to your other sandboxes right away.
+- **Open connections:** up to 256 to any one sandbox and 1,024 across your
+  account. Past either, new connections return `429` with
+  `X-Runtime-Egress: private-network-rate-limited`.
+- **New connections:** up to 1,000 a second across your account (2,000 at
+  once) and 500 a second to any one sandbox (1,000 at once). A connection
+  over the rate waits for its turn. It returns `429` with
+  `X-Runtime-Egress: private-network-rate-limited` only when its turn is more
+  than 10 seconds away.
 - **A kept top-up, for paid sandboxes.** An account without one is told so when
   it turns this on. A connection from a sandbox without credit is refused with
   `private-network-paid-only`. A sandbox with its internet off also reaches no

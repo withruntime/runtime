@@ -36,6 +36,7 @@ from ._http import NoAnswerStarted, Origin, default_base_url, reachable
 from ._proxy import describe as describe_route
 from ._renamed import renamed
 from ._unpack import Unpacker
+from ._ws import AsyncResumableWebSocket
 from ._ws import AsyncWebSocket as WebSocket
 from ._tunnel import AsyncPortForward
 from ._trace import trace_headers
@@ -497,10 +498,14 @@ class _Transport:
         finally:
             await hold.lend()
 
-    async def websocket(self, path: str, query: dict[str, Any]) -> WebSocket:
-        socket = WebSocket(self.origin, path + _query(query), {
-            "Authorization": "Bearer " + self._api_key(), "X-Runtime-Client": f"sdk-python/{VERSION}"})
-        return await open_ws(socket)
+    async def websocket(self, path: str, query: dict[str, Any]) -> AsyncResumableWebSocket:
+        """A terminal's or tunnel's WebSocket. It resumes across a restart of
+        the API with nothing lost or repeated (_ws.py)."""
+        async def connect(resume: Optional[str]) -> WebSocket:
+            socket = WebSocket(self.origin, path + _query({"resume": resume} if resume else query), {
+                "Authorization": "Bearer " + self._api_key(), "X-Runtime-Client": f"sdk-python/{VERSION}"})
+            return await open_ws(socket)
+        return await AsyncResumableWebSocket(connect).connect()
 
     async def close(self) -> None:
         await self._http.close()
@@ -964,7 +969,7 @@ class AsyncProcess:
 class AsyncTerminal:
     """An interactive terminal over a WebSocket: write() types, recv() reads."""
 
-    def __init__(self, socket: WebSocket, process_id: Optional[str]) -> None:
+    def __init__(self, socket: AsyncResumableWebSocket, process_id: Optional[str]) -> None:
         self._socket, self.process_id = socket, process_id
         self.exit_code: Optional[int] = None
 
