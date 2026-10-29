@@ -85,6 +85,10 @@ type SandboxInfo struct {
 		ExitCode  *int   `json:"exitCode,omitempty"`
 		ReadyMs   *int64 `json:"readyMs,omitempty"`
 	} `json:"start,omitempty"`
+	// Unreachable is set only while it is running and does not respond:
+	// since when, and why (agent_not_answering, disk_stalled or
+	// host_quarantined). Nil otherwise.
+	Unreachable *Unreachable `json:"unreachable,omitempty"`
 	// Raw is the whole answer, for fields newer than this SDK.
 	Raw json.RawMessage `json:"-"`
 }
@@ -427,4 +431,10 @@ type KeyCredit struct {
 	// AddedBy is "owner", or "agent" when no person pays and the agent adds
 	// credit itself with a top-up.
 	AddedBy string `json:"addedBy"`
+}
+
+// Unreachable says since when a running sandbox has not responded, and why.
+type Unreachable struct {
+	Since  time.Time `json:"since"`
+	Reason string    `json:"reason"`
 }

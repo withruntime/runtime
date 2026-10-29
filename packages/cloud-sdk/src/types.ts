@@ -58,6 +58,15 @@ export type SandboxInfo = {
    * (its `timeoutSeconds` ran out). A server before 4 October 2026 sent
    * `lease_expired` for `time_limit`. */
   stopReason: string | null;
+  /** Present only while it is running and does not respond: since when, and
+   * why. `agent_not_answering` and `host_quarantined` clear on a restart;
+   * `disk_stalled` clears when its server finishes the write. The events
+   * `sandbox.unreachable` and `sandbox.reachable` mark its start and end.
+   * Absent from older servers. */
+  unreachable?: {
+    since: string;
+    reason: "agent_not_answering" | "disk_stalled" | "host_quarantined";
+  };
   pausedAt: string | null;
   pausedExpiresAt: string | null;
   chargedMicros: number;

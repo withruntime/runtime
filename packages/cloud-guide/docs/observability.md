@@ -104,6 +104,8 @@ Every lifecycle change of a sandbox, snapshot or volume is an event. Events are 
 | `sandbox.wake_failed`        | A wake did not complete; the sandbox is paused or stopped                                                    |
 | `sandbox.host_unreachable`   | Its server has not responded for 35 s, so what runs there is frozen; `host.unreachableSince` says since when |
 | `sandbox.host_reachable`     | Its server responds again. The sandbox runs on as it was                                                     |
+| `sandbox.unreachable`        | It is running but does not respond; `unreachable.reason` says why and `unreachable.since` since when         |
+| `sandbox.reachable`          | It responds again; `unreachable.since` and `unreachable.reachableAt` say from when to when                   |
 | `sandbox.recovered`          | Its server was lost and it is back; `recovery` says from when                                                |
 | `sandbox.recovery_failed`    | Its server was lost and it cannot come back; `recovery.reason` says why                                      |
 | `sandbox.files.changed`      | Files changed under a watch that sends to webhooks                                                           |
@@ -211,6 +213,32 @@ Each event carries the resource as it was:
       "inCommand": true,
       "at": "2026-10-27T22:39:12.000Z",
       "message": "The sandbox ran out of memory, and Linux's out-of-memory killer ended rustc (pid 4242, using 2048 MiB). Give the sandbox more memory (memoryMiB) or make the program use less."
+    }
+  }
+}
+```
+
+`sandbox.unreachable` is sent when a running sandbox stops responding, within about 5 seconds. Its server checks Runtime's agent in each sandbox every 2 seconds. While it lasts, `GET /v1/sandboxes/{id}` returns the same `unreachable` object and `state` stays `running`. `sandbox.reachable` is sent when it responds again, with `since` and `reachableAt`. `reason` is one of:
+
+| `reason`              | What happened                                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_not_answering` | Runtime's agent in the sandbox does not respond. Its processes may still run. Restart the sandbox if this lasts                  |
+| `disk_stalled`        | Its server has not finished a write to the sandbox's disk for over 5 seconds. New commands return 503; running commands continue |
+| `host_quarantined`    | Its server took it out of running after a fault. Its disk is kept. Restart the sandbox                                           |
+
+```json
+{
+  "type": "sandbox.unreachable",
+  "data": {
+    "sandbox": {
+      "id": "7f3a2c10-58d4-4b9e-9c61-0a2b3c4d5e6f",
+      "state": "running",
+      "memoryMiB": 32768
+    },
+    "unreachable": {
+      "since": "2026-10-29T06:08:11.000Z",
+      "reason": "disk_stalled",
+      "message": "The sandbox's server has not finished a write to its disk for over 5 seconds, so new commands return 503. Commands already running continue."
     }
   }
 }

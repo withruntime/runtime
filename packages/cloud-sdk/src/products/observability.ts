@@ -71,6 +71,8 @@ export type WebhookEventType =
   | "sandbox.wake_failed"
   | "sandbox.host_unreachable"
   | "sandbox.host_reachable"
+  | "sandbox.unreachable"
+  | "sandbox.reachable"
   | "sandbox.recovered"
   | "sandbox.recovery_failed"
   | "sandbox.files.changed"

@@ -35,6 +35,8 @@
  * rejoin or monitor, hosts one host, sha main's commit whose scripts it runs,
  * and check what it is to do: plain/<OVH service> (OVH's installer),
  * encrypted/<OVH service> (OVH's rescue system and encrypted-install.sh),
+ * image/<OVH service> (OVH's rescue system and the host image's own
+ * installer, the image the signed image record names: signed/image-cell),
  * monitor/<OVH service> (OVH's monitoring back on), or rejoin (every
  * controller) or rejoin/<controller> (that one alone).
  */
@@ -67,15 +69,17 @@ export const prebuildSlot = (n: number) => `prebuild-${n}`;
 
 /** The target every host order is signed for: the follower that runs them. */
 export const ORDER_TARGET = "reinstall";
-export const ORDER_ACTIONS = ["reinstall", "rejoin", "monitor"] as const;
+export const ORDER_ACTIONS = ["reinstall", "rejoin", "monitor", "access"] as const;
 export type OrderAction = (typeof ORDER_ACTIONS)[number];
 /** An OVH service name, as reverse DNS gives it (src/ovh-reinstall.ts SERVICE). */
 const OVH_SERVICE = "ns[0-9]+\\.ip-[0-9]+-[0-9]+-[0-9]+\\.(us|eu|net)";
 /** What each order's check field may say. */
 export const ORDER_CHECK: Record<OrderAction, RegExp> = {
-  reinstall: new RegExp(`^(plain|encrypted)/${OVH_SERVICE}$`),
+  reinstall: new RegExp(`^(plain|encrypted|image)/${OVH_SERVICE}$`),
   monitor: new RegExp(`^monitor/${OVH_SERVICE}$`),
   rejoin: /^rejoin(\/vin-\d+)?$/,
+  /** The way into a host image that will not serve (engines/host access.rs). */
+  access: /^access\/(logs|restart-engine|boot-other)$/,
 };
 /** For the follower of host orders alone: any one host, which it checks. */
 export const ANY_HOST: unique symbol = Symbol("any host");
@@ -90,7 +94,7 @@ export type Signed = {
    * (agents/ship-it.ts shipRefusal), never a follower. card: an ask, never
    * a record: the signer posts its own ship card for that head
    * (agents/release-signer.py card) and signs nothing. */
-  action: "release" | "unhold" | "prebuild" | "ship" | "card" | OrderAction;
+  action: "release" | "unhold" | "prebuild" | "ship" | "card" | "image" | OrderAction;
   target: string;
   sha: string;
   tree: string;
@@ -200,6 +204,58 @@ export function verify(
   } catch (error) {
     return { ok: false, why: `the record could not be checked: ${String(error)}` };
   }
+}
+
+/** The image record (engines/host/crates/image record.rs): what makes a
+ * host image a release. Signed by the release signer for target cell on
+ * Marc's image approval (agents/approve-release.ts --image); its own header,
+ * so no record of one kind reads as the other. Asked as action image, check
+ * image/<the manifest's SHA-256>. */
+export const IMAGE_HEADER = "runtime-image v1";
+const IMAGE_FIELDS = ["target", "sha", "image", "hosts", "nonce", "at"] as const;
+export type ImageRecord = Record<(typeof IMAGE_FIELDS)[number], string>;
+
+/** Whether `text` is an image record signed with `key` for `want`, no older
+ * than ten minutes at `now` (a host checks its own age again at install). */
+export function verifyImage(
+  text: string | undefined,
+  key: KeyObject | undefined,
+  want: { target: string; sha: string; image: string; hosts: string },
+  now: Date,
+): { ok: true; signed: ImageRecord } | { ok: false; why: string } {
+  if (!key) return { ok: false, why: "no signing key here (release-sign.key)" };
+  // Read exactly as the host reads it (engines/host record.rs): one final
+  // newline, one spelling of the signature, one form of the time.
+  const lines = (text ?? "").replace(/\n$/, "").split("\n");
+  if (lines.length !== IMAGE_FIELDS.length + 2 || lines[0] !== IMAGE_HEADER)
+    return { ok: false, why: "not an image record" };
+  const fields: Record<string, string> = {};
+  for (const [i, f] of IMAGE_FIELDS.entries()) {
+    const line = lines[i + 1]!;
+    if (!line.startsWith(`${f}=`)) return { ok: false, why: "not an image record" };
+    fields[f] = line.slice(f.length + 1);
+  }
+  const sig = /^sig=([A-Za-z0-9+/=]{80,100})$/.exec(lines.at(-1)!)?.[1];
+  const body = lines.slice(0, -1).join("\n");
+  if (
+    !sig ||
+    Buffer.from(sig, "base64").toString("base64") !== sig ||
+    !edVerify(null, Buffer.from(body), key, Buffer.from(sig, "base64"))
+  )
+    return { ok: false, why: "forged: its signature is not the hub's" };
+  const signed = fields as ImageRecord;
+  for (const f of ["target", "sha", "image", "hosts"] as const)
+    if (signed[f] !== want[f])
+      return { ok: false, why: `signed for ${f} ${signed[f]}, not ${want[f]}` };
+  const at = Date.parse(signed.at);
+  if (
+    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(signed.at) ||
+    Number.isNaN(at) ||
+    at > now.getTime() + SIGNED_FUTURE_MS ||
+    now.getTime() - at > SIGNED_MAX_AGE_MS
+  )
+    return { ok: false, why: `signed at ${signed.at}, not in the last ten minutes` };
+  return { ok: true, signed };
 }
 
 /** The hub's private key: a PEM file only its owner reads. Anything else,

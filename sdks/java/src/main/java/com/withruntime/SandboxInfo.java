@@ -114,6 +114,15 @@ public final class SandboxInfo extends JsonObject {
     return getString("stopReason");
   }
 
+  /**
+   * Present only while it is running and does not respond: {@code since} (when it stopped
+   * responding) and {@code reason} ({@code agent_not_answering}, {@code disk_stalled} or {@code
+   * host_quarantined}). Null otherwise.
+   */
+  public JsonObject unreachable() {
+    return getObject("unreachable");
+  }
+
   public long chargedMicros() {
     return getLong("chargedMicros", 0);
   }

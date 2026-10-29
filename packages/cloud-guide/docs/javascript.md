@@ -8,7 +8,7 @@ One client for every Runtime Cloud product. It runs on Node 22.12 or later, and 
 npm install withruntime
 ```
 
-This guide describes `withruntime` 0.47.0. Run `npm ls withruntime` to see the version you have. If a method named here is missing from yours, you have an older version. Run `npm install withruntime@latest` to update it.
+This guide describes `withruntime` 0.48.0. Run `npm ls withruntime` to see the version you have. If a method named here is missing from yours, you have an older version. Run `npm install withruntime@latest` to update it.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that variable is set. Otherwise, it uses the connection this machine saved. Any `npx withruntime` command creates that connection, with one browser approval.
 
