@@ -100,6 +100,8 @@ var waitsForRoom = map[string]bool{
 	"no_capacity":        true,
 	// A volume whose last sandbox is stopping: free within seconds.
 	"volume_releasing": true,
+	// A paused sandbox moving to another server: wakes once its copy is made.
+	"sandbox_moving": true,
 }
 
 // Retryable reports whether retrying this exact call (with the same

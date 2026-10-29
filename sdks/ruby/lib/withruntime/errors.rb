@@ -19,7 +19,7 @@ module WithRuntime
     # account without credit stops.
     PASSING = %w[no_capacity no_credit_running_limit no_credit_total_limit].freeze
     # Refusals of a create that clear when a sandbox stops or a host frees room.
-    WAITS_FOR_ROOM = %w[no_credit_running_limit no_credit_total_limit no_credit_domain_limit no_credit_capacity_full quota_exceeded account_share_full no_capacity volume_releasing].freeze
+    WAITS_FOR_ROOM = %w[no_credit_running_limit no_credit_total_limit no_credit_domain_limit no_credit_capacity_full quota_exceeded account_share_full no_capacity volume_releasing sandbox_moving].freeze
     # Refusals that say nothing ran (a guest still busy, the API briefly
     # busy, the caller's rate): sent again past max_retries, with growing
     # waits, until the call's deadline.

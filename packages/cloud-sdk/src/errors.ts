@@ -52,6 +52,9 @@ export const WAITS_FOR_ROOM: ReadonlySet<string> = new Set([
   // A volume whose last sandbox is stopping: free once the stop lets go of
   // its disk, up to about a minute (measured 50 to 60 s, 6 October 2026).
   "volume_releasing",
+  // A paused sandbox moving to another server: its wake goes once its pause
+  // is copied, a minute or two.
+  "sandbox_moving",
 ]);
 
 export class RuntimeError extends Error {

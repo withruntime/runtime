@@ -29,7 +29,7 @@ _PASSING = frozenset({"no_capacity", "no_credit_running_limit", "no_credit_total
 # with the same key and input, for up to wait_for_capacity seconds.
 WAITS_FOR_ROOM = frozenset({"no_credit_running_limit", "no_credit_total_limit", "no_credit_domain_limit",
                             "no_credit_capacity_full", "quota_exceeded", "account_share_full", "no_capacity",
-                            "volume_releasing"})
+                            "volume_releasing", "sandbox_moving"})
 
 
 class RuntimeError(Exception):  # noqa: A001 - the SDK's own base error, as in 0.1.0

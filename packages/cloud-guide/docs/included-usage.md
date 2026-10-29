@@ -64,7 +64,10 @@ sandboxes have paid limits. They still use the free usage first
   out together. While a server's link is full, a paid sandbox gets
   {{paid-share}} a sandbox without credit's share of it.
 - A sandbox without credit that keeps trying to reach internal or cloud
-  metadata addresses has its network cut, and the account is suspended. One that
+  metadata addresses has its network cut, and the account is suspended. So does
+  a sandbox of an account that has never paid that connects to a mining pool,
+  scans ports, or reaches very many different destinations in a few minutes, as
+  a scan or a sweep does. One that
   holds its CPUs flat out for 30 minutes is slowed to half a core for the rest
   of its run.
 - Previews of a sandbox without credit are private. A link carries its token.

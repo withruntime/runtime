@@ -52,7 +52,8 @@ public class RuntimeCloudException extends RuntimeException {
           "quota_exceeded",
           "account_share_full",
           "no_capacity",
-          "volume_releasing");
+          "volume_releasing",
+          "sandbox_moving");
 
   /**
    * Refusals that say nothing ran (the guest, the API or the caller's rate was busy): sent again

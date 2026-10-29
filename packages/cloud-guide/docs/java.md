@@ -10,11 +10,11 @@ JDK: no HTTP library, no JSON library. It is a named module,
 <dependency>
   <groupId>com.withruntime</groupId>
   <artifactId>withruntime</artifactId>
-  <version>0.30.0</version>
+  <version>0.30.1</version>
 </dependency>
 ```
 
-With Gradle: `implementation("com.withruntime:withruntime:0.30.0")`.
+With Gradle: `implementation("com.withruntime:withruntime:0.30.1")`.
 
 **The client finds its key by itself.** It uses `RUNTIME_API_KEY` when that is
 set, and otherwise the connection this machine saved (any `npx withruntime`
