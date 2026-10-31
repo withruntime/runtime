@@ -212,15 +212,24 @@ export function verify(
  * so no record of one kind reads as the other. Asked as action image, check
  * image/<the manifest's SHA-256>. */
 export const IMAGE_HEADER = "runtime-image v1";
+
+/** The only servers a host image built from next may name: the test region
+ * (vin-12) and the servers being emptied for cell 1 (region/servers/
+ * emptying.txt), never one serving customers' sandboxes. The signer holds
+ * the same list in its own code (release-signer.py CELL1_SERVERS) and refuses
+ * any other; what serves customers takes code only from main's release. */
+export const CELL1_SERVERS: readonly string[] = ["vin-12", "vin-5", "vin-15"];
 const IMAGE_FIELDS = ["target", "sha", "image", "hosts", "nonce", "at"] as const;
 export type ImageRecord = Record<(typeof IMAGE_FIELDS)[number], string>;
 
 /** Whether `text` is an image record signed with `key` for `want`, no older
- * than ten minutes at `now` (a host checks its own age again at install). */
+ * than ten minutes at `now` (a host checks its own age again at install).
+ * `want.hosts` is the hosts field exactly, as the signer was asked;
+ * `want.host` one host among them, as the host itself checks (record.rs). */
 export function verifyImage(
   text: string | undefined,
   key: KeyObject | undefined,
-  want: { target: string; sha: string; image: string; hosts: string },
+  want: { target: string; sha: string; image: string } & ({ hosts: string } | { host: string }),
   now: Date,
 ): { ok: true; signed: ImageRecord } | { ok: false; why: string } {
   if (!key) return { ok: false, why: "no signing key here (release-sign.key)" };
@@ -244,9 +253,16 @@ export function verifyImage(
   )
     return { ok: false, why: "forged: its signature is not the hub's" };
   const signed = fields as ImageRecord;
-  for (const f of ["target", "sha", "image", "hosts"] as const)
+  for (const f of ["target", "sha", "image"] as const)
     if (signed[f] !== want[f])
       return { ok: false, why: `signed for ${f} ${signed[f]}, not ${want[f]}` };
+  if (!signed.hosts.split(",").every((h) => CELL1_SERVERS.includes(h)))
+    return { ok: false, why: `signed for hosts ${signed.hosts}, not cell 1's servers alone` };
+  if ("hosts" in want ? signed.hosts !== want.hosts : !signed.hosts.split(",").includes(want.host))
+    return {
+      ok: false,
+      why: `signed for hosts ${signed.hosts}, not ${"hosts" in want ? want.hosts : want.host}`,
+    };
   const at = Date.parse(signed.at);
   if (
     !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(signed.at) ||

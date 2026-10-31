@@ -600,18 +600,19 @@ A live copy is replaced by a copy of the same version in two cases. The first is
 
 `GET /v1/me` says who a key is. It returns `orgId`, `principalId`, `credentialId`, the account's `orgName`, and the `role` of the member who made the key (`owner`, `admin`, `developer` or `billing`). That role limits what the key may do. `GET /v1/usage` shows what the account has and has used. Money is an integer count of microdollars, given as strings (1,000,000 is one dollar). The values are exact, however large:
 
-| Field        | What it is                                                                                          |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| `credited`   | Every credit ever added: purchases and grants                                                       |
-| `spent`      | Settled usage, including what refunds and disputes took back                                        |
-| `expired`    | Credit that expired, or grant credit taken back                                                     |
-| `available`  | What can still be spent, after what running sandboxes are about to use                              |
-| `takenBack`  | The part of `spent` that refunds and disputes took                                                  |
-| `trial`      | Machine time without credit: `{totalMs, usedMs, reservedMs, availableMs, offer, renewsAt}`, or null |
-| `allowances` | This month's free usage, one row per pool, below                                                    |
-| `outbound`   | This month's outbound traffic, below                                                                |
-| `kinds`      | Every resource, however many, a row a kind: `{kind, resources, chargedMicros, heldMicros}`          |
-| `resources`  | The newest hundred resources, with what each used and was charged                                   |
+| Field           | What it is                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `credited`      | Every credit ever added: purchases and grants                                                       |
+| `spent`         | Settled usage, including what refunds and disputes took back                                        |
+| `expired`       | Credit that expired, or grant credit taken back                                                     |
+| `available`     | What can still be spent, after what running sandboxes are about to use                              |
+| `takenBack`     | The part of `spent` that refunds and disputes took                                                  |
+| `trial`         | Machine time without credit: `{totalMs, usedMs, reservedMs, availableMs, offer, renewsAt}`, or null |
+| `freeUsageHold` | Why the account has no free machine time, `{reason, message}`, or null                              |
+| `allowances`    | This month's free usage, one row per pool, below                                                    |
+| `outbound`      | This month's outbound traffic, below                                                                |
+| `kinds`         | Every resource, however many, a row a kind: `{kind, resources, chargedMicros, heldMicros}`          |
+| `resources`     | The newest hundred resources, with what each used and was charged                                   |
 
 Each resource has `resourceId`, `name`, `kind`, `state`, `createdAt`, `vcpu` and `memoryMiB` (null for a kind with no size), `runningSeconds` (the billed running time), `activeCpuSeconds`, `memoryGiBSeconds`, `rates` and `chargedMicros`. `chargedMicros` covers every meter, including outbound traffic. Divide it by `runningSeconds` to get the cost of one second of a run.
 

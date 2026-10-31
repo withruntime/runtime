@@ -347,10 +347,21 @@ type Usage struct {
 	Available string     `json:"available"`
 	TakenBack string     `json:"takenBack"`
 	Trial     *TrialTime `json:"trial"`
+	// FreeUsageHold says why the account has no free machine time, or is nil.
+	FreeUsageHold *FreeUsageHold `json:"freeUsageHold,omitempty"`
 	// Allowances is what the account uses free this calendar month (UTC),
 	// one row per product, drawn before credit and never charged.
 	Allowances []Allowance      `json:"allowances"`
 	Resources  []map[string]any `json:"resources"`
+}
+
+// FreeUsageHold is why an account has no free machine time: Reason is
+// withheld, hosting (opened from a data-center or VPN network), region
+// (opened outside the listed countries), card (opened by email, no card saved
+// yet), no-source or unknown, and Message says it and what starts it.
+type FreeUsageHold struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 // Allowance is one product's free usage this month: Quantity in Unit

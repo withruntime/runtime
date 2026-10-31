@@ -58,9 +58,18 @@ A repository belongs to the account, not to one key. It connects once per accoun
 From then on, these start a check:
 
 - a push to any branch (tags and deletes start nothing);
-- a pull request opened, reopened, pushed to or marked ready for review;
+- a pull request opened, reopened, pushed to, marked ready for review or moved to another base branch;
 - a group of GitHub's merge queue ([GitHub's merge queue](#githubs-merge-queue));
 - a re-run requested on GitHub.
+
+To check only the pull requests into some branches, list them in the production branch's file:
+
+```yaml
+pull_requests:
+  branches: [main]
+```
+
+A pull request into any other branch ends immediately and uses no machine. Its `runtime` run on GitHub reads "Not checked" with the conclusion action required, which never passes a required check. The list is read from the production branch's file, never from the pull request's own, so a pull request cannot skip its own check. When a pull request's base branch changes, it is checked again against the new base. Without the list, every pull request is checked.
 
 A newer push to the same branch or pull request replaces a check still running. Its machines are freed immediately, because the newer commit includes the older one. On the production branch, newer pushes can keep a check from reaching a verdict. Once they have kept it without a verdict for 20 minutes, the check running then is kept and finishes. So merges faster than a check never leave the branch unjudged.
 
@@ -530,6 +539,28 @@ it runs, counts only when the check's machines are set up from the pull
 request's own files. When a warm snapshot of the same `setup` and `cache:` is
 ready, the check's machines are forks of it, set up from the production
 branch's files, and the change's own copy of that file never runs on them.
+
+### Test only what a pull request touches
+
+By default, a pull request runs every test its change reaches, in every package and crate that reads it. To land pull requests sooner, set `tests: touched` in the production branch's file:
+
+```yaml
+pull_requests:
+  tests: touched
+```
+
+A pull request into the production branch then runs only the tests of the packages and crates that hold its changed files. A package is the folder of the nearest `package.json` above a file, and a crate the folder of the nearest `Cargo.toml`. A file in neither belongs to its top-level folder. A step with `inputs` runs when the pull request changes one of its inputs. A step without `inputs` or `split` reads every file, so it runs as before, and so does a step with `reuse: false`. The other tests the change reaches are listed on the `left to main` job. The production branch's check runs them after the pull request merges.
+
+A pull request runs every test its change reaches when it changes any of these files, because they configure every package:
+
+- a file at the repository's root, other than Markdown;
+- a file under any folder whose name starts with a dot;
+- a lockfile or toolchain file in any folder (`Cargo.lock`, `rust-toolchain.toml`, `bun.lock`, `package-lock.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `yarn.lock`);
+- the config file itself.
+
+A step whose `run` names a file the pull request changes runs all its targets that the change reaches. This also applies when the changed file is one the named file reads, such as the script a split step runs its test files with. A split step also runs all its reached targets when the pull request changes a `generated:` program.
+
+A failure that a pull request's check did not run appears in the production branch's check after the merge. Turn on [undo](#undo-a-failing-production-branch) with this setting: CI/CD then finds the commit that broke the branch and reverts it by itself. The default, `tests: reached`, runs every test a change reaches before it merges.
 
 ### Generated files
 

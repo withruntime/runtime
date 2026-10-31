@@ -42,10 +42,16 @@ concurrency:
 env:
   # The hub's release signer's public key (/etc/release-signer/release-sign.pub,
   # pinned on vin-1 by agents/install-signer.sh, the host job signer-install,
-  # which prints it). A new signer key means a new line here.
+  # which prints it). There is one signer and one key: install-signer.sh
+  # refuses unless the signer's key equals vin-1's pin
+  # /root/.runtime/release-sign.pub, the file agents/ship-it.ts
+  # SHIP_SIGNER_PUB copies (Marc's approval alone changes it, and the hub
+  # fails while it differs from vin-1's). export.test.ts holds this key to
+  # that pin and to vin-1's SIGN_PIN fingerprint after the 28 October
+  # reinstall (#4554), so a new signer key moves all three together.
   RELEASE_SIGN_PUB: |
     -----BEGIN PUBLIC KEY-----
-    MCowBQYDK2VwAyEAcqHpPZc8FIhBBb7LQZU86rx/QNZHwDZQSm+6tWzx7Ws=
+    MCowBQYDK2VwAyEAS2wWvzFdRso6+YKojbOxO2IwaqpKhIHSpB3vrAval5s=
     -----END PUBLIC KEY-----
   # vin-1's own SDK key (control-fleet checks/sdks.rs), whose records name
   # CI/CD's pass of the commit, never the hub's full check. Empty: none

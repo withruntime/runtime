@@ -6,9 +6,11 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { connectionOrigins, connectionStore, type SavedConnection } from "../src/credentials";
-import { onFakeClock } from "./fixtures/fake-clock";
 
-onFakeClock();
+/* On the real clock: the lock's waits are real file system work in this
+   process and its children, which the fake clock cannot see, so it jumped
+   through the 30 s lock wait while a holder was still writing and a save
+   failed as busy (main's check, 29 October 2026). Real, the file takes 1.6 s. */
 
 const directories: string[] = [];
 afterEach(async () => {

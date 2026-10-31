@@ -1602,9 +1602,12 @@ export async function run(
     );
   }
   if (["browser", "browsers", "desktop", "desktops"].includes(command)) {
-    product = command.endsWith("s") ? command : `${command}s`;
+    // Its own constant: `product` is the module's, and another run in the same
+    // process can change it while the import is awaited.
+    const which = (command.endsWith("s") ? command : `${command}s`) as "browsers" | "desktops";
+    product = which;
     return (await import("./browsers-cli.js")).machineProductCommand(
-      product as "browsers" | "desktops",
+      which,
       rest,
       out,
       () => client(env),
@@ -1814,6 +1817,7 @@ function usageSummary(u: Usage): string {
   ];
   if (micros(u.expired) > 0n) rows.push(["expired or taken back", dollars(micros(u.expired))]);
   if (u.trial) rows.push(["free time", trialLeft(u.trial)]);
+  if (u.freeUsageHold) rows.push(["no free time", u.freeUsageHold.message]);
   if (u.allowances) rows.push(...allowanceRows(u.allowances));
   // Only a data property is an older server's answer. Do not invoke SDK
   // compatibility getters when a server sends neither generation of fields.
@@ -2637,7 +2641,7 @@ async function sandbox(argv: string[], env: NodeJS.ProcessEnv, out: Out): Promis
     case "never-park": {
       // Runtime's own operator only, so not in the help: the release path's
       // sandboxes (the release signer's, the agents' hub) are never parked to
-      // make room (Marc, 28 October 2026). The API refuses it for any other
+      // make room (28 October 2026). The API refuses it for any other
       // organization, and for a key that is not an owner's, an admin's or
       // account-wide (20261028190617_cloud_never_park.sql).
       const args = parse(rest, [], []);

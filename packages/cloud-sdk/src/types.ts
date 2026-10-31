@@ -359,7 +359,9 @@ export type Usage = {
    * milliseconds, or null when it has none. `totalMs` and `usedMs` count free
    * hours given before 5 October 2026 (0 for an account given none);
    * `availableMs` is the larger of those hours left and this month's included
-   * usage, as time at 2 vCPU and 4 GiB. The field keeps its older name. */
+   * usage, as time at 2 vCPU and 4 GiB, after what running sandboxes hold: a
+   * create without credit is refused exactly when it is 0. The field keeps
+   * its older name. */
   trial: {
     totalMs: number;
     usedMs: number;
@@ -373,6 +375,12 @@ export type Usage = {
     /** When the free usage renews: the 1st of next month, 00:00 UTC. */
     renewsAt?: string;
   } | null;
+  /** Why the account has no free machine time, or null: `reason` is
+   * `withheld`, `hosting` (opened from a data-center or VPN network),
+   * `region` (opened outside the listed countries), `card` (opened by email,
+   * no card saved yet), `no-source` or `unknown`, and `message` says it and
+   * what starts it. Absent from an API older than 30 October 2026. */
+  freeUsageHold?: { reason: string; message: string } | null;
   /** What the account uses free this calendar month (UTC), one row per
    * product, drawn before credit and never charged
    * (https://withruntime.com/docs/included-usage). */

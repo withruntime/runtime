@@ -6,7 +6,7 @@
 // is older. Nothing is asked on any other path, in CI, or when
 // RUNTIME_NO_UPDATE_CHECK is set.
 import { envFetch } from "./proxy.js";
-import { VERSION } from "./transport.js";
+import { timeoutSignal, VERSION } from "./transport.js";
 
 export const LATEST_URL = "https://registry.npmjs.org/withruntime/latest";
 const ASK_MS = 1_500;
@@ -36,7 +36,7 @@ export async function outdatedLine(opts: {
   try {
     const response = await (opts.fetch ?? envFetch)(LATEST_URL, {
       headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(opts.timeoutMs ?? ASK_MS),
+      signal: timeoutSignal(opts.timeoutMs ?? ASK_MS),
     });
     if (!response.ok) return "";
     const latest = ((await response.json()) as { version?: unknown }).version;

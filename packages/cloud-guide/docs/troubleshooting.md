@@ -135,7 +135,10 @@ that credit, with nothing to change. An account with neither is refused with
 `included_usage_used_up` until the 1st (UTC). See how much is left with
 `npx withruntime usage`, or with `GET /v1/usage` or `GET /v1/limits`.
 `trial.availableMs` is what a new sandbox without credit can still use, in
-milliseconds. `allowances` shows what each pool has left this month. See
+milliseconds, after what running sandboxes hold; a create is refused exactly
+when it is 0. `allowances` shows what each pool has left this month. When
+the account has no free machine time at all, `freeUsageHold` says why, and
+the refusal's `details.reason` names the same rule. See
 [free usage](./included-usage).
 
 ## A sandbox's `env`, stop, delete or image switch is refused

@@ -1,7 +1,7 @@
 # Free usage
 
 Every account gets free usage, with no card, after a verified sign-in. It is
-{{included-machine}}. An account that has never paid gets the machine time
+{{included-machine}} ([by region](#free-usage-by-region)). An account that has never paid gets the machine time
 **once, across its first 30 days**. After that it gets none until it adds credit. An
 account that has paid (bought credit) gets it **every calendar month**. Saved
 copies and disks are monthly for every account:
@@ -29,6 +29,27 @@ copies and disks are monthly for every account:
   address, or a VPN company's) gets its free usage once it adds credit,
   not before. Accounts are made in bulk from those networks. An account opened
   from a home, office or mobile network gets it at sign-in, as above.
+
+## Free usage by region
+
+In the countries below, free usage is {{included-machine}}, as above. An
+account opened with Google starts it with no card. An account opened by
+email starts it once its owner adds a card under **Auto top-up** on
+**Usage & billing**: your bank checks the card, and Runtime does not charge
+it unless you turn auto top-up on. Each card starts free usage for one
+account. In other regions, machine time starts when the account buys credit,
+and buying credit unlocks the full free usage every month, in every region.
+Saved copies and disks are the same everywhere.
+
+Andorra, Australia, Austria, Belgium, Canada, Croatia, Cyprus, the Czech
+Republic, Denmark, Estonia, Finland, France, Germany, Greece, Hong Kong,
+Iceland, Ireland, Israel, Italy, Japan, Korea, Latvia, Lithuania, Luxembourg,
+Macao, Malta, the Netherlands, New Zealand, Norway, Portugal, Puerto Rico, San
+Marino, Singapore, Slovakia, Slovenia, Spain, Sweden, Switzerland, Taiwan, the
+United Kingdom and the United States.
+
+The region is where the account was opened from; for an account opened before
+29 October 2026, where its first visit to withruntime.com came from.
 
 ## Without credit
 
@@ -91,6 +112,8 @@ sandboxes have paid limits. They still use the free usage first
 - A [scheduled job](./jobs) does not run without credit. It waits with
   `blockedReason` `credits` until the account holds credit. Once it does,
   each run is a sandbox like any other, and uses the free usage first.
+- A sandbox without credit cannot reach cryptocurrency mining pools, on any
+  port.
 - A sandbox without credit reaches the internet on ports 80 and 443 only.
   Other ports, such as a database's or git over SSH, need a paid sandbox of an
   account with a kept top-up.
@@ -144,8 +167,18 @@ Read it with `npx withruntime usage`, or `GET /v1/usage`:
   never paid; null once it has paid).
 - `trial` is the machine time a new sandbox without credit can still run, in
   milliseconds: `availableMs`, with `offer` (`monthly`, or `hours` for an
-  account given free hours before 5 October 2026) and `renewsAt`. The field
-  keeps its older name, so code that reads it goes on working.
+  account given free hours before 5 October 2026) and `renewsAt`. It counts
+  what running sandboxes hold until they end. A create without credit is
+  refused with `included_usage_used_up` exactly when `availableMs` is 0. The
+  field keeps its older name, so code that reads it goes on working.
+- `freeUsageHold` says why the account has no free machine time, or is null.
+  `reason` is `hosting` (opened from a data-center or VPN network), `region`
+  (opened outside the countries listed [above](#free-usage-by-region)),
+  `card` (opened by email, with no card saved yet), `withheld` (under
+  review), `no-source` or `unknown`. `message` says the same in a sentence,
+  with what starts the free usage. While it is set, the account has no free
+  machine time (`trial` is null or its `availableMs` is 0), and a refused
+  create's `details.reason` is the same `reason`.
 - `startupIncluded` lists what [Runtime for Startups](https://withruntime.com/startups)
   includes for an accepted startup, one row per product.
   `machine-cpu` and `machine-memory` have `period` `once`: `quantity`,
