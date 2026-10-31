@@ -26,6 +26,11 @@ module WithRuntime
     # +sbx.info.placement+ is an opaque tag for its server: the same tag means
     # the same server.
     #
+    # +evictable: true+ lets Runtime delete the sandbox once it has been paused
+    # or stopped for at least 15 minutes and its server needs the disk, the
+    # one idle longest first; a running one is never deleted for it. For work
+    # you can recreate, such as build caches and CI machines.
+    #
     # +secrets: [name, ...]+ is the egress secrets this sandbox may use, by
     # name: only those of your egress secrets that would otherwise reach it.
     # +[]+ is none; leave it out for every secret that reaches it. Fixed for

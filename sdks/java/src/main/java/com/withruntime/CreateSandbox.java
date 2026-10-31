@@ -139,6 +139,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
   }
 
   /**
+   * When true, Runtime may delete the sandbox once it has been paused or stopped for at least 15
+   * minutes and its server needs the disk, the one idle longest first; a running one is never
+   * deleted for it. For work you can recreate, such as build caches and CI machines.
+   */
+  public CreateSandbox evictable(boolean evictable) {
+    return set("evictable", evictable);
+  }
+
+  /**
    * The egress secrets this sandbox may use, by name: only those of your egress secrets that would
    * otherwise reach it, at most 64. An empty list is none; leave it unset (or pass null) for every
    * secret that reaches it. Fixed for the sandbox's life; a copy of a snapshot may only narrow its

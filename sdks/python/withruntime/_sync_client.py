@@ -517,7 +517,7 @@ class _Transport:
 _CREATE_FIELDS = (
     "name", "labels", "funding", "region", "vcpu", "memory_mib", "disk_mib", "cpu", "cpu_floor_millis",
     "timeout_seconds", "pausable", "idle_pause_seconds", "auto_wake", "user", "lease_seconds", "persistent", "max_total_cost_micros",
-    "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "volumes",
+    "get_or_create", "on_lease_end", "max_cost_micros", "network", "image", "snapshot", "spread_from", "evictable", "volumes",
     "env", "tailscale", "secrets",
 )
 

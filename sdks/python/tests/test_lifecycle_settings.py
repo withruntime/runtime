@@ -104,6 +104,11 @@ class LifecycleSettingsTest(unittest.TestCase):
             runtime.sandboxes.create(spread_from=["a", "b"], wait=False)
         self.assertEqual(self.posts("/v1/sandboxes")[0], {"spreadFrom": ["a", "b"]})
 
+    def test_create_sends_evictable(self):
+        with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
+            runtime.sandboxes.create(evictable=True, wait=False)
+        self.assertEqual(self.posts("/v1/sandboxes")[0], {"evictable": True})
+
     def test_create_sends_secrets_only_when_given(self):
         with Runtime(api_key="rk_test", base_url=self.url, max_retries=0) as runtime:
             runtime.sandboxes.create(secrets=["ANTHROPIC_API_KEY"], wait=False)

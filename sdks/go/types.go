@@ -70,6 +70,9 @@ type SandboxInfo struct {
 	// are on the same server. It is never the server's name, and other
 	// accounts see unrelated tags. Nil before it is placed.
 	Placement *string `json:"placement"`
+	// Evictable is true when Runtime may delete it while paused or stopped
+	// and its server needs the disk.
+	Evictable bool `json:"evictable"`
 	// Secrets is the egress secrets this sandbox may use, by name, fixed at
 	// its creation. Nil is every secret that reaches it; a list page leaves
 	// it out, so it is nil there too.
@@ -189,6 +192,12 @@ type CreateOptions struct {
 	// starts only where that snapshot is kept, so Snapshot with SpreadFrom
 	// naming its server also fails with no_capacity.
 	SpreadFrom []string `json:"spreadFrom,omitempty"`
+
+	// Evictable lets Runtime delete the sandbox once it has been paused or
+	// stopped for at least 15 minutes and its server needs the disk, the one
+	// idle longest first; a running one is never deleted for it. For work
+	// you can recreate, such as build caches and CI machines.
+	Evictable bool `json:"evictable,omitempty"`
 
 	// Secrets is the egress secrets this sandbox may use, by name: only
 	// those of your egress secrets that would otherwise reach it, at most 64.
@@ -330,6 +339,9 @@ type SandboxSettings struct {
 	IdlePauseSeconds *int `json:"idlePauseSeconds,omitempty"`
 	// Persistent keeps it running while credit lasts. Paid only.
 	Persistent *bool `json:"persistent,omitempty"`
+	// Evictable true lets Runtime delete it once it has been paused or
+	// stopped for 15 minutes and its server needs the disk; false keeps it.
+	Evictable *bool `json:"evictable,omitempty"`
 	// MaxTotalCostMicros is a lifetime cap; RemoveMaxTotalCost removes it.
 	MaxTotalCostMicros *int64 `json:"-"`
 	RemoveMaxTotalCost bool   `json:"-"`

@@ -145,6 +145,14 @@ public final class SandboxInfo extends JsonObject {
   }
 
   /**
+   * True when Runtime may delete it once it has been paused or stopped for 15 minutes and its
+   * server needs the disk.
+   */
+  public boolean evictable() {
+    return getBoolean("evictable");
+  }
+
+  /**
    * The egress secrets this sandbox may use, by name, fixed at its creation. Null is every secret
    * that reaches it; a list page leaves it out, so it is null there too.
    */

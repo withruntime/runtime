@@ -38,6 +38,9 @@ export type SandboxInfo = {
   /** Runs until stopped while credit lasts, never paused for idleness or a
    * time limit, and its disk is kept after a stop. */
   persistent?: boolean;
+  /** Runtime may delete it once it has been paused or stopped for 15 minutes
+   * and its server needs the disk. Absent from APIs before 30 October 2026. */
+  evictable?: boolean;
   /** The last exec, file, terminal, desktop or preview request, to within a minute. */
   lastActiveAt?: string | null;
   /** What happens when its time limit, credit or a spending limit ends it. */
@@ -194,6 +197,11 @@ export type CreateSandbox = {
    * snapshot is kept, so a `snapshot` with `spreadFrom` naming its server also
    * answers `no_capacity`. */
   spreadFrom?: string[];
+  /** When true, Runtime may delete the sandbox once it has been paused or
+   * stopped for at least 15 minutes and its server needs the disk, the one
+   * idle longest first; a running one is never deleted for it. For work you
+   * can recreate, such as build caches and CI machines. Default false. */
+  evictable?: boolean;
   /** Up to four volumes: read-write ("rw", one sandbox at a time) or a
    * read-only "snapshot" copy. */
   volumes?: { volumeId: string; path: string; mode?: "rw" | "snapshot" }[];
@@ -513,6 +521,9 @@ export type SandboxSettings = {
    * seconds; null the default again. A running one is renewed by it within
    * seconds. */
   leaseSeconds?: number | null;
+  /** True lets Runtime delete it once it has been paused or stopped for 15
+   * minutes and its server needs the disk; false keeps it. */
+  evictable?: boolean;
   /** Keep it running until you stop it, while credit lasts, and keep its disk
    * after a stop. Paid only. */
   persistent?: boolean;
