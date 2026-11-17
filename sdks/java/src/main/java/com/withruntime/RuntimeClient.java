@@ -25,7 +25,7 @@ import java.util.Map;
  */
 public final class RuntimeClient {
   /** This SDK's version, sent as X-Runtime-Client. */
-  public static final String VERSION = "0.31.0";
+  public static final String VERSION = "0.31.1";
 
   /** Runtime's API. */
   public static final String DEFAULT_BASE_URL = "https://api.withruntime.com";
@@ -74,8 +74,10 @@ public final class RuntimeClient {
       throw new IllegalArgumentException("The Runtime API key contains whitespace.");
     // The saved key is found by the origin as given; the calls go where that origin is reachable
     // from here.
+    String project = builder.project != null ? builder.project : env.get("RUNTIME_PROJECT");
     this.transport =
-        new Transport(builder, key, Credentials.reachable(origin, Credentials::inRuntimeSandbox));
+        new Transport(
+            builder, key, Credentials.reachable(origin, Credentials::inRuntimeSandbox), project);
     this.sandboxes = new Sandboxes(transport);
     this.snapshots = new Snapshots(transport);
     this.images = new Images(transport);
@@ -120,6 +122,7 @@ public final class RuntimeClient {
   public static final class Builder {
     String apiKey;
     String baseUrl;
+    String project;
     Duration timeout = Duration.ofMinutes(5);
     int maxRetries = 4;
     int maxConnections = 32;
@@ -129,7 +132,22 @@ public final class RuntimeClient {
 
     private Builder() {}
 
-    /** The key. Default: RUNTIME_API_KEY, then this machine's saved connection. */
+    /**
+     * The project a key pair's signed requests act in (an {@code rtsk_} key, see {@link Signing}).
+     * Default: RUNTIME_PROJECT.
+     *
+     * @param project the project's ID, 32 hex characters
+     * @return this builder
+     */
+    public Builder project(String project) {
+      this.project = project;
+      return this;
+    }
+
+    /**
+     * The key. Default: RUNTIME_API_KEY, then this machine's saved connection. A bearer key, or a
+     * key pair's {@code rtsk_} secret ({@link Signing#secret}), which signs each request instead.
+     */
     public Builder apiKey(String key) {
       if (key == null || key.isEmpty() || key.chars().anyMatch(Character::isWhitespace))
         throw new IllegalArgumentException("The API key is empty or contains whitespace.");
@@ -374,10 +392,6 @@ public final class RuntimeClient {
 
   public IdentityProducts.SSO sso() {
     return new IdentityProducts.SSO(transport);
-  }
-
-  public IdentityProducts.MCP mcp() {
-    return new IdentityProducts.MCP(transport);
   }
 
   /** Who this key is: organization, agent and credential. */

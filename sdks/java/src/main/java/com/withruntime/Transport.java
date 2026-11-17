@@ -36,6 +36,9 @@ import java.util.function.Function;
 final class Transport {
   final String baseUrl;
   final String apiKey;
+  // An rtsk_ key is a key pair: each attempt is signed for its project (Signing) instead of
+  // sending the key.
+  final String project;
   final Duration timeout;
   final int maxRetries;
   final Duration waitForCapacity;
@@ -43,8 +46,16 @@ final class Transport {
   private final Semaphore slots;
   private final String client;
 
-  Transport(RuntimeClient.Builder options, String apiKey, String baseUrl) {
+  Transport(RuntimeClient.Builder options, String apiKey, String baseUrl, String project) {
     this.apiKey = apiKey;
+    this.project = project;
+    // A malformed key pair's secret, or one with no project, is refused here, before anything is
+    // sent.
+    try {
+      Signing.keyFor(apiKey, project);
+    } catch (Signing.Refused r) {
+      throw refused(r);
+    }
     this.baseUrl = baseUrl;
     this.timeout = options.timeout;
     this.maxRetries = options.maxRetries;
@@ -57,6 +68,10 @@ final class Transport {
             .connectTimeout(Duration.ofSeconds(30));
     ProxySelector proxy = EnvProxy.from(System.getenv());
     if (proxy != null) builder.proxy(proxy);
+    // With no proxy, HTTPS to a name goes through the relay that tries the
+    // name's next address when one does not connect (NextAddress).
+    else if (options.httpClient == null && NextAddress.relayed(URI.create(baseUrl)))
+      builder.proxy(NextAddress.selector(URI.create(baseUrl)));
     this.http = options.httpClient != null ? options.httpClient : builder.build();
   }
 
@@ -223,8 +238,9 @@ final class Transport {
   static boolean neverSent(Throwable failure) {
     Throwable at = failure;
     for (int depth = 0; at != null && depth < 5; depth++, at = at.getCause()) {
-      if (at instanceof java.net.ConnectException || at instanceof java.net.NoRouteToHostException)
-        return true;
+      if (at instanceof java.net.ConnectException
+          || at instanceof java.net.NoRouteToHostException
+          || NextAddress.relayRefused(at)) return true;
     }
     return false;
   }
@@ -340,6 +356,21 @@ final class Transport {
 
   private record Exchange(HttpResponse<InputStream> response, byte[] body) {}
 
+  /**
+   * A request's credential: the bearer, or, for a key pair, a signature over the request as sent,
+   * made for each attempt anew because the server takes a nonce once.
+   */
+  java.util.Map<String, String> authorize(
+      String bearer, String method, URI uri, String idempotencyKey, byte[] body) {
+    if (bearer != null) return java.util.Map.of("Authorization", "Bearer " + bearer);
+    return Signing.authorize(apiKey, project, method, uri, idempotencyKey, body);
+  }
+
+  /** A key the signer refused, as the SDK's error: nothing was sent. */
+  static RuntimeCloudException refused(Signing.Refused r) {
+    return new RuntimeCloudException(r.problem + " Nothing was sent.", "invalid_request", r.hint);
+  }
+
   private Exchange exchange(Call call, boolean whole) {
     boolean write = !call.method.equals("GET");
     String key = write ? (call.key != null ? call.key : UUID.randomUUID().toString()) : null;
@@ -370,7 +401,6 @@ final class Transport {
       HttpRequest.Builder request =
           HttpRequest.newBuilder(uri)
               .timeout(bounded ? answerStart : Duration.ofNanos(left))
-              .header("Authorization", "Bearer " + (call.bearer != null ? call.bearer : apiKey))
               .header("Accept", call.accept)
               .header("X-Runtime-Client", client)
               .header("User-Agent", "withruntime-java/" + RuntimeClient.VERSION)
@@ -379,6 +409,7 @@ final class Transport {
                   payload == null
                       ? HttpRequest.BodyPublishers.noBody()
                       : HttpRequest.BodyPublishers.ofByteArray(payload));
+      authorize(call.bearer, call.method, uri, key, payload).forEach(request::header);
       if (uri.getScheme().equals("http")) request.version(HttpClient.Version.HTTP_1_1);
       if (contentType != null) request.header("Content-Type", contentType);
       if (key != null) request.header("Idempotency-Key", key);

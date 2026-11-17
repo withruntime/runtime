@@ -65,6 +65,8 @@ while :; do
     FAILED) echo "Maven Central refused it: $status" >&2; exit 1 ;;
   esac
   i=$((i + 1))
-  [ "$i" -le 120 ] || { echo "Deployment $id is still $state after 40 minutes." >&2; exit 1; }
-  sleep 20
+  [ "$i" -le 480 ] || { echo "Deployment $id is still $state after 40 minutes." >&2; exit 1; }
+  # Asked every 5 s: at 20 s the job ended up to 20 s after Central had
+  # published (10 s on average).
+  sleep 5
 done

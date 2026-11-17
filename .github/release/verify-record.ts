@@ -83,6 +83,10 @@ export function checkDispatch(input: {
   pub: KeyObject | undefined;
   /** vin-1's own SDK key (RELEASE_SIGN_PUB_VIN1), for its records alone. */
   vin1Pub?: KeyObject | undefined;
+  /** CI/CD's SDK stage on next (engines/land/crates/sdks, runtime-land-sdks;
+   * RELEASE_SIGN_PUB_STAGE): its records name CI/CD's pass and the copy's
+   * own tree, as vin-1's do. */
+  stagePub?: KeyObject | undefined;
   /** The tree of the mirror commit checked out, which every job publishes
    * from (`git rev-parse HEAD^{tree}`). vin-1 signs the tree it read back
    * with its own git from the copy it pushed, so its record publishes only
@@ -118,6 +122,7 @@ export function checkDispatch(input: {
   const keys = [
     { pub: input.pub, check: SDKS_CHECK },
     ...(input.vin1Pub ? [{ pub: input.vin1Pub, check: SDKS_CHECK_VIN1 }] : []),
+    ...(input.stagePub ? [{ pub: input.stagePub, check: SDKS_CHECK_VIN1 }] : []),
   ];
   let why = "no key to check the record with";
   for (const key of keys) {

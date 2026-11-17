@@ -4,39 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "withruntime"
-version = "0.45.0"
-description = "Runtime Cloud: one client (sync and async) for every Runtime product. Sandboxes first."
-readme = "README.md"
+version = "1.0.0"
+description = "Runtime Cloud: Linux sandboxes for agents. The typed client for every verb of the API."
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
-# withruntime.modal's Image.uv_sync and poetry_install read pyproject.toml; tomllib is 3.11+.
-dependencies = ['tomli>=1.1.0; python_version < "3.11"']
-keywords = ["sandbox", "ai-agents", "agents", "microvm", "firecracker", "code-execution", "code-interpreter", "mcp", "llm"]
-
-[project.urls]
-Homepage = "https://withruntime.com"
-Documentation = "https://withruntime.com/docs/python"
-Source = "https://github.com/withruntime/runtime/tree/main/sdks/python"
-Issues = "https://github.com/withruntime/runtime/issues"
+dependencies = ["httpx>=0.27,<1"]
 
 [project.optional-dependencies]
-# Preserve E2B's HTTP file-transfer timeout exception types.
-e2b = ["httpx>=0.27.0,<1.0.0"]
-# withruntime.openai_agents: a sandbox client for the OpenAI Agents SDK's SandboxAgent.
-openai-agents = ["openai-agents>=0.22.3"]
-# withruntime.deepagents: a LangChain Deep Agents sandbox backend.
-deepagents = ["deepagents>=0.7"]
-# withruntime.harbor: an environment for Harbor (Terminal-Bench): -e withruntime.harbor:RuntimeEnvironment.
-harbor = ["harbor>=0.23.0"]
-# withruntime.inspect_ai: sandbox="runtime" for Inspect AI, registered by the entry point below.
-inspect-ai = ["inspect-ai>=0.3.268"]
-
-[project.entry-points.inspect_ai]
-withruntime = "withruntime.inspect_ai"
+keypair = ["cryptography>=42"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["withruntime*"]
-
-[tool.setuptools.package-data]
-withruntime = ["py.typed"]

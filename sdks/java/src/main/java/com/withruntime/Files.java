@@ -356,11 +356,49 @@ public final class Files {
    * Copies a local file or directory in. A directory travels as one gzipped tar to the API's folder
    * routes, and the sandbox's own tar unpacks it as it arrives, making the folder and its parents.
    */
+  private static void unchangedSource(
+      Path local, java.nio.file.attribute.BasicFileAttributes before, long read) {
+    long now = -1;
+    boolean same = false;
+    try {
+      java.nio.file.attribute.BasicFileAttributes after =
+          java.nio.file.Files.readAttributes(
+              local, java.nio.file.attribute.BasicFileAttributes.class);
+      now = after.size();
+      same =
+          read == before.size()
+              && after.size() == before.size()
+              && after.lastModifiedTime().equals(before.lastModifiedTime())
+              && java.util.Objects.equals(after.fileKey(), before.fileKey());
+    } catch (IOException gone) {
+      same = false;
+    }
+    if (!same)
+      throw new RuntimeCloudException(
+          local
+              + " changed while it was being copied: it was "
+              + before.size()
+              + " bytes when the copy began and is "
+              + Math.max(now, 0)
+              + " bytes now. Copy it again once whatever writes it has finished.",
+          "source_changed",
+          null);
+  }
+
   public void upload(Path local, String remote) {
     byte[] archive;
     try {
       if (!java.nio.file.Files.isDirectory(local)) {
-        write(remote, java.nio.file.Files.readAllBytes(local));
+        // A file still being written (a tar, a build) would otherwise go in as the part written so
+        // far: refused if it changed while it was read, and the call fails if it changed while it
+        // was sent (4 November 2026: an 81 MB file arrived as 4.3 MB).
+        java.nio.file.attribute.BasicFileAttributes before =
+            java.nio.file.Files.readAttributes(
+                local, java.nio.file.attribute.BasicFileAttributes.class);
+        byte[] data = java.nio.file.Files.readAllBytes(local);
+        unchangedSource(local, before, data.length);
+        write(remote, data);
+        unchangedSource(local, before, data.length);
         return;
       }
       archive = Tar.packDirectory(local);

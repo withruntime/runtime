@@ -20,6 +20,7 @@ public final class ExecOptions {
   boolean check;
   String idempotencyKey;
   boolean traceFiles;
+  Long maxOutputBytes;
 
   /** The working directory. Default /workspace. */
   public ExecOptions cwd(String cwd) {
@@ -93,6 +94,16 @@ public final class ExecOptions {
    */
   public ExecOptions traceFiles(boolean trace) {
     this.traceFiles = trace;
+    return this;
+  }
+
+  /**
+   * Returns at most this many bytes of each stream; {@link CommandResult#truncated()} and {@link
+   * CommandResult#stdoutBytes()} then say what was cut. Default: every byte, up to 256 MiB of each
+   * stream unless the output streams.
+   */
+  public ExecOptions maxOutputBytes(long bytes) {
+    this.maxOutputBytes = bytes;
     return this;
   }
 }

@@ -5,13 +5,13 @@
 # signed for it. Its source is scripts/public-sdk/publish.yml in Runtime's
 # main repository; export.sh copies it here.
 #
-# The first job checks the record with the signer's public key below, so a
-# run nobody at Runtime asked for publishes nothing. vin-1 starts it without
-# a token: it pushes an annotated tag publish/<commit> on a commit of main,
-# the record its message, with the mirror's deploy key. Then each registry's
-# job, in the environment `release` (main and publish/* tags): it skips a
-# version the registry
-# has and refuses one at or below its newest, then publishes. npm, PyPI and
+# Each registry's job, all at once, first checks the record with the
+# signer's public key below on the commit it checked out, so a run nobody at
+# Runtime asked for publishes nothing. vin-1 starts it without a token: it
+# pushes an annotated tag publish/<commit> on a commit of main, the record
+# its message, with the mirror's deploy key. Each job runs in the
+# environment `release` (main and publish/* tags): it skips a version the
+# registry has and refuses one at or below its newest, then publishes. npm, PyPI and
 # RubyGems trust this workflow by OIDC (no token anywhere); Maven Central and
 # the MCP registry read the environment's secrets. The Go module is released
 # by the hub itself (withruntime/go), never here.
@@ -51,7 +51,7 @@ env:
   # reinstall (#4554), so a new signer key moves all three together.
   RELEASE_SIGN_PUB: |
     -----BEGIN PUBLIC KEY-----
-    MCowBQYDK2VwAyEAS2wWvzFdRso6+YKojbOxO2IwaqpKhIHSpB3vrAval5s=
+    MCowBQYDK2VwAyEA/6LPzbdhAsnnUqOvAVRYS0NraX7kGlGKcWBWJ4Hwv1U=
     -----END PUBLIC KEY-----
   # vin-1's own SDK key (control-fleet checks/sdks.rs), whose records name
   # CI/CD's pass of the commit, never the hub's full check. Empty: none
@@ -60,45 +60,18 @@ env:
     -----BEGIN PUBLIC KEY-----
     MCowBQYDK2VwAyEA3nVBtUcNe1HKAs9BkGjajvTJELj42/r5nvVF5jcxKlo=
     -----END PUBLIC KEY-----
+  # CI/CD's SDK stage on next (engines/land/crates/sdks, runtime-land-sdks),
+  # whose records name CI/CD's pass and the copy's tree, as vin-1's do.
+  # Empty: none pinned, and the stage publishes nothing. Its key is pinned
+  # here only on Marc's approval.
+  RELEASE_SIGN_PUB_STAGE: ""
 
 jobs:
-  verify:
-    name: The signed record
-    # The hub's dispatch on main, or vin-1's tag publish/<commit>: an
-    # annotated tag on a commit of main whose message is the record. Only
-    # the hub's App and deploy keys may make a tag here (the rulesets).
+  npm:
+    name: npm withruntime
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    # The mirror commit checked here is the one every job publishes from.
-    outputs:
-      sha: ${{ steps.record.outputs.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      # The inputs (or the tag) reach the check as data only (the
-      # environment, git), never as code; it refuses a commit that is not 40
-      # hex and a record that is not base64 under 4 KiB before it reads them.
-      - name: Check the record
-        id: record
-        env:
-          COMMIT: ${{ inputs.commit }}
-          RECORD: ${{ inputs.record }}
-        run: |
-          node .github/release/cli.ts record
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  npm:
-    name: npm withruntime
-    needs: [verify]
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -107,12 +80,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      # The signed record, checked in this job on the very commit it
+      # publishes, before anything else reads it: no job waits for another
+      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
+      # (or the tag) reach the check as data only (the environment, git);
+      # it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
       - id: decide
         run: node .github/release/cli.ts decide npm >> "$GITHUB_OUTPUT"
       - if: steps.decide.outputs.do == 'publish'
@@ -125,14 +109,21 @@ jobs:
       - name: Publish
         if: steps.decide.outputs.do == 'publish'
         working-directory: packages/cloud-sdk
-        # Trusted publishing needs npm 11.5.1 or later; provenance comes with it.
+        # Trusted publishing needs npm 11.5.1 or later; provenance comes with
+        # it. The runner's Node 24 carries a newer one (npm 11.19.1 with Node
+        # 24.22.1 on 31 October 2026), so installing 11.6.2 cost 5 s of every
+        # publish and only moved npm back: an older one is refused instead.
         run: |
-          npm install -g npm@11.6.2
+          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)" ||
+            { echo "npm $(npm --version) is older than 11.5.1, which trusted publishing needs." >&2; exit 1; }
           npm publish --provenance --access public --ignore-scripts
 
   mcp:
     name: MCP registry com.withruntime/runtime
-    needs: [verify, npm]
+    needs: [npm]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -140,11 +131,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # The signed record, checked in this job on the very commit it
+      # publishes, before anything else reads it: no job waits for another
+      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
+      # (or the tag) reach the check as data only (the environment, git);
+      # it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
       - id: decide
         run: node .github/release/cli.ts decide mcp >> "$GITHUB_OUTPUT"
       # The registry checks the version on npm, which can take minutes to
@@ -184,7 +186,9 @@ jobs:
   # waitsForFirstUpload).
   pypi:
     name: PyPI ${{ matrix.project }}
-    needs: [verify]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -215,11 +219,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # The signed record, checked in this job on the very commit it
+      # publishes, before anything else reads it: no job waits for another
+      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
+      # (or the tag) reach the check as data only (the environment, git);
+      # it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
       - id: decide
         run: node .github/release/cli.ts decide ${{ matrix.target }} >> "$GITHUB_OUTPUT"
       - name: Build
@@ -233,7 +248,9 @@ jobs:
 
   rubygems:
     name: RubyGems withruntime
-    needs: [verify]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -242,11 +259,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # The signed record, checked in this job on the very commit it
+      # publishes, before anything else reads it: no job waits for another
+      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
+      # (or the tag) reach the check as data only (the environment, git);
+      # it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
       - id: decide
         run: node .github/release/cli.ts decide rubygems >> "$GITHUB_OUTPUT"
       - name: Build
@@ -262,7 +290,9 @@ jobs:
 
   maven:
     name: Maven Central com.withruntime:withruntime
-    needs: [verify]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/publish/'))
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -270,11 +300,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # The signed record, checked in this job on the very commit it
+      # publishes, before anything else reads it: no job waits for another
+      # job's runner (14 s of every run, 27 to 31 October 2026). The inputs
+      # (or the tag) reach the check as data only (the environment, git);
+      # it refuses a commit that is not 40 hex and a record that is not
+      # base64 under 4 KiB before it reads them.
+      - name: Check the record
+        env:
+          COMMIT: ${{ inputs.commit }}
+          RECORD: ${{ inputs.record }}
+        run: node .github/release/cli.ts record
       - id: decide
         run: node .github/release/cli.ts decide maven >> "$GITHUB_OUTPUT"
       - name: Build, sign, upload and publish

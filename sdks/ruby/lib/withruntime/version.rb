@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-module WithRuntime
-  VERSION = "0.28.0"
+module Withruntime
+  VERSION = "1.0.0"
 end

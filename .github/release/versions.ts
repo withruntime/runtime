@@ -55,32 +55,19 @@ function integration(pkg: keyof typeof PYPI_INTEGRATIONS): Spot[] {
 export type Spot = { path: string; pattern: RegExp; count: number };
 
 const POM = /<artifactId>withruntime<\/artifactId>\n\s*<version>([^<]*)<\/version>/g;
-const GUIDE = /This guide describes `withruntime` ([0-9A-Za-z.+-]+?)\.(?=\s)/g;
 
 export const VERSION_FILES: Record<Pkg, Spot[]> = {
   // npm's withruntime, and the MCP registry's com.withruntime/runtime, which
-  // lists the same version from server.json (twice: the server and its npm package).
+  // lists the same version from server.json (twice: the server and its npm
+  // package). Since the generated packages ship (sdks/release.sh), each version
+  // is in the files that package builds from and nowhere else.
   js: [
     { path: "packages/cloud-sdk/package.json", pattern: /^ {2}"version": "([^"]*)",$/gm, count: 1 },
-    {
-      path: "packages/cloud-sdk/src/transport.ts",
-      pattern: /^export const VERSION = "([^"]*)";$/gm,
-      count: 1,
-    },
     { path: "packages/cloud-sdk/server.json", pattern: /^ +"version": "([^"]*)",$/gm, count: 2 },
-    // The guide names the release it describes (packages/cloud-guide/src/content.test.ts).
-    { path: "packages/cloud-guide/docs/javascript.md", pattern: GUIDE, count: 1 },
   ],
   python: [
     { path: "sdks/python/pyproject.toml", pattern: /^version = "([^"]*)"$/gm, count: 1 },
     { path: "sdks/python/withruntime/_version.py", pattern: /^VERSION = "([^"]*)"$/gm, count: 1 },
-    // The package test's own witness, so a bump does not fail it.
-    {
-      path: "sdks/python/tests/test_package_typing.py",
-      pattern: /^VERSION = "([^"]*)"$/gm,
-      count: 1,
-    },
-    { path: "packages/cloud-guide/docs/python.md", pattern: GUIDE, count: 1 },
   ],
   langchain: [
     {

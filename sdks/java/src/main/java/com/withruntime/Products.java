@@ -309,8 +309,9 @@ public final class Products {
      * {@code current} (the plan you hold, or null: planId, name, status, interval, periodStart,
      * periodEnd, trialEndsAt, cancelAtPeriodEnd, nextPlanId, startedAt, addOns, autoUpgrade,
      * planUsage) and {@code plans} (every plan you may choose: id, name, card, feeMicros,
-     * yearlyFeeMicros, bonusMicros, trialDays, firstPeriodDouble, support, collection, contract,
-     * position, included, limits, features, addOns).
+     * yearlyFeeMicros, bonusMicros, includedMicros, yearlyOnly, trialDays, trialUsageMicros,
+     * firstPeriodDouble, support, collection, contract, position, included, limits, features,
+     * addOns).
      */
     public JsonObject list() {
       return new JsonObject(t.object(new Transport.Call("GET", "/v1/plans")));

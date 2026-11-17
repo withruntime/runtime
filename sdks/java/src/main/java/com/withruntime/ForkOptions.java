@@ -1,5 +1,6 @@
 package com.withruntime;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +37,18 @@ public final class ForkOptions extends Params<ForkOptions> {
    */
   public ForkOptions secrets(List<String> names) {
     return set("secrets", names == null ? null : new ArrayList<>(names));
+  }
+
+  /** Not sent: how long this fork waits for room when no server has one; null is the client's. */
+  Duration waitForCapacity;
+
+  /**
+   * Replaces the client's wait for room for this fork, as for a create; {@code Duration.ZERO}
+   * fails at once when no server has room for a copy.
+   */
+  public ForkOptions waitForCapacity(Duration wait) {
+    this.waitForCapacity = wait;
+    return this;
   }
 
   /** @deprecated Accepted and ignored: copies run on the free usage first, then prepaid credit. */

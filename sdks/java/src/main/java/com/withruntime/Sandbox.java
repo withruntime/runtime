@@ -51,6 +51,14 @@ public final class Sandbox implements AutoCloseable {
     return info.state();
   }
 
+  /**
+   * Whether {@code action} (pause, wake, stop, restart or delete) changes the sandbox from its
+   * state as last read: {@code if (sbx.can("pause")) sbx.pause();}.
+   */
+  public boolean can(String action) {
+    return info.actions().contains(action);
+  }
+
   /** Reads and writes files in the sandbox. */
   public Files files() {
     return files;
@@ -93,10 +101,6 @@ public final class Sandbox implements AutoCloseable {
     return new SandboxParity.Mounts(this);
   }
 
-  public SandboxParity.MCP mcp() {
-    return new SandboxParity.MCP(this);
-  }
-
   String path(String suffix) {
     return "/v1/sandboxes/" + Transport.segment(id()) + suffix;
   }
@@ -130,8 +134,9 @@ public final class Sandbox implements AutoCloseable {
   // A wake or restart refused for room (no_capacity and the like) ran nothing and is sent again
   // with the same key until the client's waitForCapacity runs out. 16 October 2026 06:11 UTC the
   // product check's wake was refused no_capacity in 36 ms on its full server, where a create would
-  // have waited; a wake or restart stays on its server, so it waits there for room. Stop, pause,
-  // extend and fork never wait. {@code waitForCapacity} replaces the client's; ZERO fails at once.
+  // have waited; a wake or restart stays on its server, so it waits there for room. Stop, pause
+  // and extend never wait; fork waits too. {@code waitForCapacity} replaces the client's; ZERO
+  // fails at once.
   private Sandbox waitingLifecycle(String verb, Map<String, Object> body, Duration waitForCapacity) {
     Duration room = waitForCapacity != null ? waitForCapacity : t.waitForCapacity;
     return lifecycle(verb, body, true, null, room.isNegative() ? Duration.ZERO : room);
@@ -211,7 +216,8 @@ public final class Sandbox implements AutoCloseable {
   }
 
   /**
-   * Changes name, labels, autoWake, user ("sandbox" or "root": who later commands run as when
+   * Changes name, labels, autoWake, wakeOnTimers (false: a process due on a timer does not wake it
+   * when idle-paused), user ("sandbox" or "root": who later commands run as when
    * one names no user), leaseSeconds (with no time limit, how far ahead each renewal funds it,
    * 300 to 43200), idlePauseSeconds, persistent or maxTotalCostMicros; fields left out stay
    * as they are, and a null maxTotalCostMicros removes the cap.
@@ -292,9 +298,15 @@ public final class Sandbox implements AutoCloseable {
    * Starts copies of this sandbox as it is now (files, memory, running processes), each its own
    * sandbox, on its server while it has room and on another when it is full, and answers once
    * they run. If a copy fails, the exception's
-   * details name the copies that did start ("startedSandboxIds").
+   * details name the copies that did start ("startedSandboxIds"), which are deleted (billed
+   * only on a 4xx). When no server has room for a copy (no_capacity) it waits for room as {@code
+   * create} does, up to the client's waitForCapacity or the options', with the same key.
    */
   public List<Sandbox> fork(ForkOptions options) {
+    // A fork refused for room recorded nothing, so the same key is checked afresh: it waits for
+    // room as a create does (4 November 2026). A fork that is over answers retryable: false, never
+    // waited on.
+    Duration room = options.waitForCapacity != null ? options.waitForCapacity : t.waitForCapacity;
     JsonObject reply =
         new JsonObject(
             t.object(
@@ -302,8 +314,7 @@ public final class Sandbox implements AutoCloseable {
                     .body(options.toMap())
                     .waitSeconds(60)
                     .key(options.idempotencyKey)
-                    // Its key replays a refusal for room or a limit, so it is told at once.
-                    .room(Duration.ZERO)));
+                    .room(room.isNegative() ? Duration.ZERO : room)));
     List<Sandbox> copies = new ArrayList<>();
     for (JsonObject copy : reply.getObjects("sandboxes")) copies.add(new Sandbox(t, copy.raw()));
     return copies;
@@ -376,15 +387,15 @@ public final class Sandbox implements AutoCloseable {
             || options.onStderr != null
             || (options.timeout != null && options.timeout.compareTo(Duration.ofMinutes(1)) > 0);
     if (!streamed) {
+      Map<String, Object> body = commandBody(command, options, null);
+      if (options.maxOutputBytes != null) body.put("maxOutputBytes", options.maxOutputBytes);
       Transport.Call call =
-          new Transport.Call("POST", path(":exec"))
-              .body(commandBody(command, options, null))
-              .key(options.idempotencyKey);
+          new Transport.Call("POST", path(":exec")).body(body).key(options.idempotencyKey);
       if (options.timeout != null) call.timeout(options.timeout.plusMinutes(1));
       result = new CommandResult(t.object(call));
     } else {
-      StringBuilder stdout = new StringBuilder();
-      StringBuilder stderr = new StringBuilder();
+      Output stdout = new Output(options.maxOutputBytes);
+      Output stderr = new Output(options.maxOutputBytes);
       Map<String, Object> fields = new LinkedHashMap<>();
       boolean dropped = false;
       try (EventStream<OutputEvent> events = stream(command, options)) {
@@ -392,11 +403,11 @@ public final class Sandbox implements AutoCloseable {
           switch (event.type()) {
             case "start" -> fields.put("processId", event.processId());
             case "stdout" -> {
-              stdout.append(event.data());
+              stdout.add(event.data());
               if (options.onStdout != null) options.onStdout.accept(event.data());
             }
             case "stderr" -> {
-              stderr.append(event.data());
+              stderr.add(event.data());
               if (options.onStderr != null) options.onStderr.accept(event.data());
             }
             case "truncated" -> dropped = true;
@@ -410,15 +421,56 @@ public final class Sandbox implements AutoCloseable {
           }
         }
       }
-      fields.put("stdout", stdout.toString());
-      fields.put("stderr", stderr.toString());
+      fields.put("stdout", stdout.text.toString());
+      fields.put("stderr", stderr.text.toString());
       // A truncated event does not say which stream lost bytes, so both flags carry it.
-      fields.put("stdoutTruncated", dropped);
-      fields.put("stderrTruncated", dropped);
+      fields.put("stdoutTruncated", dropped || stdout.kept < stdout.bytes);
+      fields.put("stderrTruncated", dropped || stderr.kept < stderr.bytes);
+      fields.put("stdoutBytes", stdout.bytes);
+      fields.put("stderrBytes", stderr.bytes);
+      fields.put("truncated", dropped || stdout.kept < stdout.bytes || stderr.kept < stderr.bytes);
       result = new CommandResult(fields);
     }
     if (options.check && !result.ok()) throw new RuntimeCloudException.Command(result);
     return result;
+  }
+
+  /** One stream of a streamed command: every byte, or the first {@code limit}, all of them counted. */
+  private static final class Output {
+    final StringBuilder text = new StringBuilder();
+    final Long limit;
+    long bytes;
+    long kept;
+
+    Output(Long limit) {
+      this.limit = limit;
+    }
+
+    void add(String data) {
+      int size = utf8Length(data);
+      // Once a stream is cut, nothing later is kept: it would leave a hole.
+      boolean cut = kept < bytes;
+      bytes += size;
+      if (cut) return;
+      if (limit == null || kept + size <= limit) {
+        text.append(data);
+        kept += size;
+        return;
+      }
+      // Whole characters only, up to the limit.
+      for (int i = 0; i < data.length(); ) {
+        int point = data.codePointAt(i);
+        int width = utf8Length(new String(Character.toChars(point)));
+        if (kept + width > limit) break;
+        text.appendCodePoint(point);
+        kept += width;
+        i += Character.charCount(point);
+      }
+    }
+
+    private static int utf8Length(String text) {
+      return text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
   }
 
   /**

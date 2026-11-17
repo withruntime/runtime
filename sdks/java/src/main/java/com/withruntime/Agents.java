@@ -54,7 +54,13 @@ public final class Agents {
    * ANTHROPIC_API_KEY ({@code runtime secrets set ANTHROPIC_API_KEY --host api.anthropic.com}).
    */
   public AnthropicOptions anthropic() {
-    return new AnthropicOptions(t.baseUrl + "/anthropic", t.apiKey);
+    // Anthropic's SDK sends the key as a bearer: a key pair's secret (rtsk_) is refused.
+    try {
+      return new AnthropicOptions(
+          t.baseUrl + "/anthropic", Signing.bearerKey(t.apiKey, "runtime.agents().anthropic()"));
+    } catch (Signing.Refused r) {
+      throw Transport.refused(r);
+    }
   }
 
   /** What {@link #anthropic()} answers. */

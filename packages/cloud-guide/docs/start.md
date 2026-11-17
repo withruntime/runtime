@@ -1,221 +1,79 @@
-# Get started with Runtime Cloud
+# Quickstart
 
-Runtime Cloud gives your agents Linux sandboxes, billed on the CPU they use. It connects them with one browser approval.
+Runtime runs Linux sandboxes: each one is a microVM with its own kernel, disk and network, created in milliseconds. This page creates a sandbox, runs a program in it and deletes it.
 
-Each sandbox is a Firecracker microVM with its own kernel, disk and toolchain.
-One API, one CLI, one MCP server and SDKs for JavaScript, Python, Go, Ruby and Java cover
-every Runtime product. New accounts get [{{included-machine}} every month](./included-usage), no card.
+## Before you begin
 
-- **{{included-machine}} every month, no card:** enough to run your real workload before you pay.
-- **Pay for the CPU you use:** {{cpu-rate}} per active vCPU-hour, measured, and
-  {{memory-rate}} per reserved GiB-hour of memory ([pricing](./pricing)).
-- **Idle time costs almost nothing:** a sandbox pauses itself after
-  {{idle-pause}} with nothing happening in it. It keeps its memory and processes.
-- **Pause keeps memory.** A fork copies a running sandbox with its memory
-  and processes.
-- **An uptime promise:** paid accounts are promised {{uptime-promise}} API
-  uptime a month. {{uptime-credit}} of a short month's charges comes back
-  automatically ([Uptime Promise](/legal/sla)). The [status page](/status)
-  publishes the record used to measure it.
-- **Secrets the sandbox never sees,** and single sign-on, SCIM and roles free
-  for every team.
-- **Built in:** a desktop, a code interpreter, custom images, volumes, and
-  preview URLs that are private by default.
-- **MCP servers and your own data:** run servers from the MCP catalog in a
-  sandbox ([MCP](./mcp)), and mount your S3, R2 or Google Cloud Storage bucket
-  as a folder ([storage](./storage#mount-your-own-bucket)).
-- **Connected to the rest of your world:** your own domain with HTTPS, public
-  TCP ports and a WireGuard private network once the account has a kept
-  top-up. A dedicated outbound address comes once it has credit
-  ([networking](./networking)). [Identity tokens](./identity-tokens) reach AWS or Google Cloud with no
-  stored key.
-- **See what runs:** each sandbox's CPU and memory over time, signed webhooks
-  and OpenTelemetry export ([observability](./observability)).
+1. Create an API key on the [Keys page](https://withruntime.com/account/keys) of the console, or with [`POST /v2/keys`](./reference/keys#create-a-key).
+2. Set it as `RUNTIME_API_KEY` in your environment. Every SDK, the CLI and the MCP server read it from there.
+3. Install an SDK: `npm install withruntime` (Node.js 22.12 or later, or Bun) or `pip install withruntime` (Python 3.9 or later).
 
-## Give your agent one instruction
+Signing up takes no card. Your first sandbox asks for one, and the 7-day Pro trial with $5 of usage starts then. After the trial, Pro costs $25 a month, and that fee is returned as $25 of usage. See [pricing](./pricing).
 
-Paste this into your coding agent:
+## Run a program
 
-> Move this project to Runtime Cloud: read https://withruntime.com/llms.txt and
-> follow it.
-
-The agent connects. If the project uses another sandbox provider, the agent moves
-every call to Runtime and keeps going until your real job runs there. It
-reports what passed, what you save each month and what is left for you to go
-live. You approve one link in your browser. There is nothing to copy.
-
-## Run your first sandbox
-
-**In the browser:** [sign in](https://withruntime.com/sign-in) and press
-**Start a sandbox** on Home. It opens with a shell running in the page, on your
-free hours. It pauses itself after {{idle-pause}} with nothing happening in it.
-
-**From your code:** Home offers a prompt for your coding agent. The prompt does
-the whole setup. Or, by hand, make your first key in one click. The key is shown
-once. The page then shows the install and a first sandbox in Python or JavaScript.
-If you signed up from a page comparing Runtime with E2B, Daytona, Vercel Sandbox or Blaxel, Home
-opens on that switch instead. By hand, the switch is the key, the install and the
-one import that changes.
-
-**Run a file, with Node 22.12 or later:**
-
-```bash
-printf '%s\n' 'print(sum([125, 250, 375]))' > invoice.py
-npx withruntime sandboxes run -- python3 - < invoice.py
-```
-
-The first time, it connects this machine:
-
-1. Your browser opens a Runtime page, or the command prints a link and a code.
-2. You sign in with Google or by email (type the six-digit code the email
-   gives you, or click its link if you already have an account), check the
-   code and choose **Connect agent**.
-3. A fresh sandbox runs the command, prints the invoice total, 750, and is
-   deleted.
-
-Exit code zero means the command succeeded. Nothing is left behind to pay for.
-`npx withruntime sandboxes ls --json` no longer lists the test sandbox. An
-older CLI only stopped it. If it is still listed, delete it with
-`npx withruntime sandboxes rm <id>`. Later commands reuse the connection.
-
-An agent running it shows you the link and code. If you approve after the
-command stopped waiting (50 seconds when no one is at a terminal), the agent
-runs it again and it finishes, with no new link.
-
-For several commands in one sandbox, this shell block deletes it on exit:
-
-```bash
-(
-  id=$(npx withruntime sandboxes create) || exit
-  trap 'npx withruntime sandboxes rm "${id}"' EXIT
-  npx withruntime sandboxes exec "${id}" -- python3 -c 'print(sum([125, 250, 375]))'
-)
-```
-
-Installed with `npm install --global withruntime`, the command is `runtime`:
-`runtime sandboxes run -- ls`, `runtime sandboxes create`. See
-[the CLI](./cli).
-
-## Give an agent Runtime's tools
-
-Add Runtime's MCP server to your agent with one command:
-
-```bash no-run
-claude mcp add --scope user runtime -- npx -y withruntime mcp   # Claude Code
-codex mcp add runtime -- npx -y withruntime mcp                 # Codex
-```
-
-Cursor: add this to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
-
-```json
-{ "mcpServers": { "runtime": { "command": "npx", "args": ["-y", "withruntime", "mcp"] } } }
-```
-
-If this machine is not connected yet, the agent sees one tool,
-`runtime_connect`. It gives the agent a link for you to approve. Then every Runtime
-tool appears. See [MCP](./mcp) for other clients and the remote endpoint.
-
-## From code
+TypeScript:
 
 ```ts
-import { Sandbox } from "withruntime";
+import { Runtime } from "withruntime";
 
-const sbx = await Sandbox.create();
+const runtime = new Runtime(); // reads RUNTIME_API_KEY
+const sandbox = await runtime.sandboxes.create();
 try {
-  await sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
-  const result = await sbx.exec("python3 /workspace/invoice.py", { check: true });
-  console.log(result.stdout);
+  await sandbox.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n");
+  const result = await sandbox.exec("python3 /workspace/invoice.py");
+  console.log(result.stdout); // 750
+  if (result.exitCode !== 0) throw new Error(result.stderr);
 } finally {
-  await sbx.delete();
+  await sandbox.delete();
 }
 ```
 
-```python
-from withruntime import Sandbox
+Python:
 
-sbx = Sandbox.create()
+```python
+from withruntime.generated import Runtime
+
+runtime = Runtime()  # reads RUNTIME_API_KEY
+sandbox = runtime.sandboxes.create()
 try:
-    sbx.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
-    print(sbx.exec("python3 /workspace/invoice.py", check=True).stdout)
+    sandbox.files.write("/workspace/invoice.py", "print(sum([125, 250, 375]))\n")
+    result = sandbox.exec("python3 /workspace/invoice.py")
+    print(result.stdout)  # 750
+    assert result.exit_code == 0, result.stderr
 finally:
-    sbx.delete()
+    sandbox.delete()
 ```
 
-- Install with `npm install withruntime` or `pip install withruntime`.
-- The SDKs use `RUNTIME_API_KEY` when it is set. Otherwise they use the key this
-  machine saved when it connected. After the one line above, they need no
-  setup.
-- On a server, create a key at https://withruntime.com/account/keys and give it
-  as `RUNTIME_API_KEY` from your secret manager.
-- `create()` needs no arguments. It waits until the sandbox is ready, and
-  raises `start_failed` if it stops first.
-- The examples check the command's result, and delete the sandbox even after
-  an error. A stopped sandbox keeps its disk, which is billed until it is deleted.
-  Export anything you need before deleting.
+The HTTP API, with curl:
 
-## Connect once in your browser
+```bash
+api=https://api.withruntime.com/v2
+auth="Authorization: Bearer $RUNTIME_API_KEY"
+id=$(curl -sf -X POST "$api/sandboxes" -H "$auth" -H "Content-Type: application/json" -d '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+trap 'curl -sf -X DELETE "$api/sandboxes/$id" -H "$auth" > /dev/null' EXIT
+curl -sf -X POST "$api/sandboxes/$id:exec" -H "$auth" -H "Content-Type: application/json" \
+  -d '{"cmd": ["python3", "-c", "print(sum([125, 250, 375]))"]}'
+```
 
-**One approval gives this machine its own key.** It is encrypted for this
-machine alone and saved outside your project. The CLI receives and saves its
-own credential automatically. You do not copy an API key.
+What each call does:
 
-- Each connection can use everything the account can, including its prepaid
-  credit. Approve only connections you started.
-- Browser sign-out does not revoke one. `npx withruntime logout` or the API
-  keys page does. See [security](./security).
-- On a machine with no browser, `npx withruntime login --no-browser` prints the
-  link to open on another device.
-- To use a key you already have, `npx withruntime login --with-key` reads it
-  from standard input, never from the command line.
-- An agent with no person to approve can open its own account and pay in
-  USDC instead: `npx withruntime billing topup 20 --new-account --accept-terms --wait`.
-  No free trial on that path. The key comes once the payment lands. See
-  [pay with stablecoins](./pricing#pay-with-stablecoins).
+- [`POST /v2/sandboxes`](./reference/sandboxes#create-a-sandbox) returns once the sandbox is running. Creates a sandbox. Asked again with the same Idempotency-Key, it returns the same sandbox.
+- [`PUT /v2/sandboxes/{id}/files`](./reference/sandboxes#write) Writes the request's bytes to a file as they come, of any size (Content-Length required), its folders made: the file whole when they all came, or as it was. With offset, they are written into it in place.
+- [`POST /v2/sandboxes/{id}:exec`](./reference/sandboxes#exec) Runs a command as a process and returns it once it ended, with its output; with wait false, at once, while it runs. A paused sandbox is resumed first. Asked again with the same Idempotency-Key, it runs nothing more: it returns the first run's process, waiting for its end while it runs. A command that fails is a result with a non-zero `exitCode`, never an error.
+- [`DELETE /v2/sandboxes/{id}`](./reference/sandboxes#delete-a-sandbox) ends the sandbox and its billing.
 
-There is nothing to choose between free usage and credit. The free usage is spent first, then prepaid credit. `funding` in a request is ignored.
-Once the account holds credit, its sandboxes have paid limits.
+## Next steps
 
-## Switch from another provider
+- [Run an agent's code](./agent-loop): a loop that runs model-written code and feeds back its errors.
+- [Serve a web app](./web-app): share a port of a sandbox at an HTTPS address.
+- [Sandboxes](./sandboxes): what a sandbox is, and its [lifecycle](./lifecycle).
+- The [API reference](./reference/overview): every call, field and error.
 
-**Most sandbox code moves over call for call.** The [switch guide](./migrate)
-maps E2B, Daytona, Vercel, Modal, Cloudflare, Fly and Blaxel calls to
-Runtime's. It shows how to work out your monthly saving from measured usage.
-Code written for E2B, Daytona, Vercel Sandbox, Blaxel or Modal Sandboxes runs
-after you change one import to `withruntime/e2b`, `withruntime/daytona`,
-`withruntime/vercel`, `withruntime/blaxel` or `withruntime/modal`. Morph's
-TypeScript client moves to `withruntime/morph`. A Worker written for Cloudflare's
-Sandbox SDK moves to `withruntime/cloudflare`, with its `containers` block deleted
-and a `RUNTIME_API_KEY` secret. Code that calls Fly's Machines API works after you
-point it at `npx withruntime fly-api` (`withruntime/fly`).
-`npx withruntime compare --from <provider>` prints what you save. Credit you add within {{welcome-days}} days of signing up is matched, up to {{welcome-max}} in total.
+## Give this to your agent
 
-## If the first run fails
+Paste this into your coding agent:
 
-Keep the error code, request ID and sandbox ID. A lost response is not proof
-that nothing ran. Inspect the original resource before trying another create.
-
-| Error                                                 | What to do                                                                |
-| ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| `connection_pending`                                  | Approve the printed request, then rerun the same command                  |
-| `no_credit_running_limit` or `included_usage_used_up` | Check your free usage; once the account holds credit, it runs on that     |
-| `start_failed`                                        | Read the sandbox's state and `stopReason`; a stopped sandbox is not ready |
-
-See [troubleshooting](./troubleshooting) for safe retries and cleanup.
-
-## What you can do next
-
-| You want to                                                        | Read                                                                                                             |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Run commands, stream output, start servers                         | [JavaScript SDK](./javascript), [Python SDK](./python), [Go SDK](./go), [Ruby SDK](./ruby) or [Java SDK](./java) |
-| Drive sandboxes from a terminal or a script                        | [CLI](./cli)                                                                                                     |
-| Give an agent Runtime tools                                        | [MCP](./mcp)                                                                                                     |
-| Call the API from any language                                     | [API reference](./api)                                                                                           |
-| Know what is installed and what the network allows                 | [The sandbox environment](./sandbox-environment)                                                                 |
-| Keep data on volumes, or mount your own bucket                     | [Storage and backups](./storage)                                                                                 |
-| Serve on your own domain, open a TCP port or reach your network    | [Networking](./networking)                                                                                       |
-| Watch CPU and memory, get webhooks, export to OpenTelemetry        | [Observability](./observability)                                                                                 |
-| Plug into the OpenAI Agents SDK, Vercel AI SDK, LangChain and more | [Frameworks](./frameworks)                                                                                       |
-| Switch from E2B, Daytona, Vercel, Modal, Cloudflare, Fly or Blaxel | [Switch guide](./migrate)                                                                                        |
-| Tell us what to build next, or get help                            | [Feedback and support](./feedback-and-support)                                                                   |
-
-Keep important results outside the sandbox. A sandbox is not a backup.
+> Read https://withruntime.com/docs/start.md and https://withruntime.com/llms.txt, then add Runtime to this project: create a sandbox with the SDK this project's language uses, run the project's real command in it, and delete the sandbox when the command ends. Take the API key from the RUNTIME_API_KEY environment variable and never print it.
+>
+> This page as Markdown: https://withruntime.com/docs/start.md

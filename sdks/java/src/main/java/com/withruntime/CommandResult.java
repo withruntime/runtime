@@ -28,13 +28,30 @@ public final class CommandResult extends JsonObject {
     return getBoolean("timedOut");
   }
 
-  /** More than 64 KiB of standard output was dropped from a result that was not streamed. */
+  /**
+   * Standard output is not whole: {@link ExecOptions#maxOutputBytes} cut it, or (rarely) output was
+   * lost. {@link #stdoutBytes()} says how much there was.
+   */
   public boolean stdoutTruncated() {
     return getBoolean("stdoutTruncated");
   }
 
   public boolean stderrTruncated() {
     return getBoolean("stderrTruncated");
+  }
+
+  /** {@link #stdoutTruncated()} or {@link #stderrTruncated()}. */
+  public boolean truncated() {
+    return stdoutTruncated() || stderrTruncated();
+  }
+
+  /** Bytes the command wrote to standard output, returned or not; null from an older sandbox. */
+  public Long stdoutBytes() {
+    return getLong("stdoutBytes");
+  }
+
+  public Long stderrBytes() {
+    return getLong("stderrBytes");
   }
 
   public Long durationMs() {

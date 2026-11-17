@@ -1,0 +1,9 @@
+{
+  "name": "@runtime/lint-config",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "oxlint.json",
+    "next.json"
+  ]
+}

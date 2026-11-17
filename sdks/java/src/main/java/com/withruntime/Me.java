@@ -33,4 +33,12 @@ public final class Me extends JsonObject {
   public String role() {
     return getString("role");
   }
+
+  /**
+   * What the key acts on now: "agent", only what its own agent made; "compartment", what every key
+   * of its compartment made; or "account", everything in the account.
+   */
+  public String reach() {
+    return getString("reach");
+  }
 }

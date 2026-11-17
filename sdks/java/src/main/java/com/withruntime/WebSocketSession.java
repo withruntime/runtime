@@ -64,12 +64,13 @@ final class WebSocketSession implements WebSocket.Listener, AutoCloseable {
 
   private CompletableFuture<WebSocket> connect(Transport.Call call) {
     URI uri = URI.create(t.uri(call).toString().replaceFirst("^http", "ws"));
-    return t.http
-        .newWebSocketBuilder()
-        .connectTimeout(t.timeout)
-        .header("Authorization", "Bearer " + t.apiKey)
-        .header("X-Runtime-Client", "sdk-java/" + RuntimeClient.VERSION)
-        .buildAsync(uri, this);
+    WebSocket.Builder builder =
+        t.http
+            .newWebSocketBuilder()
+            .connectTimeout(t.timeout)
+            .header("X-Runtime-Client", "sdk-java/" + RuntimeClient.VERSION);
+    t.authorize(null, "GET", uri, null, null).forEach(builder::header);
+    return builder.buildAsync(uri, this);
   }
 
   void open(Transport.Call call) {

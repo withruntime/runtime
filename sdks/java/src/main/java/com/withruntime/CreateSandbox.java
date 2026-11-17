@@ -83,6 +83,15 @@ public final class CreateSandbox extends Params<CreateSandbox> {
   }
 
   /**
+   * When it paused for being idle, a process in it due on a timer (a sleep, a wait with a
+   * timeout, a timerfd, alarm or POSIX timer) wakes it, billed as a wake. Needs autoWake. Default
+   * true.
+   */
+  public CreateSandbox wakeOnTimers(boolean wake) {
+    return set("wakeOnTimers", wake);
+  }
+
+  /**
    * "root" runs its commands, processes and terminals as root, through the sandbox's passwordless
    * sudo, unless one names user "sandbox". Default "sandbox"; a copy of a snapshot runs as its
    * source did. Files written through the files API stay the sandbox user's.

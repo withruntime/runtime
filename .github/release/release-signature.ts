@@ -54,6 +54,13 @@ import { readFileSync, statSync } from "node:fs";
 export const SIGNED_MAX_AGE_MS = 10 * 60_000;
 /** A clock a little ahead of the follower's is fine; one far ahead is not. */
 export const SIGNED_FUTURE_MS = 60_000;
+/** The check a release record names when it rests on Marc's signed approval
+ * of the commit (agents/approve-release.ts), not on a passed check: the
+ * release signer signs it only on an approval it verified itself with his
+ * key and 24-hour window (release-signer.py `approval`: any other ask naming
+ * a check other than the full check or CI/CD's is refused), so a record
+ * never says a check passed where none did. */
+export const APPROVAL_CHECK = "marc/approval";
 /** The target a lifted hold names: deploy/hold holds every follower. */
 export const HOLD_TARGET = "hosts";
 /** What a prebuild record names (engines-archive.ts, signed by
@@ -79,7 +86,7 @@ export const ORDER_CHECK: Record<OrderAction, RegExp> = {
   monitor: new RegExp(`^monitor/${OVH_SERVICE}$`),
   rejoin: /^rejoin(\/vin-\d+)?$/,
   /** The way into a host image that will not serve (engines/host access.rs). */
-  access: /^access\/(logs|restart-engine|boot-other)$/,
+  access: /^access\/(logs|restart-engine|boot-other|release)$/,
 };
 /** For the follower of host orders alone: any one host, which it checks. */
 export const ANY_HOST: unique symbol = Symbol("any host");
@@ -214,11 +221,29 @@ export function verify(
 export const IMAGE_HEADER = "runtime-image v1";
 
 /** The only servers a host image built from next may name: the test region
- * (vin-12) and the servers being emptied for cell 1 (region/servers/
- * emptying.txt), never one serving customers' sandboxes. The signer holds
- * the same list in its own code (release-signer.py CELL1_SERVERS) and refuses
- * any other; what serves customers takes code only from main's release. */
-export const CELL1_SERVERS: readonly string[] = ["vin-12", "vin-5", "vin-15"];
+ * (vin-12) and the servers leaving the region for cell 1, each also listed in
+ * region/servers/emptying.txt (signer.test.ts refuses one without the other),
+ * so that it takes no new sandbox. One may still serve its own customers'
+ * sandboxes until today's moves take them off: its image install refuses it
+ * while it holds anything (host-reinstall.ts, productionRefusal). The signer holds the same list in its own
+ * code (release-signer.py CELL1_SERVERS) and refuses any other; what serves
+ * customers takes code only from main's release. */
+export const CELL1_SERVERS: readonly string[] = [
+  "vin-12",
+  "vin-2",
+  "vin-3",
+  "vin-4",
+  "vin-5",
+  "vin-6",
+  "vin-7",
+  "vin-8",
+  "vin-9",
+  "vin-10",
+  "vin-11",
+  "vin-13",
+  "vin-14",
+  "vin-15",
+];
 const IMAGE_FIELDS = ["target", "sha", "image", "hosts", "nonce", "at"] as const;
 export type ImageRecord = Record<(typeof IMAGE_FIELDS)[number], string>;
 
@@ -272,6 +297,173 @@ export function verifyImage(
   )
     return { ok: false, why: `signed at ${signed.at}, not in the last ten minutes` };
   return { ok: true, signed };
+}
+
+/** Marc's image approval (agents/approve-release.ts --image, engines/host
+ * record.rs check_approval): what a host takes in the image record's place,
+ * checked with his cell key. Read as the host reads it. */
+export const IMAGE_APPROVAL_HEADER = "runtime-image-approval v3";
+const APPROVAL_FIELDS = ["sha", "image", "hosts", "undo", "nonce", "at"] as const;
+export type ImageApproval = Record<(typeof APPROVAL_FIELDS)[number], string>;
+
+/** One record of `header` and `fields`, signed with `key` (base64, one
+ * spelling), its fields; or why not. One final newline, as record.rs reads. */
+function readSigned<F extends readonly string[]>(
+  text: string | undefined,
+  key: KeyObject | undefined,
+  header: string,
+  fields: F,
+  what: string,
+): { ok: true; fields: Record<F[number], string> } | { ok: false; why: string } {
+  if (!key) return { ok: false, why: "no key here to check it with" };
+  const lines = (text ?? "").replace(/\n$/, "").split("\n");
+  if (lines.length !== fields.length + 2 || lines[0] !== header)
+    return { ok: false, why: `not ${what}` };
+  const read: Record<string, string> = {};
+  for (const [i, f] of fields.entries()) {
+    const line = lines[i + 1]!;
+    if (!line.startsWith(`${f}=`)) return { ok: false, why: `not ${what}` };
+    read[f] = line.slice(f.length + 1);
+  }
+  const sig = /^sig=([A-Za-z0-9+/=]{80,100})$/.exec(lines.at(-1)!)?.[1];
+  if (
+    !sig ||
+    Buffer.from(sig, "base64").toString("base64") !== sig ||
+    !edVerify(null, Buffer.from(lines.slice(0, -1).join("\n")), key, Buffer.from(sig, "base64"))
+  )
+    return { ok: false, why: "forged: not signed with Marc's cell key" };
+  return { ok: true, fields: read as Record<F[number], string> };
+}
+
+/** Whether `at` (the one form records write) is within ten minutes of `now`. */
+const freshAt = (at: string, now: Date) => {
+  const t = Date.parse(at);
+  return (
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(at) &&
+    !Number.isNaN(t) &&
+    t <= now.getTime() + SIGNED_FUTURE_MS &&
+    now.getTime() - t <= SIGNED_MAX_AGE_MS
+  );
+};
+
+/** Whether `text` is Marc's approval of image `want.image` of commit
+ * `want.sha` naming `want.host`, signed with his cell key `key`: what
+ * runtime-host-install takes with --cell-pub. No clock of its own: the
+ * reinstall order beside it is fresh and taken once (verifyHostOrder), and a
+ * running server spends the approval's nonce (engines/host init update.rs). */
+export function verifyImageApproval(
+  text: string | undefined,
+  key: KeyObject | undefined,
+  want: { sha: string; image: string; host: string },
+): { ok: true; signed: ImageApproval } | { ok: false; why: string } {
+  const read = readSigned(text, key, IMAGE_APPROVAL_HEADER, APPROVAL_FIELDS, "an image approval");
+  if (!read.ok) return read;
+  const signed = read.fields;
+  for (const f of ["sha", "image"] as const)
+    if (signed[f] !== want[f])
+      return { ok: false, why: `approved for ${f} ${signed[f]}, not ${want[f]}` };
+  const hosts = signed.hosts.split(",");
+  if (!hosts.every((h) => CELL1_SERVERS.includes(h)))
+    return { ok: false, why: `approved for hosts ${signed.hosts}, not cell 1's servers alone` };
+  if (!hosts.includes(want.host))
+    return { ok: false, why: `approved for hosts ${signed.hosts}, not ${want.host}` };
+  return { ok: true, signed };
+}
+
+/** Marc's own host order, signed on his Mac with his cell key
+ * (approve-release.ts --reinstall), which the follower of host orders takes
+ * with no release signer (Marc, 5 November 2026: the signer is out of the
+ * image path): one host, its OVH service, the image by its manifest's
+ * SHA-256 and the commit it was built from, a fresh nonce, taken once
+ * within ten minutes. Its own header: no record of another kind reads as
+ * one, and no host or follower takes one as anything else. `engine` is the
+ * engine line host.conf takes, signed with the rest so no follower chooses
+ * what the server runs: cell 1's engine (CELL_ENGINE), or a vault's server's
+ * `runtime-vault host ...` (engines/identity/crates/vault), nothing else.
+ *
+ *   runtime-host-order v2
+ *   action=reinstall
+ *   host=vin-4
+ *   service=ns5012345.ip-15-204-162.us
+ *   mode=image
+ *   image=<64 hex>
+ *   sha=<40 hex>
+ *   engine=cell1-host --plan /state/0/plan --host 0 --dir /data/0/cell1
+ *   nonce=<32 hex>
+ *   at=2026-11-06T17:00:00.000Z
+ *   sig=<Ed25519 signature of the lines above, base64>
+ */
+export const HOST_ORDER_HEADER = "runtime-host-order v2";
+const HOST_ORDER_FIELDS = [
+  "action",
+  "host",
+  "service",
+  "mode",
+  "image",
+  "sha",
+  "engine",
+  "nonce",
+  "at",
+] as const;
+
+/** Cell 1's engine on a server installed with the host image: its disk 0's
+ * volumes, which the image mounts by their labels. */
+export const CELL_ENGINE = "cell1-host --plan /state/0/plan --host 0 --dir /data/0/cell1";
+
+/** Why `line` is not an engine line Marc's order may name, or undefined:
+ * cell 1's engine, or a vault's server's (`runtime-vault host`), its words
+ * printable ASCII with no line break (host.conf reads one line, split on
+ * spaces; no shell ever reads it). */
+export function engineWhy(line: string): string | undefined {
+  if (line.length > 2048) return "the engine line is longer than 2048 characters";
+  if (!/^(cell1-host|runtime-vault host)( [!-~]+)*$/.test(line))
+    return "the engine is cell1-host or `runtime-vault host`, its words printable with one space between";
+  return undefined;
+}
+export type HostOrder = Record<(typeof HOST_ORDER_FIELDS)[number], string>;
+const SERVICE_RE = new RegExp(`^${OVH_SERVICE}$`);
+
+/** Why `o` is not a host order Marc may sign, or undefined. */
+function hostOrderWhy(o: HostOrder): string | undefined {
+  if (o.action !== "reinstall" || o.mode !== "image")
+    return "Marc's host order is a reinstall onto the host image";
+  if (!/^vin-[1-9][0-9]{0,3}$/.test(o.host)) return "it names one server: vin-N";
+  if (!SERVICE_RE.test(o.service)) return `${o.service} is not an OVH service name`;
+  if (!/^[0-9a-f]{64}$/.test(o.image)) return "it names the image's manifest SHA-256";
+  if (!/^[0-9a-f]{40}$/.test(o.sha)) return "it names the image's full commit";
+  const engine = engineWhy(o.engine);
+  if (engine) return engine;
+  if (!/^[0-9a-f]{32}$/.test(o.nonce)) return "no nonce";
+  return undefined;
+}
+
+export function signHostOrder(o: Omit<HostOrder, "nonce" | "at">, key: KeyObject, at = new Date()) {
+  const full: HostOrder = { ...o, nonce: newNonce(), at: at.toISOString() };
+  const why = hostOrderWhy(full);
+  if (why) throw new Error(why);
+  const body = [HOST_ORDER_HEADER, ...HOST_ORDER_FIELDS.map((f) => `${f}=${full[f]}`)].join("\n");
+  return `${body}\nsig=${edSign(null, Buffer.from(body), key).toString("base64")}\n`;
+}
+
+/** Whether `text` is Marc's host order signed with his cell key `key`, for
+ * no other server than the follower's own checks, within ten minutes at
+ * `now`, its nonce not in `used`. */
+export function verifyHostOrder(
+  text: string | undefined,
+  key: KeyObject | undefined,
+  now: Date,
+  used: readonly string[],
+): { ok: true; order: HostOrder } | { ok: false; why: string } {
+  const read = readSigned(text, key, HOST_ORDER_HEADER, HOST_ORDER_FIELDS, "Marc's host order");
+  if (!read.ok) return read;
+  const order = read.fields;
+  const why = hostOrderWhy(order);
+  if (why) return { ok: false, why };
+  if (used.includes(order.nonce))
+    return { ok: false, why: "already used: a replayed order. Sign it again" };
+  if (!freshAt(order.at, now))
+    return { ok: false, why: `signed at ${order.at}, not in the last ten minutes: sign it again` };
+  return { ok: true, order };
 }
 
 /** The hub's private key: a PEM file only its owner reads. Anything else,

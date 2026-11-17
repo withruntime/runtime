@@ -18,10 +18,14 @@ public final class Sandboxes {
 
   /**
    * Creates a sandbox and, unless {@link CreateSandbox#noWait()}, waits until it is running. When every slot without credit or the account's quota is taken, it waits for one to free, up to the
-   * client's waitForCapacity (two minutes by default).
+   * client's waitForCapacity (two minutes by default). With {@link CreateSandbox#noWait()} it does
+   * not wait for room either, unless its waitForCapacity is set.
    */
   public Sandbox create(CreateSandbox options) {
-    Duration room = options.waitForCapacity != null ? options.waitForCapacity : t.waitForCapacity;
+    Duration room =
+        options.waitForCapacity != null
+            ? options.waitForCapacity
+            : options.noWait ? Duration.ZERO : t.waitForCapacity;
     Map<String, Object> info =
         t.object(
             new Transport.Call("POST", "/v1/sandboxes")

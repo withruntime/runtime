@@ -1,6 +1,5 @@
 package com.withruntime;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -28,50 +27,6 @@ public final class SandboxParity {
 
     public void remove(String path) {
       NetworkProducts.object(s.t, "POST", s.path("/mounts:unmount"), Map.of("path", path));
-    }
-  }
-
-  public static final class MCP {
-    private final Sandbox s;
-
-    MCP(Sandbox s) {
-      this.s = s;
-    }
-
-    /** Options: servers (catalog IDs or custom commands), optional port and replace. */
-    public JsonObject start(Map<String, ?> options) {
-      return NetworkProducts.object(s.t, "POST", s.path("/mcp"), options);
-    }
-
-    public JsonObject get() {
-      return NetworkProducts.object(s.t, "GET", s.path("/mcp"), null);
-    }
-
-    public void stop() {
-      NetworkProducts.object(s.t, "DELETE", s.path("/mcp"), null);
-    }
-
-    /** Wait until installation ends. Inspect each server's status for failures. Interruptible. */
-    public JsonObject ready(Duration timeout) {
-      Duration limit = timeout == null ? Duration.ofMinutes(10) : timeout;
-      long deadline = System.nanoTime() + limit.toNanos();
-      while (true) {
-        long left = deadline - System.nanoTime();
-        if (left <= 0) throw s.t.connectionError(true, false, null, null);
-        JsonObject state =
-            new JsonObject(
-                s.t.object(
-                    new Transport.Call("GET", s.path("/mcp")).timeout(Duration.ofNanos(left))));
-        if (!state.getBoolean("running")
-            || state.getObjects("servers").stream()
-                .noneMatch(server -> "installing".equals(server.getString("status")))) return state;
-        try {
-          Thread.sleep(Math.max(1, Math.min(2000, (deadline - System.nanoTime()) / 1_000_000)));
-        } catch (InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-          throw s.t.connectionError(true, false, null, interrupted);
-        }
-      }
     }
   }
 

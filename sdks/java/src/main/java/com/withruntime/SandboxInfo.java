@@ -27,6 +27,15 @@ public final class SandboxInfo extends JsonObject {
     return getString("state");
   }
 
+  /**
+   * What it can do now: pause, wake, stop, restart or delete. Each listed changes it from its
+   * state; any other changes nothing or returns 409, whose details list these. Empty from an API
+   * before 9 November 2026.
+   */
+  public List<String> actions() {
+    return getStrings("actions");
+  }
+
   public String region() {
     return getString("region");
   }
@@ -67,6 +76,11 @@ public final class SandboxInfo extends JsonObject {
 
   public boolean autoWake() {
     return getBoolean("autoWake");
+  }
+
+  /** A process due on a timer wakes it when it paused for being idle (with autoWake). */
+  public boolean wakeOnTimers() {
+    return !has("wakeOnTimers") || getBoolean("wakeOnTimers");
   }
 
   /**

@@ -1,172 +1,59 @@
----
-launch: functions
----
-
 # Functions
 
-A Function is an HTTP handler that Runtime runs for you at its own HTTPS address.
-Copies start when calls arrive, as many as the calls in flight need. Every
-copy goes back to sleep about a second after its last call ends. A Function
-that no one calls has no copy awake. It costs only its saved copies
-([price](./pricing#functions)). A copy is a machine, the same kind as a
-sandbox. The handler can be any program in any language that serves HTTP.
+Answer HTTP requests with one TypeScript handler that pauses when idle and resumes on the next request.
 
-A Function is an [App](./apps) that never keeps a copy awake. It uses the same
-calls under `/v1/functions` instead of `/v1/apps`, with the same deploys, versions,
-rollbacks, copies and logs. It has no `minCopies`.
+A machine that answers HTTP with a handler in /app/index.ts (`export default { fetch(request) }`, as Cloudflare Workers and Vercel take one) on port 8080, reached at its preview. It pauses after 60 seconds with nothing happening, its memory kept, and a request resumes it.
 
-## Deploy a function
+| Default | Value |
+| --- | --- |
+| vCPUs | 1 |
+| Memory | 1 GB |
+| Disk | 4 GB |
+| Image | `runtime/standard` |
+| Pauses when idle | After 60 seconds |
 
-Make an image once ([custom images](./images)). Its start command runs with
-`PORT` set. It must serve HTTP on that port:
+A function is a machine like a [sandbox](./sandboxes): [`POST /v2/functions`](./reference/functions#create-a-function) takes the same [SandboxCreate](./reference/sandboxes#sandboxcreate), and every field overrides a default above. You pay for the CPU it uses while it answers, $0.03 per busy vCPU-hour, and nothing for CPU while it is paused.
 
-```ts check
+## Deploy a handler
+
+Write the handler to `/app/index.ts`. The function serves the new file on the next request.
+
+```ts
 import { Runtime } from "withruntime";
 
 const runtime = new Runtime();
-await runtime.images.build({
-  name: "hello-fn",
-  dockerfile: 'FROM python:3.12-slim\nCMD ["sh", "-c", "python -m http.server $PORT"]\n',
-});
+const fn = await runtime.functions.create();
+try {
+  await fn.files.write("/app/index.ts", `export default {
+  fetch(request: Request) {
+    return Response.json({ path: new URL(request.url).pathname });
+  },
+};
+`);
+  const preview = (await runtime.previews.create(fn.id, { port: 8080 })).info;
+  let answer = await fetch(`${preview.url}hello`, { headers: { "x-runtime-preview-token": preview.token! } });
+  for (let i = 0; i < 20 && answer.status !== 200; i++) {
+    await new Promise((r) => setTimeout(r, 250)); // the handler may still be loading
+    answer = await fetch(`${preview.url}hello`, { headers: { "x-runtime-preview-token": preview.token! } });
+  }
+  console.log(answer.status, await answer.text()); // 200 {"path":"/hello"}
+  if (answer.status !== 200) throw new Error(`the function answered ${answer.status}`);
+} finally {
+  await fn.delete();
+}
 ```
 
-Then create the Function and deploy the image. With `wait: true`, the call returns once the
-version is live, or once it has failed, with the reason:
+A private preview needs its token in the `x-runtime-preview-token` header. Make it public with [`visibility`](./reference/previews#previewcreate) to serve anyone. See [previews](./web-app).
 
-```ts check
-import { Runtime } from "withruntime";
+## Next steps
 
-const runtime = new Runtime();
-const fn = await runtime.functions.create({
-  name: "hello-fn",
-  maxCopies: 10,
-  vcpu: 1,
-  memoryMiB: 512,
-});
-const deploy = await runtime.functions.deploy(fn.id, { image: "hello-fn", wait: true });
-if (deploy.state === "live") console.log(deploy.url);
-else console.log(deploy.error?.code, deploy.error?.hint, deploy.error?.lastOutput);
-```
+- Every call on a function: [Function](./reference/functions).
+- Keep secrets out of the handler's code with [secrets](./secrets).
 
-```python check
-from withruntime import Runtime
+## Give this to your agent
 
-runtime = Runtime()
-fn = runtime.functions.create(name="hello-fn", max_copies=10, vcpu=1, memory_mib=512)
-deploy = runtime.functions.deploy(fn["id"], image="hello-fn", wait=True)
-print(deploy["state"], deploy.get("url"))
-```
+Paste this into your coding agent:
 
-From a shell:
-
-```bash no-run
-runtime functions create hello-fn --vcpu 1 --memory 512 --max-copies 10
-runtime functions deploy hello-fn --image hello-fn   # waits until it is live
-runtime functions logs hello-fn --follow
-```
-
-The same over HTTP:
-
-```bash no-run
-curl -sS https://api.withruntime.com/v1/functions \
-  -H "Authorization: Bearer $RUNTIME_API_KEY" -H "Content-Type: application/json" \
-  -d '{"name":"hello-fn","maxCopies":10,"vcpu":1,"memoryMiB":512}'
-curl -sS "https://api.withruntime.com/v1/functions/$FUNCTION_ID/deploys" \
-  -H "Authorization: Bearer $RUNTIME_API_KEY" -H "Content-Type: application/json" \
-  -d '{"image":"hello-fn"}'
-curl -sS "https://api.withruntime.com/v1/functions/$FUNCTION_ID/deploys/$DEPLOY_ID?waitFor=live" \
-  -H "Authorization: Bearer $RUNTIME_API_KEY"
-```
-
-A deploy can also take a build of a connected repository instead of an image.
-Use `build` for this: a build that succeeded, from `runtime builds`. The address is the `url` of the
-Function and of every deploy. It does not change between versions. A create
-or deploy with the same `Idempotency-Key` within 24 hours returns the first
-result again, so a retry never makes a second Function or version. Agents use
-the same calls through the MCP tools `runtime_functions_create`,
-`runtime_functions_deploy`, `runtime_functions_get_deploy`,
-`runtime_functions_rollback`, `runtime_functions_versions`,
-`runtime_functions_copies` and `runtime_functions_logs`.
-
-## Sleep and wake
-
-A copy stays awake for `sleepAfterMs` after its last call ends. The default is 1 second.
-Then it freezes with its memory. Its processes, open files and
-anything it loaded stay as they were. The next call thaws it where it
-stopped. A handler that loads a model or opens a pool at start pays that
-cost once per version, not once per call.
-
-- Calls closer together than `sleepAfterMs` keep the copy awake between
-  them. A lone first call may sleep sooner, from 250 ms.
-- A frozen copy is woken by the server it is on, in milliseconds. It does not
-  wait on Runtime's central scheduler. Each server keeps up to `spares` of
-  its frozen copies in memory. The rest, and any copy frozen for 30 minutes, are
-  parked. A parked copy wakes in a few hundred milliseconds.
-- An open connection (a WebSocket or a stream) or CPU work holds a copy
-  awake until it ends.
-- Awake time with no call in flight is not billed.
-
-`runtime.functions.copies(id)` lists each copy with its version, region and
-state (`starting`, `serving`, `draining`, `frozen` or `parked`).
-
-## Settings
-
-| Setting        | What it does                                                               | Default  |
-| -------------- | -------------------------------------------------------------------------- | -------- |
-| `vcpu`         | vCPUs of each copy, 1 to {{max-vcpu}}                                      | Required |
-| `memoryMiB`    | Memory of each copy, 128 MiB to {{max-memory}}                             | Required |
-| `maxCopies`    | The most copies awake at the same time, 1 to 1,000 and the account's limit | Required |
-| `concurrency`  | Calls one copy takes at the same time, 1 to 10,000                         | 100      |
-| `sleepAfterMs` | How long a copy stays awake after its last call, 250 to 5,000 ms           | 1,000    |
-| `spares`       | Frozen copies each server keeps in memory for the next call, 0 to 16       | 2        |
-| `port`         | The port the handler listens on, given to it as `PORT`                     | 8080     |
-| `healthPath`   | A path that must return 200; without it, the port accepting is healthy     | None     |
-| `cdn`          | Cloudflare's CDN in front of the address; false goes straight to Runtime   | true     |
-
-Change any of them in place with `runtime.functions.update(id, { ... })`
-(`POST /v1/functions/{id}:update`). A setting left out stays as it is.
-`minCopies` is refused. A Function that must always respond immediately is an
-[App](./apps) with `minCopies: 1`.
-
-## Versions, rollback and logs
-
-Deploys go `building`, `warming`, `switching`, `live`, exactly as an App's
-([deploys and rollback](./apps#deploys-health-checks-and-rollback)). The
-address moves to a new version only once it returns a passing health check. A
-version that never does ends `failed`, with the reason and its last output.
-The old version keeps serving. `runtime.functions.rollback(id)` puts the
-previous version live again without building anything.
-
-```ts check
-import { Runtime } from "withruntime";
-
-const runtime = new Runtime();
-const [fn] = (await runtime.functions.list({ name: "hello-fn" })).data;
-for (const version of await runtime.functions.versions(fn!.id))
-  console.log(version.version, version.live ? "live" : version.previous ? "previous" : "");
-const lines = await runtime.functions.logs(fn!.id, { limit: 20 });
-for (const line of lines.lines) console.log(line.stream, line.text);
-```
-
-`runtime functions logs hello-fn --follow` prints every line its copies
-print, as it comes. Lines are kept 14 days.
-
-## Environment and secrets
-
-A deploy's `env` sets the handler's environment. It is sealed as secrets bound to
-the Function. A version keeps only their names. `keepEnv: true` carries the
-last deploy's environment. Account secrets reach a Function the same way as
-an App ([environment and secrets](./apps#environment-and-secrets)). The
-copy sees a placeholder, and the egress proxy puts the value into its HTTPS
-requests to the secret's hosts.
-
-## Delete
-
-`runtime.functions.delete(id)` (`runtime functions rm hello-fn`) stops its
-copies and frees its address. Its saved copies are deleted with it.
-
-## Limits and errors
-
-A Function needs credit on the account. Its limits are an App's
-([limits](./limits#apps)), and so are its errors
-([errors](./apps#errors)). A create or update that sets `minCopies` is refused.
+> Read https://withruntime.com/docs/functions.md. Deploy this project's HTTP handler as a Runtime function: write it to /app/index.ts, share port 8080 with a preview, call it once and print the answer and the preview's url.
+>
+> This page as Markdown: https://withruntime.com/docs/functions.md
