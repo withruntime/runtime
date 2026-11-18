@@ -30,7 +30,7 @@ import {
   waitsForFirstUpload,
 } from "./registries.ts";
 import { PKGS, type Pkg, SEMVER, readVersion, withVersion } from "./versions.ts";
-import { checkDispatch, fromTag } from "./verify-record.ts";
+import { builderKey, checkDispatch, fromTag } from "./verify-record.ts";
 
 const read = (path: string) => {
   try {
@@ -86,6 +86,15 @@ if (command === "record") {
       refuse("the workflow's RELEASE_SIGN_PUB_STAGE is not a public key");
     }
   }
+  // The pipeline service's key, builder-1: its records are of the trees it pushes after a land.
+  let builderPub;
+  if (process.env.RELEASE_SIGN_PUB_BUILDER1?.trim()) {
+    try {
+      builderPub = builderKey(process.env.RELEASE_SIGN_PUB_BUILDER1);
+    } catch {
+      refuse("the workflow's RELEASE_SIGN_PUB_BUILDER1 is not a public key");
+    }
+  }
   const message = execFileSync("git", ["log", "-1", "--format=%B", "HEAD"], { encoding: "utf8" });
   let commit = process.env.COMMIT ?? "";
   let record = process.env.RECORD ?? "";
@@ -123,6 +132,7 @@ if (command === "record") {
     pub,
     vin1Pub,
     stagePub,
+    builderPub,
     tree,
     now: new Date(),
     verify,

@@ -65,6 +65,10 @@ env:
   # Empty: none pinned, and the stage publishes nothing. Its key is pinned
   # here only on Marc's approval.
   RELEASE_SIGN_PUB_STAGE: ""
+  # The pipeline service's one key, builder-1 (engines/cell/deploy/builder.pub,
+  # which export.test.ts holds this to): it signs the record the pipeline
+  # service makes of the tree it pushes after each land of main.
+  RELEASE_SIGN_PUB_BUILDER1: "kyXJqR+AfeHmx1++NBDrJoeqfjwfIkV++Rr/BamO7DY="
 
 jobs:
   npm:
