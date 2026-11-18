@@ -20,14 +20,18 @@ trap 'rm -rf "$out"' EXIT
 cd sdks/java
 
 # The sources alone, with no class path and no annotation processor: nothing the tree holds runs beside the
-# Maven secrets.
-"${bin}javac" --release 17 -proc:none -cp "" -Xlint:all -Werror -d "$out/classes" $(find src/main/java -name '*.java')
+# Maven secrets. Their names reach javac in a file, one to a line, and a name that is not plain (a space, a quote,
+# a newline, a leading dash: what could be read as an option) refuses the build.
+odd=$(find src/main/java \( -name '*[!A-Za-z0-9_.-]*' -o -name '-*' \) -print | head -1)
+[ -z "$odd" ] || { echo "maven.sh: refused: a source name that is not plain under src/main/java" >&2; exit 1; }
+find src/main/java -type f -name '*.java' | sort > "$out/sources"
+"${bin}javac" --release 17 -proc:none -cp "" -Xlint:all -Werror -d "$out/classes" @"$out/sources"
 dir="$out/bundle/com/withruntime/withruntime/$version"
 mkdir -p "$dir"
 base="$dir/withruntime-$version"
 "${bin}jar" --create --file "$base.jar" -C "$out/classes" .
 "${bin}jar" --create --file "$base-sources.jar" -C src/main/java .
-"${bin}javadoc" -quiet --release 17 -cp "" -Xdoclint:all,-missing -d "$out/javadoc" $(find src/main/java -name '*.java')
+"${bin}javadoc" -quiet --release 17 -cp "" -Xdoclint:all,-missing -d "$out/javadoc" @"$out/sources"
 "${bin}jar" --create --file "$base-javadoc.jar" -C "$out/javadoc" .
 cp pom.xml "$base.pom"
 
