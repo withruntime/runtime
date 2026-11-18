@@ -56,6 +56,11 @@ function mainVersion(t: Target): string {
   return v.version;
 }
 
+// The tree whose files it reads and writes, when it is not where it runs: the SDK stage runs this from its own
+// pinned checkout over a commit's files (engines/land/crates/sdks stage.rs `rules`), so nothing of that commit's is
+// read as configuration at its start.
+if (process.env.RELEASE_TREE) process.chdir(process.env.RELEASE_TREE);
+
 const [command, arg] = process.argv.slice(2);
 
 if (command === "record") {

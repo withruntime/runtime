@@ -19,13 +19,15 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 cd sdks/java
 
-"${bin}javac" --release 17 -Xlint:all -Werror -d "$out/classes" $(find src/main/java -name '*.java')
+# The sources alone, with no class path and no annotation processor: nothing the tree holds runs beside the
+# Maven secrets.
+"${bin}javac" --release 17 -proc:none -cp "" -Xlint:all -Werror -d "$out/classes" $(find src/main/java -name '*.java')
 dir="$out/bundle/com/withruntime/withruntime/$version"
 mkdir -p "$dir"
 base="$dir/withruntime-$version"
 "${bin}jar" --create --file "$base.jar" -C "$out/classes" .
 "${bin}jar" --create --file "$base-sources.jar" -C src/main/java .
-"${bin}javadoc" -quiet --release 17 -Xdoclint:all,-missing -d "$out/javadoc" $(find src/main/java -name '*.java')
+"${bin}javadoc" -quiet --release 17 -cp "" -Xdoclint:all,-missing -d "$out/javadoc" $(find src/main/java -name '*.java')
 "${bin}jar" --create --file "$base-javadoc.jar" -C "$out/javadoc" .
 cp pom.xml "$base.pom"
 
