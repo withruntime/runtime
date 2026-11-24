@@ -63,6 +63,10 @@ result = runtime.identities.list
 runtime identities list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_identities_list", "arguments": {  } } }
+```
+
 ## `update`
 
 `POST /v2/identities/{id}:update`
@@ -111,6 +115,10 @@ result = runtime.identities.update("IDENTITY_ID", name: "example")
 runtime identities update IDENTITY_ID --name example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_identities_update", "arguments": { "id": "IDENTITY_ID", "name": "example" } } }
+```
+
 ## Delete a identity
 
 `DELETE /v2/identities/{id}`
@@ -153,6 +161,10 @@ result = runtime.identities.delete("IDENTITY_ID")
 
 ```bash title="CLI"
 runtime identities delete IDENTITY_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_identities_delete", "arguments": { "id": "IDENTITY_ID" } } }
 ```
 
 ## Objects

@@ -56,6 +56,10 @@ result = runtime.me.get
 runtime me get
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_me_get", "arguments": {  } } }
+```
+
 ## Objects
 
 ### Me

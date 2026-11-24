@@ -16,7 +16,7 @@ auth="Authorization: Bearer $RUNTIME_API_KEY"
 id=$(curl -sf -X POST "$api/sandboxes" -H "$auth" -H "Content-Type: application/json" -d '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 trap 'curl -sf -X DELETE "$api/sandboxes/$id" -H "$auth" > /dev/null' EXIT
 event='{"orderId": 7, "amount": 1250}'
-curl -sf -X POST "$api/sandboxes/$id:exec" -H "$auth" -H "Content-Type: application/json" \
+curl -sf -X POST "$api/sandboxes/${id}:exec" -H "$auth" -H "Content-Type: application/json" \
   -d "{\"cmd\": [\"python3\", \"-c\", \"import json, os; e = json.loads(os.environ['EVENT']); print(e['amount'] / 100)\"], \"env\": {\"EVENT\": $(printf '%s' "$event" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}}"
 ```
 

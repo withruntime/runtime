@@ -93,6 +93,10 @@ result = runtime.desktops.create
 runtime desktops create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "desktops" } } }
+```
+
 ## Get a desktop
 
 `GET /v2/desktops/{id}`
@@ -142,6 +146,10 @@ result = runtime.desktops.get("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops get DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## List desktops
@@ -196,6 +204,10 @@ result = runtime.desktops.list
 runtime desktops list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "desktops" } } }
+```
+
 ## Delete a desktop
 
 `DELETE /v2/desktops/{id}`
@@ -238,6 +250,10 @@ result = runtime.desktops.delete("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops delete DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.desktops.pause("DESKTOP_ID")
 runtime desktops pause DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/desktops/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.desktops.resume("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops resume DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.desktops.exec("DESKTOP_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime desktops exec DESKTOP_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.desktops.read("DESKTOP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime desktops read DESKTOP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.desktops.write("DESKTOP_ID", "hello\n", path: "/tmp/hello.txt")
 runtime desktops write DESKTOP_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/desktops/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.desktops.process_output("DESKTOP_ID", "PROCESS_ID")
 runtime desktops process-output DESKTOP_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/desktops/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.desktops.write_process("DESKTOP_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime desktops write-process DESKTOP_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.desktops.signal_process("DESKTOP_ID", "PROCESS_ID")
 runtime desktops signal-process DESKTOP_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/desktops/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.desktops.resize_process("DESKTOP_ID", "PROCESS_ID", cols: 1, ro
 runtime desktops resize-process DESKTOP_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/desktops/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.desktops.list_processes("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops list-processes DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.desktops.remove("DESKTOP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime desktops remove DESKTOP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.desktops.stat("DESKTOP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime desktops stat DESKTOP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.desktops.list_files("DESKTOP_ID")
 runtime desktops list-files DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/desktops/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.desktops.download_folder("DESKTOP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime desktops download-folder DESKTOP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.desktops.upload_folder("DESKTOP_ID", "hello\n", path: "/tmp/hel
 runtime desktops upload-folder DESKTOP_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/desktops/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.desktops.begin_folder_upload("DESKTOP_ID", path: "/tmp/hello.tx
 
 ```bash title="CLI"
 runtime desktops begin-folder-upload DESKTOP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.desktops.write_folder_upload("DESKTOP_ID", "UPLOAD_ID", "hello\
 runtime desktops write-folder-upload DESKTOP_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/desktops/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.desktops.commit_folder_upload("DESKTOP_ID", "UPLOAD_ID")
 runtime desktops commit-folder-upload DESKTOP_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/desktops/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.desktops.abort_folder_upload("DESKTOP_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime desktops abort-folder-upload DESKTOP_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.desktops.mkdir("DESKTOP_ID", path: "/tmp/hello.txt")
 runtime desktops mkdir DESKTOP_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/desktops/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.desktops.rename("DESKTOP_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime desktops rename DESKTOP_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.desktops.link("DESKTOP_ID", path: "/tmp/hello.txt")
 runtime desktops link DESKTOP_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/desktops/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.desktops.revoke_links("DESKTOP_ID")
 runtime desktops revoke-links DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/desktops/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.desktops.get_network("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops get-network DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.desktops.metrics("DESKTOP_ID")
 runtime desktops metrics DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/desktops/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.desktops.set_network("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops set-network DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.desktops.fork("DESKTOP_ID")
 runtime desktops fork DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/desktops/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.desktops.snapshot("DESKTOP_ID")
 runtime desktops snapshot DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/desktops/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.desktops.update("DESKTOP_ID")
 
 ```bash title="CLI"
 runtime desktops update DESKTOP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.desktops.screenshot("DESKTOP_ID")
 runtime desktops screenshot DESKTOP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "desktops", "id": "DESKTOP_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/desktops/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.desktops.act("DESKTOP_ID", actions: [{ type: "move" }])
 runtime desktops act DESKTOP_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/desktops/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.desktops.run_code("DESKTOP_ID", code: "example")
 
 ```bash title="CLI"
 runtime desktops run-code DESKTOP_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "desktops", "id": "DESKTOP_ID", "code": "example" } } }
 ```
 
 ## Objects

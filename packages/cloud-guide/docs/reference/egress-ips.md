@@ -61,6 +61,10 @@ result = runtime.egress_ips.list
 runtime egressIps list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_egress_ips_list", "arguments": {  } } }
+```
+
 ## Objects
 
 ### EgressIpSettings

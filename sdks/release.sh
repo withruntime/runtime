@@ -17,6 +17,8 @@
 #   sdks/release.sh check OUT [PKG...]       build those packages in OUT as their registry jobs do
 #                                            (js python ruby go; all when none is named)
 #                                            (a pull request's `sdk-tests` step runs tree and check for the SDKs its change files name)
+#   sdks/release.sh surface OUT [PKG...]     refuse a package in OUT that breaks code written for the newest release
+#                                            of its major (sdks/surface; a break needs a major change file)
 #   sdks/release.sh                          both, for this checkout, into $OUT (default
 #                                            /tmp/sdk-release): what a release would ship, built here
 #
@@ -216,9 +218,70 @@ check() {
   done
 }
 
+# What a minor or patch release may not do: break code written for the newest release of its major. Each package
+# built in OUT is compared with that release, fetched from its registry (sdks/surface): TypeScript by the checker
+# (every old export must accept the new one in its place), Python and Ruby by every method's arguments, Go by
+# apidiff. A package that starts a major has nothing to compare with; a break needs a `major` change file.
+surface() {
+  local out=$1; shift
+  local pkgs=("$@"); [ ${#pkgs[@]} -gt 0 ] || pkgs=(js python ruby go)
+  local w; w=$(mktemp -d)
+  local p v base
+  # The newest version below $1 of its major, from the registry's list on stdin (one per line).
+  baseline() { python3 -c 'import sys
+v = tuple(map(int, sys.argv[1].split(".")))
+vs = [tuple(map(int, l.strip().lstrip("v").split("."))) for l in sys.stdin if l.strip().lstrip("v").replace(".", "").isdigit()]
+c = [x for x in vs if x[0] == v[0] and x < v]
+print(".".join(map(str, max(c))) if c else "")' "$1"; }
+  for p in "${pkgs[@]}"; do
+    case $p in
+      js) v=$(node -p 'require(process.argv[1]).version' "$out/packages/cloud-sdk/package.json")
+          base=$(npm view withruntime versions --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).join("\n")))' | baseline "$v")
+          [ -n "$base" ] || { say "npm withruntime $v: the first of its major, nothing to compare"; continue; }
+          (cd "$w" && npm pack -s "withruntime@$base" >/dev/null && mkdir -p old && tar -xzf "withruntime-$base.tgz" -C old)
+          (cd "$out/packages/cloud-sdk" && node "$here/surface/ts.mjs" "$w/old/package/dist/v2/index.d.ts" ./dist/v2/index.d.ts "$w/surface.ts" \
+            && cp "$w/surface.ts" ./surface-check.ts \
+            && node_modules/.bin/tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 \
+              --lib es2022,esnext.disposable,dom surface-check.ts; r=$?; rm -f surface-check.ts; exit $r) \
+            || { echo "release.sh: npm withruntime $v breaks code written for $base (above); a break needs a major change file" >&2; return 1; }
+          say "npm withruntime $v: code written for $base type-checks against it" ;;
+      python) v=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$out/sdks/python/pyproject.toml")
+          base=$(curl -fsS https://pypi.org/pypi/withruntime/json | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["releases"]))' | baseline "$v")
+          [ -n "$base" ] || { say "PyPI withruntime $v: the first of its major, nothing to compare"; continue; }
+          uv venv -q "$w/py-old" && uv pip install -q -p "$w/py-old/bin/python" "withruntime==$base" \
+            && uv venv -q "$w/py-new" && (cd "$out/sdks/python" && uv pip install -q -p "$w/py-new/bin/python" .) \
+            && (cd / && "$w/py-old/bin/python" -I "$here/surface/python.py" > "$w/py-old.json" && "$w/py-new/bin/python" -I "$here/surface/python.py" > "$w/py-new.json") \
+            && python3 "$here/surface/compare.py" "$w/py-old.json" "$w/py-new.json" \
+            || { echo "release.sh: PyPI withruntime $v breaks code written for $base (above); a break needs a major change file" >&2; return 1; }
+          say "PyPI withruntime $v: every method of $base takes what it took" ;;
+      ruby) v=$(sed -n 's/.*VERSION = "\(.*\)"$/\1/p' "$out/sdks/ruby/lib/withruntime/version.rb")
+          base=$(curl -fsS https://rubygems.org/api/v1/versions/withruntime.json | python3 -c 'import json,sys; print("\n".join(x["number"] for x in json.load(sys.stdin)))' | baseline "$v")
+          [ -n "$base" ] || { say "RubyGems withruntime $v: the first of its major, nothing to compare"; continue; }
+          (cd "$w" && gem fetch -q withruntime -v "$base" >/dev/null && gem unpack -q "withruntime-$base.gem" >/dev/null) \
+            && ruby "$here/surface/ruby.rb" "$w/withruntime-$base/lib" > "$w/rb-old.json" && ruby "$here/surface/ruby.rb" "$out/sdks/ruby/lib" > "$w/rb-new.json" \
+            && python3 "$here/surface/compare.py" "$w/rb-old.json" "$w/rb-new.json" \
+            || { echo "release.sh: RubyGems withruntime $v breaks code written for $base (above); a break needs a major change file" >&2; return 1; }
+          say "RubyGems withruntime $v: every method of $base takes what it took" ;;
+      go) v=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$out/sdks/go/client.go"); local module; module=$(sed -n 's/^module //p' "$out/sdks/go/go.mod")
+          base=$(curl -fsS "https://proxy.golang.org/$module/@v/list" | baseline "$v")
+          [ -n "$base" ] || { say "Go $module $v: the first of its major, nothing to compare"; continue; }
+          GOBIN="$w/bin" go install golang.org/x/exp/cmd/apidiff@v0.0.0-20261124000051-d6646c509b6d \
+            && (cd "$w" && curl -fsSL -o old.zip "https://proxy.golang.org/$module/@v/v$base.zip" && unzip -q old.zip -d old) \
+            && (cd "$w/old/$module@v$base" && "$w/bin/apidiff" -w "$w/go-old.api" "$module/generated") \
+            && (cd "$out/sdks/go" && "$w/bin/apidiff" -w "$w/go-new.api" "$module/generated") \
+            && ! "$w/bin/apidiff" -incompatible "$w/go-old.api" "$w/go-new.api" | grep . \
+            || { echo "release.sh: Go $module $v breaks code written for $base (above); a break needs a major change file" >&2; return 1; }
+          say "Go $module $v: apidiff finds nothing incompatible with $base" ;;
+      *) echo "release.sh: no package $p (js python ruby go)" >&2; return 2 ;;
+    esac
+  done
+  rm -rf "$w"
+}
+
 case "${1:-}" in
   tree) shift; tree "${1:?release.sh tree SRC OUT [VERSION]}" "${2:?release.sh tree SRC OUT [VERSION]}" "${3:-$(cat "$here/VERSION")}" ;;
   check) shift; check "${1:?release.sh check OUT [PKG...]}" "${@:2}" ;;
+  surface) shift; surface "${1:?release.sh surface OUT [PKG...]}" "${@:2}" ;;
   "") out="${OUT:-/tmp/sdk-release}"; rm -rf "$out"; tree "$here/.." "$out" "$(cat "$here/VERSION")"; check "$out" ;;
-  *) echo "usage: sdks/release.sh [tree SRC OUT [VERSION] | check OUT [PKG...]]" >&2; exit 2 ;;
+  *) echo "usage: sdks/release.sh [tree SRC OUT [VERSION] | check OUT [PKG...] | surface OUT [PKG...]]" >&2; exit 2 ;;
 esac

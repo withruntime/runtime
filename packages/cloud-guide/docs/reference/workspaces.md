@@ -93,6 +93,10 @@ result = runtime.workspaces.create
 runtime workspaces create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "workspaces" } } }
+```
+
 ## Get a workspace
 
 `GET /v2/workspaces/{id}`
@@ -142,6 +146,10 @@ result = runtime.workspaces.get("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces get WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## List workspaces
@@ -196,6 +204,10 @@ result = runtime.workspaces.list
 runtime workspaces list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "workspaces" } } }
+```
+
 ## Delete a workspace
 
 `DELETE /v2/workspaces/{id}`
@@ -238,6 +250,10 @@ result = runtime.workspaces.delete("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces delete WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.workspaces.pause("WORKSPACE_ID")
 runtime workspaces pause WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/workspaces/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.workspaces.resume("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces resume WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.workspaces.exec("WORKSPACE_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime workspaces exec WORKSPACE_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.workspaces.read("WORKSPACE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime workspaces read WORKSPACE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.workspaces.write("WORKSPACE_ID", "hello\n", path: "/tmp/hello.t
 runtime workspaces write WORKSPACE_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/workspaces/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.workspaces.process_output("WORKSPACE_ID", "PROCESS_ID")
 runtime workspaces process-output WORKSPACE_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/workspaces/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.workspaces.write_process("WORKSPACE_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime workspaces write-process WORKSPACE_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.workspaces.signal_process("WORKSPACE_ID", "PROCESS_ID")
 runtime workspaces signal-process WORKSPACE_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/workspaces/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.workspaces.resize_process("WORKSPACE_ID", "PROCESS_ID", cols: 1
 runtime workspaces resize-process WORKSPACE_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/workspaces/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.workspaces.list_processes("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces list-processes WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.workspaces.remove("WORKSPACE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime workspaces remove WORKSPACE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.workspaces.stat("WORKSPACE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime workspaces stat WORKSPACE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.workspaces.list_files("WORKSPACE_ID")
 runtime workspaces list-files WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/workspaces/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.workspaces.download_folder("WORKSPACE_ID", path: "/tmp/hello.tx
 
 ```bash title="CLI"
 runtime workspaces download-folder WORKSPACE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.workspaces.upload_folder("WORKSPACE_ID", "hello\n", path: "/tmp
 runtime workspaces upload-folder WORKSPACE_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/workspaces/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.workspaces.begin_folder_upload("WORKSPACE_ID", path: "/tmp/hell
 
 ```bash title="CLI"
 runtime workspaces begin-folder-upload WORKSPACE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.workspaces.write_folder_upload("WORKSPACE_ID", "UPLOAD_ID", "he
 runtime workspaces write-folder-upload WORKSPACE_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/workspaces/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.workspaces.commit_folder_upload("WORKSPACE_ID", "UPLOAD_ID")
 runtime workspaces commit-folder-upload WORKSPACE_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/workspaces/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.workspaces.abort_folder_upload("WORKSPACE_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime workspaces abort-folder-upload WORKSPACE_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.workspaces.mkdir("WORKSPACE_ID", path: "/tmp/hello.txt")
 runtime workspaces mkdir WORKSPACE_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/workspaces/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.workspaces.rename("WORKSPACE_ID", from: "example", to: "example
 
 ```bash title="CLI"
 runtime workspaces rename WORKSPACE_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.workspaces.link("WORKSPACE_ID", path: "/tmp/hello.txt")
 runtime workspaces link WORKSPACE_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/workspaces/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.workspaces.revoke_links("WORKSPACE_ID")
 runtime workspaces revoke-links WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/workspaces/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.workspaces.get_network("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces get-network WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.workspaces.metrics("WORKSPACE_ID")
 runtime workspaces metrics WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/workspaces/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.workspaces.set_network("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces set-network WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.workspaces.fork("WORKSPACE_ID")
 runtime workspaces fork WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/workspaces/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.workspaces.snapshot("WORKSPACE_ID")
 runtime workspaces snapshot WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/workspaces/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.workspaces.update("WORKSPACE_ID")
 
 ```bash title="CLI"
 runtime workspaces update WORKSPACE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.workspaces.screenshot("WORKSPACE_ID")
 runtime workspaces screenshot WORKSPACE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/workspaces/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.workspaces.act("WORKSPACE_ID", actions: [{ type: "move" }])
 runtime workspaces act WORKSPACE_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/workspaces/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.workspaces.run_code("WORKSPACE_ID", code: "example")
 
 ```bash title="CLI"
 runtime workspaces run-code WORKSPACE_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "workspaces", "id": "WORKSPACE_ID", "code": "example" } } }
 ```
 
 ## Objects

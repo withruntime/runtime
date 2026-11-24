@@ -60,6 +60,10 @@ result = runtime.webhooks.create(url: "example")
 runtime webhooks create --url example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_webhooks_create", "arguments": { "url": "example" } } }
+```
+
 ## List webhooks
 
 `GET /v2/webhooks`
@@ -111,6 +115,10 @@ result = runtime.webhooks.list
 runtime webhooks list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_webhooks_list", "arguments": {  } } }
+```
+
 ## Delete a webhook
 
 `DELETE /v2/webhooks/{id}`
@@ -153,6 +161,10 @@ result = runtime.webhooks.delete("WEBHOOK_ID")
 
 ```bash title="CLI"
 runtime webhooks delete WEBHOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_webhooks_delete", "arguments": { "id": "WEBHOOK_ID" } } }
 ```
 
 ## Objects

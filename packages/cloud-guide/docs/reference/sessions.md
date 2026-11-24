@@ -61,6 +61,10 @@ result = runtime.sessions.create(machine_id: "example")
 runtime sessions create --machine-id example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_sessions_create", "arguments": { "machineId": "example" } } }
+```
+
 ## Delete a session
 
 `DELETE /v2/sessions/{id}`
@@ -105,6 +109,10 @@ result = runtime.sessions.delete("SESSION_ID")
 
 ```bash title="CLI"
 runtime sessions delete SESSION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_sessions_delete", "arguments": { "id": "SESSION_ID" } } }
 ```
 
 ## Objects

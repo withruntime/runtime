@@ -6,15 +6,15 @@ Runtime runs Linux machines: each one is a microVM with its own kernel, disk and
 
 1. Create an API key on the [Keys page](https://withruntime.com/account/keys) of the console, or with [`POST /v2/keys`](./reference/keys#create-a-key).
 2. Set it as `RUNTIME_API_KEY` in your environment. Every SDK, the CLI and the MCP server read it from there.
-3. Install an SDK: `npm install withruntime` (Node.js 22.12 or later, or Bun) or `pip install withruntime` (Python 3.9 or later).
+3. Install an SDK in your project's folder: `npm install withruntime` (Node.js 22.12 or later, or Bun) or `pip install withruntime` (Python 3.9 or later).
 
 Signing up takes no card. Creating a sandbox needs one: until a card is added at [withruntime.com/account/start](https://withruntime.com/account/start), every call that creates or changes a sandbox answers `402` with the error code `card_required`. Adding the card starts the 7-day Pro trial with $5 of usage. After the trial, Pro costs $25 a month, and that fee is returned as $25 of usage. See [pricing](./pricing).
 
 ## Run a program
 
-TypeScript:
+Node.js: save this as `main.mjs` and run `node main.mjs`. The same code is valid TypeScript.
 
-```ts
+```js
 import { Runtime } from "withruntime";
 
 const runtime = new Runtime(); // reads RUNTIME_API_KEY
@@ -29,7 +29,7 @@ try {
 }
 ```
 
-Python:
+Python: save this as `main.py` and run `python3 main.py`.
 
 ```python
 from withruntime.generated import Runtime
@@ -45,14 +45,14 @@ finally:
     sandbox.delete()
 ```
 
-The HTTP API, with curl:
+The HTTP API, with curl, in bash or zsh:
 
 ```bash
 api=https://api.withruntime.com/v2
 auth="Authorization: Bearer $RUNTIME_API_KEY"
 id=$(curl -sf -X POST "$api/sandboxes" -H "$auth" -H "Content-Type: application/json" -d '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 trap 'curl -sf -X DELETE "$api/sandboxes/$id" -H "$auth" > /dev/null' EXIT
-curl -sf -X POST "$api/sandboxes/$id:exec" -H "$auth" -H "Content-Type: application/json" \
+curl -sf -X POST "$api/sandboxes/${id}:exec" -H "$auth" -H "Content-Type: application/json" \
   -d '{"cmd": ["python3", "-c", "print(sum([125, 250, 375]))"]}'
 ```
 

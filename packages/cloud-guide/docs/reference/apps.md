@@ -93,6 +93,10 @@ result = runtime.apps.create
 runtime apps create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "apps" } } }
+```
+
 ## Get a app
 
 `GET /v2/apps/{id}`
@@ -142,6 +146,10 @@ result = runtime.apps.get("APP_ID")
 
 ```bash title="CLI"
 runtime apps get APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## List apps
@@ -196,6 +204,10 @@ result = runtime.apps.list
 runtime apps list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "apps" } } }
+```
+
 ## Delete a app
 
 `DELETE /v2/apps/{id}`
@@ -238,6 +250,10 @@ result = runtime.apps.delete("APP_ID")
 
 ```bash title="CLI"
 runtime apps delete APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.apps.pause("APP_ID")
 runtime apps pause APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/apps/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.apps.resume("APP_ID")
 
 ```bash title="CLI"
 runtime apps resume APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.apps.exec("APP_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime apps exec APP_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "apps", "id": "APP_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.apps.read("APP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime apps read APP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.apps.write("APP_ID", "hello\n", path: "/tmp/hello.txt")
 runtime apps write APP_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/apps/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.apps.process_output("APP_ID", "PROCESS_ID")
 runtime apps process-output APP_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "apps", "id": "APP_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/apps/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.apps.write_process("APP_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime apps write-process APP_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "apps", "id": "APP_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.apps.signal_process("APP_ID", "PROCESS_ID")
 runtime apps signal-process APP_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "apps", "id": "APP_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/apps/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.apps.resize_process("APP_ID", "PROCESS_ID", cols: 1, rows: 1)
 runtime apps resize-process APP_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "apps", "id": "APP_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/apps/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.apps.list_processes("APP_ID")
 
 ```bash title="CLI"
 runtime apps list-processes APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.apps.remove("APP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime apps remove APP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.apps.stat("APP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime apps stat APP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.apps.list_files("APP_ID")
 runtime apps list-files APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/apps/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.apps.download_folder("APP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime apps download-folder APP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.apps.upload_folder("APP_ID", "hello\n", path: "/tmp/hello.txt")
 runtime apps upload-folder APP_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/apps/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.apps.begin_folder_upload("APP_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime apps begin-folder-upload APP_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.apps.write_folder_upload("APP_ID", "UPLOAD_ID", "hello\n")
 runtime apps write-folder-upload APP_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "apps", "id": "APP_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/apps/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.apps.commit_folder_upload("APP_ID", "UPLOAD_ID")
 runtime apps commit-folder-upload APP_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "apps", "id": "APP_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/apps/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.apps.abort_folder_upload("APP_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime apps abort-folder-upload APP_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "apps", "id": "APP_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.apps.mkdir("APP_ID", path: "/tmp/hello.txt")
 runtime apps mkdir APP_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/apps/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.apps.rename("APP_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime apps rename APP_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "apps", "id": "APP_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.apps.link("APP_ID", path: "/tmp/hello.txt")
 runtime apps link APP_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "apps", "id": "APP_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/apps/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.apps.revoke_links("APP_ID")
 runtime apps revoke-links APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/apps/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.apps.get_network("APP_ID")
 
 ```bash title="CLI"
 runtime apps get-network APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.apps.metrics("APP_ID")
 runtime apps metrics APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/apps/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.apps.set_network("APP_ID")
 
 ```bash title="CLI"
 runtime apps set-network APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.apps.fork("APP_ID")
 runtime apps fork APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/apps/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.apps.snapshot("APP_ID")
 runtime apps snapshot APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/apps/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.apps.update("APP_ID")
 
 ```bash title="CLI"
 runtime apps update APP_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "apps", "id": "APP_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.apps.screenshot("APP_ID")
 runtime apps screenshot APP_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "apps", "id": "APP_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/apps/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.apps.act("APP_ID", actions: [{ type: "move" }])
 runtime apps act APP_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "apps", "id": "APP_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/apps/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.apps.run_code("APP_ID", code: "example")
 
 ```bash title="CLI"
 runtime apps run-code APP_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "apps", "id": "APP_ID", "code": "example" } } }
 ```
 
 ## Objects

@@ -62,6 +62,10 @@ result = runtime.ports.create(sandbox_id: "SANDBOX_ID", port: 3000)
 runtime ports create --sandbox-id SANDBOX_ID --port 3000
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_ports_create", "arguments": { "sandboxId": "SANDBOX_ID", "port": 3000 } } }
+```
+
 ## List ports
 
 `GET /v2/ports`
@@ -112,6 +116,10 @@ result = runtime.ports.list
 runtime ports list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_ports_list", "arguments": {  } } }
+```
+
 ## Delete a port
 
 `DELETE /v2/ports/{id}`
@@ -156,6 +164,10 @@ result = runtime.ports.delete("PORT_ID")
 
 ```bash title="CLI"
 runtime ports delete PORT_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_ports_delete", "arguments": { "id": "PORT_ID" } } }
 ```
 
 ## Objects

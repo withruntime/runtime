@@ -64,6 +64,10 @@ result = runtime.usage.get
 runtime usage get
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_usage_get", "arguments": {  } } }
+```
+
 ## `export`
 
 `GET /v2/usage/export`
@@ -117,6 +121,10 @@ result = runtime.usage.export(since: "example", until: "example")
 
 ```bash title="CLI"
 runtime usage export --since example --until example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_usage_export", "arguments": { "since": "example", "until": "example" } } }
 ```
 
 ## Objects

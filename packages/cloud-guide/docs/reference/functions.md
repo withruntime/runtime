@@ -93,6 +93,10 @@ result = runtime.functions.create
 runtime functions create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "functions" } } }
+```
+
 ## Get a function
 
 `GET /v2/functions/{id}`
@@ -142,6 +146,10 @@ result = runtime.functions.get("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions get FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## List functions
@@ -196,6 +204,10 @@ result = runtime.functions.list
 runtime functions list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "functions" } } }
+```
+
 ## Delete a function
 
 `DELETE /v2/functions/{id}`
@@ -238,6 +250,10 @@ result = runtime.functions.delete("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions delete FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.functions.pause("FUNCTION_ID")
 runtime functions pause FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/functions/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.functions.resume("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions resume FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.functions.exec("FUNCTION_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime functions exec FUNCTION_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "functions", "id": "FUNCTION_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.functions.read("FUNCTION_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime functions read FUNCTION_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.functions.write("FUNCTION_ID", "hello\n", path: "/tmp/hello.txt
 runtime functions write FUNCTION_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/functions/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.functions.process_output("FUNCTION_ID", "PROCESS_ID")
 runtime functions process-output FUNCTION_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "functions", "id": "FUNCTION_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/functions/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.functions.write_process("FUNCTION_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime functions write-process FUNCTION_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "functions", "id": "FUNCTION_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.functions.signal_process("FUNCTION_ID", "PROCESS_ID")
 runtime functions signal-process FUNCTION_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "functions", "id": "FUNCTION_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/functions/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.functions.resize_process("FUNCTION_ID", "PROCESS_ID", cols: 1, 
 runtime functions resize-process FUNCTION_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "functions", "id": "FUNCTION_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/functions/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.functions.list_processes("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions list-processes FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.functions.remove("FUNCTION_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime functions remove FUNCTION_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.functions.stat("FUNCTION_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime functions stat FUNCTION_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.functions.list_files("FUNCTION_ID")
 runtime functions list-files FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/functions/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.functions.download_folder("FUNCTION_ID", path: "/tmp/hello.txt"
 
 ```bash title="CLI"
 runtime functions download-folder FUNCTION_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.functions.upload_folder("FUNCTION_ID", "hello\n", path: "/tmp/h
 runtime functions upload-folder FUNCTION_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/functions/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.functions.begin_folder_upload("FUNCTION_ID", path: "/tmp/hello.
 
 ```bash title="CLI"
 runtime functions begin-folder-upload FUNCTION_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.functions.write_folder_upload("FUNCTION_ID", "UPLOAD_ID", "hell
 runtime functions write-folder-upload FUNCTION_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "functions", "id": "FUNCTION_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/functions/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.functions.commit_folder_upload("FUNCTION_ID", "UPLOAD_ID")
 runtime functions commit-folder-upload FUNCTION_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "functions", "id": "FUNCTION_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/functions/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.functions.abort_folder_upload("FUNCTION_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime functions abort-folder-upload FUNCTION_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "functions", "id": "FUNCTION_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.functions.mkdir("FUNCTION_ID", path: "/tmp/hello.txt")
 runtime functions mkdir FUNCTION_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/functions/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.functions.rename("FUNCTION_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime functions rename FUNCTION_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "functions", "id": "FUNCTION_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.functions.link("FUNCTION_ID", path: "/tmp/hello.txt")
 runtime functions link FUNCTION_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "functions", "id": "FUNCTION_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/functions/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.functions.revoke_links("FUNCTION_ID")
 runtime functions revoke-links FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/functions/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.functions.get_network("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions get-network FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.functions.metrics("FUNCTION_ID")
 runtime functions metrics FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/functions/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.functions.set_network("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions set-network FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.functions.fork("FUNCTION_ID")
 runtime functions fork FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/functions/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.functions.snapshot("FUNCTION_ID")
 runtime functions snapshot FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/functions/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.functions.update("FUNCTION_ID")
 
 ```bash title="CLI"
 runtime functions update FUNCTION_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.functions.screenshot("FUNCTION_ID")
 runtime functions screenshot FUNCTION_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "functions", "id": "FUNCTION_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/functions/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.functions.act("FUNCTION_ID", actions: [{ type: "move" }])
 runtime functions act FUNCTION_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "functions", "id": "FUNCTION_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/functions/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.functions.run_code("FUNCTION_ID", code: "example")
 
 ```bash title="CLI"
 runtime functions run-code FUNCTION_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "functions", "id": "FUNCTION_ID", "code": "example" } } }
 ```
 
 ## Objects

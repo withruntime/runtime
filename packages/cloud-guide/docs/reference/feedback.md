@@ -61,7 +61,7 @@ runtime feedback create --kind bug --summary example
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_feedback", "arguments": { "kind": "bug", "summary": "example" } } }
+{ "method": "tools/call", "params": { "name": "runtime_feedback_create", "arguments": { "kind": "bug", "summary": "example" } } }
 ```
 
 ## Objects

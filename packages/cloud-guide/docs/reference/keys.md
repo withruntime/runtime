@@ -66,6 +66,10 @@ result = runtime.keys.list
 runtime keys list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_keys_list", "arguments": {  } } }
+```
+
 ## Create a key
 
 `POST /v2/keys`
@@ -112,6 +116,10 @@ result = runtime.keys.create(name: "example")
 
 ```bash title="CLI"
 runtime keys create --name example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_keys_create", "arguments": { "name": "example" } } }
 ```
 
 ## `update`
@@ -162,6 +170,10 @@ result = runtime.keys.update("KEY_ID")
 runtime keys update KEY_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_keys_update", "arguments": { "id": "KEY_ID" } } }
+```
+
 ## Delete a key
 
 `DELETE /v2/keys/{id}`
@@ -206,6 +218,10 @@ result = runtime.keys.delete("KEY_ID")
 
 ```bash title="CLI"
 runtime keys delete KEY_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_keys_delete", "arguments": { "id": "KEY_ID" } } }
 ```
 
 ## Objects

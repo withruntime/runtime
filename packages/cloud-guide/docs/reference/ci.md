@@ -93,6 +93,10 @@ result = runtime.ci.create
 runtime ci create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "ci" } } }
+```
+
 ## Get a ci
 
 `GET /v2/ci/{id}`
@@ -142,6 +146,10 @@ result = runtime.ci.get("CI_ID")
 
 ```bash title="CLI"
 runtime ci get CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## List ci
@@ -196,6 +204,10 @@ result = runtime.ci.list
 runtime ci list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "ci" } } }
+```
+
 ## Delete a ci
 
 `DELETE /v2/ci/{id}`
@@ -238,6 +250,10 @@ result = runtime.ci.delete("CI_ID")
 
 ```bash title="CLI"
 runtime ci delete CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.ci.pause("CI_ID")
 runtime ci pause CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/ci/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.ci.resume("CI_ID")
 
 ```bash title="CLI"
 runtime ci resume CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.ci.exec("CI_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime ci exec CI_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "ci", "id": "CI_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.ci.read("CI_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime ci read CI_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.ci.write("CI_ID", "hello\n", path: "/tmp/hello.txt")
 runtime ci write CI_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/ci/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.ci.process_output("CI_ID", "PROCESS_ID")
 runtime ci process-output CI_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "ci", "id": "CI_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/ci/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.ci.write_process("CI_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime ci write-process CI_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "ci", "id": "CI_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.ci.signal_process("CI_ID", "PROCESS_ID")
 runtime ci signal-process CI_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "ci", "id": "CI_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/ci/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.ci.resize_process("CI_ID", "PROCESS_ID", cols: 1, rows: 1)
 runtime ci resize-process CI_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "ci", "id": "CI_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/ci/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.ci.list_processes("CI_ID")
 
 ```bash title="CLI"
 runtime ci list-processes CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.ci.remove("CI_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime ci remove CI_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.ci.stat("CI_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime ci stat CI_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.ci.list_files("CI_ID")
 runtime ci list-files CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/ci/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.ci.download_folder("CI_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime ci download-folder CI_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.ci.upload_folder("CI_ID", "hello\n", path: "/tmp/hello.txt")
 runtime ci upload-folder CI_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/ci/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.ci.begin_folder_upload("CI_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime ci begin-folder-upload CI_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.ci.write_folder_upload("CI_ID", "UPLOAD_ID", "hello\n")
 runtime ci write-folder-upload CI_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "ci", "id": "CI_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/ci/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.ci.commit_folder_upload("CI_ID", "UPLOAD_ID")
 runtime ci commit-folder-upload CI_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "ci", "id": "CI_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/ci/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.ci.abort_folder_upload("CI_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime ci abort-folder-upload CI_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "ci", "id": "CI_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.ci.mkdir("CI_ID", path: "/tmp/hello.txt")
 runtime ci mkdir CI_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/ci/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.ci.rename("CI_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime ci rename CI_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "ci", "id": "CI_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.ci.link("CI_ID", path: "/tmp/hello.txt")
 runtime ci link CI_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "ci", "id": "CI_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/ci/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.ci.revoke_links("CI_ID")
 runtime ci revoke-links CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/ci/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.ci.get_network("CI_ID")
 
 ```bash title="CLI"
 runtime ci get-network CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.ci.metrics("CI_ID")
 runtime ci metrics CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/ci/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.ci.set_network("CI_ID")
 
 ```bash title="CLI"
 runtime ci set-network CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.ci.fork("CI_ID")
 runtime ci fork CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/ci/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.ci.snapshot("CI_ID")
 runtime ci snapshot CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/ci/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.ci.update("CI_ID")
 
 ```bash title="CLI"
 runtime ci update CI_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "ci", "id": "CI_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.ci.screenshot("CI_ID")
 runtime ci screenshot CI_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "ci", "id": "CI_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/ci/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.ci.act("CI_ID", actions: [{ type: "move" }])
 runtime ci act CI_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "ci", "id": "CI_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/ci/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.ci.run_code("CI_ID", code: "example")
 
 ```bash title="CLI"
 runtime ci run-code CI_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "ci", "id": "CI_ID", "code": "example" } } }
 ```
 
 ## Objects

@@ -56,7 +56,7 @@ jobs:
 
 ## Merge pull requests in a queue
 
-Runtime's GitHub App can merge pull requests through a queue on any GitHub plan, so your default branch is never broken by two changes that pass on their own but fail together. The queue is off in a repository until a pull request there has the `runtime-queue` label; until then the App does nothing new in it.
+Runtime's GitHub App can merge pull requests through a queue on any GitHub plan, so a branch is never broken by two changes that pass on their own but fail together. The queue is off in a repository until a pull request there has the `runtime-queue` label; until then the App does nothing new in it.
 
 1. Run your checks on the queue's branches as well as on pull requests:
 
@@ -68,10 +68,28 @@ on:
     branches: ['runtime-queue/**']
 ```
 
-2. If a ruleset or branch protection rule restricts pushes to your default branch, add Runtime's GitHub App to its bypass list. The App moves the branch only to a commit whose checks passed.
-3. Add the label `runtime-queue` to a pull request to queue it.
+2. If a ruleset or branch protection rule restricts pushes to the branch, add Runtime's GitHub App to its bypass list. The App moves the branch only to a commit whose checks passed.
+3. Add the label `runtime-queue` to a pull request to queue it, or `runtime-queue-urgent` to queue it ahead of the others.
 
-The App queues a pull request only if it comes from a branch of the same repository (not a fork), was labeled by someone with write access, and is mergeable under your rules: its required reviews and checks pass. The App merges up to 10 queued pull requests, oldest first, onto the tip of the default branch in one branch named `runtime-queue/<branch>/...`, and your workflow runs on it once. When every required status check of the default branch passes on that branch (every check, if none is required), the App fast-forwards the default branch to it, and GitHub marks each of its pull requests as merged. If a check fails, the App tests the first half of the group alone, and so on, until it finds the pull request that fails; that pull request leaves the queue, with a comment that names the failed check. A pull request that does not merge cleanly leaves the queue the same way. A new push to a queued pull request, or a change to the default branch, starts the group again.
+Each branch that pull requests merge into has a queue of its own, set by that branch's own settings file. The App queues a pull request only if it comes from a branch of the same repository (not a fork), was labeled by someone with write access, and is mergeable under your rules: its required reviews and checks pass.
+
+The App merges up to 10 queued pull requests, oldest first, into a group on a branch named `runtime-queue/<branch>/...`, and your workflow runs on it once. Each group is merged onto the group ahead of it, so it is tested with every change that lands before it, and up to 4 groups are tested at once. An urgent pull request is merged onto the branch's tip alone and lands first. When every required status check of the branch passes on a group (every check, if none is required) and the groups ahead of it have landed, the App fast-forwards the branch to it, and GitHub marks each of its pull requests as merged. If a check fails, the App tests the first half of the group alone, and so on, until it finds the pull request that fails; that pull request leaves the queue, with a comment that names the failed check, and the groups behind it are merged again without it. A pull request that does not merge cleanly leaves the queue the same way. A new push to a queued pull request starts its group again, and the groups behind it.
+
+The App makes its merges on a branch named `runtime-queue-building/<branch>/merges`, whose every commit says `[skip ci]`, so no workflow runs there.
+
+### Queue settings
+
+A file `.github/runtime-queue.json` on the branch sets its queue, as in `{"group": 1, "fromBase": [".github/", "ci/"]}`. The App reads it from the branch alone, never from a pull request. Each field is optional.
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `group` | `10` | The most pull requests in one group, 1 to 10. |
+| `auto` | `false` | Every ready pull request from the repository waits in the queue, labeled or not. |
+| `workflow` | Every check | The one workflow whose checks judge a group, such as `.github/workflows/ci.yml`. |
+| `fromBase` | None | Paths whose files a group's checks take from the branch, never from its pull requests: your workflow and the scripts that judge a change. A folder ends in `/`. The `workflow` is always among them. |
+| `approvers` | None | Logins, one of whom must approve exactly a pull request's head before it lands when it changes `.github/` or another path that judges a change. |
+
+With `fromBase`, a group's branch holds one more commit, `Checks from <branch>'s <paths> at <commit>`, in which those paths are as they are on the branch: your workflow runs the branch's workflow and scripts on the change, so a pull request cannot change or skip its own checks. The group under that commit is what lands, with the pull request's own versions of those paths, which judge the groups after it.
 
 The queue needs the App's read access to commit statuses (for a CI that reports statuses rather than check runs). Installations from before the queue are asked by GitHub to accept it.
 

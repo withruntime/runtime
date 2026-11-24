@@ -16,7 +16,7 @@ The tools are the API's calls, generated from the same spec. The server lists 15
 | `runtime_run` | Runs one command in a new sandbox and deletes it after. |
 | `runtime_search_tools`, `runtime_call_tool` | Find any other call (fork, snapshots, images, volumes, secrets, domains, jobs and the rest) with its arguments, and call it by name. |
 
-Every tool name the server has served still answers when called, with the same arguments: `runtime_sandboxes_create`, `runtime_sandboxes_exec` and `runtime_sandboxes_previews_create`, for example. The docs server serves the API reference as Markdown, with `search_runtime_docs`, `read_runtime_doc` and `list_runtime_docs`.
+Every tool name the server has ever served still answers when called, 1.0's among them, with the arguments it took and in the words it answered then. The docs server serves the API reference as Markdown, with `search_runtime_docs`, `read_runtime_doc` and `list_runtime_docs`.
 
 ## Add them to your agent
 
@@ -39,7 +39,13 @@ Cursor, VS Code and other clients take the same address. A client that cannot si
 claude mcp add --transport http runtime https://api.withruntime.com/mcp --header "Authorization: Bearer $RUNTIME_API_KEY"
 ```
 
-For a client that only runs local servers, add the tools over stdio with `npx -y withruntime mcp`.
+For a client that only runs local servers, add the tools over stdio with `npx -y withruntime mcp` (Node.js 22.12 or later). In Claude Desktop's `claude_desktop_config.json`, Cursor's `mcp.json` and most other clients:
+
+```json
+{ "mcpServers": { "runtime": { "command": "npx", "args": ["-y", "withruntime", "mcp"] } } }
+```
+
+On a computer that is not signed in, the server lists one tool, `runtime_connect`: your agent calls it and shows you a link and a code to approve in your browser, and Runtime's tools are listed once you have. With `RUNTIME_API_KEY` set, or after `npx withruntime login`, it starts signed in.
 
 ### Sign-in for client developers
 

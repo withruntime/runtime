@@ -93,6 +93,10 @@ result = runtime.browsers.create
 runtime browsers create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "browsers" } } }
+```
+
 ## Get a browser
 
 `GET /v2/browsers/{id}`
@@ -142,6 +146,10 @@ result = runtime.browsers.get("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers get BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## List browsers
@@ -196,6 +204,10 @@ result = runtime.browsers.list
 runtime browsers list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "browsers" } } }
+```
+
 ## Delete a browser
 
 `DELETE /v2/browsers/{id}`
@@ -238,6 +250,10 @@ result = runtime.browsers.delete("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers delete BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.browsers.pause("BROWSER_ID")
 runtime browsers pause BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/browsers/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.browsers.resume("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers resume BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.browsers.exec("BROWSER_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime browsers exec BROWSER_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "browsers", "id": "BROWSER_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.browsers.read("BROWSER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime browsers read BROWSER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.browsers.write("BROWSER_ID", "hello\n", path: "/tmp/hello.txt")
 runtime browsers write BROWSER_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/browsers/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.browsers.process_output("BROWSER_ID", "PROCESS_ID")
 runtime browsers process-output BROWSER_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "browsers", "id": "BROWSER_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/browsers/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.browsers.write_process("BROWSER_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime browsers write-process BROWSER_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "browsers", "id": "BROWSER_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.browsers.signal_process("BROWSER_ID", "PROCESS_ID")
 runtime browsers signal-process BROWSER_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "browsers", "id": "BROWSER_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/browsers/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.browsers.resize_process("BROWSER_ID", "PROCESS_ID", cols: 1, ro
 runtime browsers resize-process BROWSER_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "browsers", "id": "BROWSER_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/browsers/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.browsers.list_processes("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers list-processes BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.browsers.remove("BROWSER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime browsers remove BROWSER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.browsers.stat("BROWSER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime browsers stat BROWSER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.browsers.list_files("BROWSER_ID")
 runtime browsers list-files BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/browsers/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.browsers.download_folder("BROWSER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime browsers download-folder BROWSER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.browsers.upload_folder("BROWSER_ID", "hello\n", path: "/tmp/hel
 runtime browsers upload-folder BROWSER_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/browsers/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.browsers.begin_folder_upload("BROWSER_ID", path: "/tmp/hello.tx
 
 ```bash title="CLI"
 runtime browsers begin-folder-upload BROWSER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.browsers.write_folder_upload("BROWSER_ID", "UPLOAD_ID", "hello\
 runtime browsers write-folder-upload BROWSER_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "browsers", "id": "BROWSER_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/browsers/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.browsers.commit_folder_upload("BROWSER_ID", "UPLOAD_ID")
 runtime browsers commit-folder-upload BROWSER_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "browsers", "id": "BROWSER_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/browsers/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.browsers.abort_folder_upload("BROWSER_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime browsers abort-folder-upload BROWSER_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "browsers", "id": "BROWSER_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.browsers.mkdir("BROWSER_ID", path: "/tmp/hello.txt")
 runtime browsers mkdir BROWSER_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/browsers/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.browsers.rename("BROWSER_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime browsers rename BROWSER_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "browsers", "id": "BROWSER_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.browsers.link("BROWSER_ID", path: "/tmp/hello.txt")
 runtime browsers link BROWSER_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "browsers", "id": "BROWSER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/browsers/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.browsers.revoke_links("BROWSER_ID")
 runtime browsers revoke-links BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/browsers/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.browsers.get_network("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers get-network BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.browsers.metrics("BROWSER_ID")
 runtime browsers metrics BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/browsers/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.browsers.set_network("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers set-network BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.browsers.fork("BROWSER_ID")
 runtime browsers fork BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/browsers/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.browsers.snapshot("BROWSER_ID")
 runtime browsers snapshot BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/browsers/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.browsers.update("BROWSER_ID")
 
 ```bash title="CLI"
 runtime browsers update BROWSER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.browsers.screenshot("BROWSER_ID")
 runtime browsers screenshot BROWSER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "browsers", "id": "BROWSER_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/browsers/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.browsers.act("BROWSER_ID", actions: [{ type: "move" }])
 runtime browsers act BROWSER_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "browsers", "id": "BROWSER_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/browsers/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.browsers.run_code("BROWSER_ID", code: "example")
 
 ```bash title="CLI"
 runtime browsers run-code BROWSER_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "browsers", "id": "BROWSER_ID", "code": "example" } } }
 ```
 
 ## Objects

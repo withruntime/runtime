@@ -70,6 +70,10 @@ result = runtime.snapshots.list
 runtime snapshots list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_snapshots_list", "arguments": {  } } }
+```
+
 ## Get a snapshot
 
 `GET /v2/snapshots/{id}`
@@ -123,6 +127,10 @@ result = runtime.snapshots.get("SNAPSHOT_ID")
 runtime snapshots get SNAPSHOT_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_snapshots_get", "arguments": { "id": "SNAPSHOT_ID" } } }
+```
+
 ## Delete a snapshot
 
 `DELETE /v2/snapshots/{id}`
@@ -167,6 +175,10 @@ result = runtime.snapshots.delete("SNAPSHOT_ID")
 
 ```bash title="CLI"
 runtime snapshots delete SNAPSHOT_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_snapshots_delete", "arguments": { "id": "SNAPSHOT_ID" } } }
 ```
 
 ## `update`
@@ -215,6 +227,10 @@ result = runtime.snapshots.update("SNAPSHOT_ID")
 
 ```bash title="CLI"
 runtime snapshots update SNAPSHOT_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_snapshots_update", "arguments": { "id": "SNAPSHOT_ID" } } }
 ```
 
 ## Objects

@@ -62,6 +62,10 @@ result = runtime.volumes.create(size_mib: 1)
 runtime volumes create --size-mib 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_volumes_create", "arguments": { "sizeMiB": 1 } } }
+```
+
 ## List volumes
 
 `GET /v2/volumes`
@@ -116,6 +120,10 @@ result = runtime.volumes.list
 runtime volumes list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_volumes_list", "arguments": {  } } }
+```
+
 ## Get a volume
 
 `GET /v2/volumes/{id}`
@@ -167,6 +175,10 @@ result = runtime.volumes.get("VOLUME_ID")
 runtime volumes get VOLUME_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_volumes_get", "arguments": { "id": "VOLUME_ID" } } }
+```
+
 ## Delete a volume
 
 `DELETE /v2/volumes/{id}`
@@ -209,6 +221,10 @@ result = runtime.volumes.delete("VOLUME_ID")
 
 ```bash title="CLI"
 runtime volumes delete VOLUME_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_volumes_delete", "arguments": { "id": "VOLUME_ID" } } }
 ```
 
 ## `update`
@@ -257,6 +273,10 @@ result = runtime.volumes.update("VOLUME_ID")
 
 ```bash title="CLI"
 runtime volumes update VOLUME_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_volumes_update", "arguments": { "id": "VOLUME_ID" } } }
 ```
 
 ## Objects

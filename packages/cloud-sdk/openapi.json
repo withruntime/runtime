@@ -130,7 +130,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -308,7 +308,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -454,7 +454,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -591,7 +591,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/sandboxes/{id}:pause": {
@@ -729,7 +729,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/sandboxes/{id}:resume": {
@@ -867,7 +867,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/sandboxes/{id}:exec": {
@@ -1024,7 +1024,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -1186,7 +1186,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -1373,7 +1373,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -1579,7 +1579,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -1727,7 +1727,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -1884,7 +1884,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -2042,7 +2042,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -2191,7 +2191,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -2330,7 +2330,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -2497,7 +2497,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -2690,7 +2690,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -2871,7 +2871,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -3043,7 +3043,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -3193,7 +3193,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -3374,7 +3374,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -3533,7 +3533,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -3681,7 +3681,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -3820,7 +3820,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -3969,7 +3969,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -4117,7 +4117,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -4265,7 +4265,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/sandboxes/{id}/network": {
@@ -4403,7 +4403,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -4540,7 +4540,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -4706,7 +4706,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -4845,7 +4845,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -4994,7 +4994,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -5143,7 +5143,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -5318,7 +5318,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -5457,7 +5457,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -5605,7 +5605,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -5733,7 +5733,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -5911,7 +5911,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -6057,7 +6057,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -6194,7 +6194,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/functions/{id}:pause": {
@@ -6332,7 +6332,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/functions/{id}:resume": {
@@ -6470,7 +6470,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/functions/{id}:exec": {
@@ -6627,7 +6627,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -6789,7 +6789,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -6976,7 +6976,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -7182,7 +7182,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -7330,7 +7330,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -7487,7 +7487,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -7645,7 +7645,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -7794,7 +7794,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -7933,7 +7933,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -8100,7 +8100,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -8293,7 +8293,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -8474,7 +8474,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -8646,7 +8646,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -8796,7 +8796,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -8977,7 +8977,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -9136,7 +9136,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -9284,7 +9284,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -9423,7 +9423,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -9572,7 +9572,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -9720,7 +9720,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -9868,7 +9868,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/functions/{id}/network": {
@@ -10006,7 +10006,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -10143,7 +10143,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -10309,7 +10309,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -10448,7 +10448,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -10597,7 +10597,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -10746,7 +10746,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -10921,7 +10921,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -11060,7 +11060,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -11208,7 +11208,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_functions_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -11906,7 +11906,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -12084,7 +12084,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -12230,7 +12230,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -12367,7 +12367,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/apps/{id}:pause": {
@@ -12505,7 +12505,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/apps/{id}:resume": {
@@ -12643,7 +12643,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/apps/{id}:exec": {
@@ -12800,7 +12800,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -12962,7 +12962,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -13149,7 +13149,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -13355,7 +13355,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -13503,7 +13503,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -13660,7 +13660,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -13818,7 +13818,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -13967,7 +13967,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -14106,7 +14106,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -14273,7 +14273,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -14466,7 +14466,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -14647,7 +14647,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -14819,7 +14819,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -14969,7 +14969,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -15150,7 +15150,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -15309,7 +15309,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -15457,7 +15457,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -15596,7 +15596,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -15745,7 +15745,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -15893,7 +15893,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -16041,7 +16041,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/apps/{id}/network": {
@@ -16179,7 +16179,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -16316,7 +16316,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -16482,7 +16482,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -16621,7 +16621,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -16770,7 +16770,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -16919,7 +16919,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -17094,7 +17094,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -17233,7 +17233,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -17381,7 +17381,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_apps_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -17509,7 +17509,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -17687,7 +17687,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -17833,7 +17833,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -17970,7 +17970,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/sites/{id}:pause": {
@@ -18108,7 +18108,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/sites/{id}:resume": {
@@ -18246,7 +18246,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/sites/{id}:exec": {
@@ -18403,7 +18403,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -18565,7 +18565,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -18752,7 +18752,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -18958,7 +18958,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -19106,7 +19106,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -19263,7 +19263,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -19421,7 +19421,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -19570,7 +19570,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -19709,7 +19709,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -19876,7 +19876,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -20069,7 +20069,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -20250,7 +20250,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -20422,7 +20422,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -20572,7 +20572,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -20753,7 +20753,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -20912,7 +20912,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -21060,7 +21060,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -21199,7 +21199,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -21348,7 +21348,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -21496,7 +21496,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -21644,7 +21644,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/sites/{id}/network": {
@@ -21782,7 +21782,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -21919,7 +21919,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -22085,7 +22085,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -22224,7 +22224,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -22373,7 +22373,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -22522,7 +22522,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -22697,7 +22697,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -22836,7 +22836,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -22984,7 +22984,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sites_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -23112,7 +23112,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -23290,7 +23290,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -23436,7 +23436,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -23573,7 +23573,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/ci/{id}:pause": {
@@ -23711,7 +23711,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/ci/{id}:resume": {
@@ -23849,7 +23849,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/ci/{id}:exec": {
@@ -24006,7 +24006,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -24168,7 +24168,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -24355,7 +24355,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -24561,7 +24561,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -24709,7 +24709,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -24866,7 +24866,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -25024,7 +25024,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -25173,7 +25173,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -25312,7 +25312,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -25479,7 +25479,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -25672,7 +25672,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -25853,7 +25853,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -26025,7 +26025,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -26175,7 +26175,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -26356,7 +26356,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -26515,7 +26515,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -26663,7 +26663,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -26802,7 +26802,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -26951,7 +26951,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -27099,7 +27099,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -27247,7 +27247,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/ci/{id}/network": {
@@ -27385,7 +27385,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -27522,7 +27522,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -27688,7 +27688,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -27827,7 +27827,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -27976,7 +27976,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -28125,7 +28125,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -28300,7 +28300,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -28439,7 +28439,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -28587,7 +28587,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_ci_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -28715,7 +28715,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -28893,7 +28893,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -29039,7 +29039,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -29176,7 +29176,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/browsers/{id}:pause": {
@@ -29314,7 +29314,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/browsers/{id}:resume": {
@@ -29452,7 +29452,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/browsers/{id}:exec": {
@@ -29609,7 +29609,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -29771,7 +29771,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -29958,7 +29958,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -30164,7 +30164,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -30312,7 +30312,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -30469,7 +30469,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -30627,7 +30627,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -30776,7 +30776,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -30915,7 +30915,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -31082,7 +31082,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -31275,7 +31275,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -31456,7 +31456,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -31628,7 +31628,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -31778,7 +31778,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -31959,7 +31959,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -32118,7 +32118,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -32266,7 +32266,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -32405,7 +32405,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -32554,7 +32554,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -32702,7 +32702,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -32850,7 +32850,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/browsers/{id}/network": {
@@ -32988,7 +32988,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -33125,7 +33125,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -33291,7 +33291,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -33430,7 +33430,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -33579,7 +33579,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -33728,7 +33728,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -33903,7 +33903,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -34042,7 +34042,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -34190,7 +34190,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_browsers_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -34318,7 +34318,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -34496,7 +34496,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -34642,7 +34642,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -34779,7 +34779,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/desktops/{id}:pause": {
@@ -34917,7 +34917,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/desktops/{id}:resume": {
@@ -35055,7 +35055,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/desktops/{id}:exec": {
@@ -35212,7 +35212,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -35374,7 +35374,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -35561,7 +35561,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -35767,7 +35767,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -35915,7 +35915,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -36072,7 +36072,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -36230,7 +36230,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -36379,7 +36379,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -36518,7 +36518,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -36685,7 +36685,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -36878,7 +36878,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -37059,7 +37059,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -37231,7 +37231,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -37381,7 +37381,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -37562,7 +37562,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -37721,7 +37721,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -37869,7 +37869,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -38008,7 +38008,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -38157,7 +38157,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -38305,7 +38305,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -38453,7 +38453,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/desktops/{id}/network": {
@@ -38591,7 +38591,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -38728,7 +38728,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -38894,7 +38894,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -39033,7 +39033,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -39182,7 +39182,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -39331,7 +39331,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -39506,7 +39506,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -39645,7 +39645,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -39793,7 +39793,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_desktops_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -39921,7 +39921,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -40099,7 +40099,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -40245,7 +40245,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -40382,7 +40382,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/notebooks/{id}:pause": {
@@ -40520,7 +40520,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/notebooks/{id}:resume": {
@@ -40658,7 +40658,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/notebooks/{id}:exec": {
@@ -40815,7 +40815,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -40977,7 +40977,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -41164,7 +41164,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -41370,7 +41370,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -41518,7 +41518,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -41675,7 +41675,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -41833,7 +41833,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -41982,7 +41982,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -42121,7 +42121,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -42288,7 +42288,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -42481,7 +42481,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -42662,7 +42662,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -42834,7 +42834,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -42984,7 +42984,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -43165,7 +43165,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -43324,7 +43324,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -43472,7 +43472,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -43611,7 +43611,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -43760,7 +43760,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -43908,7 +43908,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -44056,7 +44056,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/notebooks/{id}/network": {
@@ -44194,7 +44194,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -44331,7 +44331,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -44497,7 +44497,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -44636,7 +44636,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -44785,7 +44785,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -44934,7 +44934,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -45109,7 +45109,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -45248,7 +45248,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -45396,7 +45396,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_notebooks_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -45524,7 +45524,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -45702,7 +45702,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -45848,7 +45848,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -45985,7 +45985,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/workspaces/{id}:pause": {
@@ -46123,7 +46123,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/workspaces/{id}:resume": {
@@ -46261,7 +46261,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/workspaces/{id}:exec": {
@@ -46418,7 +46418,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -46580,7 +46580,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -46767,7 +46767,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -46973,7 +46973,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -47121,7 +47121,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -47278,7 +47278,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -47436,7 +47436,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -47585,7 +47585,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -47724,7 +47724,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -47891,7 +47891,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -48084,7 +48084,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -48265,7 +48265,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -48437,7 +48437,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -48587,7 +48587,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -48768,7 +48768,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -48927,7 +48927,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -49075,7 +49075,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -49214,7 +49214,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -49363,7 +49363,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -49511,7 +49511,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -49659,7 +49659,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/workspaces/{id}/network": {
@@ -49797,7 +49797,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -49934,7 +49934,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -50100,7 +50100,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -50239,7 +50239,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -50388,7 +50388,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -50537,7 +50537,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -50712,7 +50712,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -50851,7 +50851,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -50999,7 +50999,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_workspaces_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -51127,7 +51127,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -51305,7 +51305,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -51451,7 +51451,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -51588,7 +51588,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/containers/{id}:pause": {
@@ -51726,7 +51726,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/containers/{id}:resume": {
@@ -51864,7 +51864,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/containers/{id}:exec": {
@@ -52021,7 +52021,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -52183,7 +52183,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -52370,7 +52370,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -52576,7 +52576,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -52724,7 +52724,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -52881,7 +52881,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -53039,7 +53039,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -53188,7 +53188,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -53327,7 +53327,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -53494,7 +53494,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -53687,7 +53687,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -53868,7 +53868,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -54040,7 +54040,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -54190,7 +54190,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -54371,7 +54371,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -54530,7 +54530,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -54678,7 +54678,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -54817,7 +54817,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -54966,7 +54966,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -55114,7 +55114,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -55262,7 +55262,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/containers/{id}/network": {
@@ -55400,7 +55400,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -55537,7 +55537,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -55703,7 +55703,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -55842,7 +55842,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -55991,7 +55991,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -56140,7 +56140,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -56315,7 +56315,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -56454,7 +56454,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -56602,7 +56602,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_containers_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -56730,7 +56730,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_create",
+        "x-mcp-tool": "runtime_machines_create",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -56908,7 +56908,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_list",
+        "x-mcp-tool": "runtime_machines_list",
         "x-idempotent": true
       }
     },
@@ -57054,7 +57054,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_get",
+        "x-mcp-tool": "runtime_machines_get",
         "x-idempotent": true
       },
       "delete": {
@@ -57191,7 +57191,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_delete"
+        "x-mcp-tool": "runtime_machines_delete"
       }
     },
     "/v2/builds/{id}:pause": {
@@ -57329,7 +57329,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_pause"
+        "x-mcp-tool": "runtime_machines_pause"
       }
     },
     "/v2/builds/{id}:resume": {
@@ -57467,7 +57467,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_resume"
+        "x-mcp-tool": "runtime_machines_resume"
       }
     },
     "/v2/builds/{id}:exec": {
@@ -57624,7 +57624,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_exec",
+        "x-mcp-tool": "runtime_machines_exec",
         "x-idempotent": true,
         "x-runs": {
           "field": "timeoutSeconds"
@@ -57786,7 +57786,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_read",
+        "x-mcp-tool": "runtime_machines_read",
         "x-idempotent": true
       },
       "put": {
@@ -57973,7 +57973,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_write",
+        "x-mcp-tool": "runtime_machines_write",
         "requestBody": {
           "required": true,
           "content": {
@@ -58179,7 +58179,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_process_output",
+        "x-mcp-tool": "runtime_machines_process_output",
         "x-idempotent": true
       }
     },
@@ -58327,7 +58327,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_write_process",
+        "x-mcp-tool": "runtime_machines_write_process",
         "requestBody": {
           "required": true,
           "content": {
@@ -58484,7 +58484,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_signal_process",
+        "x-mcp-tool": "runtime_machines_signal_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -58642,7 +58642,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_resize_process",
+        "x-mcp-tool": "runtime_machines_resize_process",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -58791,7 +58791,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_list_processes",
+        "x-mcp-tool": "runtime_machines_list_processes",
         "x-idempotent": true
       }
     },
@@ -58930,7 +58930,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_remove",
+        "x-mcp-tool": "runtime_machines_remove",
         "requestBody": {
           "required": true,
           "content": {
@@ -59097,7 +59097,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_stat",
+        "x-mcp-tool": "runtime_machines_stat",
         "x-idempotent": true
       }
     },
@@ -59290,7 +59290,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_list_files",
+        "x-mcp-tool": "runtime_machines_list_files",
         "x-idempotent": true
       }
     },
@@ -59471,7 +59471,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_download_folder",
+        "x-mcp-tool": "runtime_machines_download_folder",
         "x-idempotent": true
       },
       "put": {
@@ -59643,7 +59643,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_upload_folder",
+        "x-mcp-tool": "runtime_machines_upload_folder",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -59793,7 +59793,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_begin_folder_upload",
+        "x-mcp-tool": "runtime_machines_begin_folder_upload",
         "requestBody": {
           "required": true,
           "content": {
@@ -59974,7 +59974,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_write_folder_upload",
+        "x-mcp-tool": "runtime_machines_write_folder_upload",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -60133,7 +60133,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_commit_folder_upload",
+        "x-mcp-tool": "runtime_machines_commit_folder_upload",
         "x-idempotent": true
       }
     },
@@ -60281,7 +60281,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_abort_folder_upload",
+        "x-mcp-tool": "runtime_machines_abort_folder_upload",
         "x-idempotent": true
       }
     },
@@ -60420,7 +60420,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_mkdir",
+        "x-mcp-tool": "runtime_machines_mkdir",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -60569,7 +60569,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_rename",
+        "x-mcp-tool": "runtime_machines_rename",
         "requestBody": {
           "required": true,
           "content": {
@@ -60717,7 +60717,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_link",
+        "x-mcp-tool": "runtime_machines_link",
         "requestBody": {
           "required": true,
           "content": {
@@ -60865,7 +60865,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_revoke_links"
+        "x-mcp-tool": "runtime_machines_revoke_links"
       }
     },
     "/v2/builds/{id}/network": {
@@ -61003,7 +61003,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_get_network",
+        "x-mcp-tool": "runtime_machines_get_network",
         "x-idempotent": true
       },
       "put": {
@@ -61140,7 +61140,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_set_network",
+        "x-mcp-tool": "runtime_machines_set_network",
         "requestBody": {
           "required": true,
           "content": {
@@ -61306,7 +61306,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_metrics",
+        "x-mcp-tool": "runtime_machines_metrics",
         "x-idempotent": true
       }
     },
@@ -61445,7 +61445,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_fork",
+        "x-mcp-tool": "runtime_machines_fork",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -61594,7 +61594,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_snapshot",
+        "x-mcp-tool": "runtime_machines_snapshot",
         "x-idempotent": true,
         "requestBody": {
           "required": true,
@@ -61743,7 +61743,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_update",
+        "x-mcp-tool": "runtime_machines_update",
         "requestBody": {
           "required": true,
           "content": {
@@ -61918,7 +61918,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_screenshot",
+        "x-mcp-tool": "runtime_machines_screenshot",
         "x-idempotent": true
       }
     },
@@ -62057,7 +62057,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_act",
+        "x-mcp-tool": "runtime_machines_act",
         "requestBody": {
           "required": true,
           "content": {
@@ -62205,7 +62205,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_builds_run_code",
+        "x-mcp-tool": "runtime_machines_run_code",
         "requestBody": {
           "required": true,
           "content": {
@@ -69569,7 +69569,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_previews_create",
+        "x-mcp-tool": "runtime_previews_create",
         "requestBody": {
           "required": true,
           "content": {
@@ -69727,7 +69727,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_sandboxes_previews_list",
+        "x-mcp-tool": "runtime_previews_list",
         "x-idempotent": true
       }
     },
@@ -72908,7 +72908,7 @@
             }
           }
         },
-        "x-mcp-tool": "runtime_feedback",
+        "x-mcp-tool": "runtime_feedback_create",
         "requestBody": {
           "required": true,
           "content": {

@@ -65,6 +65,10 @@ result = runtime.projects.list
 runtime projects list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_projects_list", "arguments": {  } } }
+```
+
 ## Create a project
 
 `POST /v2/projects`
@@ -109,6 +113,10 @@ result = runtime.projects.create(name: "example")
 
 ```bash title="CLI"
 runtime projects create --name example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_projects_create", "arguments": { "name": "example" } } }
 ```
 
 ## `limits`
@@ -159,6 +167,10 @@ result = runtime.projects.limits("PROJECT_ID", limits: {  })
 runtime projects limits PROJECT_ID --limits '{  }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_projects_limits", "arguments": { "id": "PROJECT_ID", "limits": {  } } } }
+```
+
 ## `update`
 
 `POST /v2/projects/{id}:update`
@@ -207,6 +219,10 @@ result = runtime.projects.update("PROJECT_ID", name: "example")
 runtime projects update PROJECT_ID --name example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_projects_update", "arguments": { "id": "PROJECT_ID", "name": "example" } } }
+```
+
 ## Delete a project
 
 `DELETE /v2/projects/{id}`
@@ -249,6 +265,10 @@ result = runtime.projects.delete("PROJECT_ID")
 
 ```bash title="CLI"
 runtime projects delete PROJECT_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_projects_delete", "arguments": { "id": "PROJECT_ID" } } }
 ```
 
 ## Objects

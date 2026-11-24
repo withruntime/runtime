@@ -60,6 +60,10 @@ result = runtime.otel.create(endpoint: "example")
 runtime otel create --endpoint example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_otel_create", "arguments": { "endpoint": "example" } } }
+```
+
 ## List otel
 
 `GET /v2/otel`
@@ -111,6 +115,10 @@ result = runtime.otel.list
 runtime otel list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_otel_list", "arguments": {  } } }
+```
+
 ## Delete a export
 
 `DELETE /v2/otel/{id}`
@@ -153,6 +161,10 @@ result = runtime.otel.delete("EXPORT_ID")
 
 ```bash title="CLI"
 runtime otel delete EXPORT_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_otel_delete", "arguments": { "id": "EXPORT_ID" } } }
 ```
 
 ## Objects

@@ -61,6 +61,10 @@ result = runtime.networks.list
 runtime networks list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_networks_list", "arguments": {  } } }
+```
+
 ## Objects
 
 ### NetworkSettings

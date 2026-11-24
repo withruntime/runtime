@@ -93,6 +93,10 @@ result = runtime.builds.create
 runtime builds create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "builds" } } }
+```
+
 ## Get a build
 
 `GET /v2/builds/{id}`
@@ -142,6 +146,10 @@ result = runtime.builds.get("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds get BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## List builds
@@ -196,6 +204,10 @@ result = runtime.builds.list
 runtime builds list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "builds" } } }
+```
+
 ## Delete a build
 
 `DELETE /v2/builds/{id}`
@@ -238,6 +250,10 @@ result = runtime.builds.delete("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds delete BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.builds.pause("BUILD_ID")
 runtime builds pause BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/builds/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.builds.resume("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds resume BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.builds.exec("BUILD_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime builds exec BUILD_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "builds", "id": "BUILD_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.builds.read("BUILD_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime builds read BUILD_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.builds.write("BUILD_ID", "hello\n", path: "/tmp/hello.txt")
 runtime builds write BUILD_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/builds/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.builds.process_output("BUILD_ID", "PROCESS_ID")
 runtime builds process-output BUILD_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "builds", "id": "BUILD_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/builds/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.builds.write_process("BUILD_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime builds write-process BUILD_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "builds", "id": "BUILD_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.builds.signal_process("BUILD_ID", "PROCESS_ID")
 runtime builds signal-process BUILD_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "builds", "id": "BUILD_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/builds/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.builds.resize_process("BUILD_ID", "PROCESS_ID", cols: 1, rows: 
 runtime builds resize-process BUILD_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "builds", "id": "BUILD_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/builds/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.builds.list_processes("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds list-processes BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.builds.remove("BUILD_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime builds remove BUILD_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.builds.stat("BUILD_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime builds stat BUILD_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.builds.list_files("BUILD_ID")
 runtime builds list-files BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/builds/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.builds.download_folder("BUILD_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime builds download-folder BUILD_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.builds.upload_folder("BUILD_ID", "hello\n", path: "/tmp/hello.t
 runtime builds upload-folder BUILD_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/builds/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.builds.begin_folder_upload("BUILD_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime builds begin-folder-upload BUILD_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.builds.write_folder_upload("BUILD_ID", "UPLOAD_ID", "hello\n")
 runtime builds write-folder-upload BUILD_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "builds", "id": "BUILD_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/builds/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.builds.commit_folder_upload("BUILD_ID", "UPLOAD_ID")
 runtime builds commit-folder-upload BUILD_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "builds", "id": "BUILD_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/builds/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.builds.abort_folder_upload("BUILD_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime builds abort-folder-upload BUILD_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "builds", "id": "BUILD_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.builds.mkdir("BUILD_ID", path: "/tmp/hello.txt")
 runtime builds mkdir BUILD_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/builds/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.builds.rename("BUILD_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime builds rename BUILD_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "builds", "id": "BUILD_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.builds.link("BUILD_ID", path: "/tmp/hello.txt")
 runtime builds link BUILD_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "builds", "id": "BUILD_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/builds/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.builds.revoke_links("BUILD_ID")
 runtime builds revoke-links BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/builds/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.builds.get_network("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds get-network BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.builds.metrics("BUILD_ID")
 runtime builds metrics BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/builds/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.builds.set_network("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds set-network BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.builds.fork("BUILD_ID")
 runtime builds fork BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/builds/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.builds.snapshot("BUILD_ID")
 runtime builds snapshot BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/builds/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.builds.update("BUILD_ID")
 
 ```bash title="CLI"
 runtime builds update BUILD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.builds.screenshot("BUILD_ID")
 runtime builds screenshot BUILD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "builds", "id": "BUILD_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/builds/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.builds.act("BUILD_ID", actions: [{ type: "move" }])
 runtime builds act BUILD_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "builds", "id": "BUILD_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/builds/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.builds.run_code("BUILD_ID", code: "example")
 
 ```bash title="CLI"
 runtime builds run-code BUILD_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "builds", "id": "BUILD_ID", "code": "example" } } }
 ```
 
 ## Objects

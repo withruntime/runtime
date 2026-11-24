@@ -93,6 +93,10 @@ result = runtime.containers.create
 runtime containers create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "containers" } } }
+```
+
 ## Get a container
 
 `GET /v2/containers/{id}`
@@ -142,6 +146,10 @@ result = runtime.containers.get("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers get CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## List containers
@@ -196,6 +204,10 @@ result = runtime.containers.list
 runtime containers list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "containers" } } }
+```
+
 ## Delete a container
 
 `DELETE /v2/containers/{id}`
@@ -238,6 +250,10 @@ result = runtime.containers.delete("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers delete CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.containers.pause("CONTAINER_ID")
 runtime containers pause CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/containers/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.containers.resume("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers resume CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.containers.exec("CONTAINER_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime containers exec CONTAINER_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "containers", "id": "CONTAINER_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.containers.read("CONTAINER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime containers read CONTAINER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.containers.write("CONTAINER_ID", "hello\n", path: "/tmp/hello.t
 runtime containers write CONTAINER_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/containers/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.containers.process_output("CONTAINER_ID", "PROCESS_ID")
 runtime containers process-output CONTAINER_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "containers", "id": "CONTAINER_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/containers/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.containers.write_process("CONTAINER_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime containers write-process CONTAINER_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "containers", "id": "CONTAINER_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.containers.signal_process("CONTAINER_ID", "PROCESS_ID")
 runtime containers signal-process CONTAINER_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "containers", "id": "CONTAINER_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/containers/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.containers.resize_process("CONTAINER_ID", "PROCESS_ID", cols: 1
 runtime containers resize-process CONTAINER_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "containers", "id": "CONTAINER_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/containers/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.containers.list_processes("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers list-processes CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.containers.remove("CONTAINER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime containers remove CONTAINER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.containers.stat("CONTAINER_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime containers stat CONTAINER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.containers.list_files("CONTAINER_ID")
 runtime containers list-files CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/containers/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.containers.download_folder("CONTAINER_ID", path: "/tmp/hello.tx
 
 ```bash title="CLI"
 runtime containers download-folder CONTAINER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.containers.upload_folder("CONTAINER_ID", "hello\n", path: "/tmp
 runtime containers upload-folder CONTAINER_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/containers/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.containers.begin_folder_upload("CONTAINER_ID", path: "/tmp/hell
 
 ```bash title="CLI"
 runtime containers begin-folder-upload CONTAINER_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.containers.write_folder_upload("CONTAINER_ID", "UPLOAD_ID", "he
 runtime containers write-folder-upload CONTAINER_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "containers", "id": "CONTAINER_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/containers/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.containers.commit_folder_upload("CONTAINER_ID", "UPLOAD_ID")
 runtime containers commit-folder-upload CONTAINER_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "containers", "id": "CONTAINER_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/containers/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.containers.abort_folder_upload("CONTAINER_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime containers abort-folder-upload CONTAINER_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "containers", "id": "CONTAINER_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.containers.mkdir("CONTAINER_ID", path: "/tmp/hello.txt")
 runtime containers mkdir CONTAINER_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/containers/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.containers.rename("CONTAINER_ID", from: "example", to: "example
 
 ```bash title="CLI"
 runtime containers rename CONTAINER_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "containers", "id": "CONTAINER_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.containers.link("CONTAINER_ID", path: "/tmp/hello.txt")
 runtime containers link CONTAINER_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "containers", "id": "CONTAINER_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/containers/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.containers.revoke_links("CONTAINER_ID")
 runtime containers revoke-links CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/containers/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.containers.get_network("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers get-network CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.containers.metrics("CONTAINER_ID")
 runtime containers metrics CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/containers/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.containers.set_network("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers set-network CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.containers.fork("CONTAINER_ID")
 runtime containers fork CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/containers/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.containers.snapshot("CONTAINER_ID")
 runtime containers snapshot CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/containers/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.containers.update("CONTAINER_ID")
 
 ```bash title="CLI"
 runtime containers update CONTAINER_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.containers.screenshot("CONTAINER_ID")
 runtime containers screenshot CONTAINER_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "containers", "id": "CONTAINER_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/containers/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.containers.act("CONTAINER_ID", actions: [{ type: "move" }])
 runtime containers act CONTAINER_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "containers", "id": "CONTAINER_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/containers/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.containers.run_code("CONTAINER_ID", code: "example")
 
 ```bash title="CLI"
 runtime containers run-code CONTAINER_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "containers", "id": "CONTAINER_ID", "code": "example" } } }
 ```
 
 ## Objects

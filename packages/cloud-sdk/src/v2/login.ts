@@ -112,6 +112,8 @@ export type LoginOptions = {
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   say?: (line: string) => void;
+  /** Told the link and code once the API has given them, before the wait for the approval. */
+  started?: (link: string, userCode: string) => void;
 };
 
 type OAuthAnswer = {
@@ -167,6 +169,7 @@ export async function login(baseUrl: string, o: LoginOptions = {}): Promise<numb
   const link = started.verification_uri_complete ?? started.verification_uri;
   say(`Approve this computer at ${link}`);
   say(`and check that the page shows the code ${started.user_code}.`);
+  o.started?.(link, started.user_code);
   const page = sitePage(link, baseUrl);
   if (page) (o.open ?? openBrowser)(page);
   else say(`runtime login: the link is not opened in a browser: it is not a page of ${baseUrl}'s own site.`);

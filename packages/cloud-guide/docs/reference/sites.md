@@ -93,6 +93,10 @@ result = runtime.sites.create
 runtime sites create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "sites" } } }
+```
+
 ## Get a site
 
 `GET /v2/sites/{id}`
@@ -142,6 +146,10 @@ result = runtime.sites.get("SITE_ID")
 
 ```bash title="CLI"
 runtime sites get SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## List sites
@@ -196,6 +204,10 @@ result = runtime.sites.list
 runtime sites list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "sites" } } }
+```
+
 ## Delete a site
 
 `DELETE /v2/sites/{id}`
@@ -238,6 +250,10 @@ result = runtime.sites.delete("SITE_ID")
 
 ```bash title="CLI"
 runtime sites delete SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.sites.pause("SITE_ID")
 runtime sites pause SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/sites/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.sites.resume("SITE_ID")
 
 ```bash title="CLI"
 runtime sites resume SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.sites.exec("SITE_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime sites exec SITE_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "sites", "id": "SITE_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.sites.read("SITE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sites read SITE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.sites.write("SITE_ID", "hello\n", path: "/tmp/hello.txt")
 runtime sites write SITE_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/sites/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.sites.process_output("SITE_ID", "PROCESS_ID")
 runtime sites process-output SITE_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "sites", "id": "SITE_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/sites/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.sites.write_process("SITE_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime sites write-process SITE_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "sites", "id": "SITE_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.sites.signal_process("SITE_ID", "PROCESS_ID")
 runtime sites signal-process SITE_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "sites", "id": "SITE_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/sites/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.sites.resize_process("SITE_ID", "PROCESS_ID", cols: 1, rows: 1)
 runtime sites resize-process SITE_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "sites", "id": "SITE_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/sites/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.sites.list_processes("SITE_ID")
 
 ```bash title="CLI"
 runtime sites list-processes SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.sites.remove("SITE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sites remove SITE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.sites.stat("SITE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sites stat SITE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.sites.list_files("SITE_ID")
 runtime sites list-files SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/sites/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.sites.download_folder("SITE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sites download-folder SITE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.sites.upload_folder("SITE_ID", "hello\n", path: "/tmp/hello.txt
 runtime sites upload-folder SITE_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/sites/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.sites.begin_folder_upload("SITE_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sites begin-folder-upload SITE_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.sites.write_folder_upload("SITE_ID", "UPLOAD_ID", "hello\n")
 runtime sites write-folder-upload SITE_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "sites", "id": "SITE_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/sites/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.sites.commit_folder_upload("SITE_ID", "UPLOAD_ID")
 runtime sites commit-folder-upload SITE_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "sites", "id": "SITE_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/sites/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.sites.abort_folder_upload("SITE_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime sites abort-folder-upload SITE_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "sites", "id": "SITE_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.sites.mkdir("SITE_ID", path: "/tmp/hello.txt")
 runtime sites mkdir SITE_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/sites/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.sites.rename("SITE_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime sites rename SITE_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "sites", "id": "SITE_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.sites.link("SITE_ID", path: "/tmp/hello.txt")
 runtime sites link SITE_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "sites", "id": "SITE_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/sites/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.sites.revoke_links("SITE_ID")
 runtime sites revoke-links SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/sites/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.sites.get_network("SITE_ID")
 
 ```bash title="CLI"
 runtime sites get-network SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.sites.metrics("SITE_ID")
 runtime sites metrics SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/sites/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.sites.set_network("SITE_ID")
 
 ```bash title="CLI"
 runtime sites set-network SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.sites.fork("SITE_ID")
 runtime sites fork SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/sites/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.sites.snapshot("SITE_ID")
 runtime sites snapshot SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/sites/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.sites.update("SITE_ID")
 
 ```bash title="CLI"
 runtime sites update SITE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "sites", "id": "SITE_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.sites.screenshot("SITE_ID")
 runtime sites screenshot SITE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "sites", "id": "SITE_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/sites/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.sites.act("SITE_ID", actions: [{ type: "move" }])
 runtime sites act SITE_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "sites", "id": "SITE_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/sites/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.sites.run_code("SITE_ID", code: "example")
 
 ```bash title="CLI"
 runtime sites run-code SITE_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "sites", "id": "SITE_ID", "code": "example" } } }
 ```
 
 ## Objects

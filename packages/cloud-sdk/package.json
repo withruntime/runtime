@@ -1,6 +1,6 @@
 {
   "name": "withruntime",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Runtime Cloud: Linux sandboxes for agents. new Runtime(), a sandbox handle, every verb of the API typed, the runtime CLI, its MCP bridge and drop-ins for E2B, Daytona, Vercel, Blaxel, Morph, Modal, Cloudflare and Fly.",
   "license": "Apache-2.0",
   "type": "module",

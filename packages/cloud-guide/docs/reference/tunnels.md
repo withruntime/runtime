@@ -61,6 +61,10 @@ result = runtime.tunnels.list
 runtime tunnels list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_tunnels_list", "arguments": {  } } }
+```
+
 ## Objects
 
 ### TunnelPeer

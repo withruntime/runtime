@@ -64,6 +64,10 @@ result = runtime.domains.create(hostname: "example", sandbox_id: "SANDBOX_ID", p
 runtime domains create --hostname example --sandbox-id SANDBOX_ID --port 3000
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_domains_create", "arguments": { "hostname": "example", "sandboxId": "SANDBOX_ID", "port": 3000 } } }
+```
+
 ## List domains
 
 `GET /v2/domains`
@@ -111,6 +115,10 @@ result = runtime.domains.list
 
 ```bash title="CLI"
 runtime domains list
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_domains_list", "arguments": {  } } }
 ```
 
 ## Get a domain
@@ -166,6 +174,10 @@ result = runtime.domains.get("HOSTNAME_ID")
 runtime domains get HOSTNAME_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_domains_get", "arguments": { "hostname": "HOSTNAME_ID" } } }
+```
+
 ## `verify`
 
 `POST /v2/domains/{hostname}:verify`
@@ -212,6 +224,10 @@ result = runtime.domains.verify("HOSTNAME_ID")
 runtime domains verify HOSTNAME_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_domains_verify", "arguments": { "hostname": "HOSTNAME_ID" } } }
+```
+
 ## Delete a domain
 
 `DELETE /v2/domains/{hostname}`
@@ -256,6 +272,10 @@ result = runtime.domains.delete("HOSTNAME_ID")
 
 ```bash title="CLI"
 runtime domains delete HOSTNAME_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_domains_delete", "arguments": { "hostname": "HOSTNAME_ID" } } }
 ```
 
 ## Objects

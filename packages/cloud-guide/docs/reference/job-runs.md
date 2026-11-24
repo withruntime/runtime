@@ -67,6 +67,10 @@ result = runtime.job_runs.list(job: "example")
 runtime jobRuns list --job example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_job_runs_list", "arguments": { "job": "example" } } }
+```
+
 ## Get a jobrun
 
 `GET /v2/job-runs/{id}`
@@ -120,6 +124,10 @@ result = runtime.job_runs.get("JOBRUN_ID")
 runtime jobRuns get JOBRUN_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_job_runs_get", "arguments": { "id": "JOBRUN_ID" } } }
+```
+
 ## `output`
 
 `GET /v2/job-runs/{id}/output`
@@ -171,6 +179,10 @@ result = runtime.job_runs.output("JOBRUN_ID")
 
 ```bash title="CLI"
 runtime jobRuns output JOBRUN_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_job_runs_output", "arguments": { "id": "JOBRUN_ID" } } }
 ```
 
 ## Objects

@@ -68,7 +68,7 @@ runtime previews create PREVIEW_ID --port 3000
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_previews_create", "arguments": { "id": "PREVIEW_ID", "port": 3000 } } }
+{ "method": "tools/call", "params": { "name": "runtime_previews_create", "arguments": { "id": "PREVIEW_ID", "port": 3000 } } }
 ```
 
 ## List previews
@@ -124,7 +124,7 @@ runtime previews list --sandbox-id SANDBOX_ID
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_previews_list", "arguments": { "sandboxId": "SANDBOX_ID" } } }
+{ "method": "tools/call", "params": { "name": "runtime_previews_list", "arguments": { "sandboxId": "SANDBOX_ID" } } }
 ```
 
 ## Get a preview
@@ -180,6 +180,10 @@ result = runtime.previews.get("example")
 runtime previews get example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_previews_get", "arguments": { "name": "example" } } }
+```
+
 ## `sign`
 
 `POST /v2/previews/{name}:sign`
@@ -232,6 +236,10 @@ result = runtime.previews.sign("example")
 runtime previews sign example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_previews_sign", "arguments": { "name": "example" } } }
+```
+
 ## `rotate`
 
 `POST /v2/previews/{name}:rotate`
@@ -278,6 +286,10 @@ result = runtime.previews.rotate("example")
 runtime previews rotate example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_previews_rotate", "arguments": { "name": "example" } } }
+```
+
 ## Delete a preview
 
 `DELETE /v2/previews/{name}`
@@ -322,6 +334,10 @@ result = runtime.previews.delete("example")
 
 ```bash title="CLI"
 runtime previews delete example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_previews_delete", "arguments": { "name": "example" } } }
 ```
 
 ## Objects

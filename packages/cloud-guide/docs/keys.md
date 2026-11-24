@@ -31,7 +31,7 @@ Its role goes as soon as the key stops working (deleted, revoked or expired), so
 To change what a key may do without replacing it, change its role in place with [`POST /v2/roles/{id}:actions`](./reference/roles#actions):
 
 ```bash
-curl https://api.withruntime.com/v2/roles/$ROLE_ID:actions -H "Authorization: Bearer $RUNTIME_API_KEY" \
+curl https://api.withruntime.com/v2/roles/${ROLE_ID}:actions -H "Authorization: Bearer $RUNTIME_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"add": ["images:get", "images:delete"], "remove": ["sandboxes:delete"]}'
 ```

@@ -93,6 +93,10 @@ result = runtime.notebooks.create
 runtime notebooks create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "notebooks" } } }
+```
+
 ## Get a notebook
 
 `GET /v2/notebooks/{id}`
@@ -142,6 +146,10 @@ result = runtime.notebooks.get("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks get NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## List notebooks
@@ -196,6 +204,10 @@ result = runtime.notebooks.list
 runtime notebooks list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "notebooks" } } }
+```
+
 ## Delete a notebook
 
 `DELETE /v2/notebooks/{id}`
@@ -238,6 +250,10 @@ result = runtime.notebooks.delete("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks delete NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `pause`
@@ -284,6 +300,10 @@ result = runtime.notebooks.pause("NOTEBOOK_ID")
 runtime notebooks pause NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/notebooks/{id}:resume`
@@ -326,6 +346,10 @@ result = runtime.notebooks.resume("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks resume NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `exec`
@@ -374,6 +398,10 @@ result = runtime.notebooks.exec("NOTEBOOK_ID", cmd: "echo hello")
 
 ```bash title="CLI"
 runtime notebooks exec NOTEBOOK_ID -- echo hello
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -425,6 +453,10 @@ result = runtime.notebooks.read("NOTEBOOK_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime notebooks read NOTEBOOK_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -484,6 +516,10 @@ result = runtime.notebooks.write("NOTEBOOK_ID", "hello\n", path: "/tmp/hello.txt
 runtime notebooks write NOTEBOOK_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/notebooks/{id}/processes/{process}/output`
@@ -537,6 +573,10 @@ result = runtime.notebooks.process_output("NOTEBOOK_ID", "PROCESS_ID")
 runtime notebooks process-output NOTEBOOK_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/notebooks/{id}/processes/{process}:write`
@@ -583,6 +623,10 @@ result = runtime.notebooks.write_process("NOTEBOOK_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime notebooks write-process NOTEBOOK_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -633,6 +677,10 @@ result = runtime.notebooks.signal_process("NOTEBOOK_ID", "PROCESS_ID")
 runtime notebooks signal-process NOTEBOOK_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/notebooks/{id}/processes/{process}:resize`
@@ -681,6 +729,10 @@ result = runtime.notebooks.resize_process("NOTEBOOK_ID", "PROCESS_ID", cols: 1, 
 runtime notebooks resize-process NOTEBOOK_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/notebooks/{id}/processes`
@@ -723,6 +775,10 @@ result = runtime.notebooks.list_processes("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks list-processes NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `remove`
@@ -771,6 +827,10 @@ result = runtime.notebooks.remove("NOTEBOOK_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime notebooks remove NOTEBOOK_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -822,6 +882,10 @@ result = runtime.notebooks.stat("NOTEBOOK_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime notebooks stat NOTEBOOK_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -878,6 +942,10 @@ result = runtime.notebooks.list_files("NOTEBOOK_ID")
 runtime notebooks list-files NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/notebooks/{id}/files/archive`
@@ -930,6 +998,10 @@ result = runtime.notebooks.download_folder("NOTEBOOK_ID", path: "/tmp/hello.txt"
 
 ```bash title="CLI"
 runtime notebooks download-folder NOTEBOOK_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -987,6 +1059,10 @@ result = runtime.notebooks.upload_folder("NOTEBOOK_ID", "hello\n", path: "/tmp/h
 runtime notebooks upload-folder NOTEBOOK_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/notebooks/{id}/files/archive/uploads`
@@ -1033,6 +1109,10 @@ result = runtime.notebooks.begin_folder_upload("NOTEBOOK_ID", path: "/tmp/hello.
 
 ```bash title="CLI"
 runtime notebooks begin-folder-upload NOTEBOOK_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1089,6 +1169,10 @@ result = runtime.notebooks.write_folder_upload("NOTEBOOK_ID", "UPLOAD_ID", "hell
 runtime notebooks write-folder-upload NOTEBOOK_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/notebooks/{id}/files/archive/uploads/{upload}:commit`
@@ -1133,6 +1217,10 @@ result = runtime.notebooks.commit_folder_upload("NOTEBOOK_ID", "UPLOAD_ID")
 runtime notebooks commit-folder-upload NOTEBOOK_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/notebooks/{id}/files/archive/uploads/{upload}:abort`
@@ -1175,6 +1263,10 @@ result = runtime.notebooks.abort_folder_upload("NOTEBOOK_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime notebooks abort-folder-upload NOTEBOOK_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1225,6 +1317,10 @@ result = runtime.notebooks.mkdir("NOTEBOOK_ID", path: "/tmp/hello.txt")
 runtime notebooks mkdir NOTEBOOK_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/notebooks/{id}/files:rename`
@@ -1271,6 +1367,10 @@ result = runtime.notebooks.rename("NOTEBOOK_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime notebooks rename NOTEBOOK_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1321,6 +1421,10 @@ result = runtime.notebooks.link("NOTEBOOK_ID", path: "/tmp/hello.txt")
 runtime notebooks link NOTEBOOK_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/notebooks/{id}/files:revokeLinks`
@@ -1365,6 +1469,10 @@ result = runtime.notebooks.revoke_links("NOTEBOOK_ID")
 runtime notebooks revoke-links NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/notebooks/{id}/network`
@@ -1407,6 +1515,10 @@ result = runtime.notebooks.get_network("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks get-network NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `metrics`
@@ -1459,6 +1571,10 @@ result = runtime.notebooks.metrics("NOTEBOOK_ID")
 runtime notebooks metrics NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `setNetwork`
 
 `PUT /v2/notebooks/{id}/network`
@@ -1505,6 +1621,10 @@ result = runtime.notebooks.set_network("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks set-network NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `fork`
@@ -1555,6 +1675,10 @@ result = runtime.notebooks.fork("NOTEBOOK_ID")
 runtime notebooks fork NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `snapshot`
 
 `POST /v2/notebooks/{id}:snapshot`
@@ -1603,6 +1727,10 @@ result = runtime.notebooks.snapshot("NOTEBOOK_ID")
 runtime notebooks snapshot NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/notebooks/{id}:update`
@@ -1649,6 +1777,10 @@ result = runtime.notebooks.update("NOTEBOOK_ID")
 
 ```bash title="CLI"
 runtime notebooks update NOTEBOOK_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
 ```
 
 ## `screenshot`
@@ -1703,6 +1835,10 @@ result = runtime.notebooks.screenshot("NOTEBOOK_ID")
 runtime notebooks screenshot NOTEBOOK_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/notebooks/{id}:act`
@@ -1751,6 +1887,10 @@ result = runtime.notebooks.act("NOTEBOOK_ID", actions: [{ type: "move" }])
 runtime notebooks act NOTEBOOK_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/notebooks/{id}:runCode`
@@ -1797,6 +1937,10 @@ result = runtime.notebooks.run_code("NOTEBOOK_ID", code: "example")
 
 ```bash title="CLI"
 runtime notebooks run-code NOTEBOOK_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "notebooks", "id": "NOTEBOOK_ID", "code": "example" } } }
 ```
 
 ## Objects

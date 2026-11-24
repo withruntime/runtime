@@ -67,6 +67,10 @@ result = runtime.jobs.create
 runtime jobs create
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_create", "arguments": {  } } }
+```
+
 ## Get a job
 
 `GET /v2/jobs/{id}`
@@ -118,6 +122,10 @@ result = runtime.jobs.get("JOB_ID")
 
 ```bash title="CLI"
 runtime jobs get JOB_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_get", "arguments": { "id": "JOB_ID" } } }
 ```
 
 ## List jobs
@@ -172,6 +180,10 @@ result = runtime.jobs.list
 runtime jobs list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_list", "arguments": {  } } }
+```
+
 ## Delete a job
 
 `DELETE /v2/jobs/{id}`
@@ -216,6 +228,10 @@ result = runtime.jobs.delete("JOB_ID")
 
 ```bash title="CLI"
 runtime jobs delete JOB_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_delete", "arguments": { "id": "JOB_ID" } } }
 ```
 
 ## `pause`
@@ -264,6 +280,10 @@ result = runtime.jobs.pause("JOB_ID")
 runtime jobs pause JOB_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_pause", "arguments": { "id": "JOB_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/jobs/{id}:resume`
@@ -308,6 +328,10 @@ result = runtime.jobs.resume("JOB_ID")
 
 ```bash title="CLI"
 runtime jobs resume JOB_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_resume", "arguments": { "id": "JOB_ID" } } }
 ```
 
 ## `update`
@@ -360,6 +384,10 @@ result = runtime.jobs.update("JOB_ID")
 runtime jobs update JOB_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_update", "arguments": { "id": "JOB_ID" } } }
+```
+
 ## `run`
 
 `POST /v2/jobs/{id}:run`
@@ -404,6 +432,10 @@ result = runtime.jobs.run("JOB_ID")
 
 ```bash title="CLI"
 runtime jobs run JOB_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_jobs_run", "arguments": { "id": "JOB_ID" } } }
 ```
 
 ## Objects

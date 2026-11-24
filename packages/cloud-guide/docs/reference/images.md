@@ -72,6 +72,10 @@ result = runtime.images.get("IMAGE_ID")
 runtime images get IMAGE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_get", "arguments": { "id": "IMAGE_ID" } } }
+```
+
 ## List images
 
 `GET /v2/images`
@@ -126,6 +130,10 @@ result = runtime.images.list
 runtime images list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_list", "arguments": {  } } }
+```
+
 ## `missing`
 
 `POST /v2/images/context:missing`
@@ -172,6 +180,10 @@ result = runtime.images.missing(digests: ["example"])
 
 ```bash title="CLI"
 runtime images missing --digests example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_missing", "arguments": { "digests": ["example"] } } }
 ```
 
 ## `put`
@@ -224,6 +236,10 @@ result = runtime.images.put("DIGEST_ID", "hello\n")
 runtime images put DIGEST_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_put", "arguments": { "digest": "DIGEST_ID" } } }
+```
+
 ## Delete a image
 
 `DELETE /v2/images/{id}`
@@ -268,6 +284,10 @@ result = runtime.images.delete("IMAGE_ID")
 
 ```bash title="CLI"
 runtime images delete IMAGE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_delete", "arguments": { "id": "IMAGE_ID" } } }
 ```
 
 ## Create a image
@@ -316,6 +336,10 @@ result = runtime.images.create
 
 ```bash title="CLI"
 runtime images create
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_create", "arguments": {  } } }
 ```
 
 ## `logs`
@@ -372,6 +396,10 @@ result = runtime.images.logs("IMAGE_ID")
 runtime images logs IMAGE_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_logs", "arguments": { "id": "IMAGE_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/images/{id}:update`
@@ -418,6 +446,10 @@ result = runtime.images.update("IMAGE_ID")
 
 ```bash title="CLI"
 runtime images update IMAGE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_images_update", "arguments": { "id": "IMAGE_ID" } } }
 ```
 
 ## Objects

@@ -64,6 +64,10 @@ result = runtime.roles.list
 runtime roles list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_roles_list", "arguments": {  } } }
+```
+
 ## `actions`
 
 `POST /v2/roles/{id}:actions`
@@ -110,6 +114,10 @@ result = runtime.roles.actions("ROLE_ID")
 
 ```bash title="CLI"
 runtime roles actions ROLE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_roles_actions", "arguments": { "id": "ROLE_ID" } } }
 ```
 
 ## `update`
@@ -160,6 +168,10 @@ result = runtime.roles.update("ROLE_ID", name: "example")
 runtime roles update ROLE_ID --name example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_roles_update", "arguments": { "id": "ROLE_ID", "name": "example" } } }
+```
+
 ## Delete a role
 
 `DELETE /v2/roles/{id}`
@@ -202,6 +214,10 @@ result = runtime.roles.delete("ROLE_ID")
 
 ```bash title="CLI"
 runtime roles delete ROLE_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_roles_delete", "arguments": { "id": "ROLE_ID" } } }
 ```
 
 ## Objects

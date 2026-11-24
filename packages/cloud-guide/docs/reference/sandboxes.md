@@ -96,7 +96,7 @@ runtime sandboxes create
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_create", "arguments": {  } } }
+{ "method": "tools/call", "params": { "name": "runtime_machines_create", "arguments": { "product": "sandboxes" } } }
 ```
 
 ## Get a sandbox
@@ -150,6 +150,10 @@ result = runtime.sandboxes.get("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes get SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## List sandboxes
@@ -207,7 +211,7 @@ runtime sandboxes list
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_list", "arguments": {  } } }
+{ "method": "tools/call", "params": { "name": "runtime_machines_list", "arguments": { "product": "sandboxes" } } }
 ```
 
 ## Delete a sandbox
@@ -256,6 +260,10 @@ result = runtime.sandboxes.delete("SANDBOX_ID")
 runtime sandboxes delete SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_delete", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `pause`
 
 `POST /v2/sandboxes/{id}:pause`
@@ -302,6 +310,10 @@ result = runtime.sandboxes.pause("SANDBOX_ID")
 runtime sandboxes pause SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_pause", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `resume`
 
 `POST /v2/sandboxes/{id}:resume`
@@ -346,6 +358,10 @@ result = runtime.sandboxes.resume("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes resume SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resume", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `exec`
@@ -399,7 +415,7 @@ runtime sandboxes exec SANDBOX_ID -- echo hello
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_exec", "arguments": { "id": "SANDBOX_ID", "cmd": "echo hello" } } }
+{ "method": "tools/call", "params": { "name": "runtime_machines_exec", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "cmd": "echo hello" } } }
 ```
 
 ## `read`
@@ -453,6 +469,10 @@ result = runtime.sandboxes.read("SANDBOX_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sandboxes read SANDBOX_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_read", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `write`
@@ -514,6 +534,10 @@ result = runtime.sandboxes.write("SANDBOX_ID", "hello\n", path: "/tmp/hello.txt"
 runtime sandboxes write SANDBOX_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `processOutput`
 
 `GET /v2/sandboxes/{id}/processes/{process}/output`
@@ -569,6 +593,10 @@ result = runtime.sandboxes.process_output("SANDBOX_ID", "PROCESS_ID")
 runtime sandboxes process-output SANDBOX_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_process_output", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `writeProcess`
 
 `POST /v2/sandboxes/{id}/processes/{process}:write`
@@ -617,6 +645,10 @@ result = runtime.sandboxes.write_process("SANDBOX_ID", "PROCESS_ID")
 
 ```bash title="CLI"
 runtime sandboxes write-process SANDBOX_ID PROCESS_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_process", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "process": "PROCESS_ID" } } }
 ```
 
 ## `signalProcess`
@@ -669,6 +701,10 @@ result = runtime.sandboxes.signal_process("SANDBOX_ID", "PROCESS_ID")
 runtime sandboxes signal-process SANDBOX_ID PROCESS_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_signal_process", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "process": "PROCESS_ID" } } }
+```
+
 ## `resizeProcess`
 
 `POST /v2/sandboxes/{id}/processes/{process}:resize`
@@ -719,6 +755,10 @@ result = runtime.sandboxes.resize_process("SANDBOX_ID", "PROCESS_ID", cols: 1, r
 runtime sandboxes resize-process SANDBOX_ID PROCESS_ID --cols 1 --rows 1
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_resize_process", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "process": "PROCESS_ID", "cols": 1, "rows": 1 } } }
+```
+
 ## `listProcesses`
 
 `GET /v2/sandboxes/{id}/processes`
@@ -763,6 +803,10 @@ result = runtime.sandboxes.list_processes("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes list-processes SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_processes", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `remove`
@@ -813,6 +857,10 @@ result = runtime.sandboxes.remove("SANDBOX_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sandboxes remove SANDBOX_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_remove", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `stat`
@@ -866,6 +914,10 @@ result = runtime.sandboxes.stat("SANDBOX_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sandboxes stat SANDBOX_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_stat", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `listFiles`
@@ -924,6 +976,10 @@ result = runtime.sandboxes.list_files("SANDBOX_ID")
 runtime sandboxes list-files SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_list_files", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `downloadFolder`
 
 `GET /v2/sandboxes/{id}/files/archive`
@@ -978,6 +1034,10 @@ result = runtime.sandboxes.download_folder("SANDBOX_ID", path: "/tmp/hello.txt")
 
 ```bash title="CLI"
 runtime sandboxes download-folder SANDBOX_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_download_folder", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `uploadFolder`
@@ -1037,6 +1097,10 @@ result = runtime.sandboxes.upload_folder("SANDBOX_ID", "hello\n", path: "/tmp/he
 runtime sandboxes upload-folder SANDBOX_ID --path /tmp/hello.txt < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_upload_folder", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `beginFolderUpload`
 
 `POST /v2/sandboxes/{id}/files/archive/uploads`
@@ -1085,6 +1149,10 @@ result = runtime.sandboxes.begin_folder_upload("SANDBOX_ID", path: "/tmp/hello.t
 
 ```bash title="CLI"
 runtime sandboxes begin-folder-upload SANDBOX_ID --path /tmp/hello.txt
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_begin_folder_upload", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
 ```
 
 ## `writeFolderUpload`
@@ -1143,6 +1211,10 @@ result = runtime.sandboxes.write_folder_upload("SANDBOX_ID", "UPLOAD_ID", "hello
 runtime sandboxes write-folder-upload SANDBOX_ID UPLOAD_ID < hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_write_folder_upload", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `commitFolderUpload`
 
 `POST /v2/sandboxes/{id}/files/archive/uploads/{upload}:commit`
@@ -1189,6 +1261,10 @@ result = runtime.sandboxes.commit_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 runtime sandboxes commit-folder-upload SANDBOX_ID UPLOAD_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_commit_folder_upload", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "upload": "UPLOAD_ID" } } }
+```
+
 ## `abortFolderUpload`
 
 `POST /v2/sandboxes/{id}/files/archive/uploads/{upload}:abort`
@@ -1233,6 +1309,10 @@ result = runtime.sandboxes.abort_folder_upload("SANDBOX_ID", "UPLOAD_ID")
 
 ```bash title="CLI"
 runtime sandboxes abort-folder-upload SANDBOX_ID UPLOAD_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_abort_folder_upload", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "upload": "UPLOAD_ID" } } }
 ```
 
 ## `mkdir`
@@ -1285,6 +1365,10 @@ result = runtime.sandboxes.mkdir("SANDBOX_ID", path: "/tmp/hello.txt")
 runtime sandboxes mkdir SANDBOX_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_mkdir", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `rename`
 
 `POST /v2/sandboxes/{id}/files:rename`
@@ -1333,6 +1417,10 @@ result = runtime.sandboxes.rename("SANDBOX_ID", from: "example", to: "example")
 
 ```bash title="CLI"
 runtime sandboxes rename SANDBOX_ID --from example --to example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_rename", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "from": "example", "to": "example" } } }
 ```
 
 ## `link`
@@ -1385,6 +1473,10 @@ result = runtime.sandboxes.link("SANDBOX_ID", path: "/tmp/hello.txt")
 runtime sandboxes link SANDBOX_ID --path /tmp/hello.txt
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_link", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "path": "/tmp/hello.txt" } } }
+```
+
 ## `revokeLinks`
 
 `POST /v2/sandboxes/{id}/files:revokeLinks`
@@ -1431,6 +1523,10 @@ result = runtime.sandboxes.revoke_links("SANDBOX_ID")
 runtime sandboxes revoke-links SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_revoke_links", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `getNetwork`
 
 `GET /v2/sandboxes/{id}/network`
@@ -1475,6 +1571,10 @@ result = runtime.sandboxes.get_network("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes get-network SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_get_network", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `metrics`
@@ -1530,7 +1630,7 @@ runtime sandboxes metrics SANDBOX_ID
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_metrics", "arguments": { "id": "SANDBOX_ID" } } }
+{ "method": "tools/call", "params": { "name": "runtime_machines_metrics", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `setNetwork`
@@ -1581,6 +1681,10 @@ result = runtime.sandboxes.set_network("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes set-network SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_set_network", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `fork`
@@ -1634,7 +1738,7 @@ runtime sandboxes fork SANDBOX_ID
 ```
 
 ```json title="MCP"
-{ "method": "tools/call", "params": { "name": "runtime_sandboxes_fork", "arguments": { "id": "SANDBOX_ID" } } }
+{ "method": "tools/call", "params": { "name": "runtime_machines_fork", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `snapshot`
@@ -1687,6 +1791,10 @@ result = runtime.sandboxes.snapshot("SANDBOX_ID")
 runtime sandboxes snapshot SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_snapshot", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `update`
 
 `POST /v2/sandboxes/{id}:update`
@@ -1735,6 +1843,10 @@ result = runtime.sandboxes.update("SANDBOX_ID")
 
 ```bash title="CLI"
 runtime sandboxes update SANDBOX_ID
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_update", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
 ```
 
 ## `screenshot`
@@ -1791,6 +1903,10 @@ result = runtime.sandboxes.screenshot("SANDBOX_ID")
 runtime sandboxes screenshot SANDBOX_ID
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_screenshot", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID" } } }
+```
+
 ## `act`
 
 `POST /v2/sandboxes/{id}:act`
@@ -1841,6 +1957,10 @@ result = runtime.sandboxes.act("SANDBOX_ID", actions: [{ type: "move" }])
 runtime sandboxes act SANDBOX_ID --actions '{ "type": "move" }'
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_act", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "actions": [{ "type": "move" }] } } }
+```
+
 ## `runCode`
 
 `POST /v2/sandboxes/{id}:runCode`
@@ -1889,6 +2009,10 @@ result = runtime.sandboxes.run_code("SANDBOX_ID", code: "example")
 
 ```bash title="CLI"
 runtime sandboxes run-code SANDBOX_ID --code example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_machines_run_code", "arguments": { "product": "sandboxes", "id": "SANDBOX_ID", "code": "example" } } }
 ```
 
 ## Objects

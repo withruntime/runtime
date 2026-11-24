@@ -66,6 +66,10 @@ result = runtime.secrets.list
 runtime secrets list
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_secrets_list", "arguments": {  } } }
+```
+
 ## Get a secret
 
 `GET /v2/secrets/{name}`
@@ -119,6 +123,10 @@ result = runtime.secrets.get("example")
 runtime secrets get example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_secrets_get", "arguments": { "name": "example" } } }
+```
+
 ## `set`
 
 `PUT /v2/secrets/{name}`
@@ -169,6 +177,10 @@ result = runtime.secrets.set("example")
 runtime secrets set example
 ```
 
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_secrets_set", "arguments": { "name": "example" } } }
+```
+
 ## Delete a secret
 
 `DELETE /v2/secrets/{name}`
@@ -213,6 +225,10 @@ result = runtime.secrets.delete("example")
 
 ```bash title="CLI"
 runtime secrets delete example
+```
+
+```json title="MCP"
+{ "method": "tools/call", "params": { "name": "runtime_secrets_delete", "arguments": { "name": "example" } } }
 ```
 
 ## Objects
